@@ -36,11 +36,15 @@ python STS2AI/Python/evaluate_ai.py `
 python STS2AI/Python/train_hybrid.py `
   --resume STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt `
   --retrieval-head `
-  --retrieval-proj-dim 16 `
-  --matchup-data-dir STS2AI/Assets/datasets/card_ranking_post_wizardly `
-  --combat-teacher-data-dir STS2AI/Assets/datasets/combat_teacher_post_wizardly/teacher.jsonl
+  --retrieval-proj-dim 16
 ```
 
 `train_hybrid.py` will auto-enable the checkpoint's retrieval-head settings when
 resuming from the mainline champion, so the command above is the intended
 copy-and-run entrypoint.
+
+The previously documented default auxiliary datasets
+`STS2AI/Assets/datasets/card_ranking_post_wizardly` and
+`STS2AI/Assets/datasets/combat_teacher_post_wizardly/teacher.jsonl` were
+removed because they contained invalid data. If you need those inputs for a new
+training run, provide regenerated and validated replacements explicitly.

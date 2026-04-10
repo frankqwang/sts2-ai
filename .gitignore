@@ -122,18 +122,6 @@ project.fragment.lock.json
 artifacts/*
 !artifacts/archive/
 
-# NOTE 2026-04-08: source_knowledge.sqlite + .manifest.json USED to be
-# gitignored as "regeneratable", but the user explicitly chose to track
-# them — they're queried frequently from training/eval code paths and
-# treating them as committed data (rebuilt only when source changes) is
-# more reliable than asking every contributor to regenerate locally.
-# Keep an eye on the .sqlite size; switch to git-lfs if it grows past
-# a few MB. Current size: ~484 KB.
-# Only the WAL/journal sidecar files stay ignored.
-tools/python/data/source_knowledge.sqlite-journal
-tools/python/data/source_knowledge.sqlite-wal
-tools/python/data/source_knowledge.sqlite-shm
-
 # FMOD Cache
 .cache/
 .unsaved/
