@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "database_path": "STS2AI\\Python\\data\\source_knowledge.sqlite",
+  "repo_root": ".",
+  "counts": {
+    "cards": 577,
+    "monsters": 121,
+    "relics": 290,
+    "potions": 64,
+    "encounters": 88
+  },
+  "sample_ids": {
+    "cards": [
+      "abrasive",
+      "accelerant",
+      "accuracy",
+      "acrobatics",
+      "adaptive_strike"
+    ],
+    "monsters": [
+      "architect",
+      "assassin_ruby_raider",
+      "axebot",
+      "axe_ruby_raider",
+      "battle_friend_v1"
+    ],
+    "relics": [
+      "akabeko",
+      "alchemical_coffer",
+      "amethyst_aubergine",
+      "anchor",
+      "arcane_scroll"
+    ],
+    "potions": [
+      "ashwater",
+      "attack_potion",
+      "beetle_juice",
+      "blessing_of_the_forge",
+      "block_potion"
+    ],
+    "encounters": [
+      "axebots_normal",
+      "battleworn_dummy_event_encounter",
+      "bowlbugs_normal",
+      "bowlbugs_weak",
+      "bygone_effigy_elite"
+    ]
+  },
+  "extraction_errors": [],
+  "sqlite_sha1": "7d9daccb5a0ebbd2970359afa249738b585bb0c0"
+}

@@ -1,0 +1,114 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>HeadlessSim</RootNamespace>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Suppress warnings from game code we can't modify -->
+    <NoWarn>CS0649;CS0169;CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8625;CS0414;CS0162;CS0219;CS8767;CS0108;CS0114;CS0436;CS1061;CS0266;CS1503;CS1729;CS1929;CS0029;CS1955;CS1739;CS0103;CS0023;CS0308;CS4008;CS0117;CS0019;CS1662;CS8117;CS1656;CS0428;CS0030;CS8978;CS1674;CS8121;CS4027;CS0120;CS7036;CS1579;CS0426;CS1913;CS1615;CS0039;CS0021;CS4001;CS1914;CS1501;CS0305;CS0119</NoWarn>
+    <!-- Downgrade CS0508 from error to warning via custom Roslyn rule -->
+    <ErrorReport>none</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Include all game source code -->
+    <Compile Include="../../../src/**/*.cs" />
+    <!-- Include compiler-generated root-level files -->
+    <Compile Include="../../../--z__ReadOnlyArray.cs" />
+    <Compile Include="../../../--z__ReadOnlyList.cs" />
+    <Compile Include="../../../--z__ReadOnlySingleElementList.cs" />
+    <Compile Include="../../../-PrivateImplementationDetails-.cs" />
+    <!-- Include generated regex code -->
+    <Compile Include="../../../System/**/*.cs" />
+    <!-- Include Properties -->
+    <Compile Include="../../../Properties/**/*.cs" />
+    <!-- Exclude Godot-generated code -->
+    <Compile Remove="../../../.godot/**/*.cs" />
+    <!-- Exclude MegaCrit directory (Godot node pool etc) -->
+    <Compile Remove="../../../MegaCrit/**/*.cs" />
+    <!-- Exclude UI/rendering code that depends on Godot scene tree -->
+    <Compile Remove="../../../src/Core/Nodes/**/*.cs" />
+    <Compile Remove="../../../src/Core/Audio/**/*.cs" />
+    <Compile Remove="../../../src/Core/Debug/**/*.cs" />
+    <Compile Remove="../../../src/Core/Bindings/**/*.cs" />
+    <Compile Remove="../../../src/Core/Animation/**/*.cs" />
+    <Compile Remove="../../../src/Core/RichTextTags/**/*.cs" />
+    <Compile Remove="../../../src/Core/DevConsole/**/*.cs" />
+    <Compile Remove="../../../src/Core/AutoSlay/**/*.cs" />
+    <Compile Remove="../../../src/Core/ControllerInput/**/*.cs" />
+    <Compile Remove="../../../src/Core/Training/**/*.cs" />
+    <Compile Remove="../../../src/Core/Multiplayer/Transport/Steam/**/*.cs" />
+    <Compile Remove="../../../src/Core/Multiplayer/Transport/ENet/**/*.cs" />
+    <!-- Re-include pure data Training types (no Godot deps) -->
+    <Compile Include="../../../src/Core/Training/CombatTrainingDtos.cs" />
+    <Compile Include="../../../src/Core/Training/CombatTrainingActionType.cs" />
+    <Compile Include="../../../src/Core/Training/CombatTrainingActionRequest.cs" />
+    <Compile Include="../../../src/Core/Training/CombatTrainingResetRequest.cs" />
+    <Compile Include="../../../src/Core/Training/CombatTrainingMode.cs" />
+    <Compile Include="../../../src/Core/Training/CombatTrainingChoiceAdapter.cs" />
+    <Compile Include="../../../src/Core/Training/CombatTrainingSimulatorChoiceBridge.cs" />
+    <Compile Include="../../../src/Core/Training/CombatTrainingEnvService.cs" />
+    <Compile Remove="../../../src/Core/Platform/**/*.cs" />
+    <Compile Remove="../../../src/Core/Simulation/FullRunUiShim.cs" />
+
+    <!-- Re-include Godot-free files from excluded directories -->
+    <!-- Animation -->
+    <Compile Include="../../../src/Core/Animation/AnimState.cs" />
+    <!-- Audio enums/data -->
+    <Compile Include="../../../src/Core/Audio/DamageSfxType.cs" />
+    <Compile Include="../../../src/Core/Audio/Debug/PitchVariance.cs" />
+    <Compile Include="../../../src/Core/Audio/Debug/TmpSfx.cs" />
+    <Compile Include="../../../src/Core/Audio/FmodSfx.cs" />
+    <!-- Nodes: pure enums, interfaces, data types -->
+    <Compile Include="../../../src/Core/Nodes/Combat/TargetMode.cs" />
+    <Compile Include="../../../src/Core/Nodes/CommonUi/CardPreviewStyle.cs" />
+    <Compile Include="../../../src/Core/Nodes/Events/ICustomEventNode.cs" />
+    <Compile Include="../../../src/Core/Nodes/Pooling/INodePool.cs" />
+    <Compile Include="../../../src/Core/Nodes/Pooling/IPoolable.cs" />
+    <Compile Include="../../../src/Core/Nodes/Rooms/IRoomWithProceedButton.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/Capstones/ICapstoneScreen.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/CapstoneSubmenuType.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/CardSelection/ICardSelector.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/CharacterSelect/ICharacterSelectButtonDelegate.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/FeedbackScreen/FeedbackData.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/Map/DrawingMode.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/Overlays/IOverlayScreen.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/RunHistoryScreen/GameOverType.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/Timeline/EpochComparer.cs" />
+    <Compile Include="../../../src/Core/Nodes/Screens/Timeline/EpochSlotState.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/IDeathDelayer.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/Utilities/DialogueSide.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/Utilities/DialogueStyle.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/Utilities/RumbleStyle.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/Utilities/ShakeDuration.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/Utilities/ShakeStrength.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/VfxColor.cs" />
+    <Compile Include="../../../src/Core/Nodes/Vfx/VfxPosition.cs" />
+    <!-- Debug -->
+    <Compile Include="../../../src/Core/Debug/CustomDateTimeConverter.cs" />
+    <Compile Include="../../../src/Core/Debug/DebugSettings.cs" />
+    <Compile Include="../../../src/Core/Debug/ReleaseInfo.cs" />
+    <!-- Platform null-save schemas needed by MegaCritSerializerContext -->
+    <Compile Include="../../../src/Core/Platform/Null/NullLeaderboard.cs" />
+    <Compile Include="../../../src/Core/Platform/Null/NullLeaderboardFile.cs" />
+    <Compile Include="../../../src/Core/Platform/Null/NullLeaderboardFileEntry.cs" />
+    <Compile Include="../../../src/Core/Platform/Null/NullMultiplayerName.cs" />
+    <Compile Include="../../../src/Core/Platform/Steam/SteamDisconnectionReason.cs" />
+    <Compile Include="../../../src/Core/Platform/Steam/SteamDisconnectionReasonExtensions.cs" />
+    <!-- Exclude STS2MCP pipe/http server (we'll write our own entry point) -->
+    <Compile Remove="../../../STS2MCP/**/*.cs" />
+
+    <!-- GodotSharp stub sources (merged into this project) -->
+    <Compile Include="../GodotSharpStub/src/**/*.cs" />
+
+    <!-- NuGet packages from original project -->
+    <PackageReference Include="JetBrains.Annotations" Version="2023.3.0" />
+    <PackageReference Include="MonoMod.Backports" Version="1.1.2" />
+    <PackageReference Include="Sentry" Version="5.0.0" />
+    <PackageReference Include="SmartFormat" Version="3.3.0" />
+    <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+  </ItemGroup>
+</Project>

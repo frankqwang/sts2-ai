@@ -1,0 +1,7 @@
+{
+  "pck_name": "STS2_MCP",
+  "name": "STS2 MCP",
+  "author": "kunology",
+  "description": "Training-focused MCP/HTTP bridge for Slay the Spire 2 source builds",
+  "version": "0.3.1"
+}

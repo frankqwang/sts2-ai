@@ -1,0 +1,7 @@
+; Minimal Godot project used only to pack mod_manifest.json into a .pck.
+config_version=5
+
+[application]
+
+config/name="STS2 MCP Packer"
+run/main_scene=""

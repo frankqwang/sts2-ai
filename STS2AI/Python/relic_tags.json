@@ -1,0 +1,1338 @@
+{
+  "relic_tags": {
+    "akabeko": [
+      "turn_start",
+      "uncommon"
+    ],
+    "alchemical_coffer": [
+      "on_obtain",
+      "rare"
+    ],
+    "amethyst_aubergine": [
+      "common",
+      "gold"
+    ],
+    "anchor": [
+      "block",
+      "combat_start",
+      "common"
+    ],
+    "arcane_scroll": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "archaic_tooth": [
+      "on_obtain",
+      "rare",
+      "transform_card",
+      "upgrade_card"
+    ],
+    "art_of_war": [
+      "energy",
+      "on_card_play",
+      "rare"
+    ],
+    "astrolabe": [
+      "draw",
+      "on_obtain",
+      "rare",
+      "transform_card",
+      "upgrade_card"
+    ],
+    "bag_of_marbles": [
+      "turn_start",
+      "uncommon",
+      "vulnerable"
+    ],
+    "bag_of_preparation": [
+      "common",
+      "draw",
+      "passive"
+    ],
+    "beating_remnant": [
+      "rare",
+      "turn_start"
+    ],
+    "beautiful_bracelet": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "bellows": [
+      "turn_start",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "belt_buckle": [
+      "combat_start",
+      "dexterity",
+      "on_obtain",
+      "shop"
+    ],
+    "big_hat": [
+      "draw",
+      "rare",
+      "turn_start"
+    ],
+    "big_mushroom": [
+      "draw",
+      "event",
+      "max_hp",
+      "on_obtain",
+      "passive"
+    ],
+    "biiig_hug": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "bing_bong": [
+      "event"
+    ],
+    "black_blood": [
+      "heal"
+    ],
+    "black_star": [
+      "rare"
+    ],
+    "blessed_antler": [
+      "draw",
+      "energy",
+      "passive",
+      "rare"
+    ],
+    "blood_soaked_rose": [
+      "energy",
+      "on_obtain",
+      "passive",
+      "rare"
+    ],
+    "blood_vial": [
+      "common",
+      "heal",
+      "turn_start"
+    ],
+    "bone_flute": [
+      "block",
+      "common",
+      "on_attack"
+    ],
+    "bone_tea": [
+      "event",
+      "turn_start",
+      "upgrade_card"
+    ],
+    "bookmark": [
+      "rare"
+    ],
+    "book_of_five_rings": [
+      "common",
+      "draw",
+      "heal"
+    ],
+    "book_repair_knife": [
+      "heal",
+      "uncommon"
+    ],
+    "booming_conch": [
+      "draw",
+      "passive",
+      "rare"
+    ],
+    "bound_phylactery": [
+      "combat_start"
+    ],
+    "bowler_hat": [
+      "gold",
+      "uncommon"
+    ],
+    "bread": [
+      "energy",
+      "passive",
+      "shop",
+      "turn_start"
+    ],
+    "brilliant_scarf": [
+      "draw",
+      "on_card_play",
+      "rare",
+      "turn_start"
+    ],
+    "brimstone": [
+      "shop",
+      "strength",
+      "turn_start"
+    ],
+    "bronze_scales": [
+      "common"
+    ],
+    "burning_blood": [
+      "heal"
+    ],
+    "burning_sticks": [
+      "exhaust_related",
+      "shop"
+    ],
+    "byrdpip": [
+      "combat_start",
+      "event",
+      "on_obtain",
+      "transform_card"
+    ],
+    "calling_bell": [
+      "on_obtain",
+      "rare"
+    ],
+    "candelabra": [
+      "energy",
+      "turn_start",
+      "uncommon"
+    ],
+    "captains_wheel": [
+      "block",
+      "rare"
+    ],
+    "cauldron": [
+      "on_obtain",
+      "shop"
+    ],
+    "centennial_puzzle": [
+      "common",
+      "draw"
+    ],
+    "chandelier": [
+      "energy",
+      "rare",
+      "turn_start"
+    ],
+    "charons_ashes": [
+      "damage",
+      "exhaust_related",
+      "rare"
+    ],
+    "chemical_x": [
+      "shop"
+    ],
+    "choices_paradox": [
+      "draw",
+      "rare",
+      "turn_start"
+    ],
+    "chosen_cheese": [
+      "event",
+      "max_hp"
+    ],
+    "circlet": [],
+    "claws": [
+      "draw",
+      "on_obtain",
+      "rare",
+      "transform_card",
+      "upgrade_card"
+    ],
+    "cloak_clasp": [
+      "block",
+      "rare"
+    ],
+    "cracked_core": [
+      "turn_start"
+    ],
+    "crossbow": [
+      "rare",
+      "turn_start"
+    ],
+    "cursed_pearl": [
+      "gold",
+      "on_obtain",
+      "rare"
+    ],
+    "darkstone_periapt": [
+      "event",
+      "max_hp"
+    ],
+    "data_disk": [
+      "common"
+    ],
+    "daughter_of_the_wind": [
+      "block",
+      "event",
+      "on_card_play"
+    ],
+    "delicate_frond": [
+      "combat_start",
+      "rare"
+    ],
+    "demon_tongue": [
+      "heal",
+      "rare",
+      "turn_start"
+    ],
+    "deprecated_relic": [],
+    "diamond_diadem": [
+      "on_card_play",
+      "rare",
+      "turn_start"
+    ],
+    "dingy_rug": [
+      "shop"
+    ],
+    "distinguished_cape": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "divine_destiny": [
+      "turn_start"
+    ],
+    "divine_right": [],
+    "dollys_mirror": [
+      "on_obtain",
+      "shop"
+    ],
+    "dragon_fruit": [
+      "max_hp",
+      "shop"
+    ],
+    "dream_catcher": [
+      "event"
+    ],
+    "driftwood": [
+      "rare"
+    ],
+    "dusty_tome": [
+      "on_obtain",
+      "rare",
+      "upgrade_card"
+    ],
+    "ectoplasm": [
+      "energy",
+      "gold",
+      "passive",
+      "rare"
+    ],
+    "electric_shrymp": [
+      "on_obtain",
+      "rare"
+    ],
+    "ember_tea": [
+      "event",
+      "strength"
+    ],
+    "emotion_chip": [
+      "rare",
+      "turn_start"
+    ],
+    "empty_cage": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "eternal_feather": [
+      "draw",
+      "heal",
+      "uncommon"
+    ],
+    "fake_anchor": [
+      "block",
+      "combat_start",
+      "event"
+    ],
+    "fake_blood_vial": [
+      "event",
+      "heal",
+      "turn_start"
+    ],
+    "fake_happy_flower": [
+      "energy",
+      "event",
+      "turn_start"
+    ],
+    "fake_lees_waffle": [
+      "event",
+      "heal",
+      "on_obtain"
+    ],
+    "fake_mango": [
+      "event",
+      "max_hp",
+      "on_obtain"
+    ],
+    "fake_merchants_rug": [
+      "event"
+    ],
+    "fake_orichalcum": [
+      "block",
+      "event",
+      "turn_start"
+    ],
+    "fake_snecko_eye": [
+      "combat_start",
+      "event",
+      "on_obtain"
+    ],
+    "fake_strike_dummy": [
+      "event",
+      "on_attack"
+    ],
+    "fake_venerable_tea_set": [
+      "energy",
+      "event"
+    ],
+    "fencing_manual": [
+      "common",
+      "turn_start"
+    ],
+    "festive_popper": [
+      "common",
+      "damage",
+      "turn_start"
+    ],
+    "fiddle": [
+      "draw",
+      "passive",
+      "rare"
+    ],
+    "forgotten_soul": [
+      "damage",
+      "event",
+      "exhaust_related"
+    ],
+    "fragrant_mushroom": [
+      "draw",
+      "event",
+      "on_obtain",
+      "upgrade_card"
+    ],
+    "fresnel_lens": [
+      "event"
+    ],
+    "frozen_egg": [
+      "rare",
+      "upgrade_card"
+    ],
+    "funerary_mask": [
+      "draw",
+      "turn_start",
+      "uncommon"
+    ],
+    "fur_coat": [
+      "combat_start",
+      "on_obtain",
+      "rare"
+    ],
+    "galactic_dust": [
+      "block",
+      "uncommon"
+    ],
+    "gambling_chip": [
+      "rare",
+      "turn_start"
+    ],
+    "game_piece": [
+      "draw",
+      "on_card_play",
+      "rare"
+    ],
+    "ghost_seed": [
+      "shop"
+    ],
+    "girya": [
+      "rare",
+      "strength"
+    ],
+    "glass_eye": [
+      "on_obtain",
+      "rare"
+    ],
+    "glitter": [
+      "rare"
+    ],
+    "gnarled_hammer": [
+      "draw",
+      "on_obtain",
+      "shop"
+    ],
+    "golden_compass": [
+      "on_obtain",
+      "rare"
+    ],
+    "golden_pearl": [
+      "gold",
+      "on_obtain",
+      "rare"
+    ],
+    "gold_plated_cables": [
+      "uncommon"
+    ],
+    "gorget": [
+      "common"
+    ],
+    "gremlin_horn": [
+      "draw",
+      "energy",
+      "uncommon"
+    ],
+    "hand_drill": [
+      "event",
+      "vulnerable"
+    ],
+    "happy_flower": [
+      "common",
+      "energy",
+      "turn_start"
+    ],
+    "helical_dart": [
+      "dexterity",
+      "on_card_play",
+      "rare"
+    ],
+    "history_course": [
+      "event",
+      "turn_start"
+    ],
+    "horn_cleat": [
+      "block",
+      "uncommon"
+    ],
+    "ice_cream": [
+      "rare"
+    ],
+    "infused_core": [
+      "turn_start"
+    ],
+    "intimidating_helmet": [
+      "block",
+      "energy",
+      "rare"
+    ],
+    "iron_club": [
+      "draw",
+      "on_card_play",
+      "rare"
+    ],
+    "ivory_tile": [
+      "energy",
+      "on_card_play",
+      "rare"
+    ],
+    "jeweled_mask": [
+      "rare"
+    ],
+    "jewelry_box": [
+      "on_obtain",
+      "rare"
+    ],
+    "joss_paper": [
+      "draw",
+      "exhaust_related",
+      "uncommon"
+    ],
+    "juzu_bracelet": [
+      "common"
+    ],
+    "kifuda": [
+      "draw",
+      "on_obtain",
+      "shop"
+    ],
+    "kunai": [
+      "dexterity",
+      "draw",
+      "on_card_play",
+      "rare",
+      "turn_start"
+    ],
+    "kusarigama": [
+      "combat_start",
+      "damage",
+      "draw",
+      "on_card_play",
+      "uncommon"
+    ],
+    "lantern": [
+      "common",
+      "energy",
+      "turn_start"
+    ],
+    "large_capsule": [
+      "on_obtain",
+      "rare"
+    ],
+    "lasting_candy": [
+      "rare"
+    ],
+    "lava_lamp": [
+      "shop",
+      "upgrade_card"
+    ],
+    "lava_rock": [
+      "rare"
+    ],
+    "lead_paperweight": [
+      "on_obtain",
+      "rare"
+    ],
+    "leafy_poultice": [
+      "max_hp",
+      "on_obtain",
+      "rare",
+      "transform_card"
+    ],
+    "lees_waffle": [
+      "heal",
+      "max_hp",
+      "on_obtain",
+      "shop"
+    ],
+    "letter_opener": [
+      "damage",
+      "draw",
+      "on_card_play",
+      "turn_start",
+      "uncommon"
+    ],
+    "lizard_tail": [
+      "heal",
+      "rare"
+    ],
+    "looming_fruit": [
+      "max_hp",
+      "on_obtain",
+      "rare"
+    ],
+    "lords_parasol": [
+      "rare"
+    ],
+    "lost_coffer": [
+      "on_obtain",
+      "rare"
+    ],
+    "lost_wisp": [
+      "damage",
+      "event",
+      "on_card_play"
+    ],
+    "lucky_fysh": [
+      "gold",
+      "uncommon"
+    ],
+    "lunar_pastry": [
+      "rare"
+    ],
+    "mango": [
+      "max_hp",
+      "on_obtain",
+      "rare"
+    ],
+    "massive_scroll": [
+      "on_obtain",
+      "rare"
+    ],
+    "maw_bank": [
+      "event",
+      "gold"
+    ],
+    "meal_ticket": [
+      "common",
+      "heal"
+    ],
+    "meat_cleaver": [
+      "rare"
+    ],
+    "meat_on_the_bone": [
+      "combat_start",
+      "heal",
+      "rare"
+    ],
+    "membership_card": [
+      "shop"
+    ],
+    "mercury_hourglass": [
+      "damage",
+      "turn_start",
+      "uncommon"
+    ],
+    "metronome": [
+      "damage",
+      "rare"
+    ],
+    "miniature_cannon": [
+      "on_attack",
+      "uncommon"
+    ],
+    "miniature_tent": [
+      "shop"
+    ],
+    "mini_regent": [
+      "rare",
+      "strength",
+      "turn_start"
+    ],
+    "molten_egg": [
+      "rare",
+      "upgrade_card"
+    ],
+    "mr_struggles": [
+      "event",
+      "turn_start"
+    ],
+    "mummified_hand": [
+      "on_card_play",
+      "rare"
+    ],
+    "music_box": [
+      "on_card_play",
+      "rare",
+      "turn_start"
+    ],
+    "mystic_lighter": [
+      "damage",
+      "on_attack",
+      "shop"
+    ],
+    "neows_torment": [
+      "on_obtain",
+      "rare"
+    ],
+    "new_leaf": [
+      "draw",
+      "on_obtain",
+      "rare",
+      "transform_card"
+    ],
+    "ninja_scroll": [
+      "generate_card",
+      "shop"
+    ],
+    "nunchaku": [
+      "draw",
+      "energy",
+      "on_card_play",
+      "uncommon"
+    ],
+    "nutritious_oyster": [
+      "max_hp",
+      "on_obtain",
+      "rare"
+    ],
+    "nutritious_soup": [
+      "on_obtain",
+      "rare"
+    ],
+    "oddly_smooth_stone": [
+      "common",
+      "dexterity"
+    ],
+    "old_coin": [
+      "gold",
+      "on_obtain",
+      "rare"
+    ],
+    "orange_dough": [
+      "draw",
+      "rare",
+      "turn_start"
+    ],
+    "orichalcum": [
+      "block",
+      "turn_start",
+      "uncommon"
+    ],
+    "ornamental_fan": [
+      "block",
+      "draw",
+      "on_card_play",
+      "turn_start",
+      "uncommon"
+    ],
+    "orrery": [
+      "draw",
+      "on_obtain",
+      "shop"
+    ],
+    "paels_blood": [
+      "draw",
+      "passive",
+      "rare"
+    ],
+    "paels_claw": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "paels_eye": [
+      "exhaust_related",
+      "rare",
+      "turn_start"
+    ],
+    "paels_flesh": [
+      "combat_start",
+      "energy",
+      "rare",
+      "turn_start"
+    ],
+    "paels_growth": [
+      "on_obtain",
+      "rare"
+    ],
+    "paels_horn": [
+      "on_obtain",
+      "rare"
+    ],
+    "paels_legion": [
+      "combat_start",
+      "on_block",
+      "on_card_play",
+      "on_obtain",
+      "passive",
+      "rare",
+      "turn_start"
+    ],
+    "paels_tears": [
+      "energy",
+      "rare",
+      "turn_start"
+    ],
+    "paels_tooth": [
+      "draw",
+      "on_obtain",
+      "rare",
+      "upgrade_card"
+    ],
+    "paels_wing": [
+      "rare"
+    ],
+    "pandoras_box": [
+      "on_obtain",
+      "rare",
+      "transform_card"
+    ],
+    "pantograph": [
+      "heal",
+      "uncommon"
+    ],
+    "paper_krane": [
+      "rare"
+    ],
+    "paper_phrog": [
+      "uncommon"
+    ],
+    "parrying_shield": [
+      "block",
+      "damage",
+      "uncommon"
+    ],
+    "pear": [
+      "max_hp",
+      "on_obtain",
+      "uncommon"
+    ],
+    "pendulum": [
+      "common",
+      "draw"
+    ],
+    "pen_nib": [
+      "on_attack",
+      "on_card_play",
+      "uncommon"
+    ],
+    "permafrost": [
+      "block",
+      "common",
+      "on_card_play"
+    ],
+    "petrified_toad": [
+      "combat_start",
+      "uncommon"
+    ],
+    "philosophers_stone": [
+      "energy",
+      "passive",
+      "rare",
+      "strength"
+    ],
+    "phylactery_unbound": [
+      "combat_start",
+      "turn_start"
+    ],
+    "planisphere": [
+      "heal",
+      "uncommon"
+    ],
+    "pocketwatch": [
+      "draw",
+      "on_card_play",
+      "passive",
+      "rare",
+      "turn_start"
+    ],
+    "pollinous_core": [
+      "draw",
+      "event",
+      "passive",
+      "turn_start"
+    ],
+    "pomander": [
+      "draw",
+      "on_obtain",
+      "rare",
+      "upgrade_card"
+    ],
+    "potion_belt": [
+      "common",
+      "on_obtain"
+    ],
+    "power_cell": [
+      "draw",
+      "rare",
+      "turn_start"
+    ],
+    "prayer_wheel": [
+      "rare"
+    ],
+    "precarious_shears": [
+      "damage",
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "precise_scissors": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "preserved_fog": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "prismatic_gem": [
+      "energy",
+      "passive",
+      "rare"
+    ],
+    "pumpkin_candle": [
+      "energy",
+      "on_obtain",
+      "passive",
+      "rare"
+    ],
+    "punch_dagger": [
+      "on_obtain",
+      "shop"
+    ],
+    "radiant_pearl": [
+      "draw",
+      "rare"
+    ],
+    "rainbow_ring": [
+      "dexterity",
+      "on_card_play",
+      "rare",
+      "strength",
+      "turn_start"
+    ],
+    "razor_tooth": [
+      "on_card_play",
+      "rare",
+      "upgrade_card"
+    ],
+    "red_mask": [
+      "turn_start",
+      "uncommon",
+      "weak"
+    ],
+    "red_skull": [
+      "common",
+      "strength"
+    ],
+    "regalite": [
+      "block",
+      "uncommon"
+    ],
+    "regal_pillow": [
+      "common",
+      "heal",
+      "on_rest"
+    ],
+    "reptile_trinket": [
+      "strength",
+      "uncommon"
+    ],
+    "ringing_triangle": [
+      "shop"
+    ],
+    "ring_of_the_drake": [
+      "draw",
+      "passive"
+    ],
+    "ring_of_the_snake": [
+      "draw",
+      "passive"
+    ],
+    "ripple_basin": [
+      "block",
+      "on_card_play",
+      "turn_start",
+      "uncommon"
+    ],
+    "royal_poison": [
+      "damage",
+      "event",
+      "turn_start"
+    ],
+    "royal_stamp": [
+      "draw",
+      "on_obtain",
+      "shop"
+    ],
+    "ruined_helmet": [
+      "rare"
+    ],
+    "runic_capacitor": [
+      "shop",
+      "turn_start"
+    ],
+    "runic_pyramid": [
+      "rare"
+    ],
+    "sai": [
+      "block",
+      "rare",
+      "turn_start"
+    ],
+    "sand_castle": [
+      "draw",
+      "on_obtain",
+      "rare",
+      "upgrade_card"
+    ],
+    "screaming_flagon": [
+      "damage",
+      "shop"
+    ],
+    "scroll_boxes": [
+      "on_obtain",
+      "rare"
+    ],
+    "sea_glass": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "seal_of_gold": [
+      "energy",
+      "gold",
+      "rare",
+      "turn_start"
+    ],
+    "self_forming_clay": [
+      "uncommon"
+    ],
+    "sere_talon": [
+      "on_obtain",
+      "rare"
+    ],
+    "shovel": [
+      "rare"
+    ],
+    "shuriken": [
+      "draw",
+      "on_card_play",
+      "rare",
+      "strength",
+      "turn_start"
+    ],
+    "signet_ring": [
+      "gold",
+      "on_obtain",
+      "rare"
+    ],
+    "silver_crucible": [
+      "draw",
+      "rare",
+      "upgrade_card"
+    ],
+    "sling_of_courage": [
+      "shop",
+      "strength"
+    ],
+    "small_capsule": [
+      "on_obtain",
+      "rare"
+    ],
+    "snecko_eye": [
+      "combat_start",
+      "draw",
+      "on_obtain",
+      "passive",
+      "rare"
+    ],
+    "snecko_skull": [
+      "common",
+      "poison"
+    ],
+    "sozu": [
+      "energy",
+      "passive",
+      "rare"
+    ],
+    "sparkling_rouge": [
+      "dexterity",
+      "strength",
+      "uncommon"
+    ],
+    "spiked_gauntlets": [
+      "energy",
+      "passive",
+      "rare"
+    ],
+    "stone_calendar": [
+      "damage",
+      "rare",
+      "turn_start"
+    ],
+    "stone_cracker": [
+      "draw",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "stone_humidifier": [
+      "heal",
+      "max_hp",
+      "on_rest",
+      "rare"
+    ],
+    "storybook": [
+      "on_obtain",
+      "rare"
+    ],
+    "strawberry": [
+      "common",
+      "max_hp",
+      "on_obtain"
+    ],
+    "strike_dummy": [
+      "common",
+      "on_attack"
+    ],
+    "sturdy_clamp": [
+      "block",
+      "rare"
+    ],
+    "sword_of_jade": [
+      "event",
+      "strength"
+    ],
+    "sword_of_stone": [
+      "event"
+    ],
+    "symbiotic_virus": [
+      "turn_start",
+      "uncommon"
+    ],
+    "tanxs_whistle": [
+      "on_obtain",
+      "rare"
+    ],
+    "tea_of_discourtesy": [
+      "combat_start",
+      "event",
+      "heal"
+    ],
+    "the_abacus": [
+      "block",
+      "shop"
+    ],
+    "the_boot": [
+      "event"
+    ],
+    "the_courier": [
+      "rare"
+    ],
+    "throwing_axe": [
+      "rare"
+    ],
+    "tingsha": [
+      "damage",
+      "uncommon"
+    ],
+    "tiny_mailbox": [
+      "common"
+    ],
+    "toasty_mittens": [
+      "exhaust_related",
+      "rare",
+      "strength"
+    ],
+    "toolbox": [
+      "draw",
+      "shop"
+    ],
+    "touch_of_orobas": [
+      "on_obtain",
+      "rare"
+    ],
+    "tough_bandages": [
+      "block",
+      "rare"
+    ],
+    "toxic_egg": [
+      "rare",
+      "upgrade_card"
+    ],
+    "toy_box": [
+      "on_obtain",
+      "rare"
+    ],
+    "tri_boomerang": [
+      "draw",
+      "on_obtain",
+      "rare"
+    ],
+    "tungsten_rod": [
+      "rare"
+    ],
+    "tuning_fork": [
+      "block",
+      "draw",
+      "on_card_play",
+      "uncommon"
+    ],
+    "twisted_funnel": [
+      "poison",
+      "turn_start",
+      "uncommon"
+    ],
+    "unceasing_top": [
+      "draw",
+      "rare"
+    ],
+    "undying_sigil": [
+      "on_attack",
+      "shop"
+    ],
+    "unsettling_lamp": [
+      "combat_start",
+      "on_card_play",
+      "rare"
+    ],
+    "vajra": [
+      "common",
+      "strength"
+    ],
+    "vakuu_card_selector": [],
+    "vambrace": [
+      "combat_start",
+      "on_block",
+      "on_card_play",
+      "passive",
+      "uncommon"
+    ],
+    "velvet_choker": [
+      "draw",
+      "energy",
+      "on_card_play",
+      "passive",
+      "rare",
+      "turn_start"
+    ],
+    "venerable_tea_set": [
+      "common",
+      "energy"
+    ],
+    "very_hot_cocoa": [
+      "energy",
+      "rare",
+      "turn_start"
+    ],
+    "vexing_puzzlebox": [
+      "rare",
+      "turn_start"
+    ],
+    "vitruvian_minion": [
+      "on_attack",
+      "on_block",
+      "passive",
+      "shop"
+    ],
+    "war_hammer": [
+      "draw",
+      "rare",
+      "upgrade_card"
+    ],
+    "war_paint": [
+      "common",
+      "draw",
+      "on_obtain",
+      "upgrade_card"
+    ],
+    "whetstone": [
+      "common",
+      "draw",
+      "on_obtain",
+      "upgrade_card"
+    ],
+    "whispering_earring": [
+      "energy",
+      "passive",
+      "rare"
+    ],
+    "white_beast_statue": [
+      "rare"
+    ],
+    "white_star": [
+      "rare"
+    ],
+    "wing_charm": [
+      "shop"
+    ],
+    "wongo_customer_appreciation_badge": [
+      "event"
+    ],
+    "wongos_mystery_ticket": [
+      "event"
+    ],
+    "yummy_cookie": [
+      "draw",
+      "on_obtain",
+      "rare",
+      "upgrade_card"
+    ]
+  },
+  "tag_vocab": [
+    "damage",
+    "block",
+    "draw",
+    "energy",
+    "heal",
+    "gold",
+    "max_hp",
+    "strength",
+    "dexterity",
+    "vulnerable",
+    "weak",
+    "poison",
+    "artifact",
+    "upgrade_card",
+    "transform_card",
+    "generate_card",
+    "exhaust_related",
+    "combat_start",
+    "turn_start",
+    "turn_end",
+    "on_attack",
+    "on_block",
+    "on_card_play",
+    "on_rest",
+    "on_obtain",
+    "passive",
+    "common",
+    "uncommon",
+    "rare",
+    "boss",
+    "shop",
+    "event"
+  ]
+}

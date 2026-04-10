@@ -1,0 +1,3766 @@
+{
+  "tag_vocab": [
+    "attack",
+    "skill",
+    "power",
+    "status",
+    "curse",
+    "self_target",
+    "single_target",
+    "aoe",
+    "random_target",
+    "damage",
+    "block",
+    "multi_hit",
+    "x_cost",
+    "draw",
+    "energy_gen",
+    "hp_loss",
+    "heal",
+    "gold_gen",
+    "strength",
+    "dexterity",
+    "strength_scaling",
+    "block_scaling",
+    "vulnerable",
+    "weak",
+    "poison",
+    "frail",
+    "exhaust",
+    "ethereal",
+    "innate",
+    "retain",
+    "unplayable",
+    "sly",
+    "discard",
+    "exhaust_other",
+    "generate_card",
+    "upgrade_card",
+    "strike_tag",
+    "defend_tag",
+    "shiv_tag",
+    "minion_tag",
+    "summon",
+    "forge",
+    "repeat",
+    "max_hp_change",
+    "basic",
+    "common",
+    "uncommon",
+    "rare"
+  ],
+  "tag_to_idx": {
+    "attack": 0,
+    "skill": 1,
+    "power": 2,
+    "status": 3,
+    "curse": 4,
+    "self_target": 5,
+    "single_target": 6,
+    "aoe": 7,
+    "random_target": 8,
+    "damage": 9,
+    "block": 10,
+    "multi_hit": 11,
+    "x_cost": 12,
+    "draw": 13,
+    "energy_gen": 14,
+    "hp_loss": 15,
+    "heal": 16,
+    "gold_gen": 17,
+    "strength": 18,
+    "dexterity": 19,
+    "strength_scaling": 20,
+    "block_scaling": 21,
+    "vulnerable": 22,
+    "weak": 23,
+    "poison": 24,
+    "frail": 25,
+    "exhaust": 26,
+    "ethereal": 27,
+    "innate": 28,
+    "retain": 29,
+    "unplayable": 30,
+    "sly": 31,
+    "discard": 32,
+    "exhaust_other": 33,
+    "generate_card": 34,
+    "upgrade_card": 35,
+    "strike_tag": 36,
+    "defend_tag": 37,
+    "shiv_tag": 38,
+    "minion_tag": 39,
+    "summon": 40,
+    "forge": 41,
+    "repeat": 42,
+    "max_hp_change": 43,
+    "basic": 44,
+    "common": 45,
+    "uncommon": 46,
+    "rare": 47
+  },
+  "card_tags": {
+    "abrasive": [
+      "block_scaling",
+      "dexterity",
+      "power",
+      "rare",
+      "self_target",
+      "sly"
+    ],
+    "accelerant": [
+      "poison",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "accuracy": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "acrobatics": [
+      "common",
+      "discard",
+      "draw",
+      "self_target",
+      "skill"
+    ],
+    "adaptive_strike": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target",
+      "strike_tag"
+    ],
+    "adrenaline": [
+      "draw",
+      "energy_gen",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "afterimage": [
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "afterlife": [
+      "common",
+      "exhaust",
+      "self_target",
+      "skill",
+      "summon"
+    ],
+    "aggression": [
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "alchemize": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "alignment": [
+      "energy_gen",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "all_for_one": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "anger": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "anointed": [
+      "exhaust",
+      "rare",
+      "retain",
+      "self_target",
+      "skill"
+    ],
+    "anticipate": [
+      "common",
+      "dexterity",
+      "self_target",
+      "skill"
+    ],
+    "apotheosis": [
+      "exhaust",
+      "innate",
+      "self_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "apparition": [
+      "ethereal",
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "armaments": [
+      "block",
+      "common",
+      "self_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "arsenal": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "ascenders_bane": [
+      "curse",
+      "ethereal",
+      "unplayable"
+    ],
+    "ashen_strike": [
+      "attack",
+      "damage",
+      "exhaust",
+      "single_target",
+      "strike_tag",
+      "uncommon"
+    ],
+    "assassinate": [
+      "attack",
+      "damage",
+      "exhaust",
+      "innate",
+      "rare",
+      "single_target",
+      "vulnerable"
+    ],
+    "astral_pulse": [
+      "aoe",
+      "attack",
+      "common",
+      "damage"
+    ],
+    "automation": [
+      "energy_gen",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "backflip": [
+      "block",
+      "common",
+      "draw",
+      "self_target",
+      "skill"
+    ],
+    "backstab": [
+      "attack",
+      "damage",
+      "exhaust",
+      "innate",
+      "single_target",
+      "uncommon"
+    ],
+    "bad_luck": [
+      "curse",
+      "hp_loss",
+      "unplayable"
+    ],
+    "ball_lightning": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "banshees_cry": [
+      "aoe",
+      "attack",
+      "damage",
+      "energy_gen",
+      "ethereal",
+      "rare"
+    ],
+    "barrage": [
+      "attack",
+      "common",
+      "damage",
+      "multi_hit",
+      "single_target"
+    ],
+    "barricade": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "bash": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "vulnerable"
+    ],
+    "battle_trance": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "beacon_of_hope": [
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "beam_cell": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "vulnerable"
+    ],
+    "beat_down": [
+      "draw",
+      "random_target",
+      "rare",
+      "skill",
+      "unplayable"
+    ],
+    "beat_into_shape": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "beckon": [
+      "hp_loss",
+      "status"
+    ],
+    "begone": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "upgrade_card"
+    ],
+    "believe_in_you": [
+      "energy_gen",
+      "skill",
+      "uncommon"
+    ],
+    "biased_cognition": [
+      "power",
+      "self_target"
+    ],
+    "big_bang": [
+      "draw",
+      "energy_gen",
+      "exhaust",
+      "forge",
+      "innate",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "black_hole": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "blade_dance": [
+      "common",
+      "draw",
+      "exhaust",
+      "generate_card",
+      "self_target",
+      "skill"
+    ],
+    "blade_of_ink": [
+      "rare",
+      "self_target",
+      "skill",
+      "strength"
+    ],
+    "blight_strike": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "bloodletting": [
+      "common",
+      "energy_gen",
+      "hp_loss",
+      "self_target",
+      "skill"
+    ],
+    "blood_wall": [
+      "block",
+      "common",
+      "hp_loss",
+      "self_target",
+      "skill"
+    ],
+    "bludgeon": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "blur": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "bodyguard": [
+      "basic",
+      "self_target",
+      "skill",
+      "summon"
+    ],
+    "body_slam": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "bolas": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "bombardment": [
+      "attack",
+      "damage",
+      "exhaust",
+      "rare",
+      "single_target"
+    ],
+    "bone_shards": [
+      "aoe",
+      "attack",
+      "block",
+      "damage",
+      "uncommon"
+    ],
+    "boost_away": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "boot_sequence": [
+      "block",
+      "exhaust",
+      "innate",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "borrowed_time": [
+      "energy_gen",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "bouncing_flask": [
+      "multi_hit",
+      "poison",
+      "random_target",
+      "repeat",
+      "skill",
+      "uncommon"
+    ],
+    "brand": [
+      "exhaust",
+      "hp_loss",
+      "rare",
+      "self_target",
+      "skill",
+      "strength"
+    ],
+    "break": [
+      "attack",
+      "damage",
+      "single_target",
+      "vulnerable"
+    ],
+    "breakthrough": [
+      "aoe",
+      "attack",
+      "common",
+      "damage",
+      "hp_loss"
+    ],
+    "brightest_flame": [
+      "draw",
+      "energy_gen",
+      "max_hp_change",
+      "self_target",
+      "skill"
+    ],
+    "bubble_bubble": [
+      "poison",
+      "single_target",
+      "skill",
+      "uncommon"
+    ],
+    "buffer": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "bulk_up": [
+      "block_scaling",
+      "dexterity",
+      "power",
+      "self_target",
+      "strength",
+      "strength_scaling",
+      "uncommon"
+    ],
+    "bullet_time": [
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "bully": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "bulwark": [
+      "block",
+      "forge",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "bundle_of_joy": [
+      "draw",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "burn": [
+      "damage",
+      "status",
+      "unplayable"
+    ],
+    "burning_pact": [
+      "draw",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "burst": [
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "bury": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "byrdonis_egg": [
+      "unplayable"
+    ],
+    "byrd_swoop": [
+      "attack",
+      "damage",
+      "single_target"
+    ],
+    "calamity": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "calcify": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "calculated_gamble": [
+      "discard",
+      "exhaust",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "call_of_the_void": [
+      "draw",
+      "ethereal",
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "caltrops": [
+      "power",
+      "self_target"
+    ],
+    "capacitor": [
+      "multi_hit",
+      "power",
+      "repeat",
+      "self_target",
+      "uncommon"
+    ],
+    "capture_spirit": [
+      "damage",
+      "draw",
+      "single_target",
+      "skill",
+      "uncommon"
+    ],
+    "cascade": [
+      "rare",
+      "self_target",
+      "skill",
+      "x_cost"
+    ],
+    "catastrophe": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon",
+      "unplayable"
+    ],
+    "celestial_might": [
+      "attack",
+      "common",
+      "damage",
+      "multi_hit",
+      "repeat",
+      "single_target"
+    ],
+    "chaos": [
+      "multi_hit",
+      "repeat",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "charge": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "charge_battery": [
+      "block",
+      "common",
+      "energy_gen",
+      "self_target",
+      "skill"
+    ],
+    "child_of_the_stars": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "chill": [
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "cinder": [
+      "attack",
+      "common",
+      "damage",
+      "exhaust",
+      "single_target"
+    ],
+    "clash": [
+      "attack",
+      "damage",
+      "single_target"
+    ],
+    "claw": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "cleanse": [
+      "exhaust",
+      "self_target",
+      "skill",
+      "summon",
+      "uncommon"
+    ],
+    "cloak_and_dagger": [
+      "block",
+      "common",
+      "draw",
+      "generate_card",
+      "self_target",
+      "skill"
+    ],
+    "cloak_of_stars": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "clumsy": [
+      "curse",
+      "ethereal",
+      "unplayable"
+    ],
+    "cold_snap": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "collision_course": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "colossus": [
+      "block",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "comet": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target",
+      "vulnerable",
+      "weak"
+    ],
+    "compact": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "compile_driver": [
+      "attack",
+      "common",
+      "damage",
+      "draw",
+      "single_target"
+    ],
+    "conflagration": [
+      "aoe",
+      "attack",
+      "damage",
+      "rare"
+    ],
+    "conqueror": [
+      "forge",
+      "single_target",
+      "skill",
+      "uncommon"
+    ],
+    "consuming_shadow": [
+      "multi_hit",
+      "power",
+      "rare",
+      "repeat",
+      "self_target"
+    ],
+    "convergence": [
+      "energy_gen",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "coolant": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "coolheaded": [
+      "common",
+      "draw",
+      "self_target",
+      "skill"
+    ],
+    "coordinate": [
+      "skill",
+      "strength",
+      "uncommon"
+    ],
+    "corrosive_wave": [
+      "poison",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "corruption": [
+      "exhaust",
+      "power",
+      "self_target"
+    ],
+    "cosmic_indifference": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "countdown": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "crash_landing": [
+      "aoe",
+      "attack",
+      "damage",
+      "rare"
+    ],
+    "creative_ai": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "crescent_spear": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "crimson_mantle": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "cruelty": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "crush_under": [
+      "aoe",
+      "attack",
+      "common",
+      "damage"
+    ],
+    "curse_of_the_bell": [
+      "curse",
+      "unplayable"
+    ],
+    "dagger_spray": [
+      "aoe",
+      "attack",
+      "common",
+      "damage",
+      "multi_hit"
+    ],
+    "dagger_throw": [
+      "attack",
+      "common",
+      "damage",
+      "discard",
+      "draw",
+      "single_target"
+    ],
+    "danse_macabre": [
+      "energy_gen",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "dark_embrace": [
+      "exhaust",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "darkness": [
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "dark_shackles": [
+      "exhaust",
+      "single_target",
+      "skill",
+      "uncommon"
+    ],
+    "dash": [
+      "attack",
+      "block",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "dazed": [
+      "ethereal",
+      "status",
+      "unplayable"
+    ],
+    "deadly_poison": [
+      "common",
+      "poison",
+      "single_target",
+      "skill"
+    ],
+    "deathbringer": [
+      "aoe",
+      "skill",
+      "uncommon",
+      "weak"
+    ],
+    "death_march": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "deaths_door": [
+      "block",
+      "multi_hit",
+      "repeat",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "debilitate": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "debris": [
+      "exhaust",
+      "status"
+    ],
+    "debt": [
+      "curse",
+      "gold_gen",
+      "unplayable"
+    ],
+    "decay": [
+      "curse",
+      "damage",
+      "unplayable"
+    ],
+    "decisions_decisions": [
+      "draw",
+      "exhaust",
+      "multi_hit",
+      "rare",
+      "repeat",
+      "self_target",
+      "skill",
+      "unplayable"
+    ],
+    "defend_defect": [
+      "basic",
+      "block",
+      "defend_tag",
+      "self_target",
+      "skill"
+    ],
+    "defend_ironclad": [
+      "basic",
+      "block",
+      "defend_tag",
+      "self_target",
+      "skill"
+    ],
+    "defend_necrobinder": [
+      "basic",
+      "block",
+      "defend_tag",
+      "self_target",
+      "skill"
+    ],
+    "defend_regent": [
+      "basic",
+      "block",
+      "defend_tag",
+      "self_target",
+      "skill"
+    ],
+    "defend_silent": [
+      "basic",
+      "block",
+      "defend_tag",
+      "self_target",
+      "skill"
+    ],
+    "defile": [
+      "attack",
+      "common",
+      "damage",
+      "ethereal",
+      "single_target"
+    ],
+    "deflect": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "defragment": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "defy": [
+      "block",
+      "common",
+      "ethereal",
+      "single_target",
+      "skill",
+      "weak"
+    ],
+    "delay": [
+      "block",
+      "energy_gen",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "demesne": [
+      "draw",
+      "energy_gen",
+      "ethereal",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "demon_form": [
+      "power",
+      "rare",
+      "self_target",
+      "strength",
+      "strength_scaling"
+    ],
+    "demonic_shield": [
+      "block",
+      "exhaust",
+      "hp_loss",
+      "skill",
+      "uncommon"
+    ],
+    "deprecated_card": [
+      "unplayable"
+    ],
+    "devastate": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "devour_life": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "dirge": [
+      "self_target",
+      "skill",
+      "summon",
+      "uncommon",
+      "upgrade_card",
+      "x_cost"
+    ],
+    "discovery": [
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "disintegration": [
+      "status"
+    ],
+    "dismantle": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "uncommon"
+    ],
+    "distraction": [
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "dodge_and_roll": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "dominate": [
+      "exhaust",
+      "single_target",
+      "skill",
+      "strength",
+      "uncommon"
+    ],
+    "double_energy": [
+      "energy_gen",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "doubt": [
+      "curse",
+      "unplayable",
+      "weak"
+    ],
+    "drain_power": [
+      "attack",
+      "common",
+      "damage",
+      "draw",
+      "single_target",
+      "upgrade_card"
+    ],
+    "dramatic_entrance": [
+      "aoe",
+      "attack",
+      "damage",
+      "exhaust",
+      "innate",
+      "uncommon"
+    ],
+    "dredge": [
+      "draw",
+      "exhaust",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "drum_of_battle": [
+      "draw",
+      "exhaust",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "dualcast": [
+      "basic",
+      "self_target",
+      "skill"
+    ],
+    "dual_wield": [
+      "draw",
+      "self_target",
+      "skill"
+    ],
+    "dying_star": [
+      "aoe",
+      "attack",
+      "damage",
+      "ethereal",
+      "rare"
+    ],
+    "echo_form": [
+      "ethereal",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "echoing_slash": [
+      "aoe",
+      "attack",
+      "damage",
+      "rare"
+    ],
+    "eidolon": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "end_of_days": [
+      "aoe",
+      "rare",
+      "skill"
+    ],
+    "energy_surge": [
+      "energy_gen",
+      "exhaust",
+      "skill",
+      "uncommon"
+    ],
+    "enfeebling_touch": [
+      "ethereal",
+      "single_target",
+      "skill",
+      "uncommon"
+    ],
+    "enlightenment": [
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "enthralled": [
+      "curse"
+    ],
+    "entrench": [
+      "self_target",
+      "skill"
+    ],
+    "entropy": [
+      "draw",
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "envenom": [
+      "poison",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "equilibrium": [
+      "block",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "eradicate": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "rare",
+      "retain",
+      "single_target",
+      "x_cost"
+    ],
+    "escape_plan": [
+      "block",
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "eternal_armor": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "evil_eye": [
+      "block",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "expect_a_fight": [
+      "energy_gen",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "expertise": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "expose": [
+      "exhaust",
+      "single_target",
+      "skill",
+      "uncommon",
+      "vulnerable"
+    ],
+    "exterminate": [
+      "aoe",
+      "attack",
+      "damage",
+      "multi_hit",
+      "repeat"
+    ],
+    "falling_star": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "vulnerable",
+      "weak"
+    ],
+    "fan_of_knives": [
+      "draw",
+      "generate_card",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "fasten": [
+      "defend_tag",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "fear": [
+      "attack",
+      "common",
+      "damage",
+      "ethereal",
+      "single_target",
+      "vulnerable"
+    ],
+    "feed": [
+      "attack",
+      "damage",
+      "exhaust",
+      "max_hp_change",
+      "rare",
+      "single_target"
+    ],
+    "feeding_frenzy": [
+      "self_target",
+      "skill",
+      "strength"
+    ],
+    "feel_no_pain": [
+      "exhaust",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "feral": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "fetch": [
+      "attack",
+      "damage",
+      "draw",
+      "single_target",
+      "uncommon"
+    ],
+    "fiend_fire": [
+      "attack",
+      "damage",
+      "exhaust",
+      "multi_hit",
+      "rare",
+      "single_target"
+    ],
+    "fight_me": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "repeat",
+      "single_target",
+      "strength",
+      "uncommon"
+    ],
+    "fight_through": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "finesse": [
+      "block",
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "finisher": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "uncommon"
+    ],
+    "fisticuffs": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "flak_cannon": [
+      "attack",
+      "damage",
+      "exhaust",
+      "multi_hit",
+      "random_target",
+      "rare"
+    ],
+    "flame_barrier": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "flanking": [
+      "single_target",
+      "skill",
+      "uncommon"
+    ],
+    "flash_of_steel": [
+      "attack",
+      "damage",
+      "draw",
+      "single_target",
+      "uncommon"
+    ],
+    "flatten": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "flechettes": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "uncommon"
+    ],
+    "flick_flack": [
+      "aoe",
+      "attack",
+      "common",
+      "damage",
+      "sly"
+    ],
+    "focused_strike": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "follow_through": [
+      "aoe",
+      "attack",
+      "damage",
+      "uncommon",
+      "weak"
+    ],
+    "folly": [
+      "curse",
+      "innate",
+      "unplayable"
+    ],
+    "footwork": [
+      "block_scaling",
+      "dexterity",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "forbidden_grimoire": [
+      "power",
+      "self_target"
+    ],
+    "foregone_conclusion": [
+      "draw",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "forgotten_ritual": [
+      "energy_gen",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "frantic_escape": [
+      "self_target",
+      "status"
+    ],
+    "friendship": [
+      "energy_gen",
+      "power",
+      "self_target",
+      "strength",
+      "strength_scaling",
+      "uncommon"
+    ],
+    "ftl": [
+      "attack",
+      "damage",
+      "draw",
+      "single_target",
+      "uncommon"
+    ],
+    "fuel": [
+      "draw",
+      "energy_gen",
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "furnace": [
+      "forge",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "fusion": [
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "gamma_blast": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon",
+      "vulnerable",
+      "weak"
+    ],
+    "gang_up": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "gather_light": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "genesis": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "genetic_algorithm": [
+      "block",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "giant_rock": [
+      "attack",
+      "damage",
+      "single_target"
+    ],
+    "glacier": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "glasswork": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "glimmer": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "glimpse_beyond": [
+      "draw",
+      "exhaust",
+      "rare",
+      "skill"
+    ],
+    "glitterstream": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "glow": [
+      "common",
+      "draw",
+      "self_target",
+      "skill"
+    ],
+    "go_for_the_eyes": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "weak"
+    ],
+    "gold_axe": [
+      "attack",
+      "damage",
+      "rare",
+      "retain",
+      "single_target"
+    ],
+    "grand_finale": [
+      "aoe",
+      "attack",
+      "damage",
+      "rare"
+    ],
+    "grapple": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "graveblast": [
+      "attack",
+      "common",
+      "damage",
+      "exhaust",
+      "single_target"
+    ],
+    "grave_warden": [
+      "block",
+      "common",
+      "draw",
+      "self_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "greed": [
+      "curse",
+      "unplayable"
+    ],
+    "guards": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "guiding_star": [
+      "attack",
+      "common",
+      "damage",
+      "draw",
+      "single_target"
+    ],
+    "guilty": [
+      "curse",
+      "unplayable"
+    ],
+    "gunk_up": [
+      "attack",
+      "common",
+      "damage",
+      "multi_hit",
+      "repeat",
+      "single_target"
+    ],
+    "hailstorm": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "hammer_time": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "hand_of_greed": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "hand_trick": [
+      "block",
+      "self_target",
+      "skill",
+      "sly",
+      "uncommon"
+    ],
+    "hang": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "haunt": [
+      "hp_loss",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "havoc": [
+      "common",
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "haze": [
+      "aoe",
+      "poison",
+      "skill",
+      "sly",
+      "uncommon"
+    ],
+    "headbutt": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "heavenly_drill": [
+      "attack",
+      "damage",
+      "energy_gen",
+      "multi_hit",
+      "rare",
+      "single_target",
+      "x_cost"
+    ],
+    "hegemony": [
+      "attack",
+      "damage",
+      "energy_gen",
+      "single_target",
+      "uncommon"
+    ],
+    "heirloom_hammer": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "rare",
+      "repeat",
+      "single_target"
+    ],
+    "helix_drill": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "rare",
+      "single_target"
+    ],
+    "hello_world": [
+      "innate",
+      "power",
+      "self_target"
+    ],
+    "hellraiser": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "hemokinesis": [
+      "attack",
+      "damage",
+      "hp_loss",
+      "single_target",
+      "uncommon"
+    ],
+    "hidden_cache": [
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "hidden_daggers": [
+      "discard",
+      "draw",
+      "generate_card",
+      "self_target",
+      "skill",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "hidden_gem": [
+      "rare",
+      "self_target",
+      "skill",
+      "unplayable"
+    ],
+    "high_five": [
+      "aoe",
+      "attack",
+      "damage",
+      "uncommon",
+      "vulnerable"
+    ],
+    "hologram": [
+      "block",
+      "common",
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "hotfix": [
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "howl_from_beyond": [
+      "aoe",
+      "attack",
+      "damage",
+      "exhaust",
+      "uncommon"
+    ],
+    "huddle_up": [
+      "draw",
+      "skill",
+      "uncommon"
+    ],
+    "hyperbeam": [
+      "aoe",
+      "attack",
+      "damage",
+      "rare"
+    ],
+    "i_am_invincible": [
+      "block",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "ice_lance": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "rare",
+      "repeat",
+      "single_target"
+    ],
+    "ignition": [
+      "exhaust",
+      "rare",
+      "skill"
+    ],
+    "impatience": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "impervious": [
+      "block",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "infection": [
+      "damage",
+      "status",
+      "unplayable"
+    ],
+    "infernal_blade": [
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "inferno": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "infinite_blades": [
+      "innate",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "inflame": [
+      "power",
+      "self_target",
+      "strength",
+      "strength_scaling",
+      "uncommon"
+    ],
+    "injury": [
+      "curse",
+      "unplayable"
+    ],
+    "intercept": [
+      "block",
+      "skill",
+      "uncommon"
+    ],
+    "invoke": [
+      "common",
+      "energy_gen",
+      "self_target",
+      "skill",
+      "summon"
+    ],
+    "iron_wave": [
+      "attack",
+      "block",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "iteration": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "jack_of_all_trades": [
+      "draw",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "jackpot": [
+      "attack",
+      "damage",
+      "draw",
+      "rare",
+      "single_target",
+      "upgrade_card"
+    ],
+    "juggernaut": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "juggling": [
+      "innate",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "kingly_kick": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "kingly_punch": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "knife_trap": [
+      "rare",
+      "shiv_tag",
+      "single_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "knockdown": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "knockout_blow": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "know_thy_place": [
+      "common",
+      "exhaust",
+      "single_target",
+      "skill",
+      "vulnerable",
+      "weak"
+    ],
+    "lantern_key": [
+      "self_target",
+      "unplayable"
+    ],
+    "largesse": [
+      "skill",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "leading_strike": [
+      "attack",
+      "common",
+      "damage",
+      "draw",
+      "generate_card",
+      "single_target",
+      "strike_tag"
+    ],
+    "leap": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "legion_of_bone": [
+      "exhaust",
+      "skill",
+      "summon",
+      "uncommon"
+    ],
+    "leg_sweep": [
+      "block",
+      "single_target",
+      "skill",
+      "uncommon",
+      "weak"
+    ],
+    "lethality": [
+      "ethereal",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "lift": [
+      "block",
+      "skill",
+      "uncommon"
+    ],
+    "lightning_rod": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "loop": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "luminesce": [
+      "energy_gen",
+      "exhaust",
+      "retain",
+      "self_target",
+      "skill"
+    ],
+    "lunar_blast": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "uncommon"
+    ],
+    "machine_learning": [
+      "draw",
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "mad_science": [
+      "block",
+      "damage",
+      "dexterity",
+      "draw",
+      "energy_gen",
+      "innate",
+      "strength",
+      "vulnerable",
+      "weak"
+    ],
+    "make_it_so": [
+      "attack",
+      "damage",
+      "draw",
+      "rare",
+      "single_target"
+    ],
+    "malaise": [
+      "exhaust",
+      "rare",
+      "single_target",
+      "skill",
+      "strength",
+      "weak",
+      "x_cost"
+    ],
+    "mangle": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "manifest_authority": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "master_of_strategy": [
+      "draw",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "master_planner": [
+      "power",
+      "rare",
+      "self_target",
+      "sly"
+    ],
+    "maul": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "single_target"
+    ],
+    "mayhem": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "melancholy": [
+      "block",
+      "energy_gen",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "memento_mori": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "metamorphosis": [
+      "draw",
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "meteor_shower": [
+      "aoe",
+      "attack",
+      "damage",
+      "vulnerable",
+      "weak"
+    ],
+    "meteor_strike": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target",
+      "strike_tag"
+    ],
+    "mimic": [
+      "block",
+      "exhaust",
+      "rare",
+      "skill"
+    ],
+    "mind_blast": [
+      "attack",
+      "damage",
+      "innate",
+      "single_target",
+      "uncommon"
+    ],
+    "mind_rot": [
+      "status"
+    ],
+    "minion_dive_bomb": [
+      "attack",
+      "damage",
+      "exhaust",
+      "minion_tag",
+      "single_target"
+    ],
+    "minion_sacrifice": [
+      "block",
+      "exhaust",
+      "minion_tag",
+      "self_target",
+      "skill"
+    ],
+    "minion_strike": [
+      "attack",
+      "damage",
+      "draw",
+      "exhaust",
+      "minion_tag",
+      "single_target",
+      "strike_tag"
+    ],
+    "mirage": [
+      "block",
+      "exhaust",
+      "poison",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "misery": [
+      "attack",
+      "damage",
+      "rare",
+      "retain",
+      "single_target"
+    ],
+    "modded": [
+      "draw",
+      "multi_hit",
+      "rare",
+      "repeat",
+      "self_target",
+      "skill"
+    ],
+    "molten_fist": [
+      "attack",
+      "common",
+      "damage",
+      "exhaust",
+      "single_target",
+      "vulnerable"
+    ],
+    "momentum_strike": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "monarchs_gaze": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "monologue": [
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "multi_cast": [
+      "rare",
+      "self_target",
+      "skill",
+      "x_cost"
+    ],
+    "murder": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "necro_mastery": [
+      "power",
+      "rare",
+      "self_target",
+      "summon"
+    ],
+    "negative_pulse": [
+      "aoe",
+      "block",
+      "common",
+      "skill"
+    ],
+    "neows_fury": [
+      "attack",
+      "damage",
+      "draw",
+      "exhaust",
+      "single_target"
+    ],
+    "neurosurge": [
+      "draw",
+      "energy_gen",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "neutralize": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "weak"
+    ],
+    "neutron_aegis": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "nightmare": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "no_escape": [
+      "single_target",
+      "skill",
+      "uncommon"
+    ],
+    "normality": [
+      "curse",
+      "unplayable"
+    ],
+    "nostalgia": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "noxious_fumes": [
+      "poison",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "null": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon",
+      "weak"
+    ],
+    "oblivion": [
+      "rare",
+      "single_target",
+      "skill"
+    ],
+    "offering": [
+      "draw",
+      "energy_gen",
+      "exhaust",
+      "hp_loss",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "omnislice": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "one_two_punch": [
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "orbit": [
+      "energy_gen",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "outbreak": [
+      "multi_hit",
+      "poison",
+      "power",
+      "repeat",
+      "self_target",
+      "uncommon"
+    ],
+    "outmaneuver": [
+      "energy_gen",
+      "self_target",
+      "skill"
+    ],
+    "overclock": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "pacts_end": [
+      "aoe",
+      "attack",
+      "damage",
+      "draw",
+      "rare"
+    ],
+    "pagestorm": [
+      "draw",
+      "ethereal",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "pale_blue_dot": [
+      "draw",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "panache": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "panic_button": [
+      "block",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "parry": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "parse": [
+      "draw",
+      "ethereal",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "particle_wall": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "patter": [
+      "block",
+      "common",
+      "self_target",
+      "skill"
+    ],
+    "peck": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "repeat",
+      "single_target"
+    ],
+    "perfected_strike": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "phantom_blades": [
+      "power",
+      "retain",
+      "self_target",
+      "uncommon"
+    ],
+    "photon_cut": [
+      "attack",
+      "common",
+      "damage",
+      "draw",
+      "single_target"
+    ],
+    "piercing_wail": [
+      "aoe",
+      "common",
+      "exhaust",
+      "skill"
+    ],
+    "pillage": [
+      "attack",
+      "damage",
+      "draw",
+      "single_target",
+      "uncommon"
+    ],
+    "pillar_of_creation": [
+      "block",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "pinpoint": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "poisoned_stab": [
+      "attack",
+      "common",
+      "damage",
+      "poison",
+      "single_target"
+    ],
+    "poke": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "pommel_strike": [
+      "attack",
+      "common",
+      "damage",
+      "draw",
+      "single_target",
+      "strike_tag"
+    ],
+    "poor_sleep": [
+      "curse",
+      "retain",
+      "unplayable"
+    ],
+    "pounce": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "precise_cut": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "predator": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "prepared": [
+      "common",
+      "discard",
+      "draw",
+      "self_target",
+      "skill"
+    ],
+    "prep_time": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "primal_force": [
+      "rare",
+      "self_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "production": [
+      "energy_gen",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "prolong": [
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "prophesize": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "protector": [
+      "attack",
+      "damage",
+      "single_target"
+    ],
+    "prowess": [
+      "block_scaling",
+      "dexterity",
+      "power",
+      "self_target",
+      "strength",
+      "strength_scaling",
+      "uncommon"
+    ],
+    "pull_aggro": [
+      "block",
+      "common",
+      "self_target",
+      "skill",
+      "summon"
+    ],
+    "pull_from_below": [
+      "attack",
+      "damage",
+      "ethereal",
+      "multi_hit",
+      "single_target",
+      "uncommon"
+    ],
+    "purity": [
+      "draw",
+      "exhaust",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "putrefy": [
+      "exhaust",
+      "single_target",
+      "skill",
+      "uncommon",
+      "vulnerable",
+      "weak"
+    ],
+    "pyre": [
+      "energy_gen",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "quadcast": [
+      "multi_hit",
+      "repeat",
+      "self_target",
+      "skill"
+    ],
+    "quasar": [
+      "self_target",
+      "skill",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "radiate": [
+      "aoe",
+      "attack",
+      "damage",
+      "multi_hit",
+      "uncommon"
+    ],
+    "rage": [
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "rainbow": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "rally": [
+      "block",
+      "rare",
+      "skill"
+    ],
+    "rampage": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "rattle": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "uncommon"
+    ],
+    "reanimate": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill",
+      "summon"
+    ],
+    "reap": [
+      "attack",
+      "common",
+      "damage",
+      "retain",
+      "single_target"
+    ],
+    "reaper_form": [
+      "power",
+      "rare",
+      "retain",
+      "self_target"
+    ],
+    "reave": [
+      "attack",
+      "common",
+      "damage",
+      "draw",
+      "single_target",
+      "upgrade_card"
+    ],
+    "reboot": [
+      "draw",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "rebound": [
+      "attack",
+      "damage",
+      "single_target"
+    ],
+    "refine_blade": [
+      "common",
+      "energy_gen",
+      "forge",
+      "self_target",
+      "skill"
+    ],
+    "reflect": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "reflex": [
+      "draw",
+      "self_target",
+      "skill",
+      "sly",
+      "uncommon"
+    ],
+    "refract": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "repeat",
+      "single_target",
+      "uncommon"
+    ],
+    "regret": [
+      "curse",
+      "unplayable"
+    ],
+    "relax": [
+      "block",
+      "draw",
+      "energy_gen",
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "rend": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "resonance": [
+      "aoe",
+      "skill",
+      "strength",
+      "uncommon"
+    ],
+    "restlessness": [
+      "draw",
+      "energy_gen",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "ricochet": [
+      "attack",
+      "common",
+      "damage",
+      "multi_hit",
+      "random_target",
+      "repeat",
+      "sly"
+    ],
+    "right_hand_hand": [
+      "attack",
+      "damage",
+      "energy_gen",
+      "single_target",
+      "uncommon"
+    ],
+    "rip_and_tear": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "random_target",
+      "uncommon"
+    ],
+    "rocket_punch": [
+      "attack",
+      "damage",
+      "draw",
+      "single_target",
+      "uncommon"
+    ],
+    "rolling_boulder": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "royal_gamble": [
+      "exhaust",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "royalties": [
+      "gold_gen",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "rupture": [
+      "power",
+      "self_target",
+      "strength",
+      "strength_scaling",
+      "uncommon"
+    ],
+    "sacrifice": [
+      "rare",
+      "retain",
+      "self_target",
+      "skill"
+    ],
+    "salvo": [
+      "attack",
+      "damage",
+      "rare",
+      "retain",
+      "single_target"
+    ],
+    "scavenge": [
+      "energy_gen",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "scourge": [
+      "common",
+      "draw",
+      "single_target",
+      "skill"
+    ],
+    "scrape": [
+      "attack",
+      "damage",
+      "discard",
+      "draw",
+      "single_target",
+      "uncommon"
+    ],
+    "scrawl": [
+      "draw",
+      "exhaust",
+      "rare",
+      "retain",
+      "self_target",
+      "skill"
+    ],
+    "sculpting_strike": [
+      "attack",
+      "common",
+      "damage",
+      "ethereal",
+      "single_target",
+      "strike_tag"
+    ],
+    "seance": [
+      "draw",
+      "ethereal",
+      "rare",
+      "self_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "second_wind": [
+      "block",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "secret_technique": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "secret_weapon": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "seeker_strike": [
+      "attack",
+      "damage",
+      "draw",
+      "single_target",
+      "strike_tag",
+      "uncommon"
+    ],
+    "seeking_edge": [
+      "forge",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "sentry_mode": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "serpent_form": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "setup_strike": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "strength",
+      "strike_tag"
+    ],
+    "seven_stars": [
+      "aoe",
+      "attack",
+      "damage",
+      "multi_hit",
+      "rare",
+      "repeat"
+    ],
+    "severance": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "shadowmeld": [
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "shadow_shield": [
+      "block",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "shadow_step": [
+      "discard",
+      "draw",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "shame": [
+      "curse",
+      "frail",
+      "unplayable"
+    ],
+    "shared_fate": [
+      "exhaust",
+      "rare",
+      "single_target",
+      "skill",
+      "strength"
+    ],
+    "shatter": [
+      "aoe",
+      "attack",
+      "damage",
+      "rare"
+    ],
+    "shining_strike": [
+      "attack",
+      "damage",
+      "exhaust",
+      "single_target",
+      "strike_tag",
+      "uncommon"
+    ],
+    "shiv": [
+      "attack",
+      "damage",
+      "exhaust",
+      "generate_card",
+      "shiv_tag",
+      "single_target"
+    ],
+    "shockwave": [
+      "aoe",
+      "exhaust",
+      "skill",
+      "uncommon",
+      "vulnerable",
+      "weak"
+    ],
+    "shroud": [
+      "block",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "shrug_it_off": [
+      "block",
+      "common",
+      "draw",
+      "self_target",
+      "skill"
+    ],
+    "sic_em": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "signal_boost": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "skewer": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "uncommon",
+      "x_cost"
+    ],
+    "skim": [
+      "draw",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "sleight_of_flesh": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "slice": [
+      "attack",
+      "common",
+      "damage",
+      "single_target"
+    ],
+    "slimed": [
+      "draw",
+      "exhaust",
+      "status"
+    ],
+    "sloth": [
+      "status"
+    ],
+    "smokestack": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "snakebite": [
+      "common",
+      "poison",
+      "retain",
+      "single_target",
+      "skill"
+    ],
+    "snap": [
+      "attack",
+      "common",
+      "damage",
+      "retain",
+      "single_target"
+    ],
+    "sneaky": [
+      "power",
+      "rare",
+      "self_target",
+      "sly"
+    ],
+    "solar_strike": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "soot": [
+      "status",
+      "unplayable"
+    ],
+    "soul": [
+      "draw",
+      "exhaust",
+      "generate_card",
+      "self_target",
+      "skill"
+    ],
+    "soul_storm": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "sovereign_blade": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "repeat",
+      "retain",
+      "single_target"
+    ],
+    "sow": [
+      "aoe",
+      "attack",
+      "common",
+      "damage",
+      "retain"
+    ],
+    "spectrum_shift": [
+      "draw",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "speedster": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "spinner": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "spirit_of_ash": [
+      "ethereal",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "spite": [
+      "attack",
+      "damage",
+      "draw",
+      "single_target",
+      "uncommon"
+    ],
+    "splash": [
+      "self_target",
+      "skill",
+      "uncommon",
+      "upgrade_card"
+    ],
+    "spoils_map": [
+      "gold_gen",
+      "self_target",
+      "unplayable"
+    ],
+    "spoils_of_battle": [
+      "common",
+      "forge",
+      "self_target",
+      "skill"
+    ],
+    "spore_mind": [
+      "curse",
+      "exhaust"
+    ],
+    "spur": [
+      "heal",
+      "retain",
+      "self_target",
+      "skill",
+      "summon",
+      "uncommon"
+    ],
+    "squash": [
+      "attack",
+      "damage",
+      "single_target",
+      "vulnerable"
+    ],
+    "squeeze": [
+      "attack",
+      "damage",
+      "rare",
+      "single_target"
+    ],
+    "stack": [
+      "block",
+      "self_target",
+      "skill"
+    ],
+    "stampede": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "stardust": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "random_target",
+      "uncommon"
+    ],
+    "stoke": [
+      "draw",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "stomp": [
+      "aoe",
+      "attack",
+      "damage",
+      "uncommon"
+    ],
+    "stone_armor": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "storm": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "storm_of_steel": [
+      "discard",
+      "generate_card",
+      "rare",
+      "self_target",
+      "skill",
+      "upgrade_card"
+    ],
+    "strangle": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "stratagem": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "strike_defect": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "strike_ironclad": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "strike_necrobinder": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "strike_regent": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "strike_silent": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target",
+      "strike_tag"
+    ],
+    "subroutine": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "sucker_punch": [
+      "attack",
+      "common",
+      "damage",
+      "single_target",
+      "weak"
+    ],
+    "summon_forth": [
+      "forge",
+      "retain",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "sunder": [
+      "attack",
+      "damage",
+      "energy_gen",
+      "single_target",
+      "uncommon"
+    ],
+    "supercritical": [
+      "energy_gen",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "supermassive": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "suppress": [
+      "attack",
+      "damage",
+      "innate",
+      "single_target",
+      "weak"
+    ],
+    "survivor": [
+      "basic",
+      "block",
+      "discard",
+      "self_target",
+      "skill"
+    ],
+    "sweeping_beam": [
+      "aoe",
+      "attack",
+      "common",
+      "damage",
+      "draw"
+    ],
+    "sweeping_gaze": [
+      "attack",
+      "damage",
+      "ethereal",
+      "exhaust",
+      "random_target"
+    ],
+    "sword_boomerang": [
+      "attack",
+      "common",
+      "damage",
+      "multi_hit",
+      "random_target",
+      "repeat"
+    ],
+    "sword_sage": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "synchronize": [
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "synthesis": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "tactician": [
+      "energy_gen",
+      "self_target",
+      "skill",
+      "sly",
+      "uncommon"
+    ],
+    "tag_team": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "tank": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "taunt": [
+      "block",
+      "single_target",
+      "skill",
+      "uncommon",
+      "vulnerable"
+    ],
+    "tear_asunder": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "rare",
+      "repeat",
+      "single_target"
+    ],
+    "tempest": [
+      "self_target",
+      "skill",
+      "uncommon",
+      "x_cost"
+    ],
+    "terraforming": [
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "tesla_coil": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "the_bomb": [
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "the_gambit": [
+      "block",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "the_hunt": [
+      "attack",
+      "damage",
+      "exhaust",
+      "rare",
+      "single_target"
+    ],
+    "the_scythe": [
+      "attack",
+      "damage",
+      "exhaust",
+      "rare",
+      "single_target"
+    ],
+    "the_sealed_throne": [
+      "innate",
+      "power",
+      "self_target"
+    ],
+    "the_smith": [
+      "forge",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "thinking_ahead": [
+      "draw",
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "thrash": [
+      "attack",
+      "damage",
+      "exhaust",
+      "multi_hit",
+      "rare",
+      "single_target"
+    ],
+    "thrumming_hatchet": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "thunder": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "thunderclap": [
+      "aoe",
+      "attack",
+      "common",
+      "damage",
+      "vulnerable"
+    ],
+    "times_up": [
+      "attack",
+      "damage",
+      "exhaust",
+      "rare",
+      "retain",
+      "single_target"
+    ],
+    "tools_of_the_trade": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "toric_toughness": [
+      "block",
+      "self_target",
+      "skill"
+    ],
+    "toxic": [
+      "damage",
+      "exhaust",
+      "status"
+    ],
+    "tracking": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "transfigure": [
+      "energy_gen",
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "trash_to_treasure": [
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "tremble": [
+      "common",
+      "single_target",
+      "skill",
+      "vulnerable"
+    ],
+    "true_grit": [
+      "block",
+      "common",
+      "exhaust",
+      "self_target",
+      "skill"
+    ],
+    "turbo": [
+      "common",
+      "energy_gen",
+      "self_target",
+      "skill"
+    ],
+    "twin_strike": [
+      "attack",
+      "common",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "strike_tag"
+    ],
+    "tyranny": [
+      "exhaust",
+      "innate",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "ultimate_defend": [
+      "block",
+      "defend_tag",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "ultimate_strike": [
+      "attack",
+      "damage",
+      "single_target",
+      "strike_tag",
+      "uncommon"
+    ],
+    "undeath": [
+      "block",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "unleash": [
+      "attack",
+      "basic",
+      "damage",
+      "single_target"
+    ],
+    "unmovable": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "unrelenting": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon"
+    ],
+    "untouchable": [
+      "block",
+      "common",
+      "self_target",
+      "skill",
+      "sly"
+    ],
+    "up_my_sleeve": [
+      "draw",
+      "generate_card",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "uppercut": [
+      "attack",
+      "damage",
+      "single_target",
+      "uncommon",
+      "vulnerable",
+      "weak"
+    ],
+    "uproar": [
+      "attack",
+      "common",
+      "damage",
+      "multi_hit",
+      "single_target",
+      "unplayable"
+    ],
+    "veilpiercer": [
+      "attack",
+      "damage",
+      "ethereal",
+      "single_target",
+      "uncommon"
+    ],
+    "venerate": [
+      "basic",
+      "self_target",
+      "skill"
+    ],
+    "vicious": [
+      "draw",
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "void": [
+      "energy_gen",
+      "ethereal",
+      "status",
+      "unplayable"
+    ],
+    "void_form": [
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "volley": [
+      "attack",
+      "damage",
+      "multi_hit",
+      "random_target",
+      "uncommon",
+      "x_cost"
+    ],
+    "voltaic": [
+      "exhaust",
+      "rare",
+      "self_target",
+      "skill"
+    ],
+    "waste_away": [
+      "status"
+    ],
+    "well_laid_plans": [
+      "power",
+      "retain",
+      "self_target",
+      "uncommon"
+    ],
+    "whirlwind": [
+      "aoe",
+      "attack",
+      "damage",
+      "multi_hit",
+      "uncommon",
+      "x_cost"
+    ],
+    "whistle": [
+      "attack",
+      "damage",
+      "exhaust",
+      "single_target"
+    ],
+    "white_noise": [
+      "exhaust",
+      "self_target",
+      "skill",
+      "uncommon"
+    ],
+    "wish": [
+      "exhaust",
+      "retain",
+      "self_target",
+      "skill"
+    ],
+    "wisp": [
+      "common",
+      "energy_gen",
+      "exhaust",
+      "retain",
+      "self_target",
+      "skill"
+    ],
+    "wound": [
+      "status",
+      "unplayable"
+    ],
+    "wraith_form": [
+      "power",
+      "self_target"
+    ],
+    "writhe": [
+      "curse",
+      "innate",
+      "unplayable"
+    ],
+    "wrought_in_war": [
+      "attack",
+      "common",
+      "damage",
+      "forge",
+      "single_target"
+    ],
+    "zap": [
+      "basic",
+      "self_target",
+      "skill"
+    ]
+  }
+}

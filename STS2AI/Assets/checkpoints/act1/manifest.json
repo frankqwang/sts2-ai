@@ -1,0 +1,35 @@
+{
+  "group": "act1",
+  "updated_at": "2026-04-10",
+  "self_contained_root": "STS2AI",
+  "policy": {
+    "mainline_checkpoint_count": 1,
+    "mainline_checkpoint_only": true,
+    "history_policy": "Use git history or archived docs for superseded milestones."
+  },
+  "production_champion": {
+    "name": "retrieval_final_iter2175",
+    "checkpoint_path": "STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt",
+    "checkpoint_sha256": "873e924c6fcdcf9792c3507da914c0950bbc52e501844ed5d9e38b9e0a00e639",
+    "iteration": 2175,
+    "frozen_at": "2026-04-09",
+    "contains": [
+      "ppo_model",
+      "mcts_model",
+      "retrieval_head"
+    ],
+    "training_entrypoint": "STS2AI/Python/train_hybrid.py",
+    "eval_entrypoint": "STS2AI/Python/evaluate_ai.py",
+    "default_seeds_file": "STS2AI/Assets/seeds/full_run_benchmark_seeds_200.json",
+    "default_matchup_dataset": "STS2AI/Assets/datasets/card_ranking_post_wizardly",
+    "default_combat_teacher_dataset": "STS2AI/Assets/datasets/combat_teacher_post_wizardly/teacher.jsonl",
+    "usage": {
+      "training_resume": "python STS2AI/Python/train_hybrid.py --resume STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt --retrieval-head --retrieval-proj-dim 16",
+      "evaluation": "python STS2AI/Python/evaluate_ai.py --checkpoint STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt"
+    },
+    "notes": [
+      "This manifest tracks the self-contained mainline package only.",
+      "Do not require a separate combat checkpoint unless an experiment explicitly overrides combat weights."
+    ]
+  }
+}

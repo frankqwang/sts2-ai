@@ -1,0 +1,41 @@
+is_global = true
+
+# Downgrade compilation errors to warnings for headless stub compatibility
+# These errors come from stub properties returning object? instead of specific types
+dotnet_diagnostic.CS1061.severity = warning
+dotnet_diagnostic.CS0266.severity = warning
+dotnet_diagnostic.CS1503.severity = warning
+dotnet_diagnostic.CS1729.severity = warning
+dotnet_diagnostic.CS1929.severity = warning
+dotnet_diagnostic.CS0029.severity = warning
+dotnet_diagnostic.CS1955.severity = warning
+dotnet_diagnostic.CS1739.severity = warning
+dotnet_diagnostic.CS0103.severity = warning
+dotnet_diagnostic.CS0023.severity = warning
+dotnet_diagnostic.CS0308.severity = warning
+dotnet_diagnostic.CS4008.severity = warning
+dotnet_diagnostic.CS0117.severity = warning
+dotnet_diagnostic.CS0019.severity = warning
+dotnet_diagnostic.CS1662.severity = warning
+dotnet_diagnostic.CS8117.severity = warning
+dotnet_diagnostic.CS1656.severity = warning
+dotnet_diagnostic.CS0428.severity = warning
+dotnet_diagnostic.CS0030.severity = warning
+dotnet_diagnostic.CS8978.severity = warning
+dotnet_diagnostic.CS1674.severity = warning
+dotnet_diagnostic.CS8121.severity = warning
+dotnet_diagnostic.CS4027.severity = warning
+dotnet_diagnostic.CS0120.severity = warning
+dotnet_diagnostic.CS7036.severity = warning
+dotnet_diagnostic.CS1579.severity = warning
+dotnet_diagnostic.CS0426.severity = warning
+dotnet_diagnostic.CS1913.severity = warning
+dotnet_diagnostic.CS1615.severity = warning
+dotnet_diagnostic.CS0039.severity = warning
+dotnet_diagnostic.CS0021.severity = warning
+dotnet_diagnostic.CS4001.severity = warning
+dotnet_diagnostic.CS1914.severity = warning
+dotnet_diagnostic.CS1501.severity = warning
+dotnet_diagnostic.CS0305.severity = warning
+dotnet_diagnostic.CS0119.severity = warning
+dotnet_diagnostic.CS0246.severity = warning

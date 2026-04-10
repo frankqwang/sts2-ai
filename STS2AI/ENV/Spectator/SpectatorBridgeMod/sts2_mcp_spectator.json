@@ -1,0 +1,10 @@
+{
+  "id": "sts2_mcp_spectator",
+  "name": "STS2 MCP Spectator",
+  "author": "OpenAI Codex",
+  "description": "Singleplayer spectator bridge with optional in-game AI decision overlay for upstream 0991.",
+  "version": "0.1.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": false
+}

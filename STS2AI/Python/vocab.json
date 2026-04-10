@@ -1,0 +1,5125 @@
+{
+  "card_to_idx": {
+    "<pad>": 0,
+    "<unk>": 1,
+    "abrasive": 2,
+    "accelerant": 3,
+    "accuracy": 4,
+    "acrobatics": 5,
+    "adaptive_strike": 6,
+    "adrenaline": 7,
+    "afterimage": 8,
+    "afterlife": 9,
+    "aggression": 10,
+    "alchemize": 11,
+    "alignment": 12,
+    "all_for_one": 13,
+    "anger": 14,
+    "anointed": 15,
+    "anticipate": 16,
+    "apotheosis": 17,
+    "apparition": 18,
+    "armaments": 19,
+    "arsenal": 20,
+    "ascenders_bane": 21,
+    "ashen_strike": 22,
+    "assassinate": 23,
+    "astral_pulse": 24,
+    "automation": 25,
+    "backflip": 26,
+    "backstab": 27,
+    "bad_luck": 28,
+    "ball_lightning": 29,
+    "banshees_cry": 30,
+    "barrage": 31,
+    "barricade": 32,
+    "bash": 33,
+    "battle_trance": 34,
+    "beacon_of_hope": 35,
+    "beam_cell": 36,
+    "beat_down": 37,
+    "beat_into_shape": 38,
+    "beckon": 39,
+    "begone": 40,
+    "believe_in_you": 41,
+    "biased_cognition": 42,
+    "big_bang": 43,
+    "black_hole": 44,
+    "blade_dance": 45,
+    "blade_of_ink": 46,
+    "blight_strike": 47,
+    "bloodletting": 48,
+    "blood_wall": 49,
+    "bludgeon": 50,
+    "blur": 51,
+    "bodyguard": 52,
+    "body_slam": 53,
+    "bolas": 54,
+    "bombardment": 55,
+    "bone_shards": 56,
+    "boost_away": 57,
+    "boot_sequence": 58,
+    "borrowed_time": 59,
+    "bouncing_flask": 60,
+    "brand": 61,
+    "break": 62,
+    "breakthrough": 63,
+    "brightest_flame": 64,
+    "bubble_bubble": 65,
+    "buffer": 66,
+    "bulk_up": 67,
+    "bullet_time": 68,
+    "bully": 69,
+    "bulwark": 70,
+    "bundle_of_joy": 71,
+    "burn": 72,
+    "burning_pact": 73,
+    "burst": 74,
+    "bury": 75,
+    "byrdonis_egg": 76,
+    "byrd_swoop": 77,
+    "calamity": 78,
+    "calcify": 79,
+    "calculated_gamble": 80,
+    "call_of_the_void": 81,
+    "caltrops": 82,
+    "capacitor": 83,
+    "capture_spirit": 84,
+    "cascade": 85,
+    "catastrophe": 86,
+    "celestial_might": 87,
+    "chaos": 88,
+    "charge": 89,
+    "charge_battery": 90,
+    "child_of_the_stars": 91,
+    "chill": 92,
+    "cinder": 93,
+    "clash": 94,
+    "claw": 95,
+    "cleanse": 96,
+    "cloak_and_dagger": 97,
+    "cloak_of_stars": 98,
+    "clumsy": 99,
+    "cold_snap": 100,
+    "collision_course": 101,
+    "colossus": 102,
+    "comet": 103,
+    "compact": 104,
+    "compile_driver": 105,
+    "conflagration": 106,
+    "conqueror": 107,
+    "consuming_shadow": 108,
+    "convergence": 109,
+    "coolant": 110,
+    "coolheaded": 111,
+    "coordinate": 112,
+    "corrosive_wave": 113,
+    "corruption": 114,
+    "cosmic_indifference": 115,
+    "countdown": 116,
+    "crash_landing": 117,
+    "creative_ai": 118,
+    "crescent_spear": 119,
+    "crimson_mantle": 120,
+    "cruelty": 121,
+    "crush_under": 122,
+    "curse_of_the_bell": 123,
+    "dagger_spray": 124,
+    "dagger_throw": 125,
+    "danse_macabre": 126,
+    "dark_embrace": 127,
+    "darkness": 128,
+    "dark_shackles": 129,
+    "dash": 130,
+    "dazed": 131,
+    "deadly_poison": 132,
+    "deathbringer": 133,
+    "death_march": 134,
+    "deaths_door": 135,
+    "debilitate": 136,
+    "debris": 137,
+    "debt": 138,
+    "decay": 139,
+    "decisions_decisions": 140,
+    "defend_defect": 141,
+    "defend_ironclad": 142,
+    "defend_necrobinder": 143,
+    "defend_regent": 144,
+    "defend_silent": 145,
+    "defile": 146,
+    "deflect": 147,
+    "defragment": 148,
+    "defy": 149,
+    "delay": 150,
+    "demesne": 151,
+    "demon_form": 152,
+    "demonic_shield": 153,
+    "deprecated_card": 154,
+    "devastate": 155,
+    "devour_life": 156,
+    "dirge": 157,
+    "discovery": 158,
+    "disintegration": 159,
+    "dismantle": 160,
+    "distraction": 161,
+    "dodge_and_roll": 162,
+    "dominate": 163,
+    "double_energy": 164,
+    "doubt": 165,
+    "drain_power": 166,
+    "dramatic_entrance": 167,
+    "dredge": 168,
+    "drum_of_battle": 169,
+    "dualcast": 170,
+    "dual_wield": 171,
+    "dying_star": 172,
+    "echo_form": 173,
+    "echoing_slash": 174,
+    "eidolon": 175,
+    "end_of_days": 176,
+    "energy_surge": 177,
+    "enfeebling_touch": 178,
+    "enlightenment": 179,
+    "enthralled": 180,
+    "entrench": 181,
+    "entropy": 182,
+    "envenom": 183,
+    "equilibrium": 184,
+    "eradicate": 185,
+    "escape_plan": 186,
+    "eternal_armor": 187,
+    "evil_eye": 188,
+    "expect_a_fight": 189,
+    "expertise": 190,
+    "expose": 191,
+    "exterminate": 192,
+    "falling_star": 193,
+    "fan_of_knives": 194,
+    "fasten": 195,
+    "fear": 196,
+    "feed": 197,
+    "feeding_frenzy": 198,
+    "feel_no_pain": 199,
+    "feral": 200,
+    "fetch": 201,
+    "fiend_fire": 202,
+    "fight_me": 203,
+    "fight_through": 204,
+    "finesse": 205,
+    "finisher": 206,
+    "fisticuffs": 207,
+    "flak_cannon": 208,
+    "flame_barrier": 209,
+    "flanking": 210,
+    "flash_of_steel": 211,
+    "flatten": 212,
+    "flechettes": 213,
+    "flick_flack": 214,
+    "focused_strike": 215,
+    "follow_through": 216,
+    "folly": 217,
+    "footwork": 218,
+    "forbidden_grimoire": 219,
+    "foregone_conclusion": 220,
+    "forgotten_ritual": 221,
+    "frantic_escape": 222,
+    "friendship": 223,
+    "ftl": 224,
+    "fuel": 225,
+    "furnace": 226,
+    "fusion": 227,
+    "gamma_blast": 228,
+    "gang_up": 229,
+    "gather_light": 230,
+    "genesis": 231,
+    "genetic_algorithm": 232,
+    "giant_rock": 233,
+    "glacier": 234,
+    "glasswork": 235,
+    "glimmer": 236,
+    "glimpse_beyond": 237,
+    "glitterstream": 238,
+    "glow": 239,
+    "go_for_the_eyes": 240,
+    "gold_axe": 241,
+    "grand_finale": 242,
+    "grapple": 243,
+    "graveblast": 244,
+    "grave_warden": 245,
+    "greed": 246,
+    "guards": 247,
+    "guiding_star": 248,
+    "guilty": 249,
+    "gunk_up": 250,
+    "hailstorm": 251,
+    "hammer_time": 252,
+    "hand_of_greed": 253,
+    "hand_trick": 254,
+    "hang": 255,
+    "haunt": 256,
+    "havoc": 257,
+    "haze": 258,
+    "headbutt": 259,
+    "heavenly_drill": 260,
+    "hegemony": 261,
+    "heirloom_hammer": 262,
+    "helix_drill": 263,
+    "hello_world": 264,
+    "hellraiser": 265,
+    "hemokinesis": 266,
+    "hidden_cache": 267,
+    "hidden_daggers": 268,
+    "hidden_gem": 269,
+    "high_five": 270,
+    "hologram": 271,
+    "hotfix": 272,
+    "howl_from_beyond": 273,
+    "huddle_up": 274,
+    "hyperbeam": 275,
+    "i_am_invincible": 276,
+    "ice_lance": 277,
+    "ignition": 278,
+    "impatience": 279,
+    "impervious": 280,
+    "infection": 281,
+    "infernal_blade": 282,
+    "inferno": 283,
+    "infinite_blades": 284,
+    "inflame": 285,
+    "injury": 286,
+    "intercept": 287,
+    "invoke": 288,
+    "iron_wave": 289,
+    "iteration": 290,
+    "jack_of_all_trades": 291,
+    "jackpot": 292,
+    "juggernaut": 293,
+    "juggling": 294,
+    "kingly_kick": 295,
+    "kingly_punch": 296,
+    "knife_trap": 297,
+    "knockdown": 298,
+    "knockout_blow": 299,
+    "know_thy_place": 300,
+    "lantern_key": 301,
+    "largesse": 302,
+    "leading_strike": 303,
+    "leap": 304,
+    "legion_of_bone": 305,
+    "leg_sweep": 306,
+    "lethality": 307,
+    "lift": 308,
+    "lightning_rod": 309,
+    "loop": 310,
+    "luminesce": 311,
+    "lunar_blast": 312,
+    "machine_learning": 313,
+    "mad_science": 314,
+    "make_it_so": 315,
+    "malaise": 316,
+    "mangle": 317,
+    "manifest_authority": 318,
+    "master_of_strategy": 319,
+    "master_planner": 320,
+    "maul": 321,
+    "mayhem": 322,
+    "melancholy": 323,
+    "memento_mori": 324,
+    "metamorphosis": 325,
+    "meteor_shower": 326,
+    "meteor_strike": 327,
+    "mimic": 328,
+    "mind_blast": 329,
+    "mind_rot": 330,
+    "minion_dive_bomb": 331,
+    "minion_sacrifice": 332,
+    "minion_strike": 333,
+    "mirage": 334,
+    "misery": 335,
+    "modded": 336,
+    "molten_fist": 337,
+    "momentum_strike": 338,
+    "monarchs_gaze": 339,
+    "monologue": 340,
+    "multi_cast": 341,
+    "murder": 342,
+    "necro_mastery": 343,
+    "negative_pulse": 344,
+    "neows_fury": 345,
+    "neurosurge": 346,
+    "neutralize": 347,
+    "neutron_aegis": 348,
+    "nightmare": 349,
+    "no_escape": 350,
+    "normality": 351,
+    "nostalgia": 352,
+    "noxious_fumes": 353,
+    "null": 354,
+    "oblivion": 355,
+    "offering": 356,
+    "omnislice": 357,
+    "one_two_punch": 358,
+    "orbit": 359,
+    "outbreak": 360,
+    "outmaneuver": 361,
+    "overclock": 362,
+    "pacts_end": 363,
+    "pagestorm": 364,
+    "pale_blue_dot": 365,
+    "panache": 366,
+    "panic_button": 367,
+    "parry": 368,
+    "parse": 369,
+    "particle_wall": 370,
+    "patter": 371,
+    "peck": 372,
+    "perfected_strike": 373,
+    "phantom_blades": 374,
+    "photon_cut": 375,
+    "piercing_wail": 376,
+    "pillage": 377,
+    "pillar_of_creation": 378,
+    "pinpoint": 379,
+    "poisoned_stab": 380,
+    "poke": 381,
+    "pommel_strike": 382,
+    "poor_sleep": 383,
+    "pounce": 384,
+    "precise_cut": 385,
+    "predator": 386,
+    "prepared": 387,
+    "prep_time": 388,
+    "primal_force": 389,
+    "production": 390,
+    "prolong": 391,
+    "prophesize": 392,
+    "protector": 393,
+    "prowess": 394,
+    "pull_aggro": 395,
+    "pull_from_below": 396,
+    "purity": 397,
+    "putrefy": 398,
+    "pyre": 399,
+    "quadcast": 400,
+    "quasar": 401,
+    "radiate": 402,
+    "rage": 403,
+    "rainbow": 404,
+    "rally": 405,
+    "rampage": 406,
+    "rattle": 407,
+    "reanimate": 408,
+    "reap": 409,
+    "reaper_form": 410,
+    "reave": 411,
+    "reboot": 412,
+    "rebound": 413,
+    "refine_blade": 414,
+    "reflect": 415,
+    "reflex": 416,
+    "refract": 417,
+    "regret": 418,
+    "relax": 419,
+    "rend": 420,
+    "resonance": 421,
+    "restlessness": 422,
+    "ricochet": 423,
+    "right_hand_hand": 424,
+    "rip_and_tear": 425,
+    "rocket_punch": 426,
+    "rolling_boulder": 427,
+    "royal_gamble": 428,
+    "royalties": 429,
+    "rupture": 430,
+    "sacrifice": 431,
+    "salvo": 432,
+    "scavenge": 433,
+    "scourge": 434,
+    "scrape": 435,
+    "scrawl": 436,
+    "sculpting_strike": 437,
+    "seance": 438,
+    "second_wind": 439,
+    "secret_technique": 440,
+    "secret_weapon": 441,
+    "seeker_strike": 442,
+    "seeking_edge": 443,
+    "sentry_mode": 444,
+    "serpent_form": 445,
+    "setup_strike": 446,
+    "seven_stars": 447,
+    "severance": 448,
+    "shadowmeld": 449,
+    "shadow_shield": 450,
+    "shadow_step": 451,
+    "shame": 452,
+    "shared_fate": 453,
+    "shatter": 454,
+    "shining_strike": 455,
+    "shiv": 456,
+    "shockwave": 457,
+    "shroud": 458,
+    "shrug_it_off": 459,
+    "sic_em": 460,
+    "signal_boost": 461,
+    "skewer": 462,
+    "skim": 463,
+    "sleight_of_flesh": 464,
+    "slice": 465,
+    "slimed": 466,
+    "sloth": 467,
+    "smokestack": 468,
+    "snakebite": 469,
+    "snap": 470,
+    "sneaky": 471,
+    "solar_strike": 472,
+    "soot": 473,
+    "soul": 474,
+    "soul_storm": 475,
+    "sovereign_blade": 476,
+    "sow": 477,
+    "spectrum_shift": 478,
+    "speedster": 479,
+    "spinner": 480,
+    "spirit_of_ash": 481,
+    "spite": 482,
+    "splash": 483,
+    "spoils_map": 484,
+    "spoils_of_battle": 485,
+    "spore_mind": 486,
+    "spur": 487,
+    "squash": 488,
+    "squeeze": 489,
+    "stack": 490,
+    "stampede": 491,
+    "stardust": 492,
+    "stoke": 493,
+    "stomp": 494,
+    "stone_armor": 495,
+    "storm": 496,
+    "storm_of_steel": 497,
+    "strangle": 498,
+    "stratagem": 499,
+    "strike_defect": 500,
+    "strike_ironclad": 501,
+    "strike_necrobinder": 502,
+    "strike_regent": 503,
+    "strike_silent": 504,
+    "subroutine": 505,
+    "sucker_punch": 506,
+    "summon_forth": 507,
+    "sunder": 508,
+    "supercritical": 509,
+    "supermassive": 510,
+    "suppress": 511,
+    "survivor": 512,
+    "sweeping_beam": 513,
+    "sweeping_gaze": 514,
+    "sword_boomerang": 515,
+    "sword_sage": 516,
+    "synchronize": 517,
+    "synthesis": 518,
+    "tactician": 519,
+    "tag_team": 520,
+    "tank": 521,
+    "taunt": 522,
+    "tear_asunder": 523,
+    "tempest": 524,
+    "terraforming": 525,
+    "tesla_coil": 526,
+    "the_bomb": 527,
+    "the_gambit": 528,
+    "the_hunt": 529,
+    "the_scythe": 530,
+    "the_sealed_throne": 531,
+    "the_smith": 532,
+    "thinking_ahead": 533,
+    "thrash": 534,
+    "thrumming_hatchet": 535,
+    "thunder": 536,
+    "thunderclap": 537,
+    "times_up": 538,
+    "tools_of_the_trade": 539,
+    "toric_toughness": 540,
+    "toxic": 541,
+    "tracking": 542,
+    "transfigure": 543,
+    "trash_to_treasure": 544,
+    "tremble": 545,
+    "true_grit": 546,
+    "turbo": 547,
+    "twin_strike": 548,
+    "tyranny": 549,
+    "ultimate_defend": 550,
+    "ultimate_strike": 551,
+    "undeath": 552,
+    "unleash": 553,
+    "unmovable": 554,
+    "unrelenting": 555,
+    "untouchable": 556,
+    "up_my_sleeve": 557,
+    "uppercut": 558,
+    "uproar": 559,
+    "veilpiercer": 560,
+    "venerate": 561,
+    "vicious": 562,
+    "void": 563,
+    "void_form": 564,
+    "volley": 565,
+    "voltaic": 566,
+    "waste_away": 567,
+    "well_laid_plans": 568,
+    "whirlwind": 569,
+    "whistle": 570,
+    "white_noise": 571,
+    "wish": 572,
+    "wisp": 573,
+    "wound": 574,
+    "wraith_form": 575,
+    "writhe": 576,
+    "wrought_in_war": 577,
+    "zap": 578
+  },
+  "relic_to_idx": {
+    "<pad>": 0,
+    "<unk>": 1,
+    "akabeko": 2,
+    "alchemical_coffer": 3,
+    "amethyst_aubergine": 4,
+    "anchor": 5,
+    "arcane_scroll": 6,
+    "archaic_tooth": 7,
+    "art_of_war": 8,
+    "astrolabe": 9,
+    "bag_of_marbles": 10,
+    "bag_of_preparation": 11,
+    "beating_remnant": 12,
+    "beautiful_bracelet": 13,
+    "bellows": 14,
+    "belt_buckle": 15,
+    "big_hat": 16,
+    "big_mushroom": 17,
+    "biiig_hug": 18,
+    "bing_bong": 19,
+    "black_blood": 20,
+    "black_star": 21,
+    "blessed_antler": 22,
+    "blood_soaked_rose": 23,
+    "blood_vial": 24,
+    "bone_flute": 25,
+    "bone_tea": 26,
+    "bookmark": 27,
+    "book_of_five_rings": 28,
+    "book_repair_knife": 29,
+    "booming_conch": 30,
+    "bound_phylactery": 31,
+    "bowler_hat": 32,
+    "bread": 33,
+    "brilliant_scarf": 34,
+    "brimstone": 35,
+    "bronze_scales": 36,
+    "burning_blood": 37,
+    "burning_sticks": 38,
+    "byrdpip": 39,
+    "calling_bell": 40,
+    "candelabra": 41,
+    "captains_wheel": 42,
+    "cauldron": 43,
+    "centennial_puzzle": 44,
+    "chandelier": 45,
+    "charons_ashes": 46,
+    "chemical_x": 47,
+    "choices_paradox": 48,
+    "chosen_cheese": 49,
+    "circlet": 50,
+    "claws": 51,
+    "cloak_clasp": 52,
+    "cracked_core": 53,
+    "crossbow": 54,
+    "cursed_pearl": 55,
+    "darkstone_periapt": 56,
+    "data_disk": 57,
+    "daughter_of_the_wind": 58,
+    "delicate_frond": 59,
+    "demon_tongue": 60,
+    "deprecated_relic": 61,
+    "diamond_diadem": 62,
+    "dingy_rug": 63,
+    "distinguished_cape": 64,
+    "divine_destiny": 65,
+    "divine_right": 66,
+    "dollys_mirror": 67,
+    "dragon_fruit": 68,
+    "dream_catcher": 69,
+    "driftwood": 70,
+    "dusty_tome": 71,
+    "ectoplasm": 72,
+    "electric_shrymp": 73,
+    "ember_tea": 74,
+    "emotion_chip": 75,
+    "empty_cage": 76,
+    "eternal_feather": 77,
+    "fake_anchor": 78,
+    "fake_blood_vial": 79,
+    "fake_happy_flower": 80,
+    "fake_lees_waffle": 81,
+    "fake_mango": 82,
+    "fake_merchants_rug": 83,
+    "fake_orichalcum": 84,
+    "fake_snecko_eye": 85,
+    "fake_strike_dummy": 86,
+    "fake_venerable_tea_set": 87,
+    "fencing_manual": 88,
+    "festive_popper": 89,
+    "fiddle": 90,
+    "forgotten_soul": 91,
+    "fragrant_mushroom": 92,
+    "fresnel_lens": 93,
+    "frozen_egg": 94,
+    "funerary_mask": 95,
+    "fur_coat": 96,
+    "galactic_dust": 97,
+    "gambling_chip": 98,
+    "game_piece": 99,
+    "ghost_seed": 100,
+    "girya": 101,
+    "glass_eye": 102,
+    "glitter": 103,
+    "gnarled_hammer": 104,
+    "golden_compass": 105,
+    "golden_pearl": 106,
+    "gold_plated_cables": 107,
+    "gorget": 108,
+    "gremlin_horn": 109,
+    "hand_drill": 110,
+    "happy_flower": 111,
+    "helical_dart": 112,
+    "history_course": 113,
+    "horn_cleat": 114,
+    "ice_cream": 115,
+    "infused_core": 116,
+    "intimidating_helmet": 117,
+    "iron_club": 118,
+    "ivory_tile": 119,
+    "jeweled_mask": 120,
+    "jewelry_box": 121,
+    "joss_paper": 122,
+    "juzu_bracelet": 123,
+    "kifuda": 124,
+    "kunai": 125,
+    "kusarigama": 126,
+    "lantern": 127,
+    "large_capsule": 128,
+    "lasting_candy": 129,
+    "lava_lamp": 130,
+    "lava_rock": 131,
+    "lead_paperweight": 132,
+    "leafy_poultice": 133,
+    "lees_waffle": 134,
+    "letter_opener": 135,
+    "lizard_tail": 136,
+    "looming_fruit": 137,
+    "lords_parasol": 138,
+    "lost_coffer": 139,
+    "lost_wisp": 140,
+    "lucky_fysh": 141,
+    "lunar_pastry": 142,
+    "mango": 143,
+    "massive_scroll": 144,
+    "maw_bank": 145,
+    "meal_ticket": 146,
+    "meat_cleaver": 147,
+    "meat_on_the_bone": 148,
+    "membership_card": 149,
+    "mercury_hourglass": 150,
+    "metronome": 151,
+    "miniature_cannon": 152,
+    "miniature_tent": 153,
+    "mini_regent": 154,
+    "molten_egg": 155,
+    "mr_struggles": 156,
+    "mummified_hand": 157,
+    "music_box": 158,
+    "mystic_lighter": 159,
+    "neows_torment": 160,
+    "new_leaf": 161,
+    "ninja_scroll": 162,
+    "nunchaku": 163,
+    "nutritious_oyster": 164,
+    "nutritious_soup": 165,
+    "oddly_smooth_stone": 166,
+    "old_coin": 167,
+    "orange_dough": 168,
+    "orichalcum": 169,
+    "ornamental_fan": 170,
+    "orrery": 171,
+    "paels_blood": 172,
+    "paels_claw": 173,
+    "paels_eye": 174,
+    "paels_flesh": 175,
+    "paels_growth": 176,
+    "paels_horn": 177,
+    "paels_legion": 178,
+    "paels_tears": 179,
+    "paels_tooth": 180,
+    "paels_wing": 181,
+    "pandoras_box": 182,
+    "pantograph": 183,
+    "paper_krane": 184,
+    "paper_phrog": 185,
+    "parrying_shield": 186,
+    "pear": 187,
+    "pendulum": 188,
+    "pen_nib": 189,
+    "permafrost": 190,
+    "petrified_toad": 191,
+    "philosophers_stone": 192,
+    "phylactery_unbound": 193,
+    "planisphere": 194,
+    "pocketwatch": 195,
+    "pollinous_core": 196,
+    "pomander": 197,
+    "potion_belt": 198,
+    "power_cell": 199,
+    "prayer_wheel": 200,
+    "precarious_shears": 201,
+    "precise_scissors": 202,
+    "preserved_fog": 203,
+    "prismatic_gem": 204,
+    "pumpkin_candle": 205,
+    "punch_dagger": 206,
+    "radiant_pearl": 207,
+    "rainbow_ring": 208,
+    "razor_tooth": 209,
+    "red_mask": 210,
+    "red_skull": 211,
+    "regalite": 212,
+    "regal_pillow": 213,
+    "reptile_trinket": 214,
+    "ringing_triangle": 215,
+    "ring_of_the_drake": 216,
+    "ring_of_the_snake": 217,
+    "ripple_basin": 218,
+    "royal_poison": 219,
+    "royal_stamp": 220,
+    "ruined_helmet": 221,
+    "runic_capacitor": 222,
+    "runic_pyramid": 223,
+    "sai": 224,
+    "sand_castle": 225,
+    "screaming_flagon": 226,
+    "scroll_boxes": 227,
+    "sea_glass": 228,
+    "seal_of_gold": 229,
+    "self_forming_clay": 230,
+    "sere_talon": 231,
+    "shovel": 232,
+    "shuriken": 233,
+    "signet_ring": 234,
+    "silver_crucible": 235,
+    "sling_of_courage": 236,
+    "small_capsule": 237,
+    "snecko_eye": 238,
+    "snecko_skull": 239,
+    "sozu": 240,
+    "sparkling_rouge": 241,
+    "spiked_gauntlets": 242,
+    "stone_calendar": 243,
+    "stone_cracker": 244,
+    "stone_humidifier": 245,
+    "storybook": 246,
+    "strawberry": 247,
+    "strike_dummy": 248,
+    "sturdy_clamp": 249,
+    "sword_of_jade": 250,
+    "sword_of_stone": 251,
+    "symbiotic_virus": 252,
+    "tanxs_whistle": 253,
+    "tea_of_discourtesy": 254,
+    "the_abacus": 255,
+    "the_boot": 256,
+    "the_courier": 257,
+    "throwing_axe": 258,
+    "tingsha": 259,
+    "tiny_mailbox": 260,
+    "toasty_mittens": 261,
+    "toolbox": 262,
+    "touch_of_orobas": 263,
+    "tough_bandages": 264,
+    "toxic_egg": 265,
+    "toy_box": 266,
+    "tri_boomerang": 267,
+    "tungsten_rod": 268,
+    "tuning_fork": 269,
+    "twisted_funnel": 270,
+    "unceasing_top": 271,
+    "undying_sigil": 272,
+    "unsettling_lamp": 273,
+    "vajra": 274,
+    "vakuu_card_selector": 275,
+    "vambrace": 276,
+    "velvet_choker": 277,
+    "venerable_tea_set": 278,
+    "very_hot_cocoa": 279,
+    "vexing_puzzlebox": 280,
+    "vitruvian_minion": 281,
+    "war_hammer": 282,
+    "war_paint": 283,
+    "whetstone": 284,
+    "whispering_earring": 285,
+    "white_beast_statue": 286,
+    "white_star": 287,
+    "wing_charm": 288,
+    "wongo_customer_appreciation_badge": 289,
+    "wongos_mystery_ticket": 290,
+    "yummy_cookie": 291
+  },
+  "potion_to_idx": {
+    "<pad>": 0,
+    "<unk>": 1,
+    "ashwater": 2,
+    "attack_potion": 3,
+    "beetle_juice": 4,
+    "blessing_of_the_forge": 5,
+    "block_potion": 6,
+    "blood_potion": 7,
+    "bone_brew": 8,
+    "bottled_potential": 9,
+    "clarity": 10,
+    "colorless_potion": 11,
+    "cosmic_concoction": 12,
+    "cunning_potion": 13,
+    "cure_all": 14,
+    "deprecated_potion": 15,
+    "dexterity_potion": 16,
+    "distilled_chaos": 17,
+    "droplet_of_precognition": 18,
+    "duplicator": 19,
+    "energy_potion": 20,
+    "entropic_brew": 21,
+    "essence_of_darkness": 22,
+    "explosive_ampoule": 23,
+    "fairy_in_a_bottle": 24,
+    "fire_potion": 25,
+    "flex_potion": 26,
+    "focus_potion": 27,
+    "fortifier": 28,
+    "foul_potion": 29,
+    "fruit_juice": 30,
+    "fysh_oil": 31,
+    "gamblers_brew": 32,
+    "ghost_in_a_jar": 33,
+    "gigantification_potion": 34,
+    "glowwater_potion": 35,
+    "heart_of_iron": 36,
+    "kings_courage": 37,
+    "liquid_bronze": 38,
+    "liquid_memories": 39,
+    "lucky_tonic": 40,
+    "mazaleths_gift": 41,
+    "orobic_acid": 42,
+    "poison_potion": 43,
+    "potion_of_binding": 44,
+    "potion_of_capacity": 45,
+    "potion_of_doom": 46,
+    "potion_shaped_rock": 47,
+    "pot_of_ghouls": 48,
+    "powdered_demise": 49,
+    "power_potion": 50,
+    "radiant_tincture": 51,
+    "regen_potion": 52,
+    "shackling_potion": 53,
+    "ship_in_a_bottle": 54,
+    "skill_potion": 55,
+    "snecko_oil": 56,
+    "soldiers_stew": 57,
+    "speed_potion": 58,
+    "stable_serum": 59,
+    "star_potion": 60,
+    "strength_potion": 61,
+    "swift_potion": 62,
+    "touch_of_insanity": 63,
+    "vulnerable_potion": 64,
+    "weak_potion": 65
+  },
+  "monster_to_idx": {
+    "<pad>": 0,
+    "<unk>": 1,
+    "architect": 2,
+    "assassin_ruby_raider": 3,
+    "axebot": 4,
+    "axe_ruby_raider": 5,
+    "battle_friend_v1": 6,
+    "battle_friend_v2": 7,
+    "battle_friend_v3": 8,
+    "big_dummy": 9,
+    "bowlbug_egg": 10,
+    "bowlbug_nectar": 11,
+    "bowlbug_rock": 12,
+    "bowlbug_silk": 13,
+    "brute_ruby_raider": 14,
+    "bygone_effigy": 15,
+    "byrdonis": 16,
+    "byrdpip": 17,
+    "calcified_cultist": 18,
+    "ceremonial_beast": 19,
+    "chomper": 20,
+    "corpse_slug": 21,
+    "crossbow_ruby_raider": 22,
+    "crusher": 23,
+    "cubex_construct": 24,
+    "damp_cultist": 25,
+    "decimillipede_segment": 26,
+    "decimillipede_segment_back": 27,
+    "decimillipede_segment_front": 28,
+    "decimillipede_segment_middle": 29,
+    "devoted_sculptor": 30,
+    "door": 31,
+    "doormaker": 32,
+    "entomancer": 33,
+    "exoskeleton": 34,
+    "eye_with_teeth": 35,
+    "fabricator": 36,
+    "fake_merchant_monster": 37,
+    "fat_gremlin": 38,
+    "flail_knight": 39,
+    "flyconid": 40,
+    "fogmog": 41,
+    "fossil_stalker": 42,
+    "frog_knight": 43,
+    "fuzzy_wurm_crawler": 44,
+    "gas_bomb": 45,
+    "globe_head": 46,
+    "gremlin_merc": 47,
+    "guardbot": 48,
+    "haunted_ship": 49,
+    "hunter_killer": 50,
+    "infested_prism": 51,
+    "inklet": 52,
+    "kin_follower": 53,
+    "kin_priest": 54,
+    "knowledge_demon": 55,
+    "lagavulin_matriarch": 56,
+    "leaf_slime_m": 57,
+    "leaf_slime_s": 58,
+    "living_fog": 59,
+    "living_shield": 60,
+    "louse_progenitor": 61,
+    "magi_knight": 62,
+    "mawler": 63,
+    "mecha_knight": 64,
+    "multi_attack_move_monster": 65,
+    "mysterious_knight": 66,
+    "myte": 67,
+    "nibbit": 68,
+    "noisebot": 69,
+    "one_hp_monster": 70,
+    "osty": 71,
+    "ovicopter": 72,
+    "owl_magistrate": 73,
+    "paels_legion": 74,
+    "parafright": 75,
+    "phantasmal_gardener": 76,
+    "phrog_parasite": 77,
+    "punch_construct": 78,
+    "queen": 79,
+    "rocket": 80,
+    "scroll_of_biting": 81,
+    "seapunk": 82,
+    "sewer_clam": 83,
+    "shrinker_beetle": 84,
+    "single_attack_move_monster": 85,
+    "skulking_colony": 86,
+    "slimed_berserker": 87,
+    "slithering_strangler": 88,
+    "sludge_spinner": 89,
+    "slumbering_beetle": 90,
+    "snapping_jaxfruit": 91,
+    "sneaky_gremlin": 92,
+    "soul_fysh": 93,
+    "soul_nexus": 94,
+    "spectral_knight": 95,
+    "spiny_toad": 96,
+    "stabbot": 97,
+    "ten_hp_monster": 98,
+    "terror_eel": 99,
+    "test_subject": 100,
+    "the_adversary_mk_one": 101,
+    "the_adversary_mk_three": 102,
+    "the_adversary_mk_two": 103,
+    "the_forgotten": 104,
+    "the_insatiable": 105,
+    "the_lost": 106,
+    "the_obscura": 107,
+    "thieving_hopper": 108,
+    "toadpole": 109,
+    "torch_head_amalgam": 110,
+    "tough_egg": 111,
+    "tracker_ruby_raider": 112,
+    "tunneler": 113,
+    "turret_operator": 114,
+    "twig_slime_m": 115,
+    "twig_slime_s": 116,
+    "two_tailed_rat": 117,
+    "vantom": 118,
+    "vine_shambler": 119,
+    "waterfall_giant": 120,
+    "wriggler": 121,
+    "zapbot": 122
+  },
+  "card_props": [
+    {
+      "cost": 0,
+      "type": "None",
+      "type_idx": 6,
+      "rarity": "None",
+      "rarity_idx": 9
+    },
+    {
+      "cost": 0,
+      "type": "None",
+      "type_idx": 6,
+      "rarity": "None",
+      "rarity_idx": 9
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 6,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 4,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Quest",
+      "type_idx": 5,
+      "rarity": "Quest",
+      "rarity_idx": 9
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 2,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 4,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Quest",
+      "type_idx": 5,
+      "rarity": "Quest",
+      "rarity_idx": 9
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 5,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 0,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Quest",
+      "type_idx": 5,
+      "rarity": "Quest",
+      "rarity_idx": 9
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Token",
+      "rarity_idx": 6
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Event",
+      "rarity_idx": 5
+    },
+    {
+      "cost": 1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 2,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 2,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Rare",
+      "rarity_idx": 3
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 1,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 3,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Uncommon",
+      "rarity_idx": 2
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": 0,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": -1,
+      "type": "Status",
+      "type_idx": 3,
+      "rarity": "Status",
+      "rarity_idx": 7
+    },
+    {
+      "cost": 3,
+      "type": "Power",
+      "type_idx": 2,
+      "rarity": "Ancient",
+      "rarity_idx": 4
+    },
+    {
+      "cost": -1,
+      "type": "Curse",
+      "type_idx": 4,
+      "rarity": "Curse",
+      "rarity_idx": 8
+    },
+    {
+      "cost": 1,
+      "type": "Attack",
+      "type_idx": 0,
+      "rarity": "Common",
+      "rarity_idx": 1
+    },
+    {
+      "cost": 1,
+      "type": "Skill",
+      "type_idx": 1,
+      "rarity": "Basic",
+      "rarity_idx": 0
+    }
+  ]
+}
