@@ -94,6 +94,12 @@ public static partial class McpMod
 
         EnsureFtuesDisabled();
         EnsureDecisionOverlayAttached();
+
+        // Manually drive overlay update since Godot won't call _Process on mod assemblies
+        if (GodotObject.IsInstanceValid(_decisionOverlay))
+        {
+            _decisionOverlay.ManualProcess();
+        }
     }
 
     private static void EnsureFtuesDisabled()
@@ -174,7 +180,7 @@ public static partial class McpMod
             return;
         }
 
-        Node parent = tree.CurrentScene ?? tree.Root;
+        Node parent = tree.Root;
         if (!GodotObject.IsInstanceValid(parent))
         {
             return;
@@ -186,7 +192,8 @@ public static partial class McpMod
             OverlayFilePath = Path.GetFullPath(_decisionOverlayFile)
         };
         parent.AddChild(_decisionOverlay);
-        GD.Print("[STS2 MCP Spectator] decision overlay attached");
+        _decisionOverlay.Initialize();
+        GD.Print($"[STS2 MCP Spectator] decision overlay attached and initialized");
     }
 
     private static void ServerLoop()

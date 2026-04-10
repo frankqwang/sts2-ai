@@ -1141,6 +1141,7 @@ class DecisionBroadcaster:
         self.paused.set()  # not paused initially
         self.step_once = False
         self.speed_multiplier = 1.0
+        self._cmd_file: Path | None = None
 
     def start(self):
         """Start WebSocket + HTTP server in daemon threads."""
@@ -1223,9 +1224,29 @@ class DecisionBroadcaster:
             "speed": self.speed_multiplier,
         })
 
+    def set_cmd_file(self, overlay_file: str | None):
+        """Set the playback.cmd file path (next to overlay JSON)."""
+        if overlay_file:
+            self._cmd_file = Path(overlay_file).parent / "playback.cmd"
+
+    def _poll_cmd_file(self):
+        """Check for file-based control commands from the game overlay."""
+        if self._cmd_file is None or not self._cmd_file.exists():
+            return
+        try:
+            cmd = self._cmd_file.read_text().strip()
+            self._cmd_file.unlink(missing_ok=True)
+            if cmd:
+                logger.info("File command: %s", cmd)
+                self._handle_command({"command": cmd})
+        except Exception:
+            pass
+
     def wait_if_paused(self):
         """Block until unpaused. Returns True when ready to continue."""
+        self._poll_cmd_file()
         while not self.paused.is_set() and not _shutdown:
+            self._poll_cmd_file()
             self.paused.wait(timeout=0.1)
         if self.step_once:
             self.step_once = False
@@ -1234,11 +1255,40 @@ class DecisionBroadcaster:
         return True
 
     def _run_http(self, overlay_dir: Path):
-        os.chdir(str(overlay_dir))
+        broadcaster = self
 
         class Handler(SimpleHTTPRequestHandler):
             def log_message(self, format, *args):
                 pass
+
+            def do_GET(self):
+                path = self.path.split("?")[0]
+                if path == "/api/pause":
+                    broadcaster._handle_command({"command": "pause"})
+                    self._json_ok({"status": "paused"})
+                elif path == "/api/resume":
+                    broadcaster._handle_command({"command": "resume"})
+                    self._json_ok({"status": "resumed"})
+                elif path == "/api/step":
+                    broadcaster._handle_command({"command": "step"})
+                    self._json_ok({"status": "stepped"})
+                elif path == "/api/status":
+                    self._json_ok({
+                        "paused": not broadcaster.paused.is_set(),
+                        "speed": broadcaster.speed_multiplier,
+                    })
+                else:
+                    os.chdir(str(overlay_dir))
+                    super().do_GET()
+
+            def _json_ok(self, data):
+                body = json.dumps(data).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
 
         server = HTTPServer(("0.0.0.0", self.port), Handler)
         server.serve_forever()
@@ -1839,6 +1889,7 @@ def main():
 
     # Start overlay
     broadcaster = DecisionBroadcaster(port=args.overlay_port)
+    broadcaster.set_cmd_file(args.decision_overlay_file)
     broadcaster.start()
     overlay_writer = DecisionOverlayFileWriter(args.decision_overlay_file)
     overlay_writer.clear()
@@ -2169,6 +2220,12 @@ def main():
             )
             publish(decision)
 
+            # Delay: let the player read the decision overlay before executing
+            delay = args.combat_delay if decision_type == "combat" else args.step_delay
+            broadcaster.wait_if_paused()
+            if delay > 0:
+                time.sleep(delay / max(0.1, broadcaster.speed_multiplier))
+
             # Log / execute payload
             clean = {
                 k: v for k, v in action.items()
@@ -2237,11 +2294,6 @@ def main():
                         # Refresh state instead so we can inspect the real failure.
                         time.sleep(0.10)
                         state = client.get_state()
-
-            # Delay adjusted by speed multiplier
-            if delay > 0:
-                adjusted_delay = delay / max(0.1, broadcaster.speed_multiplier)
-                time.sleep(adjusted_delay)
 
             step_i += 1
             step = step_i
@@ -2338,6 +2390,7 @@ def main():
     logger.info("NN internals hooks registered")
 
     broadcaster = DecisionBroadcaster(port=args.overlay_port)
+    broadcaster.set_cmd_file(args.decision_overlay_file)
     broadcaster.start()
     overlay_writer = DecisionOverlayFileWriter(args.decision_overlay_file)
     overlay_writer.clear()
@@ -2821,6 +2874,12 @@ def main():
                 )
                 publish(decision)
 
+                # Show decision on overlay, then wait before executing
+                delay = args.combat_delay if decision_type == "combat" else args.step_delay
+                broadcaster.wait_if_paused()
+                if delay > 0:
+                    time.sleep(delay / max(0.1, broadcaster.speed_multiplier))
+
                 clean = {
                     key: value
                     for key, value in action.items()
@@ -2919,10 +2978,6 @@ def main():
                             else:
                                 time.sleep(0.10)
                                 state = client.get_state()
-
-                if delay > 0:
-                    adjusted_delay = delay / max(0.1, broadcaster.speed_multiplier)
-                    time.sleep(adjusted_delay)
 
                 step_i += 1
                 episode_summary["steps"] = step_i
@@ -3216,6 +3271,11 @@ def build_decision(
     )
     chosen_label = _clean_action_label(action, state)
     chosen_prob = float(probs[action_idx]) if action_idx < len(probs) else 0.0
+    # Problem vector: 9-dim deck capability assessment
+    pv = compute_problem_vector(state)
+    pv_labels = ["frontload", "aoe", "block", "draw", "energy", "scaling", "consistency", "elite_ready", "boss_answer"]
+    pv_dict = {label: round(float(pv[i]), 2) for i, label in enumerate(pv_labels)}
+
     details = [
         f"candidates={len(legal)}",
         f"chosen_prob={chosen_prob:.2f}",
@@ -3259,6 +3319,8 @@ def build_decision(
         "next_boss_name": run_next_boss,
         "next_boss_archetype": boss_token,
         "boss_readiness": round(float(readiness_score), 3),
+        "deck_quality": round(ds, 3),
+        "problem_vector": pv_dict,
         "details": details,
     }
 

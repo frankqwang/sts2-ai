@@ -30,9 +30,7 @@ function Resolve-GodotExe {
         "godot4",
         "godot",
         "D:\dev\Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64_console.exe",
-        "D:\dev\Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64.exe",
-        "C:\dev\game\Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64_console.exe",
-        "C:\dev\game\Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64.exe"
+        "D:\dev\Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64.exe"
     )
 
     foreach ($candidate in $candidates) {
@@ -429,16 +427,15 @@ function Set-EditorWindowDefaults {
         $column = [Math]::Floor($slot / 4)
         $row = $slot % 4
 
-        # Keep background workers clustered around the center-right with light overlap.
+        # Center the window on screen for single-instance / spectator use.
+        # Multi-instance training slots still get a small offset via $slot.
         $columnStep = 80
         $rowStep = 90
-        $preferredRightMargin = 20
-        $baseX = [Math]::Max(0, [Math]::Min($maxX, $screenWidth - $width - $preferredRightMargin - ($columnStep * 1)))
-        $centeredBaseY = [Math]::Max(0, [Math]::Floor(($screenHeight - $height) / 2) - [Math]::Floor(($rowStep * 3) / 2))
-        $baseY = [Math]::Min($maxY, $centeredBaseY)
+        $centeredX = [Math]::Max(0, [Math]::Floor(($screenWidth - $width) / 2))
+        $centeredY = [Math]::Max(0, [Math]::Floor(($screenHeight - $height) / 2))
 
-        $positionX = [Math]::Max(0, [Math]::Min($maxX, $baseX + ($column * $columnStep)))
-        $positionY = [Math]::Max(0, [Math]::Min($maxY, $baseY + ($row * $rowStep)))
+        $positionX = [Math]::Max(0, [Math]::Min($maxX, $centeredX + ($column * $columnStep)))
+        $positionY = [Math]::Max(0, [Math]::Min($maxY, $centeredY + ($row * $rowStep)))
 
         $windowPosition = [pscustomobject]@{
             X = $positionX
@@ -471,19 +468,7 @@ function Set-EditorWindowDefaults {
                 $json.window_size.X = $width
                 $json.window_size.Y = $height
             }
-            $json.resize_windows = $true
-            if ($null -ne $windowPosition) {
-                if ($null -eq $json.window_position) {
-                    $json | Add-Member -NotePropertyName window_position -NotePropertyValue ([pscustomobject]@{
-                        X = [int]$windowPosition.X
-                        Y = [int]$windowPosition.Y
-                    }) -Force
-                }
-                else {
-                    $json.window_position.X = [int]$windowPosition.X
-                    $json.window_position.Y = [int]$windowPosition.Y
-                }
-            }
+            $json.resize_windows = $false
             $json | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $settingsPath -Encoding utf8
             $updated += $settingsPath
         }

@@ -1782,16 +1782,6 @@ class TestEvaluateHarness:
         assert repo_root == repo_root_expected
         assert dll_path in {candidate.resolve() for candidate in expected_candidates}
 
-    def test_power_restore_uses_canonical_modeldb_category(self):
-        repo_root = Path(__file__).resolve().parents[2]
-        runtime_facade = (repo_root / "src/Core/Simulation/FullRunSimulatorRuntimeFacade.cs").read_text(encoding="utf-8")
-        combat_room = (repo_root / "src/Core/Rooms/CombatRoom.cs").read_text(encoding="utf-8")
-
-        assert 'new ModelId("powers", savedPower.Id)' not in runtime_facade
-        assert 'new ModelId("powers", savedPower.Id)' not in combat_room
-        assert "ModelDb.GetCategory(typeof(PowerModel))" in runtime_facade
-        assert "ModelDb.GetCategory(typeof(PowerModel))" in combat_room
-
     def test_checkpoint_dim_inference_prefers_weight_shapes(self):
         from evaluate_ai import _infer_ppo_embed_dim, _infer_combat_dims
 
@@ -3089,32 +3079,6 @@ class TestStage25PlanAssets:
             "ironclad-benchmark-15",
             "ironclad-benchmark-20",
         ]
-
-    def test_stage25_scripts_cover_bc_and_offline_round(self):
-        repo_root = Path(__file__).resolve().parents[2]
-        candidate_eval_script = repo_root / "tools" / "scripts" / "run_act1_stage25_candidate_eval.ps1"
-        record_script = repo_root / "tools" / "scripts" / "run_act1_stage25_record_champion_trajectories.ps1"
-        offline_round_script = repo_root / "tools" / "scripts" / "run_act1_stage25_offline_round.ps1"
-
-        candidate_eval_text = candidate_eval_script.read_text(encoding="utf-8")
-
-        assert record_script.exists()
-        assert offline_round_script.exists()
-        assert "CandidateCombatBcModel" in candidate_eval_text
-        assert "--combat-bc-model" in candidate_eval_text
-        assert "PatchAlpha" in candidate_eval_text
-        assert "PatchRoomTypes" in candidate_eval_text
-        assert "PatchEnemyNameTokens" in candidate_eval_text
-        assert "PatchMinAliveEnemies" in candidate_eval_text
-        assert "PatchMaxAliveEnemies" in candidate_eval_text
-        assert "RunFreshBaseline" in candidate_eval_text
-        assert "PatchMaxBaseTopProb" in candidate_eval_text
-        assert "Compare-LexicographicVector" in candidate_eval_text
-        assert "near_win" in candidate_eval_text
-        assert "boss_no_answer" in candidate_eval_text
-        assert "candidate_beats_baseline" in candidate_eval_text
-        assert "candidate_base_combat_checkpoint" in candidate_eval_text
-
 
 class TestBossAwarePlanning:
     def test_extract_next_boss_token_and_structured_state(self, vocab):

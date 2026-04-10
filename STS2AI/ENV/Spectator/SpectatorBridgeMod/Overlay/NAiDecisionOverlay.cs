@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -10,6 +11,13 @@ namespace MegaCrit.Sts2.Core.Nodes.Debug;
 
 public partial class NAiDecisionOverlay : CanvasLayer
 {
+	private const float PanelWidth = 438f;
+	private const float PanelHeight = 442f;
+	private const float MarginRight = 18f;
+	private const float MarginTop = 74f;
+	private const float MinX = 12f;
+	private const float MinY = 12f;
+
 	private sealed class OverlayPayload
 	{
 		public string? title { get; set; }
@@ -26,6 +34,9 @@ public partial class NAiDecisionOverlay : CanvasLayer
 		public string? next_boss_name { get; set; }
 		public string? next_boss_archetype { get; set; }
 		public double? boss_readiness { get; set; }
+		public double? deck_quality { get; set; }
+		public double? value { get; set; }
+		public Dictionary<string, double>? problem_vector { get; set; }
 		public string[]? details { get; set; }
 		public OverlayPlayerPayload? player { get; set; }
 		public OverlayEnemyPayload[]? enemies { get; set; }
@@ -70,65 +81,101 @@ public partial class NAiDecisionOverlay : CanvasLayer
 	}
 
 	public string OverlayFilePath { get; set; } = "";
+	public int ControlPort { get; set; } = 8765;
 
+	private PanelContainer _panel = null!;
 	private RichTextLabel _label = null!;
+	private Button _pauseBtn = null!;
+	private Button _stepBtn = null!;
+	private Button _resumeBtn = null!;
+	private bool _isPaused;
 	private double _nextPollAt;
 	private long _lastModifiedTicks = -1;
+	private Vector2 _lastViewportSize = Vector2.Zero;
 
-	public override void _Ready()
+	private bool _initialized;
+
+	/// <summary>
+	/// Manual init — Godot does NOT call _Ready/_Process on C# nodes
+	/// loaded from external mod assemblies. Called explicitly after AddChild.
+	/// </summary>
+	public void Initialize()
 	{
-		Layer = 50;
-		ProcessMode = ProcessModeEnum.Always;
+		if (_initialized) return;
+		_initialized = true;
 
-		Control root = new Control();
-		root.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-		root.MouseFilter = Control.MouseFilterEnum.Ignore;
-		AddChild(root);
+		try
+		{
+			Layer = 100;
+			ProcessMode = ProcessModeEnum.Always;
+			Visible = true;
 
-		PanelContainer panel = new PanelContainer();
-		panel.MouseFilter = Control.MouseFilterEnum.Ignore;
-		panel.AnchorLeft = 1.0f;
-		panel.AnchorTop = 0.0f;
-		panel.AnchorRight = 1.0f;
-		panel.AnchorBottom = 0.0f;
-		panel.OffsetLeft = -456f;
-		panel.OffsetTop = 74f;
-		panel.OffsetRight = -18f;
-		panel.OffsetBottom = 516f;
-		root.AddChild(panel);
+			_panel = new PanelContainer();
+			_panel.MouseFilter = Control.MouseFilterEnum.Ignore;
+			_panel.Visible = true;
+			_panel.Position = new Vector2(1920 - PanelWidth - MarginRight, MarginTop);
+			_panel.Size = new Vector2(PanelWidth, PanelHeight);
+			AddChild(_panel);
 
-		StyleBoxFlat panelStyle = new StyleBoxFlat();
-		panelStyle.BgColor = new Color(0.03f, 0.05f, 0.08f, 0.84f);
-		panelStyle.BorderColor = new Color(0.96f, 0.83f, 0.45f, 0.30f);
-		panelStyle.SetBorderWidthAll(1);
-		panelStyle.SetCornerRadiusAll(16);
-		panelStyle.ShadowColor = new Color(0f, 0f, 0f, 0.36f);
-		panelStyle.ShadowSize = 10;
-		panel.AddThemeStyleboxOverride("panel", panelStyle);
+			var panelStyle = new StyleBoxFlat();
+			panelStyle.BgColor = new Color(0.03f, 0.05f, 0.08f, 0.88f);
+			panelStyle.BorderColor = new Color(0.96f, 0.83f, 0.45f, 0.30f);
+			panelStyle.SetBorderWidthAll(1);
+			panelStyle.SetCornerRadiusAll(16);
+			panelStyle.ShadowColor = new Color(0f, 0f, 0f, 0.36f);
+			panelStyle.ShadowSize = 10;
+			_panel.AddThemeStyleboxOverride("panel", panelStyle);
 
-		MarginContainer margin = new MarginContainer();
-		margin.AddThemeConstantOverride("margin_left", 18);
-		margin.AddThemeConstantOverride("margin_right", 18);
-		margin.AddThemeConstantOverride("margin_top", 16);
-		margin.AddThemeConstantOverride("margin_bottom", 16);
-		panel.AddChild(margin);
+			var margin = new MarginContainer();
+			margin.AddThemeConstantOverride("margin_left", 18);
+			margin.AddThemeConstantOverride("margin_right", 18);
+			margin.AddThemeConstantOverride("margin_top", 16);
+			margin.AddThemeConstantOverride("margin_bottom", 16);
+			_panel.AddChild(margin);
 
-		_label = new RichTextLabel();
-		_label.BbcodeEnabled = true;
-		_label.ScrollActive = false;
-		_label.FitContent = true;
-		_label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-		_label.MouseFilter = Control.MouseFilterEnum.Ignore;
-		_label.AddThemeFontSizeOverride("normal_font_size", 14);
-		_label.AddThemeConstantOverride("line_separation", 4);
-		_label.AddThemeColorOverride("default_color", new Color(0.96f, 0.98f, 1.00f, 1.0f));
-		margin.AddChild(_label);
+			_label = new RichTextLabel();
+			_label.BbcodeEnabled = true;
+			_label.ScrollActive = false;
+			_label.FitContent = true;
+			_label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+			_label.MouseFilter = Control.MouseFilterEnum.Ignore;
+			_label.AddThemeFontSizeOverride("normal_font_size", 14);
+			_label.AddThemeConstantOverride("line_separation", 4);
+			_label.AddThemeColorOverride("default_color", new Color(0.96f, 0.98f, 1.00f, 1.0f));
+			margin.AddChild(_label);
 
-		SetPlaceholderText();
+			SetPlaceholderText();
+
+			// Playback control buttons at bottom of panel
+			var btnRow = new HBoxContainer();
+			btnRow.MouseFilter = Control.MouseFilterEnum.Stop;
+			btnRow.AddThemeConstantOverride("separation", 8);
+			AddChild(btnRow);
+			btnRow.Position = new Vector2(_panel.Position.X, _panel.Position.Y + PanelHeight + 8);
+
+			_pauseBtn = CreateControlButton("⏸ 暂停", () => SendControlCommand("pause"));
+			_stepBtn = CreateControlButton("⏭ 下一步", () => SendControlCommand("step"));
+			_resumeBtn = CreateControlButton("▶ 继续", () => SendControlCommand("resume"));
+			btnRow.AddChild(_pauseBtn);
+			btnRow.AddChild(_stepBtn);
+			btnRow.AddChild(_resumeBtn);
+
+			GD.Print($"[NAiDecisionOverlay] initialized, panel at {_panel.Position}");
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[NAiDecisionOverlay] Initialize FAILED: {ex}");
+		}
 	}
 
-	public override void _Process(double delta)
+	/// <summary>
+	/// Called manually from McpMod.ProcessMainThreadQueue each frame,
+	/// since Godot won't call _Process on external mod assemblies.
+	/// </summary>
+	public void ManualProcess()
 	{
+		if (!_initialized) return;
+
 		if (string.IsNullOrWhiteSpace(OverlayFilePath))
 		{
 			return;
@@ -184,6 +231,41 @@ public partial class NAiDecisionOverlay : CanvasLayer
 		}
 	}
 
+	private void UpdatePanelLayout(bool force = false)
+	{
+		if (!GodotObject.IsInstanceValid(_panel))
+		{
+			return;
+		}
+
+		Vector2 viewportSize = GetViewport()?.GetVisibleRect().Size ?? Vector2.Zero;
+		if (!force && viewportSize == _lastViewportSize)
+		{
+			return;
+		}
+
+		_lastViewportSize = viewportSize;
+
+		float width = PanelWidth;
+		float height = PanelHeight;
+		if (viewportSize.X > 0)
+		{
+			width = MathF.Min(PanelWidth, MathF.Max(280f, viewportSize.X - (MinX * 2f)));
+		}
+		if (viewportSize.Y > 0)
+		{
+			height = MathF.Min(PanelHeight, MathF.Max(220f, viewportSize.Y - (MinY * 2f)));
+		}
+
+		_panel.Size = new Vector2(width, height);
+
+		float x = viewportSize.X > 0 ? viewportSize.X - width - MarginRight : MinX;
+		float y = viewportSize.Y > 0 ? MathF.Min(MarginTop, MathF.Max(MinY, viewportSize.Y - height - MinY)) : MinY;
+		x = MathF.Max(MinX, x);
+		y = MathF.Max(MinY, y);
+		_panel.Position = new Vector2(x, y);
+	}
+
 	private void SetPlaceholderText()
 	{
 		_label.Text =
@@ -198,47 +280,55 @@ public partial class NAiDecisionOverlay : CanvasLayer
 		string chosenAction = string.IsNullOrWhiteSpace(payload.chosen_action) ? "-" : payload.chosen_action!;
 
 		StringBuilder sb = new StringBuilder();
-		sb.Append("[font_size=18][b][color=#ffe3a1]").Append(title).AppendLine("[/color][/b][/font_size]");
-		sb.Append("[color=#a9c6de]Act ").Append(payload.act ?? 0)
-			.Append("  |  Floor ").Append(payload.floor ?? 0);
-		if (payload.step.HasValue)
-		{
-			sb.Append("  |  Step ").Append(payload.step.Value);
-		}
-		sb.Append("  |  ").Append(stateType).AppendLine("[/color]");
-		sb.AppendLine();
-		sb.Append("[font_size=22][b][color=#ffffff]").Append(chosenAction).AppendLine("[/color][/b][/font_size]");
+		// Line 1: Title + screen type
+		sb.Append("[font_size=18][b][color=#ffe3a1]").Append(title).Append("[/color][/b][/font_size]");
+		sb.Append("  [color=#a9c6de]").Append(stateType).AppendLine("[/color]");
 
+		// Line 2: AI metrics (always shown, fixed height)
+		sb.Append("[color=#9fc1df]V=").Append(FormatFloat(payload.value ?? 0, "0.00"));
+		sb.Append("  Deck=").Append(FormatFloat(payload.deck_quality ?? 0, "0.00"));
+		sb.Append("  Boss=").Append(FormatFloat((payload.boss_readiness ?? 0) * 100, "0")).Append("%");
+		sb.AppendLine("[/color]");
+
+		// Line 3: Problem vector (compact bar style)
+		if (payload.problem_vector is { Count: > 0 })
+		{
+			string[] pvKeys = { "frontload", "aoe", "block", "draw", "scaling" };
+			string[] pvLabels = { "DMG", "AOE", "BLK", "DRW", "SCL" };
+			sb.Append("[color=#7a9ab5]");
+			for (int i = 0; i < pvKeys.Length; i++)
+			{
+				if (payload.problem_vector.TryGetValue(pvKeys[i], out double val))
+				{
+					if (i > 0) sb.Append("  ");
+					sb.Append(pvLabels[i]).Append(':').Append(FormatFloat(val * 100, "0")).Append('%');
+				}
+			}
+			sb.AppendLine("[/color]");
+		}
+
+		sb.AppendLine();
+
+		// Line 4: Chosen action (large)
+		sb.Append("[font_size=20][b][color=#ffffff]").Append(chosenAction).AppendLine("[/color][/b][/font_size]");
+
+		// Lines 5+: Options
 		if (payload.options is { Length: > 0 })
 		{
-			sb.AppendLine("[color=#8fd3ff]Options[/color]");
-			foreach (OverlayOptionPayload option in payload.options.Take(4))
+			foreach (OverlayOptionPayload option in payload.options.Take(5))
 			{
 				bool chosen = ParseChosen(option.chosen);
 				sb.Append(chosen ? "[color=#ffd978]> [/color]" : "[color=#55697d]- [/color]");
 				sb.Append(string.IsNullOrWhiteSpace(option.label) ? "?" : option.label);
-				if (option.cost.HasValue)
+				if (option.prob.HasValue)
 				{
-					sb.Append("  [color=#9fc1df]c=").Append(option.cost.Value).Append("[/color]");
+					sb.Append("  [color=#9fc1df]").Append(FormatFloat(option.prob.Value * 100, "0")).Append("%[/color]");
 				}
 				if (!string.IsNullOrWhiteSpace(option.target))
 				{
 					sb.Append("  [color=#9fc1df]-> ").Append(option.target).Append("[/color]");
 				}
 				sb.AppendLine();
-			}
-			sb.AppendLine();
-		}
-
-		if (payload.details is { Length: > 0 })
-		{
-			sb.AppendLine("[color=#8fd3ff]State[/color]");
-			foreach (string detail in payload.details.Take(4))
-			{
-				if (!string.IsNullOrWhiteSpace(detail))
-				{
-					sb.Append("[color=#cad7e4]").Append(detail).AppendLine("[/color]");
-				}
 			}
 		}
 
@@ -306,6 +396,53 @@ public partial class NAiDecisionOverlay : CanvasLayer
 				return elem.TryGetInt32(out int intValue) && intValue != 0;
 			default:
 				return false;
+		}
+	}
+
+	private static Button CreateControlButton(string text, Action onPress)
+	{
+		var btn = new Button();
+		btn.Text = text;
+		btn.MouseFilter = Control.MouseFilterEnum.Stop;
+		btn.CustomMinimumSize = new Vector2(120, 32);
+
+		var style = new StyleBoxFlat();
+		style.BgColor = new Color(0.12f, 0.16f, 0.22f, 0.92f);
+		style.BorderColor = new Color(0.96f, 0.83f, 0.45f, 0.40f);
+		style.SetBorderWidthAll(1);
+		style.SetCornerRadiusAll(8);
+		style.SetContentMarginAll(6);
+		btn.AddThemeStyleboxOverride("normal", style);
+
+		var hoverStyle = new StyleBoxFlat();
+		hoverStyle.BgColor = new Color(0.18f, 0.24f, 0.32f, 0.95f);
+		hoverStyle.BorderColor = new Color(0.96f, 0.83f, 0.45f, 0.60f);
+		hoverStyle.SetBorderWidthAll(1);
+		hoverStyle.SetCornerRadiusAll(8);
+		hoverStyle.SetContentMarginAll(6);
+		btn.AddThemeStyleboxOverride("hover", hoverStyle);
+
+		btn.AddThemeColorOverride("font_color", new Color(0.96f, 0.98f, 1.0f));
+		btn.AddThemeFontSizeOverride("font_size", 13);
+		btn.Pressed += onPress;
+		return btn;
+	}
+
+	private void SendControlCommand(string command)
+	{
+		try
+		{
+			// Write command to a file next to the overlay JSON.
+			// Python demo_play.py polls this file each frame.
+			if (string.IsNullOrWhiteSpace(OverlayFilePath)) return;
+			string cmdFile = Path.Combine(Path.GetDirectoryName(OverlayFilePath)!, "playback.cmd");
+			File.WriteAllText(cmdFile, command);
+			_isPaused = command == "pause" || command == "step";
+			GD.Print($"[NAiDecisionOverlay] {command} written to {cmdFile}");
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[NAiDecisionOverlay] control command failed: {ex.Message}");
 		}
 	}
 }

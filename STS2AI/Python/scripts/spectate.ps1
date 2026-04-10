@@ -177,6 +177,8 @@ if ($MuteAudio) {
 }
 $editorRunSaveRoot = Join-Path $resolvedAppDataRoot "SlayTheSpire2\editor"
 
+# Detect if using Steam game exe (has .pck) vs Godot engine (needs --path)
+$isSteamExe = (Test-Path -LiteralPath ([IO.Path]::ChangeExtension($godotExe, ".pck")))
 $godotArgs = @(
     "--verbose",
     "--display-driver", "windows",
@@ -186,7 +188,10 @@ $godotArgs = @(
     "--mcp-instant",
     "--mcp-port", [string]$resolvedMcpPort,
     "--mcp-decision-overlay-file", $resolvedDecisionOverlayFile
-) + $GodotExtraArgs + @("--path", $repoRoot)
+) + $GodotExtraArgs
+if (-not $isSteamExe) {
+    $godotArgs += @("--path", $repoRoot)
+}
 
 $pythonArgs = @(
     $demoScript,
@@ -289,6 +294,29 @@ try {
         throw "Visible MCP singleplayer endpoint did not become ready in time."
     }
     $null = Focus-GodotGameWindow -ProcessId $godotProc.Id
+
+    # Center the game window on screen after Godot has finished initializing
+    try {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WinPos {
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
+    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int x, int y, int w, int h, bool repaint);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+}
+"@ -ErrorAction SilentlyContinue
+        $proc = Get-Process -Id $godotProc.Id -ErrorAction SilentlyContinue
+        if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
+            $rect = New-Object WinPos+RECT
+            [WinPos]::GetWindowRect($proc.MainWindowHandle, [ref]$rect) | Out-Null
+            $winW = $rect.R - $rect.L; $winH = $rect.B - $rect.T
+            $screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+            $x = [Math]::Max(0, [Math]::Floor(($screen.Width - $winW) / 2))
+            $y = [Math]::Max(0, [Math]::Floor(($screen.Height - $winH) / 2))
+            [WinPos]::MoveWindow($proc.MainWindowHandle, $x, $y, $winW, $winH, $true) | Out-Null
+        }
+    } catch {}
 
     $demoProc = Start-Process `
         -FilePath $pythonExe `

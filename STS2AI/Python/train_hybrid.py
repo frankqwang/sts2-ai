@@ -2862,7 +2862,8 @@ def main() -> int:
         logger.info("Zero-CUDA collector: CPU policy snapshots created (no CUDA in worker threads)")
 
     try:
-        for iteration in range(start_iter, args.max_iterations):
+        end_iter = start_iter + args.max_iterations
+        for iteration in range(start_iter, end_iter):
             if _shutdown_requested:
                 break
             iter_start = time.monotonic()
@@ -3553,7 +3554,7 @@ def main() -> int:
     torch.save({
         "ppo_model": ppo_net.state_dict(),
         "mcts_model": mcts_net.state_dict(),
-        "iteration": args.max_iterations - 1,
+        "iteration": end_iter - 1,
         "ppo_config": {"embed_dim": args.embed_dim},
         "mcts_config": {"embed_dim": args.embed_dim, "hidden_dim": args.combat_hidden_dim},
     }, output_dir / "hybrid_final.pt")
