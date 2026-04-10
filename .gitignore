@@ -1,0 +1,255 @@
+_mono_referenced_assemblies
+.godot
+bin
+debug_audio/
+fonts
+images
+RiderTestRunner
+addons/
+animations
+banks
+System
+bin
+localization/
+materials
+models
+scenes
+shaders
+themes
+steam
+
+/STS2AI/ENV/Sim/Host/bin/
+
+# System files
+**/.DS_Store
+Thumbs.db
+**/Thumbs.db
+# GDRE specific ignores
+.gltf_copy/
+.untouched_gltf_copy/
+.tscn_copy/
+.tscn_manip/
+.autoconverted/
+gdre_export.json
+gdre_export.log
+# Mono build directory
+.mono/
+.godot/*
+!.godot/imported/
+# Godot 4 files — ignore .godot except Spine cache (can't be regenerated)
+.godot/*
+!.godot/imported/
+.godot/imported/*
+!.godot/imported/*.spskel
+!.godot/imported/*.spatlas
+!.godot/imported/*.meta
+!.godot/imported/*.image
+!.godot/imported/*.dpitex
+
+# Godot-specific
+*.translation
+
+# .NET / Mono
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Build results
+#[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+!/bin/
+!/bin/spine_godot_extension.gdextension
+!/bin/spine_godot_extension.gdextension.uid
+!/bin/windows/
+!/bin/windows/libspine_godot.windows.editor.x86_64.dll
+!/bin/windows/libspine_godot.windows.template_debug.x86_64.dll
+!/bin/windows/libspine_godot.windows.template_release.x86_64.dll
+tools/headless-sim/HeadlessSim/bin/
+!addons/sentry/bin/
+!addons/sentry/bin/**
+!addons/fmod/libs/android/arm64/
+!addons/fmod/libs/android/arm64/**
+
+# Rider
+.idea/
+*.sln.iml
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.sln.DotSettings.user
+
+# Visual Studio cache/options
+.vs/
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+project.lock.json
+project.fragment.lock.json
+# 2026-04-08 (wizardly merge): allow the rebuild-time archive subtree so old
+# tracked artifacts (e.g. ONNX exports) can be `git mv`d into archive/. Use
+# `artifacts/*` instead of `artifacts/` so the negation can re-include the
+# archive subdirectory (gitignore won't recurse into a fully-ignored dir).
+artifacts/*
+!artifacts/archive/
+
+# NOTE 2026-04-08: source_knowledge.sqlite + .manifest.json USED to be
+# gitignored as "regeneratable", but the user explicitly chose to track
+# them — they're queried frequently from training/eval code paths and
+# treating them as committed data (rebuilt only when source changes) is
+# more reliable than asking every contributor to regenerate locally.
+# Keep an eye on the .sqlite size; switch to git-lfs if it grows past
+# a few MB. Current size: ~484 KB.
+# Only the WAL/journal sidecar files stay ignored.
+tools/python/data/source_knowledge.sqlite-journal
+tools/python/data/source_knowledge.sqlite-wal
+tools/python/data/source_knowledge.sqlite-shm
+
+# FMOD Cache
+.cache/
+.unsaved/
+fmod_editor.log
+
+# Steamworks
+steam_appid.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+*.TMP
+~*.dll
+
+# Test build outputs
+Tests/**/bin/
+Tests/**/obj/
+
+# Local tooling / trainer outputs
+.vscode/
+.claude/worktrees/
+.claude/settings.local.json
+
+# Ad-hoc workspace for diagnostics / temporary state dumps
+# (kept git-clean so we can `rm -rf artifacts/_tmp` without fear)
+artifacts/_tmp/
+tmp/
+.rl_training_appdata/
+__pycache__/
+*.py[cod]
+tools/python/data/*.jsonl
+tools/python/data/**/*.jsonl
+tools/python/data/full_run/
+tools/python/data/full_run/**
+tools/python/artifacts/
+tools/python/runs/
+tools/python/models/*.json
+tools/python/models/**/*.json
+# Auto-generated from C# source (rebuilt on demand)
+tools/python/vocab.json
+tools/python/card_tags.json
+tools/python/relic_tags.json
+
+
+
+# ============================================================
+# Slay the Spire 2 source assets
+# Track source assets and external project files in git/LFS.
+# Ignore only generated caches, local runtime data, and build outputs.
+# ============================================================
+
+# Generated / cache-only content
+packages.lock.json
+.autoconverted/
+*.TMP
+~*.dll
+
+# Training session logs and temp files
+training_*.txt
+eval_*.txt
+teacher_build_log.txt
+*_log.txt
+
+# Large training data (tensors, episode logs)
+datasets/*/tensors/
+datasets/*/episode_logs.json
+
+# HeadlessSim runtime PIDs
+scripts/.sim_pids
+tools/python/logs/
+
+src/Core/Debug/ReleaseInfoJsonSerializerContext.cs
+src/Core/Debug/ReleaseInfoJsonSerializerContext.cs.uid
+src/Core/Localization/SerializableDynamicVarDictionarySerializerContext.cs
+src/Core/Localization/SerializableDynamicVarDictionarySerializerContext.cs.uid
+src/Core/Runs/Metrics/MetricsSerializerContext.cs
+src/Core/Runs/Metrics/MetricsSerializerContext.cs.uid
+src/Core/Saves/MegaCritSerializerContext.cs
+src/Core/Saves/MegaCritSerializerContext.cs.uid
+src/GameInfo/GameInfoUploaderSerializerContext.cs
+src/GameInfo/GameInfoUploaderSerializerContext.cs.uid
+
+# Feature engineering v2 fine-tune experiments (2026-04-08) — intermediate,
+# not tracked (too large, reproducible from config + logs)
+checkpoints/act1_v2features/
+checkpoints/act1_v2features_200iter/
+
+# 2026-04-09 aux-resume overnight run — 21 intermediate checkpoints (~520 MB)
+# + offline_data episode dumps. The 3 promoted candidates
+# (aux_final_iter1999.pt, aux_iter1050.pt, aux_iter1500.pt) live in
+# checkpoints/act1/ and ARE tracked via LFS. The full run directory is only
+# kept on disk for ad-hoc re-eval / splice experiments.
+checkpoints/act1_aux_overnight/
+
+# 2026-04-09 PM retrieval-head aux-resume — 9 intermediate checkpoints (2000-2199
+# in 25-iter steps, ~65 MB). The promoted candidate retrieval_final_iter2175.pt
+# lives in checkpoints/act1/ and is LFS-tracked. Intermediate checkpoints are
+# kept on disk for ablation sweeps but not committed.
+checkpoints/act1_retrieval_200iter/
+
+# 2026-04-09 PM 20-iter smoke training (verification run after wiring
+# SymbolicFeaturesHead before the full 200-iter training). Disposable.
+checkpoints/act1_symbolic_smoke/
+
+# Splice experiments — research-only, not promoted.
+checkpoints/splice/
+
+# Git-bash on Windows accidentally materializes `/dev/null` redirects as
+# empty literal `dev/null/` directories in the repo root. Harmless but noisy.
+dev/
+bin/spine_godot_extension.gdextension
+bin/spine_godot_extension.gdextension.uid
+bin/windows/libspine_godot.windows.editor.x86_64.dll
+bin/windows/libspine_godot.windows.template_debug.x86_64.dll
+bin/windows/libspine_godot.windows.template_release.x86_64.dll

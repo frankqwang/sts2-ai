@@ -1,0 +1,58 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <PropertyGroup>
+    <AssemblyName>sts2</AssemblyName>
+    <EnableDynamicLoading>True</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <TargetFramework>net90</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>13.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup />
+  <ItemGroup>
+    <Compile Remove="STS2AI\**" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <PackageReference Include="JetBrains.Annotations" Version="2023.3.0" />
+    <PackageReference Include="MonoMod.Backports" Version="1.1.2" />
+    <PackageReference Include="Sentry" Version="5.0.0" />
+    <PackageReference Include="SmartFormat" Version="3.3.0" />
+    <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
+    <PackageReference Include="Vortice.DXGI" Version="3.6.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Steamworks.NET">
+      <HintPath>_mono_referenced_assemblies\Steamworks.NET.dll</HintPath>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>_mono_referenced_assemblies\0Harmony.dll</HintPath>
+    </Reference>
+    <!--The following references were not added to the project file because they are automatically added by the Godot SDK.-->
+    <!--
+<Reference Include="GodotSharp">
+  <HintPath>..\..\..\..\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64\GodotSharp.dll</HintPath>
+</Reference>
+-->
+    <!--The following references were not added to the project file because they are part of the package references above.-->
+    <!--
+<Reference Include="System.IO.Hashing">
+  <HintPath>..\..\..\..\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64\System.IO.Hashing.dll</HintPath>
+</Reference>
+<Reference Include="Sentry">
+  <HintPath>..\..\..\..\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64\Sentry.dll</HintPath>
+</Reference>
+<Reference Include="SmartFormat">
+  <HintPath>..\..\..\..\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64\SmartFormat.dll</HintPath>
+</Reference>
+<Reference Include="Vortice.DXGI">
+  <HintPath>..\..\..\..\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64\Vortice.DXGI.dll</HintPath>
+</Reference>
+<Reference Include="SharpGen.Runtime">
+  <HintPath>..\..\..\..\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64\SharpGen.Runtime.dll</HintPath>
+</Reference>
+-->
+  </ItemGroup>
+</Project>
