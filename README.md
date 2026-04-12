@@ -14,6 +14,8 @@
 </ItemGroup>
 ```
 
+如果git有lf问题，直接用 git add --renormalize . 让 git 重新规范化索引，不需要重写文件
+
 ### 2. 构建 HeadlessSim（无头模拟器）
 
 ```powershell
