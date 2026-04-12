@@ -6,7 +6,7 @@ ones are only recorded for future use.
 For the companion note that explains the model split, head modes, and which
 trainer updates which network, see:
 
-- `STS2AI/Python/NETWORK_AND_TRAINING_OVERVIEW.md`
+- `STS2AI/docs/NETWORK_AND_TRAINING_OVERVIEW.md`
 
 ## Main Sources
 

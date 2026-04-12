@@ -1,6 +1,6 @@
 # Hybrid training config for IRONCLAD with main combat rollout attention enabled.
 #
-# This is intentionally close to `hybrid_train_ironclad_teacher.toml`.
+# This is intentionally close to `STS2AI/docs/configs/hybrid_train_ironclad_teacher.toml`.
 # The only structural difference is:
 # - `combat_main_path_mode = "light_attention"`
 #

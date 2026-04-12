@@ -62,9 +62,9 @@ STS2AI/Artifacts/...
 - `STS2AI/Python/train_hybrid.py`
 - `STS2AI/Python/core/combat_nn.py`
 - `STS2AI/Python/core/rl_policy_v2.py`
-- `STS2AI/Python/NETWORK_AND_TRAINING_OVERVIEW.md`
-- `STS2AI/Python/TRAINING_DATA_FLOW.md`
-- `STS2AI/Python/configs/hybrid_train_ironclad_teacher*.toml`
+- `STS2AI/docs/NETWORK_AND_TRAINING_OVERVIEW.md`
+- `STS2AI/docs/TRAINING_DATA_FLOW.md`
+- `STS2AI/docs/configs/hybrid_train_ironclad_teacher.toml`
 - `STS2AI/Python/configs/hybrid_train_ironclad_noncombat_ranking*.toml`
 - `STS2AI/Python/search/build_act1_combat_teacher_v2_dataset.py`
 - `STS2AI/Python/search/train_combat_teacher.py`
