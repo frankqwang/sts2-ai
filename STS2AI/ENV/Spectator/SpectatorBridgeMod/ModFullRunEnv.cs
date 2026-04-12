@@ -266,7 +266,8 @@ public static partial class McpMod
 
                 bool settled = !string.IsNullOrEmpty(state.state_type)
                     && state.state_type != "unknown"
-                    && state.state_type != "menu";
+                    && state.state_type != "menu"
+                    && state.state_type != "loading";
                 bool actionable = state.terminal || (state.legal_actions?.Count ?? 0) > 0;
 
                 if (settled && actionable && stablePolls >= 2)
@@ -865,7 +866,7 @@ public static partial class McpMod
     private static bool IsSettledFullRunState(Dictionary<string, object?> state)
     {
         string stateType = GetStateType(state);
-        return stateType is not "" and not "unknown" and not "menu";
+        return stateType is not "" and not "unknown" and not "menu" and not "loading";
     }
 
     private static bool IsMenuReadyForFullRunReset(Dictionary<string, object?> state)

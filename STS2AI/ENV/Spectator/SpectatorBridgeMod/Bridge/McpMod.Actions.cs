@@ -37,41 +37,16 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Unlocks;
 using System.Threading.Tasks;
-using HarmonyLib;
 
 namespace STS2_MCP;
 
 public static partial class McpMod
 {
-    // When true, GenerateUnlockStateFromProgress returns UnlockState.all
-    // to match Sim's initialization (deterministic unlock state for training parity).
-    private static bool _forceUnlockAll;
-    private static bool _unlockPatchInstalled;
-
-    private static void EnsureUnlockPatchInstalled()
-    {
-        if (_unlockPatchInstalled) return;
-        var harmony = new Harmony("sts2_mcp_spectator.unlock_patch");
-        var original = typeof(SaveManager).GetMethod("GenerateUnlockStateFromProgress");
-        var prefix = typeof(McpMod).GetMethod("UnlockStatePrefix", BindingFlags.NonPublic | BindingFlags.Static);
-        if (original != null && prefix != null)
-        {
-            harmony.Patch(original, prefix: new HarmonyMethod(prefix));
-        }
-        _unlockPatchInstalled = true;
-    }
-
-    private static bool UnlockStatePrefix(ref UnlockState __result)
-    {
-        if (!_forceUnlockAll) return true; // run original
-        __result = UnlockState.all;
-        return false; // skip original
-    }
-
     private static Dictionary<string, object?> ExecuteAction(string action, Dictionary<string, JsonElement> data)
     {
         if (!RunManager.Instance.IsInProgress)
@@ -225,7 +200,6 @@ public static partial class McpMod
         if (game == null || mainMenu == null || !mainMenu.IsVisibleInTree())
             return Error("Main menu is not active");
 
-        var unlockState = SaveManager.Instance.GenerateUnlockStateFromProgress();
         var charSelectScreen = TryGetCharacterSelectScreen(mainMenu);
 
         CharacterModel? character = null;
@@ -245,9 +219,6 @@ public static partial class McpMod
 
         character ??= ModelDb.Character<Ironclad>();
 
-        if (!unlockState.Characters.Contains(character))
-            return Error($"Character '{character.Id.Entry}' is locked");
-
         int requestedAscension = charSelectScreen?.Visible == true ? charSelectScreen.Lobby.Ascension : 0;
         if (data.TryGetValue("ascension", out var ascensionElem))
             requestedAscension = ascensionElem.GetInt32();
@@ -255,8 +226,7 @@ public static partial class McpMod
         if (requestedAscension < 0)
             return Error("Ascension must be >= 0");
 
-        int maxAscension = Math.Max(0, SaveManager.Instance.Progress.GetOrCreateCharacterStats(character.Id).MaxAscension);
-        int ascension = Math.Clamp(requestedAscension, 0, maxAscension);
+        int ascension = requestedAscension;
 
         string seed;
         if (data.TryGetValue("seed", out var seedElem))
@@ -271,13 +241,24 @@ public static partial class McpMod
             seed = game.DebugSeedOverride ?? SeedHelper.GetRandomSeed();
         }
 
-        // Patch UnlockState to all for parity with Sim, then use GetRandomList
-        // (which NGame.StartNewSingleplayerRun expects as mutable-ready input).
-        EnsureUnlockPatchInstalled();
-        _forceUnlockAll = true;
-        var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false).ToList();
-        TaskHelper.RunSafely(game.StartNewSingleplayerRun(character, shouldSave: true, acts, new List<ModifierModel>(), seed, ascension));
-        _forceUnlockAll = false;
+        // Bypass NGame.StartNewSingleplayerRun so spectator start-up exactly matches
+        // sim's fully-unlocked initialization instead of re-reading profile progress.
+        var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false)
+            .Select(static act => act.ToMutable())
+            .ToList();
+        Player player = Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId);
+        RunState runState = RunState.CreateForNewRun(
+            new List<Player> { player },
+            acts,
+            Array.Empty<ModifierModel>(),
+            ascension,
+            seed);
+        RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: true, dailyTime: null);
+
+        MethodInfo? startRunMethod = game.GetType().GetMethod("StartRun", BindingFlags.NonPublic | BindingFlags.Instance);
+        if (startRunMethod == null)
+            return Error("Could not find NGame.StartRun via reflection");
+        TaskHelper.RunSafely((Task)startRunMethod.Invoke(game, new object[] { runState })!);
 
         return new Dictionary<string, object?>
         {
@@ -514,16 +495,16 @@ public static partial class McpMod
 
         int index = indexElem.GetInt32();
 
-        var buttons = FindAll<NEventOptionButton>(uiRoom)
-            .Where(b => !b.Option.IsLocked)
-            .ToList();
+        var buttons = FindAll<NEventOptionButton>(uiRoom).ToList();
 
         if (buttons.Count == 0)
-            return Error("No unlocked event options available");
+            return Error("No event options available");
         if (index < 0 || index >= buttons.Count)
-            return Error($"Event option index {index} out of range ({buttons.Count} unlocked options)");
+            return Error($"Event option index {index} out of range ({buttons.Count} options)");
 
         var button = buttons[index];
+        if (button.Option.IsLocked)
+            return Error($"Event option index {index} is locked");
         string title = SafeGetText(() => button.Option.Title) ?? "option";
         button.ForceClick();
 
@@ -814,6 +795,17 @@ public static partial class McpMod
             }
 
             return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Closing shop inventory" };
+        }
+
+        if (NEventRoom.Instance is { } eventRoom)
+        {
+            var proceedButton = FindAll<NEventOptionButton>(eventRoom)
+                .FirstOrDefault(static button => button.Option.IsProceed && !button.Option.IsLocked);
+            if (proceedButton != null)
+            {
+                proceedButton.ForceClick();
+                return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Proceeding from event" };
+            }
         }
 
         return ExecuteProceed();

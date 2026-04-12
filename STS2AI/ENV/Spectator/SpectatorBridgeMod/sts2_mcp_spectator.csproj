@@ -6,7 +6,7 @@
     <LangVersion>12.0</LangVersion>
     <AssemblyName>sts2_mcp_spectator</AssemblyName>
     <RootNamespace>STS2_MCP</RootNamespace>
-    <STS2AssemblyDir Condition="'$(STS2AssemblyDir)' == ''">C:\Users\Administrator\Desktop\sts2_0991\.godot\mono\temp\bin\Debug</STS2AssemblyDir>
+    <STS2AssemblyDir Condition="'$(STS2AssemblyDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\..\.godot\mono\temp\bin\Debug</STS2AssemblyDir>
   </PropertyGroup>
 
   <ItemGroup>

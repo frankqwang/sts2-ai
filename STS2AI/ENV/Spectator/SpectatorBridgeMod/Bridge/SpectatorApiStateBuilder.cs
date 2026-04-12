@@ -112,8 +112,14 @@ public static class SpectatorApiStateBuilder
 			{
 				sb.Append('|'); sb.Append(a.action);
 				sb.Append(':'); sb.Append(a.index ?? -1);
+				sb.Append('/'); sb.Append(a.card_index ?? -1);
+				sb.Append('/'); sb.Append(a.slot ?? -1);
+				sb.Append('/'); sb.Append(a.target_id ?? 0);
 				sb.Append(','); sb.Append(a.col ?? -1);
 				sb.Append(','); sb.Append(a.row ?? -1);
+				sb.Append(','); sb.Append(a.reward_type ?? "");
+				sb.Append(','); sb.Append(a.reward_key ?? "");
+				sb.Append(','); sb.Append(a.label ?? "");
 			}
 		}
 		return sb.ToString();

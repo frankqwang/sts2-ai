@@ -69,59 +69,89 @@ public static partial class McpMod
             result["state_type"] = "unknown";
             return result;
         }
-
-        // Card selection overlays can appear on top of any room (events, rest sites, combat)
-        var topOverlay = NOverlayStack.Instance?.Peek();
         var currentRoom = runState.CurrentRoom;
-        if (topOverlay is NCardGridSelectionScreen cardSelectScreen)
+
+        try
         {
-            result["state_type"] = "card_select";
-            result["card_select"] = BuildCardSelectState(cardSelectScreen, runState);
-        }
-        else if (topOverlay is NChooseACardSelectionScreen chooseCardScreen)
-        {
-            result["state_type"] = "card_select";
-            result["card_select"] = BuildChooseCardState(chooseCardScreen, runState);
-        }
-        else if (topOverlay is NChooseARelicSelection relicSelectScreen)
-        {
-            result["state_type"] = "relic_select";
-            result["relic_select"] = BuildRelicSelectState(relicSelectScreen, runState);
-        }
-        else if (topOverlay is NGameOverScreen gameOverScreen)
-        {
-            result["state_type"] = "game_over";
-            result["game_over"] = BuildGameOverState(gameOverScreen, runState);
-        }
-        else if (topOverlay is IOverlayScreen
-                 && topOverlay is not NRewardsScreen
-                 && topOverlay is not NCardRewardSelectionScreen)
-        {
-            // Catch-all for unhandled overlays — prevents soft-locks
-            result["state_type"] = "overlay";
-            result["overlay"] = BuildOverlayState((Node)topOverlay, runState);
-        }
-        else if (currentRoom is CombatRoom combatRoom)
-        {
-            if (CombatManager.Instance.IsInProgress)
+            // Card selection overlays can appear on top of any room (events, rest sites, combat)
+            var topOverlay = NOverlayStack.Instance?.Peek();
+            if (topOverlay is NCardGridSelectionScreen cardSelectScreen)
             {
-                // Check for in-combat hand card selection (e.g., "Select a card to exhaust")
-                var playerHand = NPlayerHand.Instance;
-                if (playerHand != null && playerHand.IsInCardSelection)
+                result["state_type"] = "card_select";
+                result["card_select"] = BuildCardSelectState(cardSelectScreen, runState);
+            }
+            else if (topOverlay is NChooseACardSelectionScreen chooseCardScreen)
+            {
+                result["state_type"] = "card_select";
+                result["card_select"] = BuildChooseCardState(chooseCardScreen, runState);
+            }
+            else if (topOverlay is NChooseARelicSelection relicSelectScreen)
+            {
+                result["state_type"] = "relic_select";
+                result["relic_select"] = BuildRelicSelectState(relicSelectScreen, runState);
+            }
+            else if (topOverlay is NGameOverScreen gameOverScreen)
+            {
+                result["state_type"] = "game_over";
+                result["game_over"] = BuildGameOverState(gameOverScreen, runState);
+            }
+            else if (topOverlay is IOverlayScreen
+                     && topOverlay is not NRewardsScreen
+                     && topOverlay is not NCardRewardSelectionScreen)
+            {
+                // Catch-all for unhandled overlays — prevents soft-locks
+                result["state_type"] = "overlay";
+                result["overlay"] = BuildOverlayState((Node)topOverlay, runState);
+            }
+            else if (currentRoom is CombatRoom combatRoom)
+            {
+                if (CombatManager.Instance.IsInProgress)
                 {
-                    result["state_type"] = "hand_select";
-                    result["hand_select"] = BuildHandSelectState(playerHand, runState);
-                    result["battle"] = BuildBattleState(runState, combatRoom);
+                    // Check for in-combat hand card selection (e.g., "Select a card to exhaust")
+                    var playerHand = NPlayerHand.Instance;
+                    if (playerHand != null && playerHand.IsInCardSelection)
+                    {
+                        result["state_type"] = "hand_select";
+                        result["hand_select"] = BuildHandSelectState(playerHand, runState);
+                        result["battle"] = BuildBattleState(runState, combatRoom);
+                    }
+                    else
+                    {
+                        result["state_type"] = combatRoom.RoomType.ToString().ToLower(); // monster, elite, boss
+                        result["battle"] = BuildBattleState(runState, combatRoom);
+                    }
                 }
                 else
                 {
-                    result["state_type"] = combatRoom.RoomType.ToString().ToLower(); // monster, elite, boss
-                    result["battle"] = BuildBattleState(runState, combatRoom);
+                    // After combat ends, check: map open (post-rewards) > overlays > fallback
+                    if (NMapScreen.Instance is { IsOpen: true })
+                    {
+                        result["state_type"] = "map";
+                        result["map"] = BuildMapState(runState);
+                    }
+                    else
+                    {
+                        var overlay = NOverlayStack.Instance?.Peek();
+                        if (overlay is NCardRewardSelectionScreen cardScreen)
+                        {
+                            result["state_type"] = "card_reward";
+                            result["card_reward"] = BuildCardRewardState(cardScreen, runState);
+                        }
+                        else if (overlay is NRewardsScreen rewardsScreen)
+                        {
+                            result["state_type"] = "combat_rewards";
+                            result["rewards"] = BuildRewardsState(rewardsScreen, runState);
+                        }
+                        else
+                        {
+                            result["state_type"] = combatRoom.RoomType.ToString().ToLower();
+                            result["message"] = "Combat ended. Waiting for rewards...";
+                        }
+                    }
                 }
             }
-            else
+            else if (currentRoom is EventRoom eventRoom)
             {
-                // After combat ends, check: map open (post-rewards) > overlays > fallback
                 if (NMapScreen.Instance is { IsOpen: true })
                 {
                     result["state_type"] = "map";
@@ -129,86 +159,66 @@ public static partial class McpMod
                 }
                 else
                 {
-                    var overlay = NOverlayStack.Instance?.Peek();
-                    if (overlay is NCardRewardSelectionScreen cardScreen)
-                    {
-                        result["state_type"] = "card_reward";
-                        result["card_reward"] = BuildCardRewardState(cardScreen, runState);
-                    }
-                    else if (overlay is NRewardsScreen rewardsScreen)
-                    {
-                        result["state_type"] = "combat_rewards";
-                        result["rewards"] = BuildRewardsState(rewardsScreen, runState);
-                    }
-                    else
-                    {
-                        result["state_type"] = combatRoom.RoomType.ToString().ToLower();
-                        result["message"] = "Combat ended. Waiting for rewards...";
-                    }
+                    result["state_type"] = "event";
+                    result["event"] = BuildEventState(eventRoom, runState);
                 }
             }
-        }
-        else if (currentRoom is EventRoom eventRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
+            else if (currentRoom is MapRoom)
             {
                 result["state_type"] = "map";
                 result["map"] = BuildMapState(runState);
             }
-            else
+            else if (currentRoom is MerchantRoom merchantRoom)
             {
-                result["state_type"] = "event";
-                result["event"] = BuildEventState(eventRoom, runState);
+                if (NMapScreen.Instance is { IsOpen: true })
+                {
+                    result["state_type"] = "map";
+                    result["map"] = BuildMapState(runState);
+                }
+                else
+                {
+                    result["state_type"] = "shop";
+                    result["shop"] = BuildShopState(merchantRoom, runState);
+                }
             }
-        }
-        else if (currentRoom is MapRoom)
-        {
-            result["state_type"] = "map";
-            result["map"] = BuildMapState(runState);
-        }
-        else if (currentRoom is MerchantRoom merchantRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
+            else if (currentRoom is RestSiteRoom restSiteRoom)
             {
-                result["state_type"] = "map";
-                result["map"] = BuildMapState(runState);
+                if (NMapScreen.Instance is { IsOpen: true })
+                {
+                    result["state_type"] = "map";
+                    result["map"] = BuildMapState(runState);
+                }
+                else
+                {
+                    result["state_type"] = "rest_site";
+                    result["rest_site"] = BuildRestSiteState(restSiteRoom, runState);
+                }
             }
-            else
+            else if (currentRoom is TreasureRoom treasureRoom)
             {
-                result["state_type"] = "shop";
-                result["shop"] = BuildShopState(merchantRoom, runState);
-            }
-        }
-        else if (currentRoom is RestSiteRoom restSiteRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
-            {
-                result["state_type"] = "map";
-                result["map"] = BuildMapState(runState);
-            }
-            else
-            {
-                result["state_type"] = "rest_site";
-                result["rest_site"] = BuildRestSiteState(restSiteRoom, runState);
-            }
-        }
-        else if (currentRoom is TreasureRoom treasureRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
-            {
-                result["state_type"] = "map";
-                result["map"] = BuildMapState(runState);
+                if (NMapScreen.Instance is { IsOpen: true })
+                {
+                    result["state_type"] = "map";
+                    result["map"] = BuildMapState(runState);
+                }
+                else
+                {
+                    result["state_type"] = "treasure";
+                    result["treasure"] = BuildTreasureState(treasureRoom, runState);
+                }
             }
             else
             {
-                result["state_type"] = "treasure";
-                result["treasure"] = BuildTreasureState(treasureRoom, runState);
+                result["state_type"] = "unknown";
+                result["room_type"] = currentRoom?.GetType().Name;
             }
         }
-        else
+        catch (Exception ex)
         {
-            result["state_type"] = "unknown";
+            result.Clear();
+            result["state_type"] = "loading";
             result["room_type"] = currentRoom?.GetType().Name;
+            result["message"] = $"State build in progress: {ex.GetType().Name}";
         }
 
         // Common run info
