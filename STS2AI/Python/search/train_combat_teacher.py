@@ -15,9 +15,9 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
-from combat_nn import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
-from combat_teacher_dataset import CombatTeacherSample, load_combat_teacher_samples, sample_metric_applicable
-from vocab import load_vocab
+from core.combat_nn import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
+from search.combat_teacher_dataset import CombatTeacherSample, load_combat_teacher_samples, sample_metric_applicable
+from core.vocab import load_vocab
 
 
 def _safe_load_state_dict(model: torch.nn.Module, state_dict: dict[str, Any]) -> None:
@@ -573,7 +573,7 @@ def main() -> None:
     (output_dir / "history.json").write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if args.microbench_output:
-        from combat_microbench import build_microbench_report
+        from archive.search_experiments.combat_microbench import build_microbench_report
 
         report = build_microbench_report(
             holdout_samples,

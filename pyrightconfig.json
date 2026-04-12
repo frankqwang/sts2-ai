@@ -1,0 +1,11 @@
+{
+  "include": [
+    "STS2AI/Python"
+  ],
+  "extraPaths": [
+    "STS2AI/Python",
+    "STS2AI/Python/core",
+    "STS2AI/Python/ipc",
+    "STS2AI/Python/search"
+  ]
+}

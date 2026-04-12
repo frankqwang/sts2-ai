@@ -45,16 +45,16 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from vocab import load_vocab, Vocab
-from rl_encoder_v2 import build_structured_state, build_structured_actions
-from rl_policy_v2 import (
+from core.vocab import load_vocab, Vocab
+from core.rl_encoder_v2 import build_structured_state, build_structured_actions
+from core.rl_policy_v2 import (
     FullRunPolicyNetworkV2,
     PPOTrainerV2,
     StructuredRolloutBuffer,
     _structured_state_to_numpy_dict,
     _structured_actions_to_numpy_dict,
 )
-from rl_reward_shaping import (
+from core.rl_reward_shaping import (
     boss_readiness_score,
     shaped_reward,
     combat_step_reward,
@@ -66,15 +66,15 @@ from rl_reward_shaping import (
 )
 from rl_segment_buffer import SegmentRolloutBuffer, Segment
 from segment_collector import NonCombatSegmentCollector
-from counterfactual_scoring import compute_counterfactual_reward
-from combat_nn import (
+from search.counterfactual_scoring import compute_counterfactual_reward
+from core.combat_nn import (
     CombatPolicyValueNetwork,
     build_combat_features,
     build_combat_action_features,
     MAX_ACTIONS,
 )
-from mcts_core import MCTSConfig, mcts_search
-from combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
+from search.mcts_core import MCTSConfig, mcts_search
+from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
 from full_run_env import ApiBackedFullRunClient, PipeBackedFullRunClient, create_full_run_client
 from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from sts2ai_paths import ARTIFACTS_ROOT, DATASETS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
@@ -1073,7 +1073,7 @@ def _mp_episode_worker(
 def _export_ppo_actor_onnx(net, output_path: str, vocab) -> None:
     """Export PPO actor-only ONNX for ORT CPU inference."""
     import torch.nn as nn
-    from rl_encoder_v2 import (SCALAR_DIM, MAX_DECK_SIZE, MAX_RELICS, MAX_POTIONS,
+    from core.rl_encoder_v2 import (SCALAR_DIM, MAX_DECK_SIZE, MAX_RELICS, MAX_POTIONS,
         MAX_HAND_SIZE, MAX_ENEMIES, MAX_MAP_NODES, MAX_CARD_REWARDS, MAX_SHOP_ITEMS,
         MAX_REST_OPTIONS, MAX_ACTIONS, CARD_AUX_DIM, ENEMY_AUX_DIM, NUM_RELIC_TAGS, MAP_ROUTE_DIM)
 
@@ -1693,7 +1693,7 @@ def collect_unified_episode(
                         fm = PipeCombatForwardModel.from_current_state(
                             pipe() if callable(pipe) else pipe)
                         action, root = mcts_agent.choose_action(fm)
-                        from combat_mcts_agent import _reconcile_action
+                        from search.combat_mcts_agent import _reconcile_action
                         action = _reconcile_action(action, legal)
                         # Find action_idx in legal list
                         action_idx = 0
@@ -2677,7 +2677,7 @@ def main() -> int:
     # It complements live PPO data instead of replacing it.
     matchup_dataset = None
     if args.matchup_data_dir:
-        from matchup_dataset import MatchupRankingDataset
+        from search.matchup_dataset import MatchupRankingDataset
         matchup_dataset = MatchupRankingDataset(
             args.matchup_data_dir,
             min_spread=args.matchup_min_spread,
@@ -2697,8 +2697,8 @@ def main() -> int:
     # silently reduce its influence on the combat network.
     combat_teacher_dataset = None
     if args.combat_teacher_data_dir:
-        from combat_teacher_dataset import load_combat_teacher_samples
-        from train_combat_teacher import CombatTeacherTorchDataset
+        from search.combat_teacher_dataset import load_combat_teacher_samples
+        from search.train_combat_teacher import CombatTeacherTorchDataset
         ct_path = Path(args.combat_teacher_data_dir)
         ct_samples: list = []
         if ct_path.is_file():
@@ -3179,7 +3179,7 @@ def main() -> int:
                             _skada_priors_obj.num_cards, _skada_priors_obj.num_relics,
                             _skada_priors_obj.num_synergies, _skada_priors_obj.num_bosses)
                 if args.skada_boss_weights:
-                    from rl_reward_shaping import load_skada_boss_difficulty
+                    from core.rl_reward_shaping import load_skada_boss_difficulty
                     load_skada_boss_difficulty(_skada_priors_obj)
             else:
                 logger.warning("Skada DB not found — skada priors disabled")
@@ -3190,7 +3190,7 @@ def main() -> int:
 
     # Register learned card evaluator for counterfactual scoring
     if effective_counterfactual_scoring or args.matchup_blend_beta > 0 or args.skada_prior_weight > 0:
-        from counterfactual_scoring import set_learned_evaluator
+        from search.counterfactual_scoring import set_learned_evaluator
         # Blend alpha ramps up over training: start with heuristic, gradually trust learned
         _initial_alpha = 0.3 if start_iter > 200 else 0.0
         _matchup_beta = args.matchup_blend_beta
@@ -3641,7 +3641,7 @@ def main() -> int:
                     # Slice to match option count
                     n_opts = mb["target_scores"].shape[1]
                     pred_scores = pred_scores_full[:, :n_opts]
-                    from ranking_loss import listwise_ranking_loss
+                    from search.ranking_loss import listwise_ranking_loss
                     rank_loss = listwise_ranking_loss(
                         pred_scores, mb["target_scores"], mb["option_mask"])
                     decay_tau = getattr(args, "matchup_loss_decay_tau", 0.0)
@@ -3667,7 +3667,7 @@ def main() -> int:
                     and iteration >= args.combat_teacher_warmup_iters
                     and len(combat_teacher_dataset) > 0
                     and not getattr(args, "freeze_combat", False)):
-                from train_combat_teacher import (
+                from search.train_combat_teacher import (
                     _regret_weighted_pairwise_ranking,
                     _stack_batch as _ct_stack_batch,
                 )
@@ -3846,7 +3846,7 @@ def main() -> int:
             # Health check
             # Ramp up learned card evaluator blend (every 100 iter)
             if effective_counterfactual_scoring and iteration > 0 and iteration % 100 == 0:
-                from counterfactual_scoring import set_learned_evaluator
+                from search.counterfactual_scoring import set_learned_evaluator
                 _alpha = min(0.7, 0.1 + iteration * 0.3 / 1000)  # 0→0.7 over 2000 iter
                 set_learned_evaluator(
                     ppo_net, vocab, alpha=_alpha,

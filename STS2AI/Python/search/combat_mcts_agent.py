@@ -19,7 +19,7 @@ from typing import Any
 
 import torch
 
-from mcts_core import (
+from search.mcts_core import (
     CombatForwardModel,
     MCTSConfig,
     MCTSNode,
@@ -27,11 +27,11 @@ from mcts_core import (
     mcts_search,
     mcts_search_with_determinization,
 )
-from combat_nn import (
+from core.combat_nn import (
     CombatNNEvaluator,
     CombatPolicyValueNetwork,
 )
-from vocab import Vocab, load_vocab
+from core.vocab import Vocab, load_vocab
 
 logger = logging.getLogger(__name__)
 
