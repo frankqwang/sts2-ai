@@ -47,7 +47,8 @@ internal enum BinaryOpcode : byte
 	LoadOrtModel = 0x0B,
 	RunCombatLocal = 0x0C,
 	ExportState = 0x0D,
-	ImportState = 0x0E
+	ImportState = 0x0E,
+	SkipCombat = 0x0F
 }
 
 internal enum BinaryStatus : byte

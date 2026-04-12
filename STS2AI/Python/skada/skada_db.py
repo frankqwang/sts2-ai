@@ -1,6 +1,7 @@
 """SQLite schema and upsert helpers for the checked-in Skada dataset."""
 
 from pathlib import Path
+import json
 import sqlite3
 
 DB_PATH = Path(__file__).resolve().parents[2] / "Assets" / "datasets" / "skada" / "skada_analytics.sqlite"
@@ -185,6 +186,205 @@ def create_tables(conn: sqlite3.Connection):
         player_name     TEXT
     )""")
 
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_details (
+        run_id              INTEGER PRIMARY KEY,
+        status              TEXT NOT NULL,
+        scraped_at          TEXT,
+        last_error          TEXT,
+        total_combats       INTEGER,
+        total_floors        INTEGER,
+        final_deck_count    INTEGER,
+        final_relic_count   INTEGER,
+        map_act_count       INTEGER,
+        total_damage_taken  INTEGER,
+        total_damage_dealt  INTEGER,
+        net_gold_change     INTEGER,
+        picked_card_count   INTEGER,
+        offered_card_count  INTEGER,
+        raw_json            TEXT,
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_combats (
+        combat_id            INTEGER PRIMARY KEY,
+        run_id               INTEGER,
+        floor                INTEGER,
+        encounter            TEXT,
+        enc_type             TEXT,
+        type                 TEXT,
+        turns                INTEGER,
+        won                  INTEGER,
+        name_en              TEXT,
+        name_zh              TEXT,
+        total_dmg_dealt      INTEGER,
+        total_dmg_taken      INTEGER,
+        raw_json             TEXT,
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_combat_stats (
+        combat_id            INTEGER,
+        stat_index           INTEGER,
+        character_id         TEXT,
+        dmg_dealt            INTEGER,
+        dmg_taken            INTEGER,
+        block_gained         INTEGER,
+        cards_played         INTEGER,
+        energy_spent         INTEGER,
+        energy_wasted        INTEGER,
+        overkill             INTEGER,
+        max_hit              INTEGER,
+        assist_dmg           INTEGER,
+        dmg_prevented        INTEGER,
+        potions_used         INTEGER,
+        name_en              TEXT,
+        name_zh              TEXT,
+        raw_json             TEXT,
+        PRIMARY KEY (combat_id, stat_index),
+        FOREIGN KEY (combat_id) REFERENCES run_combats(combat_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_combat_card_perf (
+        combat_id            INTEGER,
+        perf_index           INTEGER,
+        card_id              TEXT,
+        character_id         TEXT,
+        damage               INTEGER,
+        block                INTEGER,
+        energy               INTEGER,
+        plays                INTEGER,
+        name_en              TEXT,
+        name_zh              TEXT,
+        raw_json             TEXT,
+        PRIMARY KEY (combat_id, perf_index),
+        FOREIGN KEY (combat_id) REFERENCES run_combats(combat_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_floor_timeline (
+        run_id               INTEGER,
+        floor                INTEGER,
+        room_type            TEXT,
+        room_name_en         TEXT,
+        room_name_zh         TEXT,
+        hp_before            INTEGER,
+        hp_after             INTEGER,
+        gold_before          INTEGER,
+        gold_after           INTEGER,
+        event_text           TEXT,
+        campfire_choice      TEXT,
+        campfire_name_en     TEXT,
+        campfire_name_zh     TEXT,
+        combat_id            INTEGER,
+        encounter            TEXT,
+        enc_type             TEXT,
+        turns                INTEGER,
+        won                  INTEGER,
+        total_dmg_dealt      INTEGER,
+        total_dmg_taken      INTEGER,
+        raw_json             TEXT,
+        PRIMARY KEY (run_id, floor),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_floor_card_choices (
+        run_id               INTEGER,
+        floor                INTEGER,
+        choice_index         INTEGER,
+        card_id              TEXT,
+        was_picked           INTEGER,
+        name_en              TEXT,
+        name_zh              TEXT,
+        PRIMARY KEY (run_id, floor, choice_index),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_floor_relic_choices (
+        run_id               INTEGER,
+        floor                INTEGER,
+        source_kind          TEXT,
+        choice_index         INTEGER,
+        relic_id             TEXT,
+        was_picked           INTEGER,
+        name_en              TEXT,
+        name_zh              TEXT,
+        PRIMARY KEY (run_id, floor, source_kind, choice_index),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_floor_shop_actions (
+        run_id               INTEGER,
+        floor                INTEGER,
+        action_index         INTEGER,
+        action_type          TEXT,
+        item_id              TEXT,
+        item_name_en         TEXT,
+        item_name_zh         TEXT,
+        action_name_en       TEXT,
+        action_name_zh       TEXT,
+        raw_json             TEXT,
+        PRIMARY KEY (run_id, floor, action_index),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_card_upgrades (
+        run_id               INTEGER,
+        floor                INTEGER,
+        upgrade_index        INTEGER,
+        card_id              TEXT,
+        name_en              TEXT,
+        name_zh              TEXT,
+        PRIMARY KEY (run_id, floor, upgrade_index),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_final_deck (
+        run_id               INTEGER,
+        deck_index           INTEGER,
+        card_id              TEXT,
+        count                INTEGER,
+        name_en              TEXT,
+        name_zh              TEXT,
+        PRIMARY KEY (run_id, deck_index),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_final_relics (
+        run_id               INTEGER,
+        relic_index          INTEGER,
+        relic_id             TEXT,
+        name_en              TEXT,
+        name_zh              TEXT,
+        PRIMARY KEY (run_id, relic_index),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS run_map_acts (
+        run_id               INTEGER,
+        act                  INTEGER,
+        width                INTEGER,
+        height               INTEGER,
+        boss_x               INTEGER,
+        boss_y               INTEGER,
+        start_coords_json    TEXT,
+        visited_coords_json  TEXT,
+        nodes_json           TEXT,
+        raw_json             TEXT,
+        PRIMARY KEY (run_id, act),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+    )""")
+
     # ── Decisions (campfire, etc.) ──
     c.execute("""
     CREATE TABLE IF NOT EXISTS campfire_decisions (
@@ -236,6 +436,63 @@ def create_tables(conn: sqlite3.Connection):
 
 
 # ── Bulk insert helpers ──
+
+def _display_name_parts(payload):
+    if not isinstance(payload, dict):
+        return None, None
+    return payload.get("en"), payload.get("zh")
+
+
+def _json_dumps(value):
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def record_run_detail_error(conn, run_id, error_message):
+    from datetime import datetime
+    conn.execute("""
+    INSERT OR REPLACE INTO run_details (
+        run_id, status, scraped_at, last_error, total_combats, total_floors,
+        final_deck_count, final_relic_count, map_act_count, total_damage_taken,
+        total_damage_dealt, net_gold_change, picked_card_count, offered_card_count, raw_json
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        run_id, "error", datetime.now().isoformat(), str(error_message)[:2000],
+        None, None, None, None, None, None, None, None, None, None, None,
+    ))
+    conn.commit()
+
+
+def get_pending_run_detail_ids(conn, limit=None, retry_errors=False):
+    where = "d.run_id IS NULL"
+    if retry_errors:
+        where = "(d.run_id IS NULL OR d.status = 'error')"
+    sql = f"""
+        SELECT r.run_id
+        FROM runs r
+        LEFT JOIN run_details d ON d.run_id = r.run_id
+        WHERE {where}
+        ORDER BY r.run_id
+    """
+    params = []
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return [int(row[0]) for row in conn.execute(sql, params).fetchall()]
+
+
+def get_run_detail_progress(conn):
+    total_runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+    ok_count = conn.execute("SELECT COUNT(*) FROM run_details WHERE status = 'ok'").fetchone()[0]
+    error_count = conn.execute("SELECT COUNT(*) FROM run_details WHERE status = 'error'").fetchone()[0]
+    pending_count = max(0, total_runs - ok_count - error_count)
+    return {
+        "total_runs": int(total_runs),
+        "ok": int(ok_count),
+        "error": int(error_count),
+        "pending": int(pending_count),
+    }
 
 def upsert_cards(conn, cards):
     c = conn.cursor()
@@ -388,6 +645,296 @@ def upsert_runs(conn, runs):
             r.get("game_version"), r.get("created_at"),
             r.get("player_name"),
         ))
+    conn.commit()
+
+
+def upsert_run_detail(conn, payload):
+    from datetime import datetime
+
+    run = payload.get("run") or {}
+    run_id = run.get("run_id")
+    if run_id is None:
+        raise ValueError("Run detail payload missing run.run_id")
+
+    upsert_runs(conn, [run])
+
+    combats = payload.get("combats") or []
+    floor_timeline = payload.get("floor_timeline") or []
+    final_deck = payload.get("final_deck") or []
+    final_relics = payload.get("final_relics") or []
+    map_acts = payload.get("map_acts") or []
+
+    total_damage_taken = 0
+    total_damage_dealt = 0
+    for combat in combats:
+        for stat in combat.get("combat_stats") or []:
+            total_damage_taken += int(stat.get("dmg_taken") or 0)
+            total_damage_dealt += int(stat.get("dmg_dealt") or 0)
+
+    net_gold_change = 0
+    picked_card_count = 0
+    offered_card_count = 0
+    for row in floor_timeline:
+        before = row.get("gold_before")
+        after = row.get("gold_after")
+        if before is not None and after is not None:
+            net_gold_change += int(after) - int(before)
+        card_choices = row.get("card_choices") or []
+        offered_card_count += len(card_choices)
+        picked_card_count += sum(1 for choice in card_choices if choice.get("was_picked"))
+
+    c = conn.cursor()
+    c.execute("""
+        DELETE FROM run_combat_stats
+        WHERE combat_id IN (SELECT combat_id FROM run_combats WHERE run_id = ?)
+    """, (run_id,))
+    c.execute("""
+        DELETE FROM run_combat_card_perf
+        WHERE combat_id IN (SELECT combat_id FROM run_combats WHERE run_id = ?)
+    """, (run_id,))
+    for table in (
+        "run_combats",
+        "run_floor_timeline",
+        "run_floor_card_choices",
+        "run_floor_relic_choices",
+        "run_floor_shop_actions",
+        "run_card_upgrades",
+        "run_final_deck",
+        "run_final_relics",
+        "run_map_acts",
+        "run_details",
+    ):
+        c.execute(f"DELETE FROM {table} WHERE run_id = ?", (run_id,))
+
+    c.execute("""
+        INSERT OR REPLACE INTO run_details VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        run_id,
+        "ok",
+        datetime.now().isoformat(),
+        None,
+        len(combats),
+        len(floor_timeline),
+        len(final_deck),
+        len(final_relics),
+        len(map_acts),
+        total_damage_taken,
+        total_damage_dealt,
+        net_gold_change,
+        picked_card_count,
+        offered_card_count,
+        _json_dumps(payload),
+    ))
+
+    for combat in combats:
+        name_en, name_zh = _display_name_parts(
+            combat.get("encounter_display_name")
+            or combat.get("display_name")
+            or combat.get("encounter_name")
+        )
+        combat_summary = next(
+            (row for row in floor_timeline if (row.get("combat") or {}).get("combat_id") == combat.get("combat_id")),
+            None,
+        )
+        combat_blob = combat_summary.get("combat") if isinstance(combat_summary, dict) else None
+        c.execute("""
+            INSERT OR REPLACE INTO run_combats VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            combat.get("combat_id"),
+            run_id,
+            combat.get("floor"),
+            combat.get("encounter"),
+            combat.get("enc_type"),
+            combat.get("type"),
+            combat.get("turns"),
+            1 if combat.get("won") else 0,
+            name_en,
+            name_zh,
+            (combat_blob or {}).get("total_dmg_dealt"),
+            (combat_blob or {}).get("total_dmg_taken"),
+            _json_dumps(combat),
+        ))
+
+        for stat_index, stat in enumerate(combat.get("combat_stats") or []):
+            stat_en, stat_zh = _display_name_parts(
+                stat.get("character_display_name") or stat.get("display_name") or stat.get("character_name")
+            )
+            c.execute("""
+                INSERT OR REPLACE INTO run_combat_stats VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                combat.get("combat_id"),
+                stat_index,
+                stat.get("character_id"),
+                stat.get("dmg_dealt"),
+                stat.get("dmg_taken"),
+                stat.get("block_gained"),
+                stat.get("cards_played"),
+                stat.get("energy_spent"),
+                stat.get("energy_wasted"),
+                stat.get("overkill"),
+                stat.get("max_hit"),
+                stat.get("assist_dmg"),
+                stat.get("dmg_prevented"),
+                stat.get("potions_used"),
+                stat_en,
+                stat_zh,
+                _json_dumps(stat),
+            ))
+
+        for perf_index, perf in enumerate(combat.get("card_combat_perf") or []):
+            perf_en, perf_zh = _display_name_parts(
+                perf.get("display_name") or perf.get("card_name")
+            )
+            c.execute("""
+                INSERT OR REPLACE INTO run_combat_card_perf VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                combat.get("combat_id"),
+                perf_index,
+                perf.get("card_id"),
+                perf.get("character_id"),
+                perf.get("damage"),
+                perf.get("block"),
+                perf.get("energy"),
+                perf.get("plays"),
+                perf_en,
+                perf_zh,
+                _json_dumps(perf),
+            ))
+
+    for row in floor_timeline:
+        floor = row.get("floor")
+        room_en, room_zh = _display_name_parts(row.get("room_type_display_name"))
+        campfire_en, campfire_zh = _display_name_parts(row.get("campfire_display_name"))
+        combat = row.get("combat") or {}
+        c.execute("""
+            INSERT OR REPLACE INTO run_floor_timeline VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            run_id,
+            floor,
+            row.get("room_type"),
+            room_en,
+            room_zh,
+            row.get("hp_before"),
+            row.get("hp_after"),
+            row.get("gold_before"),
+            row.get("gold_after"),
+            row.get("event_text"),
+            row.get("campfire_choice"),
+            campfire_en,
+            campfire_zh,
+            combat.get("combat_id"),
+            combat.get("encounter"),
+            combat.get("enc_type"),
+            combat.get("turns"),
+            1 if combat.get("won") else 0 if "won" in combat else None,
+            combat.get("total_dmg_dealt"),
+            combat.get("total_dmg_taken"),
+            _json_dumps(row),
+        ))
+
+        for choice_index, choice in enumerate(row.get("card_choices") or []):
+            choice_en, choice_zh = _display_name_parts(choice.get("display_name"))
+            c.execute("""
+                INSERT OR REPLACE INTO run_floor_card_choices VALUES (?,?,?,?,?,?,?)
+            """, (
+                run_id,
+                floor,
+                choice_index,
+                choice.get("card_id"),
+                1 if choice.get("was_picked") else 0,
+                choice_en,
+                choice_zh,
+            ))
+
+        for source_kind in ("relic_choices", "ancient_choices"):
+            for choice_index, choice in enumerate(row.get(source_kind) or []):
+                choice_en, choice_zh = _display_name_parts(choice.get("display_name"))
+                c.execute("""
+                    INSERT OR REPLACE INTO run_floor_relic_choices VALUES (?,?,?,?,?,?,?,?)
+                """, (
+                    run_id,
+                    floor,
+                    source_kind,
+                    choice_index,
+                    choice.get("relic_id"),
+                    1 if choice.get("was_picked") else 0,
+                    choice_en,
+                    choice_zh,
+                ))
+
+        for action_index, action in enumerate(row.get("shop_actions") or []):
+            item_en, item_zh = _display_name_parts(action.get("display_name"))
+            action_en, action_zh = _display_name_parts(action.get("action_display_name"))
+            c.execute("""
+                INSERT OR REPLACE INTO run_floor_shop_actions VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (
+                run_id,
+                floor,
+                action_index,
+                action.get("action_type"),
+                action.get("item_id"),
+                item_en,
+                item_zh,
+                action_en,
+                action_zh,
+                _json_dumps(action),
+            ))
+
+        for upgrade_index, upgrade in enumerate(row.get("card_upgrades") or []):
+            upgrade_en, upgrade_zh = _display_name_parts(upgrade.get("display_name"))
+            c.execute("""
+                INSERT OR REPLACE INTO run_card_upgrades VALUES (?,?,?,?,?,?)
+            """, (
+                run_id,
+                floor,
+                upgrade_index,
+                upgrade.get("card_id"),
+                upgrade_en,
+                upgrade_zh,
+            ))
+
+    for deck_index, card in enumerate(final_deck):
+        card_en, card_zh = _display_name_parts(card.get("display_name"))
+        c.execute("""
+            INSERT OR REPLACE INTO run_final_deck VALUES (?,?,?,?,?,?)
+        """, (
+            run_id,
+            deck_index,
+            card.get("card_id"),
+            card.get("count"),
+            card_en,
+            card_zh,
+        ))
+
+    for relic_index, relic in enumerate(final_relics):
+        relic_en, relic_zh = _display_name_parts(relic.get("display_name"))
+        c.execute("""
+            INSERT OR REPLACE INTO run_final_relics VALUES (?,?,?,?,?)
+        """, (
+            run_id,
+            relic_index,
+            relic.get("relic_id"),
+            relic_en,
+            relic_zh,
+        ))
+
+    for act_payload in map_acts:
+        boss = act_payload.get("boss") or [None, None]
+        c.execute("""
+            INSERT OR REPLACE INTO run_map_acts VALUES (?,?,?,?,?,?,?,?,?,?)
+        """, (
+            run_id,
+            act_payload.get("act"),
+            act_payload.get("width"),
+            act_payload.get("height"),
+            boss[0] if len(boss) > 0 else None,
+            boss[1] if len(boss) > 1 else None,
+            _json_dumps(act_payload.get("start_coords")),
+            _json_dumps(act_payload.get("visited_coords")),
+            _json_dumps(act_payload.get("nodes")),
+            _json_dumps(act_payload),
+        ))
+
     conn.commit()
 
 

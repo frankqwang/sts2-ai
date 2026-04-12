@@ -50,6 +50,75 @@ def _load_teacher_init_network(
     return network
 
 
+def _configure_teacher_scorer_mode(
+    network: CombatPolicyValueNetwork,
+    mode: str,
+) -> str:
+    """Choose which teacher scorer path is trainable.
+
+    `mlp` keeps the legacy scorer path only by freezing the lightweight
+    attention residual and forcing its gate to 0.
+    `light_attention` leaves the residual branch trainable.
+    """
+    normalized = str(mode or "light_attention").strip().lower()
+    if normalized not in {"mlp", "light_attention"}:
+        raise ValueError(f"Unsupported teacher scorer mode: {mode}")
+
+    attention_names = {
+        "teacher_action_context_gate",
+    }
+    attention_prefixes = (
+        "teacher_action_context_attn.",
+        "teacher_action_context_norm.",
+        "teacher_action_context_ffn.",
+        "teacher_action_context_ffn_norm.",
+    )
+    use_attention = normalized == "light_attention"
+    with torch.no_grad():
+        if hasattr(network, "teacher_action_context_gate"):
+            network.teacher_action_context_gate.fill_(0.0)
+    for name, param in network.named_parameters():
+        if name in attention_names or any(name.startswith(prefix) for prefix in attention_prefixes):
+            param.requires_grad = use_attention
+    return normalized
+
+
+def _configure_main_combat_path_mode(
+    network: CombatPolicyValueNetwork,
+    mode: str,
+) -> str:
+    """Choose whether the main combat policy/value path uses residual attention.
+
+    `mlp` keeps the legacy main path by freezing the residual branch and
+    forcing both gates to 0.
+    `light_attention` leaves the residual branch trainable.
+    """
+    normalized = str(mode or "mlp").strip().lower()
+    if normalized not in {"mlp", "light_attention"}:
+        raise ValueError(f"Unsupported main combat path mode: {mode}")
+
+    attention_names = {
+        "main_action_context_gate",
+        "main_state_context_gate",
+    }
+    attention_prefixes = (
+        "main_action_context_attn.",
+        "main_action_context_norm.",
+        "main_action_context_ffn.",
+        "main_action_context_ffn_norm.",
+    )
+    use_attention = normalized == "light_attention"
+    with torch.no_grad():
+        if hasattr(network, "main_action_context_gate"):
+            network.main_action_context_gate.fill_(0.0)
+        if hasattr(network, "main_state_context_gate"):
+            network.main_state_context_gate.fill_(0.0)
+    for name, param in network.named_parameters():
+        if name in attention_names or any(name.startswith(prefix) for prefix in attention_prefixes):
+            param.requires_grad = use_attention
+    return normalized
+
+
 class CombatTeacherTorchDataset(Dataset):
     def __init__(
         self,
@@ -337,6 +406,10 @@ def main() -> None:
     parser.add_argument("--dataset", required=True, help="combat_teacher_dataset.v1 JSONL")
     parser.add_argument("--combat-checkpoint", required=True, help="Combat checkpoint used to initialize the teacher model")
     parser.add_argument("--output-dir", default="artifacts/combat_teacher", help="Output directory root")
+    parser.add_argument("--main-combat-path-mode", choices=["mlp", "light_attention"], default="mlp",
+                        help="Which main combat policy/value path to train: legacy mlp baseline or light_attention residual")
+    parser.add_argument("--teacher-scorer-mode", choices=["mlp", "light_attention"], default="light_attention",
+                        help="Which teacher action scorer to train: legacy mlp baseline or light_attention residual")
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -367,6 +440,8 @@ def main() -> None:
         holdout_samples = list(train_samples)
 
     network = _load_teacher_init_network(args.combat_checkpoint, vocab=vocab, device=device)
+    main_combat_path_mode = _configure_main_combat_path_mode(network, args.main_combat_path_mode)
+    teacher_scorer_mode = _configure_teacher_scorer_mode(network, args.teacher_scorer_mode)
     optimizer = torch.optim.AdamW(network.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     train_weights = [
@@ -473,6 +548,8 @@ def main() -> None:
             "config": {
                 "epochs": int(args.epochs),
                 "batch_size": int(args.batch_size),
+                "main_combat_path_mode": main_combat_path_mode,
+                "teacher_scorer_mode": teacher_scorer_mode,
                 "lr": float(args.lr),
                 "weight_decay": float(args.weight_decay),
                 "baseline_ce_weight": float(args.baseline_ce_weight),
@@ -511,6 +588,8 @@ def main() -> None:
         "history": history,
         "train_samples": len(train_samples),
         "holdout_samples": len(holdout_samples),
+        "main_combat_path_mode": main_combat_path_mode,
+        "teacher_scorer_mode": teacher_scorer_mode,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

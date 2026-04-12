@@ -7,16 +7,21 @@ Usage:
     python STS2AI/Python/skada/scrape_skada.py --cards-only   # just cards
     python STS2AI/Python/skada/scrape_skada.py --skip-runs    # skip the big runs table
     python STS2AI/Python/skada/scrape_skada.py --max-run-pages 10
+    python STS2AI/Python/skada/scrape_skada.py --details-only --run-detail-limit 50
+    python STS2AI/Python/skada/scrape_skada.py --skip-run-details
 
 API base: http://124.223.63.165/api/
 """
 import argparse
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
+import random
 import time
-import urllib.request
+import threading
 import urllib.error
 import sys
 import os
+import requests
 
 sys.path.insert(0, os.path.dirname(__file__))
 from skada_db import (
@@ -26,24 +31,57 @@ from skada_db import (
     upsert_card_upgrade_value, upsert_relics, upsert_encounters,
     upsert_boss_guide, upsert_runs, upsert_campfire_decisions,
     upsert_deck_size_curves, upsert_overview, update_scrape_meta,
+    upsert_run_detail, record_run_detail_error,
+    get_pending_run_detail_ids, get_run_detail_progress,
 )
 
 BASE_URL = "http://124.223.63.165/api"
 PAGE_SIZE = 100
 REQUEST_DELAY = 0.3  # seconds between requests to be polite
+DETAIL_REQUEST_DELAY = 2.5  # slower cadence for per-run detail scraping
+DETAIL_REQUEST_JITTER = 0.75
+
+_THREAD_LOCAL = threading.local()
+
+
+def _get_session() -> requests.Session:
+    session = getattr(_THREAD_LOCAL, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "STS2-AI-Research/1.0",
+            "Accept": "application/json",
+        })
+        _THREAD_LOCAL.session = session
+    return session
+
+
+def polite_sleep(base_delay, jitter=0.0):
+    delay = max(0.0, float(base_delay)) + (random.random() * max(0.0, float(jitter)))
+    if delay > 0:
+        time.sleep(delay)
 
 
 def fetch_json(url, retries=3):
     """Fetch JSON from URL with retries."""
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "STS2-AI-Research/1.0",
-                "Accept": "application/json",
-            })
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+            resp = _get_session().get(url, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.HTTPError as e:
+            if attempt < retries - 1:
+                response = e.response
+                retry_after = response.headers.get("Retry-After") if response is not None else None
+                wait = max(float(retry_after), 2 ** attempt) if retry_after else 2 ** attempt
+                code = response.status_code if response is not None else "?"
+                reason = response.reason if response is not None else str(e)
+                print(f"  Retry {attempt+1}/{retries} after {wait:.1f}s: HTTP {code} {reason}")
+                time.sleep(wait)
+            else:
+                print(f"  FAILED after {retries} attempts: {url}")
+                raise
+        except (requests.RequestException, TimeoutError) as e:
             if attempt < retries - 1:
                 wait = 2 ** attempt
                 print(f"  Retry {attempt+1}/{retries} after {wait}s: {e}")
@@ -182,13 +220,92 @@ def scrape_runs(conn, max_pages=None):
     return len(runs)
 
 
+def scrape_run_details(conn, limit=None, delay=DETAIL_REQUEST_DELAY, jitter=DETAIL_REQUEST_JITTER,
+                       retry_errors=False, parallelism=1):
+    print("\n=== Scraping run details ===")
+    queue = get_pending_run_detail_ids(conn, limit=limit, retry_errors=retry_errors)
+    if not queue:
+        progress = get_run_detail_progress(conn)
+        print(
+            "  No pending run details "
+            f"(ok={progress['ok']}, error={progress['error']}, pending={progress['pending']})"
+        )
+        update_scrape_meta(conn, "run_details", progress["ok"])
+        return 0
+
+    success = 0
+    errors = 0
+    total = len(queue)
+    completed = 0
+
+    def _fetch_detail(run_id):
+        return run_id, fetch_json(f"{BASE_URL}/runs/{run_id}")
+
+    max_workers = max(1, int(parallelism))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        pending_futures = {}
+        queue_index = 0
+        while queue_index < total or pending_futures:
+            while queue_index < total and len(pending_futures) < max_workers:
+                run_id = queue[queue_index]
+                if queue_index > 0:
+                    polite_sleep(delay, jitter)
+                future = pool.submit(_fetch_detail, run_id)
+                pending_futures[future] = run_id
+                queue_index += 1
+
+            done, _ = wait(list(pending_futures.keys()), return_when=FIRST_COMPLETED)
+            for future in done:
+                run_id = pending_futures.pop(future)
+                completed += 1
+                try:
+                    _rid, payload = future.result()
+                    upsert_run_detail(conn, payload)
+                    success += 1
+                    progress = get_run_detail_progress(conn)
+                    print(
+                        f"  [run_details] {completed}/{total} run_id={run_id} ok "
+                        f"(ok={progress['ok']}, error={progress['error']}, pending={progress['pending']})"
+                    )
+                except Exception as e:
+                    errors += 1
+                    record_run_detail_error(conn, run_id, e)
+                    print(f"  [run_details] {completed}/{total} run_id={run_id} ERROR: {e}")
+                    if isinstance(e, requests.HTTPError) and e.response is not None and e.response.status_code == 429:
+                        backoff = max(30.0, delay * 8.0)
+                        print(f"  [run_details] hit HTTP 429, backing off for {backoff:.1f}s")
+                        time.sleep(backoff)
+
+    progress = get_run_detail_progress(conn)
+    update_scrape_meta(conn, "run_details", progress["ok"])
+    print(
+        f"  Saved {success} run details, recorded {errors} errors "
+        f"(ok={progress['ok']}, error={progress['error']}, pending={progress['pending']})"
+    )
+    return success
+
+
 def main():
     parser = argparse.ArgumentParser(description="Scrape Skada Analytics")
     parser.add_argument("--db", default=None, help="SQLite database path")
     parser.add_argument("--cards-only", action="store_true", help="Only scrape cards")
+    parser.add_argument("--details-only", action="store_true",
+                        help="Only scrape per-run details for run_ids already stored in the DB")
     parser.add_argument("--skip-runs", action="store_true", help="Skip runs (slow)")
+    parser.add_argument("--skip-run-details", action="store_true",
+                        help="Skip per-run detail payloads (very slow; uses /api/runs/{id})")
     parser.add_argument("--max-run-pages", type=int, default=None,
                         help="Max pages of runs to fetch (100 runs/page)")
+    parser.add_argument("--run-detail-limit", type=int, default=None,
+                        help="Max number of run details to fetch this invocation")
+    parser.add_argument("--run-detail-delay", type=float, default=DETAIL_REQUEST_DELAY,
+                        help="Base delay between run detail requests in seconds")
+    parser.add_argument("--run-detail-jitter", type=float, default=DETAIL_REQUEST_JITTER,
+                        help="Random extra delay added between run detail requests in seconds")
+    parser.add_argument("--run-detail-parallelism", type=int, default=1,
+                        help="Max in-flight detail requests. Keep small to stay polite.")
+    parser.add_argument("--retry-detail-errors", action="store_true",
+                        help="Retry run details that previously failed")
     args = parser.parse_args()
 
     conn = get_connection(args.db)
@@ -197,8 +314,20 @@ def main():
     t0 = time.time()
     totals = {}
 
+    if args.cards_only and args.details_only:
+        parser.error("--cards-only and --details-only cannot be used together.")
+
     if args.cards_only:
         totals["cards"] = scrape_cards(conn)
+    elif args.details_only:
+        totals["run_details"] = scrape_run_details(
+            conn,
+            limit=args.run_detail_limit,
+            delay=args.run_detail_delay,
+            jitter=args.run_detail_jitter,
+            retry_errors=args.retry_detail_errors,
+            parallelism=args.run_detail_parallelism,
+        )
     else:
         # Fast endpoints first
         totals["cards"] = scrape_cards(conn)
@@ -224,6 +353,17 @@ def main():
         if not args.skip_runs:
             time.sleep(REQUEST_DELAY)
             totals["runs"] = scrape_runs(conn, max_pages=args.max_run_pages)
+
+        if not args.skip_run_details:
+            polite_sleep(args.run_detail_delay, min(args.run_detail_jitter, 0.5))
+            totals["run_details"] = scrape_run_details(
+                conn,
+                limit=args.run_detail_limit,
+                delay=args.run_detail_delay,
+                jitter=args.run_detail_jitter,
+                retry_errors=args.retry_detail_errors,
+                parallelism=args.run_detail_parallelism,
+            )
 
     elapsed = time.time() - t0
     print(f"\n{'='*60}")

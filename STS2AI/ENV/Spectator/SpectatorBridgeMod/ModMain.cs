@@ -291,6 +291,17 @@ public static partial class McpMod
                     SendError(response, 405, "Method not allowed");
                 }
             }
+            else if (path == "/api/v2/full_run_env/skip_combat")
+            {
+                if (request.HttpMethod == "POST")
+                {
+                    HandlePostFullRunEnvSkipCombat(response);
+                }
+                else
+                {
+                    SendError(response, 405, "Method not allowed");
+                }
+            }
             else if (path == "/api/v2/full_run_env/batch_step")
             {
                 if (request.HttpMethod == "POST")

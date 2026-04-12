@@ -56,6 +56,7 @@ from rl_policy_v2 import (
 )
 from rl_reward_shaping import boss_readiness_score, extract_next_boss_token
 from heuristic_combat import heuristic_combat_action
+from combat_safety import rerank_combat_logits_with_safety
 from combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
 from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from mcts_core import MCTSConfig
@@ -69,6 +70,11 @@ from archive.combat_actions import normalize_action
 from archive.combat_bc import BehaviorCloningLinearPolicy
 from combat_teacher_common import BODY_SLAM_TOKENS, _card_for_action, _card_slug, detect_motif_labels
 from card_tags import load_card_tags
+from search.noncombat_deterministic import (
+    choose_deterministic_card_select_action,
+    choose_deterministic_rest_action,
+    choose_deterministic_shop_action,
+)
 from sts2ai_paths import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT, SEEDS_ROOT
 
 logging.basicConfig(
@@ -109,6 +115,12 @@ DEFAULT_COMBAT_BC_PATCH_CONFIG = {
     "max_base_top_prob": 1.0,
 }
 DEFAULT_COMBAT_MCTS_TACTICAL_BLEND_WEIGHT = 0.0
+_COMBAT_TEACHER_MODE_ALIASES = {
+    "replace": "full_replace",
+    "full_replace": "full_replace",
+    "rerank": "hard_override",
+    "hard_override": "hard_override",
+}
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -845,10 +857,15 @@ class CombatTeacherOverride:
     network: CombatPolicyValueNetwork
     vocab: Vocab
     device: torch.device
-    mode: str = "replace"
+    mode: str = "full_replace"
     lethal_logit_blend_alpha: float = 0.0
     direct_lethal_probe_top_k: int = 4
     direct_lethal_step_budget: int = 24
+
+
+def _normalize_combat_teacher_mode(raw_mode: str | None) -> str:
+    normalized = str(raw_mode or "").strip().lower()
+    return _COMBAT_TEACHER_MODE_ALIASES.get(normalized, "full_replace")
 
 
 @dataclass(slots=True)
@@ -1259,6 +1276,7 @@ def _select_action_nn(
     device: torch.device,
     *,
     lethal_probe: bool = False,
+    combat_safety_rerank: bool = False,
     beam_search: int = 0,
     turn_planner: Any | None = None,
 ) -> tuple[int, dict, str, CombatMctsTrace | None]:
@@ -1302,7 +1320,7 @@ def _select_action_nn(
                                 fm.cleanup()
                             except Exception:
                                 pass
-            if combat_teacher_override is not None and combat_teacher_override.mode == "replace":
+            if combat_teacher_override is not None and combat_teacher_override.mode == "full_replace":
                 action_idx, action, action_source = _select_action_combat_teacher(
                     state=state,
                     legal=legal,
@@ -1318,6 +1336,7 @@ def _select_action_nn(
             logits = logits.squeeze(0)  # (MAX_ACTIONS,)
             logits = logits + (1.0 - mask.squeeze(0)) * (-1e9)
             base_logits = logits[:len(legal)].detach().cpu().numpy()
+            decision_logits = np.asarray(base_logits, dtype=np.float32)
             if combat_bc_override is not None:
                 bc_choice = _select_action_combat_bc(
                     state=state,
@@ -1328,7 +1347,7 @@ def _select_action_nn(
                 if bc_choice is not None:
                     action_idx, action, action_source = bc_choice
                     return action_idx, action, action_source, None
-            if combat_teacher_override is not None and combat_teacher_override.mode == "rerank":
+            if combat_teacher_override is not None and combat_teacher_override.mode == "hard_override":
                 teacher_choice = _select_action_combat_teacher_rerank(
                     state=state,
                     legal=legal,
@@ -1339,10 +1358,16 @@ def _select_action_nn(
                 if teacher_choice[0] is not None and teacher_choice[1] is not None and teacher_choice[2] is not None:
                     action_idx, action, action_source = teacher_choice
                     return action_idx, action, action_source, None
+            if combat_safety_rerank and len(decision_logits) > 0:
+                decision_logits, _safety_adjustments = rerank_combat_logits_with_safety(
+                    state,
+                    legal,
+                    decision_logits,
+                )
             # Standalone lethal probe — only fires when NN chose end_turn
             # but play_card options exist (minimal probe to catch missed lethals)
             if lethal_probe and combat_pipe_getter is not None:
-                nn_choice = int(np.argmax(base_logits)) if len(base_logits) > 0 else 0
+                nn_choice = int(np.argmax(decision_logits)) if len(decision_logits) > 0 else 0
                 chosen_action_type = (legal[nn_choice].get("action") or "").lower() if nn_choice < len(legal) else ""
                 if chosen_action_type == "end_turn":
                     play_indices = [
@@ -1398,7 +1423,9 @@ def _select_action_nn(
 
             # NOTE 2026-04-08 (wizardly cleanup): legacy --beam-search branch
             # removed; beam_search_combat.py archived. See parser comment.
-            action_idx = int(np.argmax(base_logits)) if len(base_logits) > 0 else 0
+            base_choice = int(np.argmax(base_logits)) if len(base_logits) > 0 else 0
+            action_idx = int(np.argmax(decision_logits)) if len(decision_logits) > 0 else 0
+            action_source = "nn_safety" if combat_safety_rerank and action_idx != base_choice else "nn"
         else:
             state_t, action_t = _build_ppo_tensors(state, legal, vocab, device)
             with torch.no_grad():
@@ -1406,10 +1433,11 @@ def _select_action_nn(
             # Argmax (deterministic)
             logits = logits.squeeze(0)  # (MAX_ACTIONS,)
             action_idx = int(logits.argmax().item())
+            action_source = "nn"
 
         if action_idx < len(legal):
-            return action_idx, legal[action_idx], "nn", None
-        return 0, legal[0], "nn", None
+            return action_idx, legal[action_idx], action_source, None
+        return 0, legal[0], action_source, None
 
     except Exception as e:
         logger.debug("NN inference error, falling back to heuristic: %s", e)
@@ -1438,7 +1466,15 @@ def _select_action_heuristic(
     st = (state.get("state_type") or "").lower()
     if st in COMBAT_SCREENS:
         return heuristic_combat_action(legal, state)
-    # Non-combat: first action is usually "proceed" or a reasonable choice
+    candidate = None
+    if st == "rest_site":
+        candidate = choose_deterministic_rest_action(state, legal, hp_rest_threshold=0.5)
+    elif st == "shop":
+        candidate = choose_deterministic_shop_action(state, legal)
+    elif st == "card_select":
+        candidate = choose_deterministic_card_select_action(state, legal)
+    if candidate is not None:
+        return _match_legal_action_index(legal, candidate), candidate
     return 0, legal[0]
 
 
@@ -1950,6 +1986,7 @@ def run_single_game(
     capture_trace: bool = False,
     capture_trajectory: bool = False,
     lethal_probe: bool = False,
+    combat_safety_rerank: bool = False,
     beam_search: int = 0,
     turn_planner: Any | None = None,
 ) -> tuple[GameResult, list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
@@ -2170,6 +2207,7 @@ def run_single_game(
                     vocab,
                     device,
                     lethal_probe=lethal_probe,
+                    combat_safety_rerank=combat_safety_rerank,
                     beam_search=beam_search,
                     turn_planner=turn_planner,
                 )
@@ -2301,6 +2339,7 @@ def evaluate_batch(
     trace_seeds: set[str] | None = None,
     trajectory_seeds: set[str] | None = None,
     lethal_probe: bool = False,
+    combat_safety_rerank: bool = False,
     beam_search: int = 0,
     turn_planner: Any | None = None,
 ) -> tuple[
@@ -2340,6 +2379,7 @@ def evaluate_batch(
                 capture_trace=bool(trace_seeds and seed in trace_seeds),
                 capture_trajectory=bool(trajectory_seeds and seed in trajectory_seeds),
                 lethal_probe=lethal_probe,
+                combat_safety_rerank=combat_safety_rerank,
                 beam_search=beam_search,
                 turn_planner=turn_planner,
             )
@@ -2589,8 +2629,10 @@ def main() -> int:
         help="Optional offline combat-teacher checkpoint to use as the combat policy during evaluation",
     )
     parser.add_argument(
-        "--combat-teacher-mode", choices=["replace", "rerank"], default="replace",
-        help="How to apply the combat teacher during evaluation: full replace or baseline-first selective rerank",
+        "--combat-teacher-mode",
+        choices=["full_replace", "hard_override", "replace", "rerank"],
+        default="full_replace",
+        help="How to apply the combat teacher during evaluation. Recommended names: full_replace or hard_override.",
     )
     parser.add_argument(
         "--combat-teacher-lethal-logit-blend-alpha", type=float, default=0.0,
@@ -2608,6 +2650,11 @@ def main() -> int:
         "--lethal-probe", action="store_true", default=False,
         help="Enable standalone lethal probe for combat: check if any play_card "
              "directly kills all enemies and force that action (no teacher required)",
+    )
+    parser.add_argument(
+        "--combat-safety-rerank", action="store_true", default=False,
+        help="Apply a lightweight safety rerank on combat logits to favor blocking,"
+             " finishing low-HP attackers, and avoiding greedy setup in danger turns.",
     )
     # NOTE 2026-04-08 (wizardly cleanup): --beam-search and its lazy import of
     # `beam_search_combat.py` were removed. It was a legacy research planner
@@ -2999,11 +3046,12 @@ def main() -> int:
             )
             _safe_load_state_dict(teacher_net, teacher_state, "combat_teacher_override")
             teacher_net.to(device).eval()
+            teacher_mode = _normalize_combat_teacher_mode(args.combat_teacher_mode)
             combat_teacher_override = CombatTeacherOverride(
                 network=teacher_net,
                 vocab=vocab,
                 device=device,
-                mode=str(args.combat_teacher_mode),
+                mode=teacher_mode,
                 lethal_logit_blend_alpha=float(max(0.0, args.combat_teacher_lethal_logit_blend_alpha)),
                 direct_lethal_probe_top_k=max(1, int(args.combat_teacher_direct_probe_top_k)),
                 direct_lethal_step_budget=max(4, int(args.combat_teacher_direct_probe_step_budget)),
@@ -3017,8 +3065,8 @@ def main() -> int:
                 combat_teacher_override.direct_lethal_probe_top_k,
                 combat_teacher_override.direct_lethal_step_budget,
             )
-            if args.combat_bc_model and combat_teacher_override.mode == "replace":
-                logger.warning("combat-teacher override is active in replace mode; combat BC rerank will be ignored for combat decisions")
+            if args.combat_bc_model and combat_teacher_override.mode == "full_replace":
+                logger.warning("combat-teacher override is active in full_replace mode; combat BC rerank will be ignored for combat decisions")
             if args.combat_mcts_sims > 0:
                 logger.warning("combat-teacher override is active, but combat MCTS still takes priority when enabled")
 
@@ -3340,6 +3388,7 @@ def main() -> int:
             trace_seeds=trace_seeds,
             trajectory_seeds=trajectory_seeds,
             lethal_probe=getattr(args, "lethal_probe", False),
+            combat_safety_rerank=getattr(args, "combat_safety_rerank", False),
             beam_search=getattr(args, "beam_search", 0),
             turn_planner=_turn_planner,
         )
@@ -3459,6 +3508,12 @@ def main() -> int:
         "timestamp": datetime.now().isoformat(),
         "checkpoint": args.checkpoint,
         "combat_checkpoint": args.combat_checkpoint,
+        "combat_teacher_checkpoint": args.combat_teacher_checkpoint,
+        "combat_teacher_mode": (
+            combat_teacher_override.mode
+            if combat_teacher_override is not None
+            else None
+        ),
         "combat_bc_model": args.combat_bc_model,
         "combat_bc_patch_config": (
             asdict(combat_bc_override.patch_config)

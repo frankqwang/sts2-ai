@@ -1,0 +1,27 @@
+{
+  "schema_version": "combat_teacher_dataset.v1",
+  "sample_count": 53,
+  "metadata": {
+    "trajectory_files": [
+      "artifacts\\combat_trace\\nn_trajectory\\EVAL_002_trajectory.jsonl",
+      "artifacts\\combat_trace\\nn_trajectory\\EVAL_005_trajectory.jsonl",
+      "artifacts\\combat_trace\\nn_trajectory\\EVAL_010_trajectory.jsonl"
+    ],
+    "combat_checkpoint": "STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt",
+    "motif_counts": {
+      "avoid_greedy_setup": 11,
+      "bad_end_turn": 2,
+      "bash_before_strike": 11,
+      "danger_blocking": 26,
+      "focus_fire_attacker": 18,
+      "potion_misuse": 3
+    },
+    "per_seed_counts": {
+      "EVAL_002": 18,
+      "EVAL_005": 13,
+      "EVAL_010": 22
+    },
+    "train_count": 38,
+    "holdout_count": 15
+  }
+}

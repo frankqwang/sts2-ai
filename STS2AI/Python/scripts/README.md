@@ -9,6 +9,10 @@ These wrappers are the self-contained entrypoints intended to travel with the
   - launches `STS2AI/Python/train_hybrid.py`
 - `canonical-eval.ps1`
   - launches `STS2AI/Python/evaluate_ai.py`
+- `run-ironclad-teacher-eval.ps1`
+  - fixed-protocol wrapper for `IRONCLAD` teacher A/B checks
+  - defaults to `20` or `50` deterministic evaluation seeds
+  - exposes `hard_override` / `full_replace` teacher modes
 - `run_full_run_recording.ps1`
   - visible demo / recording wrapper
   - defaults to `STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt`

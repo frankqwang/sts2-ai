@@ -429,6 +429,20 @@ class CombatPolicyValueNetwork(nn.Module):
             nn.Linear(hidden_dim // 2, 1),
             nn.Tanh(),  # Output in [-1, 1]
         )
+        self.main_action_context_attn = nn.MultiheadAttention(
+            hidden_dim,
+            num_heads=num_attn_heads,
+            batch_first=True,
+        )
+        self.main_action_context_norm = nn.LayerNorm(hidden_dim)
+        self.main_action_context_ffn = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.main_action_context_ffn_norm = nn.LayerNorm(hidden_dim)
+        self.main_action_context_gate = nn.Parameter(torch.tensor(0.0))
+        self.main_state_context_gate = nn.Parameter(torch.tensor(0.0))
 
         # Residual adapter: deck-conditioned delta heads (GPT Pro recommendation)
         # Frozen backbone computes base logits/value; adapter adds deck-aware residuals.
@@ -460,11 +474,29 @@ class CombatPolicyValueNetwork(nn.Module):
         # Offline teacher-stack auxiliary heads. They are intentionally separate
         # from the online PPO outputs so existing callers can keep using
         # forward() without any behavior change.
+        #
+        # The baseline teacher scorer is still a simple state/action MLP. We
+        # keep it as the stable path, then add a lightweight attention-based
+        # residual on top so older checkpoints remain compatible and the online
+        # combat policy path stays untouched.
         self.action_score_head = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1),
         )
+        self.teacher_action_context_attn = nn.MultiheadAttention(
+            hidden_dim,
+            num_heads=num_attn_heads,
+            batch_first=True,
+        )
+        self.teacher_action_context_norm = nn.LayerNorm(hidden_dim)
+        self.teacher_action_context_ffn = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.teacher_action_context_ffn_norm = nn.LayerNorm(hidden_dim)
+        self.teacher_action_context_gate = nn.Parameter(torch.tensor(0.0))
         self.continuation_value_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -614,6 +646,49 @@ class CombatPolicyValueNetwork(nn.Module):
 
         return state_repr, action_repr, deck_repr
 
+    def _apply_residual_action_context(
+        self,
+        *,
+        state_repr: torch.Tensor,
+        action_repr: torch.Tensor,
+        action_mask: torch.Tensor,
+        attn: nn.MultiheadAttention,
+        norm: nn.LayerNorm,
+        ffn: nn.Sequential,
+        ffn_norm: nn.LayerNorm,
+        state_gate: torch.Tensor,
+        action_gate: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply a lightweight joint state/action attention residual."""
+        joint_tokens = torch.cat([state_repr.unsqueeze(1), action_repr], dim=1)
+        joint_padding_mask = torch.cat(
+            [
+                torch.zeros(
+                    action_mask.shape[0],
+                    1,
+                    dtype=torch.bool,
+                    device=action_mask.device,
+                ),
+                ~action_mask,
+            ],
+            dim=1,
+        )
+        attn_out, _ = attn(
+            joint_tokens,
+            joint_tokens,
+            joint_tokens,
+            key_padding_mask=joint_padding_mask,
+            need_weights=False,
+        )
+        joint_delta = norm(attn_out)
+        joint_delta = ffn(joint_delta)
+        joint_delta = ffn_norm(joint_delta)
+        state_delta = joint_delta[:, 0, :]
+        action_delta = joint_delta[:, 1:, :]
+        contextual_state_repr = state_repr + state_gate * state_delta
+        contextual_action_repr = action_repr + action_gate * action_delta
+        return contextual_state_repr, contextual_action_repr
+
     def forward(
         self,
         state_features: dict[str, torch.Tensor],
@@ -633,36 +708,47 @@ class CombatPolicyValueNetwork(nn.Module):
               where state_repr: (B, hidden_dim), action_repr: (B, A, hidden_dim)
         """
         state_repr, action_repr, deck_repr = self._encode_state_and_actions(state_features, action_features)
+        policy_state_repr, policy_action_repr = self._apply_residual_action_context(
+            state_repr=state_repr,
+            action_repr=action_repr,
+            action_mask=action_features["action_mask"],
+            attn=self.main_action_context_attn,
+            norm=self.main_action_context_norm,
+            ffn=self.main_action_context_ffn,
+            ffn_norm=self.main_action_context_ffn_norm,
+            state_gate=self.main_state_context_gate,
+            action_gate=self.main_action_context_gate,
+        )
 
         # Base policy + value (from backbone)
-        logits = self.policy_scorer(state_repr, action_repr, action_features["action_mask"])
-        value = self.value_head(state_repr).squeeze(-1)
+        logits = self.policy_scorer(policy_state_repr, policy_action_repr, action_features["action_mask"])
+        value = self.value_head(policy_state_repr).squeeze(-1)
 
         # Deck-conditioned action delta: deck info directly influences per-action scoring
         if deck_repr is not None and hasattr(self, "deck_action_delta"):
-            B, A, _ = action_repr.shape
+            B, A, _ = policy_action_repr.shape
             deck_exp = deck_repr.unsqueeze(1).expand(-1, A, -1)  # (B, A, deck_dim)
-            delta_in = torch.cat([deck_exp, action_repr], dim=-1)  # (B, A, deck_dim+hidden)
+            delta_in = torch.cat([deck_exp, policy_action_repr], dim=-1)  # (B, A, deck_dim+hidden)
             deck_delta = self.deck_action_delta(delta_in).squeeze(-1)  # (B, A)
             deck_delta = deck_delta.masked_fill(~action_features["action_mask"], 0.0)
             logits = logits + self.deck_delta_gate * deck_delta
 
         # Residual adapter: add deck-conditioned deltas
         if self.residual_adapter and deck_repr is not None and hasattr(self, "delta_logits_head"):
-            B, A, _ = action_repr.shape
+            B, A, _ = policy_action_repr.shape
             deck_expanded = deck_repr.unsqueeze(1).expand(-1, A, -1)  # (B, A, deck_dim)
-            state_expanded = state_repr.unsqueeze(1).expand(-1, A, -1)  # (B, A, hidden)
-            delta_input = torch.cat([deck_expanded, state_expanded, action_repr], dim=-1)
+            state_expanded = policy_state_repr.unsqueeze(1).expand(-1, A, -1)  # (B, A, hidden)
+            delta_input = torch.cat([deck_expanded, state_expanded, policy_action_repr], dim=-1)
             delta_logits = self.delta_logits_head(delta_input).squeeze(-1)  # (B, A)
             delta_logits = delta_logits.masked_fill(~action_features["action_mask"], 0.0)
             logits = logits + self.adapter_alpha * delta_logits
 
-            dv_input = torch.cat([deck_repr, state_repr], dim=-1)
+            dv_input = torch.cat([deck_repr, policy_state_repr], dim=-1)
             delta_value = self.delta_value_head(dv_input).squeeze(-1)  # (B,)
             value = value + self.adapter_beta * delta_value
 
         if return_hidden:
-            return logits, value, state_repr, action_repr
+            return logits, value, policy_state_repr, policy_action_repr
         return logits, value
 
     def forward_teacher(
@@ -672,15 +758,39 @@ class CombatPolicyValueNetwork(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Extended forward for the offline combat teacher stack."""
         state_repr, action_repr, deck_repr = self._encode_state_and_actions(state_features, action_features)
-        logits = self.policy_scorer(state_repr, action_repr, action_features["action_mask"])
-        value = self.value_head(state_repr).squeeze(-1)
+        policy_state_repr, policy_action_repr = self._apply_residual_action_context(
+            state_repr=state_repr,
+            action_repr=action_repr,
+            action_mask=action_features["action_mask"],
+            attn=self.main_action_context_attn,
+            norm=self.main_action_context_norm,
+            ffn=self.main_action_context_ffn,
+            ffn_norm=self.main_action_context_ffn_norm,
+            state_gate=self.main_state_context_gate,
+            action_gate=self.main_action_context_gate,
+        )
+        logits = self.policy_scorer(policy_state_repr, policy_action_repr, action_features["action_mask"])
+        value = self.value_head(policy_state_repr).squeeze(-1)
 
-        state_expanded = state_repr.unsqueeze(1).expand(-1, action_repr.shape[1], -1)
-        action_score_input = torch.cat([state_expanded, action_repr], dim=-1)
+        action_mask = action_features["action_mask"]
+        _, contextual_action_repr = self._apply_residual_action_context(
+            state_repr=policy_state_repr,
+            action_repr=policy_action_repr,
+            action_mask=action_mask,
+            attn=self.teacher_action_context_attn,
+            norm=self.teacher_action_context_norm,
+            ffn=self.teacher_action_context_ffn,
+            ffn_norm=self.teacher_action_context_ffn_norm,
+            state_gate=policy_state_repr.new_tensor(0.0),
+            action_gate=self.teacher_action_context_gate,
+        )
+
+        state_expanded = policy_state_repr.unsqueeze(1).expand(-1, policy_action_repr.shape[1], -1)
+        action_score_input = torch.cat([state_expanded, contextual_action_repr], dim=-1)
         raw_action_scores = self.action_score_head(action_score_input).squeeze(-1)
-        action_scores = raw_action_scores.masked_fill(~action_features["action_mask"], -1e9)
+        action_scores = raw_action_scores.masked_fill(~action_mask, -1e9)
 
-        continuation_raw = self.continuation_value_head(state_repr)
+        continuation_raw = self.continuation_value_head(policy_state_repr)
         win_prob = torch.sigmoid(continuation_raw[:, 0:1])
         expected_hp_loss = F.softplus(continuation_raw[:, 1:2])
         expected_potion_cost = F.softplus(continuation_raw[:, 2:3])

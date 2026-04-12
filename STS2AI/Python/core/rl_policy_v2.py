@@ -95,6 +95,7 @@ class FullRunPolicyNetworkV2(nn.Module):
         symbolic_proj_dim: int = 16,
         symbolic_db_path: Path | str | None = None,
         symbolic_head: SymbolicFeaturesHead | None = None,
+        offline_noncombat_ranking_head_mode: str = "mlp",
     ):
         super().__init__()
         self.vocab = vocab
@@ -102,6 +103,7 @@ class FullRunPolicyNetworkV2(nn.Module):
         self.set_encoder_dim = set_encoder_dim
         self.trunk_output = trunk_output
         self.screen_head_dim = screen_head_dim
+        self.offline_noncombat_ranking_head_mode = "mlp"
 
         # --- Entity embeddings ---
         self.entity_emb = EntityEmbeddings(vocab, embed_dim)
@@ -265,6 +267,37 @@ class FullRunPolicyNetworkV2(nn.Module):
         )
         nn.init.zeros_(self.matchup_score_head[-1].weight)
         nn.init.zeros_(self.matchup_score_head[-1].bias)
+        # Residual lightweight attention for non-combat ranking screens
+        # (card_reward / shop / campfire style "context + options" scoring).
+        # This keeps the legacy matchup head intact and lets attention learn a
+        # small corrective delta instead of replacing the scorer outright.
+        self.offline_ranking_action_context_attn = nn.MultiheadAttention(
+            screen_head_dim,
+            num_heads=num_attn_heads,
+            batch_first=True,
+        )
+        self.offline_ranking_action_context_norm = nn.LayerNorm(screen_head_dim)
+        self.offline_ranking_action_context_ffn = nn.Sequential(
+            nn.Linear(screen_head_dim, screen_head_dim * 2),
+            nn.ReLU(),
+            nn.Linear(screen_head_dim * 2, screen_head_dim),
+        )
+        self.offline_ranking_action_context_ffn_norm = nn.LayerNorm(screen_head_dim)
+        transformer_layer = nn.TransformerEncoderLayer(
+            d_model=screen_head_dim,
+            nhead=num_attn_heads,
+            dim_feedforward=screen_head_dim * 2,
+            dropout=0.0,
+            activation="relu",
+            batch_first=True,
+        )
+        self.offline_ranking_transformer = nn.TransformerEncoder(
+            transformer_layer,
+            num_layers=2,
+            norm=nn.LayerNorm(screen_head_dim),
+        )
+        self.offline_ranking_action_context_gate = nn.Parameter(torch.zeros(1))
+        self.offline_ranking_state_context_gate = nn.Parameter(torch.zeros(1))
 
         # --- Expanded encoder proj repair ---
         # When symbolic features are enabled, some encoders whose proj was
@@ -277,6 +310,9 @@ class FullRunPolicyNetworkV2(nn.Module):
         # at init, consistent with out_proj zero-init).
         if self.use_symbolic_features:
             self._repair_expanded_projs(sp)
+        self.configure_offline_noncombat_ranking_head_mode(
+            offline_noncombat_ranking_head_mode
+        )
 
     def _repair_expanded_projs(self, sp: int):
         """Initialize encoder projections expanded from nn.Identity to [I | 0].
@@ -582,6 +618,123 @@ class FullRunPolicyNetworkV2(nn.Module):
         mean_adv = (raw_adv * action_mask.float()).sum(dim=-1, keepdim=True) / n_valid
         return raw_adv - mean_adv
 
+    def configure_offline_noncombat_ranking_head_mode(self, mode: str) -> str:
+        """Choose whether offline non-combat ranking uses residual context.
+
+        `mlp` preserves the legacy scorer by freezing the residual context
+        parameters and forcing both gates to 0.
+        `light_attention` leaves the lightweight residual branch trainable.
+        `transformer` enables a deeper transformer-style residual context stack.
+        """
+        normalized = str(mode or "mlp").strip().lower()
+        if normalized not in {"mlp", "light_attention", "transformer"}:
+            raise ValueError(
+                "Unsupported offline_noncombat_ranking_head_mode: "
+                f"{mode}"
+            )
+        with torch.no_grad():
+            self.offline_ranking_action_context_gate.fill_(0.0)
+            self.offline_ranking_state_context_gate.fill_(0.0)
+        use_context = normalized in {"light_attention", "transformer"}
+        attention_names = {
+            "offline_ranking_action_context_gate",
+            "offline_ranking_state_context_gate",
+        }
+        attention_prefixes = (
+            "offline_ranking_action_context_attn.",
+            "offline_ranking_action_context_norm.",
+            "offline_ranking_action_context_ffn.",
+            "offline_ranking_action_context_ffn_norm.",
+            "offline_ranking_transformer.",
+        )
+        for name, param in self.named_parameters():
+            if name in attention_names or any(
+                name.startswith(prefix) for prefix in attention_prefixes
+            ):
+                param.requires_grad = use_context
+        self.offline_noncombat_ranking_head_mode = normalized
+        return normalized
+
+    def _apply_residual_offline_ranking_context(
+        self,
+        screen_ctx: torch.Tensor,
+        action_repr: torch.Tensor,
+        action_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Contextualize option scoring with a residual context block."""
+        if self.offline_noncombat_ranking_head_mode == "transformer":
+            state_token = screen_ctx.unsqueeze(1)
+            tokens = torch.cat([state_token, action_repr], dim=1)
+            key_padding_mask = torch.cat(
+                [
+                    torch.zeros(
+                        (action_mask.shape[0], 1),
+                        dtype=torch.bool,
+                        device=action_mask.device,
+                    ),
+                    ~action_mask,
+                ],
+                dim=1,
+            )
+            transformed = self.offline_ranking_transformer(
+                tokens,
+                src_key_padding_mask=key_padding_mask,
+            )
+            state_delta = transformed[:, 0] - screen_ctx
+            action_delta = transformed[:, 1:] - action_repr
+            contextual_screen_ctx = (
+                screen_ctx
+                + self.offline_ranking_state_context_gate * state_delta
+            )
+            contextual_action_repr = (
+                action_repr
+                + self.offline_ranking_action_context_gate * action_delta
+            )
+            contextual_action_repr = contextual_action_repr.masked_fill(
+                ~action_mask.unsqueeze(-1),
+                0.0,
+            )
+            return contextual_screen_ctx, contextual_action_repr
+
+        state_token = screen_ctx.unsqueeze(1)
+        tokens = torch.cat([state_token, action_repr], dim=1)
+        key_padding_mask = torch.cat(
+            [
+                torch.zeros(
+                    (action_mask.shape[0], 1),
+                    dtype=torch.bool,
+                    device=action_mask.device,
+                ),
+                ~action_mask,
+            ],
+            dim=1,
+        )
+        attn_out, _ = self.offline_ranking_action_context_attn(
+            tokens,
+            tokens,
+            tokens,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )
+        tokens = self.offline_ranking_action_context_norm(tokens + attn_out)
+        ffn_out = self.offline_ranking_action_context_ffn(tokens)
+        tokens = self.offline_ranking_action_context_ffn_norm(tokens + ffn_out)
+        state_delta = tokens[:, 0] - screen_ctx
+        action_delta = tokens[:, 1:] - action_repr
+        contextual_screen_ctx = (
+            screen_ctx
+            + self.offline_ranking_state_context_gate * state_delta
+        )
+        contextual_action_repr = (
+            action_repr
+            + self.offline_ranking_action_context_gate * action_delta
+        )
+        contextual_action_repr = contextual_action_repr.masked_fill(
+            ~action_mask.unsqueeze(-1),
+            0.0,
+        )
+        return contextual_screen_ctx, contextual_action_repr
+
     def forward(
         self,
         state_tensors: dict[str, torch.Tensor],
@@ -733,6 +886,11 @@ class FullRunPolicyNetworkV2(nn.Module):
         _, screen_ctx, _, _ = self._encode_state(state_tensors)
         action_repr = self._encode_actions(action_tensors)
         action_mask = action_tensors["action_mask"]
+        screen_ctx, action_repr = self._apply_residual_offline_ranking_context(
+            screen_ctx,
+            action_repr,
+            action_mask,
+        )
 
         ctx_expanded = screen_ctx.unsqueeze(1).expand_as(action_repr)  # (B, A, dim)
         combined = torch.cat([ctx_expanded, action_repr], dim=-1)  # (B, A, dim*2)
@@ -1012,6 +1170,8 @@ class PPOTrainerV2:
         total_entropy = 0.0
         total_deck_loss = 0.0
         total_boss_readiness_loss = 0.0
+        total_ratio_mean = 0.0
+        total_clip_fraction = 0.0
         update_count = 0
 
         for _epoch in range(self.ppo_epochs):
@@ -1060,6 +1220,7 @@ class PPOTrainerV2:
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon,
                                      1 + self.clip_epsilon) * mb_adv
                 policy_loss = -torch.min(surr1, surr2).mean()
+                clip_fraction = ((ratio - 1.0).abs() > self.clip_epsilon).float().mean()
                 value_loss = F.mse_loss(new_values, mb_ret)
                 entropy_loss = -entropy.mean()
 
@@ -1096,6 +1257,8 @@ class PPOTrainerV2:
                 total_entropy += (-entropy_loss.item())
                 total_deck_loss += deck_loss.item()
                 total_boss_readiness_loss += boss_readiness_loss.item()
+                total_ratio_mean += ratio.mean().item()
+                total_clip_fraction += clip_fraction.item()
                 update_count += 1
 
         return {
@@ -1104,6 +1267,8 @@ class PPOTrainerV2:
             "entropy": total_entropy / max(1, update_count),
             "deck_quality_loss": total_deck_loss / max(1, update_count),
             "boss_readiness_loss": total_boss_readiness_loss / max(1, update_count),
+            "ratio_mean": total_ratio_mean / max(1, update_count),
+            "clip_fraction": total_clip_fraction / max(1, update_count),
             "buffer_size": n,
         }
 
