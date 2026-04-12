@@ -37,16 +37,41 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
-using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Unlocks;
 using System.Threading.Tasks;
+using HarmonyLib;
 
 namespace STS2_MCP;
 
 public static partial class McpMod
 {
+    // When true, GenerateUnlockStateFromProgress returns UnlockState.all
+    // to match Sim's initialization (deterministic unlock state for training parity).
+    private static bool _forceUnlockAll;
+    private static bool _unlockPatchInstalled;
+
+    private static void EnsureUnlockPatchInstalled()
+    {
+        if (_unlockPatchInstalled) return;
+        var harmony = new Harmony("sts2_mcp_spectator.unlock_patch");
+        var original = typeof(SaveManager).GetMethod("GenerateUnlockStateFromProgress");
+        var prefix = typeof(McpMod).GetMethod("UnlockStatePrefix", BindingFlags.NonPublic | BindingFlags.Static);
+        if (original != null && prefix != null)
+        {
+            harmony.Patch(original, prefix: new HarmonyMethod(prefix));
+        }
+        _unlockPatchInstalled = true;
+    }
+
+    private static bool UnlockStatePrefix(ref UnlockState __result)
+    {
+        if (!_forceUnlockAll) return true; // run original
+        __result = UnlockState.all;
+        return false; // skip original
+    }
+
     private static Dictionary<string, object?> ExecuteAction(string action, Dictionary<string, JsonElement> data)
     {
         if (!RunManager.Instance.IsInProgress)
@@ -246,18 +271,13 @@ public static partial class McpMod
             seed = game.DebugSeedOverride ?? SeedHelper.GetRandomSeed();
         }
 
-        // Match Sim backend exactly: GetDefaultList + UnlockState.all for training parity.
-        // We bypass NGame.StartNewSingleplayerRun because it hardcodes
-        // SaveManager.GenerateUnlockStateFromProgress() which differs from Sim's UnlockState.all.
-        var acts = ActModel.GetDefaultList().Select(static act => act.ToMutable()).ToList();
-        UnlockState simUnlockState = UnlockState.all;
-        Player player = Player.CreateForNewRun(character, simUnlockState, NetSingleplayerGameService.defaultNetId);
-        RunState runState = RunState.CreateForNewRun(
-            new List<Player> { player }, acts, new List<ModifierModel>(), ascension, seed);
-        RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: true, dailyTime: null);
-        // NGame.StartRun is private — invoke via reflection
-        var startRunMethod = game.GetType().GetMethod("StartRun", BindingFlags.NonPublic | BindingFlags.Instance);
-        TaskHelper.RunSafely((Task)startRunMethod!.Invoke(game, new object[] { runState })!);
+        // Patch UnlockState to all for parity with Sim, then use GetRandomList
+        // (which NGame.StartNewSingleplayerRun expects as mutable-ready input).
+        EnsureUnlockPatchInstalled();
+        _forceUnlockAll = true;
+        var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false).ToList();
+        TaskHelper.RunSafely(game.StartNewSingleplayerRun(character, shouldSave: true, acts, new List<ModifierModel>(), seed, ascension));
+        _forceUnlockAll = false;
 
         return new Dictionary<string, object?>
         {

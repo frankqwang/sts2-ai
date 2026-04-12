@@ -264,7 +264,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		// fully-unlocked, non-first-run unlock state so tutorial/first-run
 		// branches match the mature simulator backend instead of empty test saves.
 		UnlockState unlockState = UnlockState.all;
-		List<ActModel> acts = ActModel.GetDefaultList().Select(static act => act.ToMutable()).ToList();
+		List<ActModel> acts = ActModel.GetRandomList(seed, unlockState, isMultiplayer: false).Select(static act => act.ToMutable()).ToList();
 		Player player = Player.CreateForNewRun(character, unlockState, NetSingleplayerGameService.defaultNetId);
 		RunState runState = RunState.CreateForNewRun(new List<Player> { player }, acts, Array.Empty<ModifierModel>(), ascensionLevel, seed);
 		FullRunSimulationTrace.Write($"headless_reset.after_create_run seed={seed} character={character.Id.Entry} ascension={ascensionLevel}");

@@ -643,11 +643,13 @@ public static partial class McpMod
         var player = LocalContext.GetMe(runState);
         if (player != null)
             state["player"] = BuildNonCombatPlayerState(player);
+        var localEvent = eventRoom.LocalMutableEvent;
         var eventModel = eventRoom.CanonicalEvent;
         bool isAncient = eventModel is AncientEventModel;
         state["event_id"] = eventModel.Id.Entry;
         state["event_name"] = SafeGetText(() => eventModel.Title);
         state["is_ancient"] = isAncient;
+        state["is_finished"] = localEvent.IsFinished;
 
         // Check dialogue state for ancients
         bool inDialogue = false;
@@ -666,39 +668,53 @@ public static partial class McpMod
         // Event body text
         state["body"] = SafeGetText(() => eventModel.Description);
 
-        // Options from UI
+        // Options: prefer game model (matches Sim) with fallback to UI buttons
         var options = new List<Dictionary<string, object?>>();
-        if (uiRoom != null)
+        try
         {
-            var buttons = FindAll<NEventOptionButton>(uiRoom);
-            int index = 0;
-            foreach (var button in buttons)
+            // Snapshot the options list to avoid mutation during iteration
+            var currentOptions = localEvent.CurrentOptions.ToList();
+            for (int i = 0; i < currentOptions.Count; i++)
             {
-                var opt = button.Option;
-                var optData = new Dictionary<string, object?>
+                var opt = currentOptions[i];
+                options.Add(new Dictionary<string, object?>
                 {
-                    ["index"] = index,
-                    ["text_key"] = opt.TextKey,
+                    ["index"] = i,
+                    ["text"] = SafeGetText(() => opt.Title?.GetRawText()),
                     ["title"] = SafeGetText(() => opt.Title),
-                    ["description"] = SafeGetText(() => opt.Description),
                     ["is_locked"] = opt.IsLocked,
-                    ["is_proceed"] = opt.IsProceed,
-                    ["was_chosen"] = opt.WasChosen
-                };
-                var effectInfo = InferEventOptionEffects(opt);
-                foreach (var kv in effectInfo)
-                    optData[kv.Key] = kv.Value;
-                if (opt.Relic != null)
+                    ["is_chosen"] = opt.WasChosen,
+                    ["is_proceed"] = opt.IsProceed
+                });
+            }
+        }
+        catch
+        {
+            // Fallback to UI buttons if game model is mid-mutation
+            options.Clear();
+            if (uiRoom != null)
+            {
+                var buttons = FindAll<NEventOptionButton>(uiRoom);
+                int bi = 0;
+                foreach (var button in buttons)
                 {
-                    optData["relic_name"] = SafeGetText(() => opt.Relic.Title);
-                    optData["relic_description"] = SafeGetText(() => opt.Relic.DynamicDescription);
+                    var opt = button.Option;
+                    options.Add(new Dictionary<string, object?>
+                    {
+                        ["index"] = bi++,
+                        ["text"] = SafeGetText(() => opt.Title?.GetRawText()),
+                        ["title"] = SafeGetText(() => opt.Title),
+                        ["is_locked"] = opt.IsLocked,
+                        ["is_chosen"] = opt.WasChosen,
+                        ["is_proceed"] = opt.IsProceed
+                    });
                 }
-                optData["keywords"] = BuildHoverTips(opt.HoverTips);
-                options.Add(optData);
-                index++;
             }
         }
         state["options"] = options;
+        // Match Sim logic: no options + not finished = in dialogue
+        if (!localEvent.IsFinished && options.Count == 0)
+            state["in_dialogue"] = true;
 
         return state;
     }

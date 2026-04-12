@@ -578,6 +578,13 @@ public static partial class McpMod
         if (!TryGetDict(state, "event", out Dictionary<string, object?> eventState))
             return;
 
+        // Finished event → single proceed action (matches Sim exactly)
+        if (GetBool(eventState, "is_finished"))
+        {
+            actions.Add(new Dictionary<string, object?> { ["action"] = "proceed" });
+            return;
+        }
+
         if (GetBool(eventState, "in_dialogue"))
         {
             actions.Add(new Dictionary<string, object?> { ["action"] = "advance_dialogue" });
@@ -586,13 +593,18 @@ public static partial class McpMod
 
         foreach (Dictionary<string, object?> option in EnumerateDictionaries(eventState.TryGetValue("options", out object? rawOptions) ? rawOptions : null))
         {
-            if (GetBool(option, "is_locked") || GetBool(option, "was_chosen"))
+            if (GetBool(option, "is_locked"))
+                continue;
+            // Match Sim: skip chosen options (is_chosen or was_chosen)
+            if (GetBool(option, "is_chosen") || GetBool(option, "was_chosen"))
                 continue;
 
+            // Match Sim: is_proceed options become "proceed" action
+            bool isProceed = GetBool(option, "is_proceed");
             actions.Add(new Dictionary<string, object?>
             {
-                ["action"] = "choose_event_option",
-                ["index"] = GetInt(option, "index", -1)
+                ["action"] = isProceed ? "proceed" : "choose_event_option",
+                ["index"] = isProceed ? null : (object?)GetInt(option, "index", -1)
             });
         }
     }
