@@ -263,7 +263,7 @@ public static class FullRunApiStateBuilder
 			return state;
 		}
 		EventModel localEvent = eventRoom.LocalMutableEvent;
-		state.event_id = localEvent.Id.ToString();
+		state.event_id = localEvent.Id.Entry;
 		state.is_finished = localEvent.IsFinished;
 		state.options = localEvent.CurrentOptions.Select(static (option, index) => new FullRunApiEventOption
 		{
@@ -476,7 +476,7 @@ public static class FullRunApiStateBuilder
 
 	private static FullRunApiPlayerState BuildPlayerState(Player player)
 	{
-		return new FullRunApiPlayerState
+		var state = new FullRunApiPlayerState
 		{
 			character = SafeValue(() => player.Character.Id.Entry, player.Character?.Id?.Entry),
 			hp = SafeValue(() => player.Creature.CurrentHp),
@@ -494,6 +494,61 @@ public static class FullRunApiStateBuilder
 			relics = SafeBuildRelics(player),
 			potions = SafeBuildPotions(player)
 		};
+
+		// Stars (The Regent resource)
+		var combatState = player.PlayerCombatState;
+		if (combatState != null)
+		{
+			if (player.Character.ShouldAlwaysShowStarCounter || combatState.Stars > 0)
+				state.stars = combatState.Stars;
+
+			// Orbs (The Conduit resource)
+			if (combatState.OrbQueue.Capacity > 0)
+			{
+				state.orbs = combatState.OrbQueue.Orbs
+					.Select(static orb => new FullRunApiOrbState
+					{
+						id = orb.Id.Entry,
+						name = SafeGetText(() => orb.Title),
+						passive_val = (int)orb.PassiveVal,
+						evoke_val = (int)orb.EvokeVal
+					}).ToList();
+				state.orb_slots = combatState.OrbQueue.Capacity;
+				state.orb_empty_slots = combatState.OrbQueue.Capacity - combatState.OrbQueue.Orbs.Count;
+			}
+
+			// Pile contents (draw pile shuffled to avoid leaking draw order)
+			state.draw_pile = SafeBuildPileCards(combatState.DrawPile.Cards, shuffle: true);
+			state.discard_pile = SafeBuildPileCards(combatState.DiscardPile.Cards, shuffle: false);
+			state.exhaust_pile = SafeBuildPileCards(combatState.ExhaustPile.Cards, shuffle: false);
+		}
+
+		return state;
+	}
+
+	private static List<FullRunApiCardOption> SafeBuildPileCards(IReadOnlyList<CardModel> cards, bool shuffle)
+	{
+		try
+		{
+			var list = cards
+				.Where(static card => card != null)
+				.Select((card, index) => ToApiCardOption(card, index))
+				.ToList();
+			if (shuffle)
+			{
+				var rng = new System.Random();
+				for (int i = list.Count - 1; i > 0; i--)
+				{
+					int j = rng.Next(i + 1);
+					(list[i], list[j]) = (list[j], list[i]);
+				}
+			}
+			return list;
+		}
+		catch
+		{
+			return new List<FullRunApiCardOption>();
+		}
 	}
 
 	private static FullRunApiPlayerState BuildCombatPlayerState(Player player, CombatTrainingStateSnapshot? combat, FullRunApiPlayerState? baseState)
@@ -629,7 +684,8 @@ public static class FullRunApiStateBuilder
 			id = relic.Id.Entry,
 			name = SafeGetText(() => relic.Title),
 			rarity = relic.Rarity.ToString(),
-			description = SafeGetText(() => relic.Description)
+			description = SafeGetText(() => relic.DynamicDescription),
+			counter = relic.ShowCounter ? relic.DisplayAmount : null
 		};
 	}
 
@@ -894,7 +950,7 @@ public static class FullRunApiStateBuilder
 		try
 		{
 			return player.Creature?.Powers?
-				.Where(static power => power != null)
+				.Where(static power => power != null && power.IsVisible)
 				.Select(static power => new FullRunApiPower
 				{
 					id = power.Id?.Entry,

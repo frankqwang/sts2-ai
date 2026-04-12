@@ -73,6 +73,17 @@ public sealed class FullRunApiPower
 	public int amount { get; set; }
 }
 
+public sealed class FullRunApiOrbState
+{
+	public string? id { get; set; }
+
+	public string? name { get; set; }
+
+	public int passive_val { get; set; }
+
+	public int evoke_val { get; set; }
+}
+
 public sealed class FullRunApiIntent
 {
 	public string? type { get; set; }
@@ -137,6 +148,8 @@ public sealed class FullRunApiPotionState
 
 	public bool can_use_in_combat { get; set; }
 
+	public List<uint>? valid_target_ids { get; set; }
+
 	public List<string> keywords { get; set; } = new List<string>();
 }
 
@@ -151,6 +164,8 @@ public sealed class FullRunApiRelicOption
 	public string? rarity { get; set; }
 
 	public string? description { get; set; }
+
+	public int? counter { get; set; }
 }
 
 public sealed class FullRunApiPlayerState
@@ -179,11 +194,28 @@ public sealed class FullRunApiPlayerState
 
 	public int open_potion_slots { get; set; }
 
+	// The Regent star resource (combat only, null when not applicable)
+	public int? stars { get; set; }
+
+	// The Conduit orb queue (combat only, null when not applicable)
+	public List<FullRunApiOrbState>? orbs { get; set; }
+
+	public int? orb_slots { get; set; }
+
+	public int? orb_empty_slots { get; set; }
+
 	public List<FullRunApiPower> status { get; set; } = new List<FullRunApiPower>();
 
 	public List<FullRunApiCardOption> hand { get; set; } = new List<FullRunApiCardOption>();
 
 	public List<FullRunApiCardOption> deck { get; set; } = new List<FullRunApiCardOption>();
+
+	// Pile contents (combat only). Draw pile is shuffled to avoid leaking draw order.
+	public List<FullRunApiCardOption>? draw_pile { get; set; }
+
+	public List<FullRunApiCardOption>? discard_pile { get; set; }
+
+	public List<FullRunApiCardOption>? exhaust_pile { get; set; }
 
 	public List<FullRunApiRelicOption> relics { get; set; } = new List<FullRunApiRelicOption>();
 

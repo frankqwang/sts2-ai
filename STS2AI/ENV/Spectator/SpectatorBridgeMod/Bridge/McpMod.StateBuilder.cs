@@ -48,6 +48,9 @@ namespace STS2_MCP;
 
 public static partial class McpMod
 {
+    // Internal accessors for SpectatorApiStateBuilder (Dict → DTO conversion layer)
+    internal static Dictionary<string, object?> BuildGameStateForApi() => BuildGameState();
+
     private static Dictionary<string, object?> BuildGameState()
     {
         var result = new Dictionary<string, object?>();
@@ -1321,42 +1324,46 @@ public static partial class McpMod
         }
         state["visited"] = visited;
 
-        // Next options — read travelable state from UI nodes
+        // Next options — read from game logic (matches Sim's BuildMapOptions exactly)
         var nextOptions = new List<Dictionary<string, object?>>();
-        var mapScreen = NMapScreen.Instance;
-        if (mapScreen != null)
+        IEnumerable<MapPoint> candidatePoints;
+        if (runState.CurrentMapPoint != null)
         {
-            var travelable = FindAll<NMapPoint>(mapScreen)
-                .Where(mp => mp.State == MapPointState.Travelable)
-                .OrderBy(mp => mp.Point.coord.col)
-                .ToList();
-
-            int index = 0;
-            foreach (var nmp in travelable)
+            candidatePoints = runState.CurrentMapPoint.Children;
+        }
+        else if (map.startMapPoints.Count > 0)
+        {
+            candidatePoints = map.startMapPoints;
+        }
+        else
+        {
+            candidatePoints = map.StartingMapPoint.Children;
+        }
+        int index = 0;
+        foreach (var pt in candidatePoints.OrderBy(p => p.coord.row).ThenBy(p => p.coord.col))
+        {
+            var option = new Dictionary<string, object?>
             {
-                var pt = nmp.Point;
-                var option = new Dictionary<string, object?>
+                ["index"] = index,
+                ["col"] = pt.coord.col,
+                ["row"] = pt.coord.row,
+                ["type"] = pt.PointType.ToString(),
+                ["point_type"] = pt.PointType.ToString().ToLowerInvariant()
+            };
+
+            // 1-level lookahead
+            var children = pt.Children
+                .OrderBy(c => c.coord.col)
+                .Select(c => new Dictionary<string, object?>
                 {
-                    ["index"] = index,
-                    ["col"] = pt.coord.col,
-                    ["row"] = pt.coord.row,
-                    ["type"] = pt.PointType.ToString()
-                };
+                    ["col"] = c.coord.col, ["row"] = c.coord.row,
+                    ["type"] = c.PointType.ToString()
+                }).ToList();
+            if (children.Count > 0)
+                option["leads_to"] = children;
 
-                // 1-level lookahead
-                var children = pt.Children
-                    .OrderBy(c => c.coord.col)
-                    .Select(c => new Dictionary<string, object?>
-                    {
-                        ["col"] = c.coord.col, ["row"] = c.coord.row,
-                        ["type"] = c.PointType.ToString()
-                    }).ToList();
-                if (children.Count > 0)
-                    option["leads_to"] = children;
-
-                nextOptions.Add(option);
-                index++;
-            }
+            nextOptions.Add(option);
+            index++;
         }
         state["next_options"] = nextOptions;
 

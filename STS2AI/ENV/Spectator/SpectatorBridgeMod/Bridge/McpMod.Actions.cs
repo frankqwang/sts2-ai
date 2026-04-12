@@ -37,8 +37,11 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Unlocks;
+using System.Threading.Tasks;
 
 namespace STS2_MCP;
 
@@ -243,8 +246,18 @@ public static partial class McpMod
             seed = game.DebugSeedOverride ?? SeedHelper.GetRandomSeed();
         }
 
-        var acts = ActModel.GetRandomList(seed, unlockState, isMultiplayer: false).ToList();
-        TaskHelper.RunSafely(game.StartNewSingleplayerRun(character, shouldSave: true, acts, new List<ModifierModel>(), seed, ascension));
+        // Match Sim backend exactly: GetDefaultList + UnlockState.all for training parity.
+        // We bypass NGame.StartNewSingleplayerRun because it hardcodes
+        // SaveManager.GenerateUnlockStateFromProgress() which differs from Sim's UnlockState.all.
+        var acts = ActModel.GetDefaultList().Select(static act => act.ToMutable()).ToList();
+        UnlockState simUnlockState = UnlockState.all;
+        Player player = Player.CreateForNewRun(character, simUnlockState, NetSingleplayerGameService.defaultNetId);
+        RunState runState = RunState.CreateForNewRun(
+            new List<Player> { player }, acts, new List<ModifierModel>(), ascension, seed);
+        RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: true, dailyTime: null);
+        // NGame.StartRun is private — invoke via reflection
+        var startRunMethod = game.GetType().GetMethod("StartRun", BindingFlags.NonPublic | BindingFlags.Instance);
+        TaskHelper.RunSafely((Task)startRunMethod!.Invoke(game, new object[] { runState })!);
 
         return new Dictionary<string, object?>
         {

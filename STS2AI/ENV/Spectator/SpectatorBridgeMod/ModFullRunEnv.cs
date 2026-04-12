@@ -5,19 +5,39 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Simulation;
 
 namespace STS2_MCP;
 
 public static partial class McpMod
 {
+    // JSON serializer options for FullRunApiState — matches Sim's HeadlessSim.JsonOptions exactly.
+    // DTO properties are already snake_case, so NO naming policy needed.
+    private static readonly JsonSerializerOptions _apiJsonOptions = new JsonSerializerOptions
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    private static FullRunApiState BuildApiState()
+    {
+        return SpectatorApiStateBuilder.Build();
+    }
+
+    private static string GetApiStateSignature(FullRunApiState state)
+    {
+        return SpectatorApiStateBuilder.Signature(state);
+    }
+
     private static void HandleGetFullRunEnvState(HttpListenerResponse response)
     {
         try
         {
-            Dictionary<string, object?> state = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
-            SendJson(response, state);
+            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+            SendApiJson(response, state);
         }
         catch (Exception ex)
         {
@@ -25,11 +45,22 @@ public static partial class McpMod
         }
     }
 
+    private static void SendApiJson<T>(HttpListenerResponse response, T value)
+    {
+        string json = JsonSerializer.Serialize(value, _apiJsonOptions);
+        byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
+        response.ContentType = "application/json";
+        response.ContentLength64 = buffer.Length;
+        response.OutputStream.Write(buffer, 0, buffer.Length);
+        response.OutputStream.Close();
+    }
+
     private static void HandlePostFullRunEnvReset(HttpListenerRequest request, HttpListenerResponse response)
     {
         try
         {
             Dictionary<string, JsonElement> parsed = NormalizeFullRunEnvPayload(ParseFullRunEnvRequestObject(request, allowEmptyBody: true));
+            // Wait for menu readiness using legacy dict builder (complex UI state detection)
             WaitForFullRunEnvState(
                 predicate: static current => IsMenuReadyForFullRunReset(current) || GetStateType(current) != "menu",
                 timeoutMs: GetOptionalInt(parsed, "timeout_ms", 20000),
@@ -38,14 +69,17 @@ public static partial class McpMod
             if (IsErrorResult(startResult, out string? resetError))
                 throw new InvalidOperationException(resetError ?? "Failed to start run.");
 
-            Dictionary<string, object?> state = WaitForFullRunEnvState(
+            // Wait for run to settle using legacy dict builder, then return DTO state
+            WaitForFullRunEnvState(
                 predicate: static current =>
                     GetStateType(current) != "menu"
                     && IsSettledFullRunState(current)
                     && IsActionableOrTerminalFullRunState(current),
                 timeoutMs: GetOptionalInt(parsed, "timeout_ms", 20000),
                 pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 50));
-            SendJson(response, state);
+            // Return DTO-based state for consistent output
+            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+            SendApiJson(response, state);
         }
         catch (JsonException ex)
         {
@@ -69,9 +103,9 @@ public static partial class McpMod
             if (!parsed.TryGetValue("action", out JsonElement actionElem) || actionElem.ValueKind != JsonValueKind.String)
                 throw new InvalidOperationException("Missing 'action' field.");
 
-            Dictionary<string, object?> beforeState = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
+            FullRunApiState beforeState = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
             string action = actionElem.GetString() ?? string.Empty;
-            Dictionary<string, object?> state;
+            FullRunApiState state;
             string? stepInfoCode = null;
             bool accepted;
             string? actionError;
@@ -80,14 +114,14 @@ public static partial class McpMod
             {
                 try
                 {
-                    state = WaitForChangedFullRunEnvState(
+                    state = WaitForChangedApiState(
                         beforeState,
                         timeoutMs: GetOptionalInt(parsed, "timeout_ms", 2000),
                         pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 25));
                 }
                 catch (TimeoutException)
                 {
-                    state = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
+                    state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
                     stepInfoCode = "state_change_timeout";
                 }
 
@@ -104,24 +138,24 @@ public static partial class McpMod
                 {
                     try
                     {
-                        state = WaitForChangedFullRunEnvState(
+                        state = WaitForChangedApiState(
                             beforeState,
                             timeoutMs: GetOptionalInt(parsed, "timeout_ms", 2000),
                             pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 25));
                     }
                     catch (TimeoutException)
                     {
-                        state = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
+                        state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
                         stepInfoCode = "state_change_timeout";
                     }
                 }
                 else
                 {
-                    state = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
+                    state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
                 }
             }
 
-            SendJson(response, ShapeFullRunEnvStepResult(state, accepted, actionError, stepInfoCode));
+            SendApiJson(response, ShapeApiStepResult(state, accepted, actionError, stepInfoCode));
         }
         catch (JsonException ex)
         {
@@ -195,6 +229,79 @@ public static partial class McpMod
         if (!payload.ContainsKey("ascension") && payload.TryGetValue("ascension_level", out JsonElement ascensionLevel))
             payload["ascension"] = ascensionLevel;
         return payload;
+    }
+
+    // ── DTO-based helpers for v2 API ──────────────────────────
+
+    private static FullRunApiState WaitForChangedApiState(
+        FullRunApiState previousState,
+        int timeoutMs,
+        int pollDelayMs)
+    {
+        string previousSignature = GetApiStateSignature(previousState);
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(100, timeoutMs));
+        int delay = Math.Max(10, pollDelayMs);
+        FullRunApiState? lastChangedState = null;
+        string? lastChangedSignature = null;
+        int stablePolls = 0;
+
+        while (DateTime.UtcNow <= deadline)
+        {
+            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+            string signature = GetApiStateSignature(state);
+            if (!string.Equals(signature, previousSignature, StringComparison.Ordinal))
+            {
+                lastChangedState = state;
+
+                if (string.Equals(signature, lastChangedSignature, StringComparison.Ordinal))
+                    stablePolls++;
+                else
+                {
+                    lastChangedSignature = signature;
+                    stablePolls = 1;
+                }
+
+                if (state.terminal)
+                    return state;
+
+                bool settled = !string.IsNullOrEmpty(state.state_type)
+                    && state.state_type != "unknown"
+                    && state.state_type != "menu";
+                bool actionable = state.terminal || (state.legal_actions?.Count ?? 0) > 0;
+
+                if (settled && actionable && stablePolls >= 2)
+                    return state;
+            }
+
+            Thread.Sleep(delay);
+        }
+
+        if (lastChangedState != null)
+            return lastChangedState;
+
+        throw new TimeoutException("Timed out waiting for changed API state.");
+    }
+
+    private static object ShapeApiStepResult(FullRunApiState state, bool accepted, string? error, string? stepInfoCode)
+    {
+        double reward = 0.0;
+        if (state.terminal)
+            reward = state.run_outcome == "victory" || state.run_outcome == "win" ? 1.0 : -1.0;
+
+        return new
+        {
+            accepted,
+            error,
+            state,
+            reward,
+            done = state.terminal,
+            info = new
+            {
+                state_type = state.state_type,
+                run_outcome = state.run_outcome,
+                step_info_code = stepInfoCode
+            }
+        };
     }
 
     private static Dictionary<string, JsonElement> ParseFullRunEnvRequestObject(HttpListenerRequest request, bool allowEmptyBody)
@@ -327,6 +434,9 @@ public static partial class McpMod
             }
         };
     }
+
+    internal static List<Dictionary<string, object?>> BuildFullRunLegalActionsForApi(Dictionary<string, object?> state)
+        => BuildFullRunLegalActions(state);
 
     private static List<Dictionary<string, object?>> BuildFullRunLegalActions(Dictionary<string, object?> state)
     {
@@ -698,11 +808,15 @@ public static partial class McpMod
         {
             if (!string.IsNullOrWhiteSpace(enabledKey) && !GetBool(item, enabledKey, defaultValue: true))
                 continue;
-            actions.Add(new Dictionary<string, object?>
+            var action = new Dictionary<string, object?>
             {
                 ["action"] = actionName,
                 ["index"] = GetInt(item, "index", -1)
-            });
+            };
+            // Forward col/row for map nodes (needed for parity with Sim legal actions)
+            if (item.TryGetValue("col", out object? col) && col != null) action["col"] = col;
+            if (item.TryGetValue("row", out object? row) && row != null) action["row"] = row;
+            actions.Add(action);
         }
     }
 

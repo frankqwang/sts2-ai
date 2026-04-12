@@ -296,13 +296,21 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationTrace.Write("headless_reset.after_finalize_starting_relics");
 		RunManager.Instance.Launch();
 		FullRunSimulationTrace.Write("headless_reset.after_launch");
-		// Pure simulator: bypass EnterAct's Godot scene tree operations.
-		// SetActInternal generates the map, PushRoom sets CurrentRoom so
-		// the state builder returns "map" instead of "run_bootstrap".
+		// SetActInternal generates the map. Then enter the starting map point
+		// so Neow event triggers (matching Godot's EnterAct flow exactly).
 		await RunManager.Instance.SetActInternal(0);
-		FullRunSimulationTrace.Write("headless_reset.after_set_act_internal");
-		runState.PushRoom(new MapRoom());
-		FullRunSimulationTrace.Write("headless_reset.after_push_map_room");
+		FullRunSimulationTrace.Write($"headless_reset.after_set_act_internal started_with_neow={runState.ExtraFields.StartedWithNeow}");
+		if (runState.ExtraFields.StartedWithNeow)
+		{
+			// Walk the starting map point → triggers Neow event room
+			await RunManager.Instance.EnterMapCoord(runState.Map.StartingMapPoint.coord);
+			FullRunSimulationTrace.Write("headless_reset.after_enter_neow_map_coord");
+		}
+		else
+		{
+			runState.PushRoom(new MapRoom());
+			FullRunSimulationTrace.Write("headless_reset.after_push_map_room");
+		}
 		EpisodeNumber++;
 		CurrentSeed = seed;
 		CurrentCharacterId = character.Id.Entry;
