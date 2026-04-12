@@ -18,6 +18,8 @@ RiderTestRunner
 /themes
 /steam
 *.uid
+*.sqlite
+icudt_godot.dat
 
 /STS2AI/ENV/Sim/Host/bin/
 
@@ -197,17 +199,6 @@ datasets/*/episode_logs.json
 # HeadlessSim runtime PIDs
 scripts/.sim_pids
 tools/python/logs/
-
-src/Core/Debug/ReleaseInfoJsonSerializerContext.cs
-src/Core/Debug/ReleaseInfoJsonSerializerContext.cs.uid
-src/Core/Localization/SerializableDynamicVarDictionarySerializerContext.cs
-src/Core/Localization/SerializableDynamicVarDictionarySerializerContext.cs.uid
-src/Core/Runs/Metrics/MetricsSerializerContext.cs
-src/Core/Runs/Metrics/MetricsSerializerContext.cs.uid
-src/Core/Saves/MegaCritSerializerContext.cs
-src/Core/Saves/MegaCritSerializerContext.cs.uid
-src/GameInfo/GameInfoUploaderSerializerContext.cs
-src/GameInfo/GameInfoUploaderSerializerContext.cs.uid
 
 # Feature engineering v2 fine-tune experiments (2026-04-08) — intermediate,
 # not tracked (too large, reproducible from config + logs)
