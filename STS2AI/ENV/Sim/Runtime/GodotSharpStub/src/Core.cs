@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Godot;
 
+#pragma warning disable CS0067
+
 // === Base Types ===
 
 public class GodotObject
@@ -345,3 +347,5 @@ public enum PropertyUsageFlags
 {
     None = 0, Storage = 1, Editor = 2, Default = 7
 }
+
+#pragma warning restore CS0067

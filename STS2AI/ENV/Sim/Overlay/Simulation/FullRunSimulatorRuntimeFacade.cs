@@ -914,6 +914,79 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 	}
 
+	private async Task<FullRunSimulationStateSnapshot?> TryAdvancePostCombatTerminalTransitionAsync(
+		string diagnosticsPrefix,
+		FullRunSimulationStateSnapshot snapshot)
+	{
+		if (snapshot.StateType != "combat_pending")
+		{
+			return null;
+		}
+
+		RunState? runState = RunManager.Instance.DebugOnlyGetState();
+		if (runState?.CurrentRoom is not CombatRoom combatRoom
+			|| CombatManager.Instance.IsInProgress
+			|| runState.IsGameOver
+			|| (combatRoom.RoomType != RoomType.Boss && !combatRoom.IsVictoryRoom))
+		{
+			return null;
+		}
+
+		if (FullRunSimulationChoiceBridge.Instance.IsRewardSelectionActive
+			|| FullRunSimulationChoiceBridge.Instance.IsCardRewardSelectionActive
+			|| FullRunSimulationChoiceBridge.Instance.IsRelicSelectionActive
+			|| FullRunSimulationChoiceBridge.Instance.IsCardSelectionActive
+			|| FullRunSimulationChoiceBridge.Instance.IsHandSelectionActive)
+		{
+			return null;
+		}
+
+		Player? localPlayer = LocalContext.GetMe(runState) ?? runState.Players.FirstOrDefault();
+		if (localPlayer == null || localPlayer.Creature.IsDead)
+		{
+			return null;
+		}
+
+		CombatState? combatState = CombatManager.Instance.DebugOnlyGetState();
+		if (combatState?.Enemies.Any(static enemy => !enemy.IsDead) == true)
+		{
+			return null;
+		}
+
+		FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.terminal_transition_attempts");
+		FullRunSimulationTrace.Write(
+			$"{diagnosticsPrefix}.terminal_transition.begin room={combatRoom.RoomType} hp={localPlayer.Creature.CurrentHp} max_hp={localPlayer.Creature.MaxHp}");
+		string previousSignature = BuildStateChangeSignature(snapshot);
+		await TriggerTerminalRewardsTransitionIfNeededAsync();
+
+		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 16 : 64;
+		for (int attempt = 0; attempt < maxAttempts; attempt++)
+		{
+			if (CombatSimulationRuntime.IsPureCombatSimulator)
+			{
+				await CombatSimulationRuntime.Clock.YieldAsync();
+				await Task.Yield();
+			}
+			else
+			{
+				await Task.Yield();
+			}
+
+			ObservedState observed = ObserveState();
+			if (!string.Equals(observed.Signature, previousSignature, StringComparison.Ordinal)
+				&& observed.Snapshot.StateType != "combat_pending")
+			{
+				FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.terminal_transition_hits");
+				FullRunSimulationTrace.Write(
+					$"{diagnosticsPrefix}.terminal_transition.done state={observed.Snapshot.StateType} floor={observed.Snapshot.TotalFloor}");
+				return observed.Snapshot;
+			}
+		}
+
+		FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.terminal_transition_exhausted");
+		return null;
+	}
+
 	private async Task<FullRunSimulationStepResult> StepCombatAsync(FullRunSimulationStateSnapshot state, string actionType, FullRunSimulationActionRequest action)
 	{
 		if (!IsCombatState(state.StateType))
@@ -1293,6 +1366,13 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		TracePotentialWaitStall("headless_wait_combat_followup.fallback", fallback);
 		if (fallback.StateType == "combat_pending")
 		{
+			FullRunSimulationStateSnapshot? advancedTerminal = await TryAdvancePostCombatTerminalTransitionAsync(
+				"settle.wait_combat_followup",
+				fallback);
+			if (advancedTerminal != null)
+			{
+				return advancedTerminal;
+			}
 			FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.force_map_view");
 			_forceMapView = true;
 			FullRunSimulationStateSnapshot forced = GetState();
@@ -1448,6 +1528,13 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		TracePotentialWaitStall("headless_wait_explicit.fallback", fallback);
 		if (fallback.StateType == "combat_pending")
 		{
+			FullRunSimulationStateSnapshot? advancedTerminal = await TryAdvancePostCombatTerminalTransitionAsync(
+				"settle.wait_explicit",
+				fallback);
+			if (advancedTerminal != null)
+			{
+				return advancedTerminal;
+			}
 			FullRunSimulationDiagnostics.Increment("settle.wait_explicit.force_map_view");
 			_forceMapView = true;
 			FullRunSimulationStateSnapshot forced = GetState();

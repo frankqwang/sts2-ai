@@ -63,7 +63,7 @@ internal static class FullRunSimulationStateBuilder
 		snapshot.TotalFloor = runState.TotalFloor;
 		snapshot.RoomType = currentRoom?.RoomType.ToString().ToLowerInvariant();
 		snapshot.RoomModelId = currentRoom?.ModelId?.Entry;
-		snapshot.StateType = ResolveStateType(runState, currentRoom, bridge, forceMapView);
+		snapshot.StateType = ResolveStateType(runState, currentRoom, bridge, forceMapView, localPlayer);
 		if (snapshot.StateType == "map")
 		{
 			// When we force the map view after a room clear, currentRoom may still
@@ -111,7 +111,7 @@ internal static class FullRunSimulationStateBuilder
 			actions);
 	}
 
-	private static string ResolveStateType(RunState runState, AbstractRoom? currentRoom, FullRunSimulationChoiceBridge bridge, bool forceMapView)
+private static string ResolveStateType(RunState runState, AbstractRoom? currentRoom, FullRunSimulationChoiceBridge bridge, bool forceMapView, Player localPlayer)
 	{
 		if (runState.IsGameOver)
 		{
@@ -160,8 +160,13 @@ internal static class FullRunSimulationStateBuilder
 		// if we're in a brief transition before rewards appear.
 		if (currentRoom is CombatRoom && !CombatManager.Instance.IsInProgress)
 		{
-			if (runState.IsGameOver)
+			if (runState.IsGameOver
+				|| localPlayer.Creature.IsDead
+				|| localPlayer.Creature.CurrentHp <= 0
+				|| localPlayer.Creature.MaxHp <= 0)
+			{
 				return "game_over";
+			}
 			// Combat ended but rewards haven't appeared yet — report as
 			// "combat_pending" so Python can send a "wait" action to let
 			// the game transition to rewards/map/game_over naturally.

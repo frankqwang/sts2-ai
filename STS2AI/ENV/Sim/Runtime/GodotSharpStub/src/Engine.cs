@@ -3,6 +3,8 @@ using System.Linq;
 
 namespace Godot;
 
+#pragma warning disable CS0067
+
 // === Engine, OS, Time, GD — the "global" Godot singletons ===
 
 public static class Engine
@@ -447,3 +449,5 @@ public enum Error
     DuplicateSymbol = 42, ParseError = 43, Busy = 44,
     Skip = 45, Help = 46, Bug = 47, PrinterOnFire = 48,
 }
+
+#pragma warning restore CS0067

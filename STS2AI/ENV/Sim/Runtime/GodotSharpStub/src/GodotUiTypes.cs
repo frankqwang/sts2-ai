@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 
 namespace Godot;
 
+#pragma warning disable CS0067
+
 // === Visual types ===
 public class Texture2D : Resource { public virtual Image GetImage() => new(); }
 public class CompressedTexture2D : Texture2D { }
@@ -233,3 +235,5 @@ public partial class ENetPacketPeer : GodotObject
     public bool IsActive() => false;
 }
 public partial class ENetMultiplayerPeer : GodotObject { }
+
+#pragma warning restore CS0067
