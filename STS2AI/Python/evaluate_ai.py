@@ -49,12 +49,21 @@ from combat_nn import (
     MAX_ACTIONS,
 )
 from rl_policy_v2 import FullRunPolicyNetworkV2
-from rl_encoder_v2 import build_structured_state, build_structured_actions
+from rl_encoder_v2 import (
+    build_structured_state,
+    build_structured_actions,
+    _compute_route_features,
+    _extract_map_paths,
+)
 from rl_policy_v2 import (
     _structured_state_to_numpy_dict,
     _structured_actions_to_numpy_dict,
 )
-from rl_reward_shaping import boss_readiness_score, extract_next_boss_token
+from rl_reward_shaping import (
+    boss_readiness_score,
+    compute_problem_vector,
+    extract_next_boss_token,
+)
 from heuristic_combat import heuristic_combat_action
 from combat_safety import rerank_combat_logits_with_safety
 from combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
@@ -115,6 +124,9 @@ DEFAULT_COMBAT_BC_PATCH_CONFIG = {
     "max_base_top_prob": 1.0,
 }
 DEFAULT_COMBAT_MCTS_TACTICAL_BLEND_WEIGHT = 0.0
+DEFAULT_COMBAT_MCTS_SCREEN_MODE = "boss_elite"
+DEFAULT_COMBAT_MCTS_MIN_FLOOR = 5
+DEFAULT_ACT1_ROUTE_MODE = "conservative"
 _COMBAT_TEACHER_MODE_ALIASES = {
     "replace": "full_replace",
     "full_replace": "full_replace",
@@ -132,6 +144,13 @@ def _safe_int(value: Any, default: int = 0) -> int:
 
 def _lower(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _utc_now() -> str:
@@ -259,6 +278,148 @@ def _legal_action_name_set(legal: list[dict[str, Any]]) -> set[str]:
         for action in legal
         if isinstance(action, dict)
     }
+
+
+def _enabled_legal_actions(state: dict[str, Any]) -> list[dict[str, Any]]:
+    legal = state.get("legal_actions", [])
+    return [
+        action
+        for action in legal
+        if isinstance(action, dict) and action.get("is_enabled") is not False
+    ]
+
+
+def _action_signature(action: dict[str, Any] | None) -> str:
+    if not isinstance(action, dict):
+        return ""
+    parts = [
+        _lower(action.get("action")),
+        _lower(action.get("label")),
+        str(action.get("index") if action.get("index") is not None else ""),
+        str(action.get("target_id") if action.get("target_id") is not None else ""),
+        str(action.get("target") if action.get("target") is not None else ""),
+        str(action.get("card_index") if action.get("card_index") is not None else ""),
+        _lower(action.get("card_id")),
+        str(action.get("slot") if action.get("slot") is not None else ""),
+        _lower(action.get("screen_type")),
+    ]
+    return "|".join(parts)
+
+
+def _legal_action_signature(legal: list[dict[str, Any]]) -> tuple[str, ...]:
+    signatures = sorted(
+        _action_signature(action)
+        for action in legal
+        if isinstance(action, dict)
+    )
+    return tuple(signatures)
+
+
+def _combat_loop_progress_signature(state: dict[str, Any]) -> tuple[Any, ...]:
+    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
+    player = battle.get("player") if isinstance(battle.get("player"), dict) else (_extract_player_snapshot(state) or {})
+    enemies = battle.get("enemies") if isinstance(battle.get("enemies"), list) else []
+    player_hand = player.get("hand") if isinstance(player.get("hand"), list) else []
+    draw_pile = player.get("draw_pile") if isinstance(player.get("draw_pile"), list) else []
+    discard_pile = player.get("discard_pile") if isinstance(player.get("discard_pile"), list) else []
+    exhaust_pile = player.get("exhaust_pile") if isinstance(player.get("exhaust_pile"), list) else []
+    total_enemy_hp = 0
+    total_enemy_block = 0
+    alive_enemy_count = 0
+    for enemy in enemies:
+        if not isinstance(enemy, dict):
+            continue
+        hp = _safe_int(enemy.get("hp", enemy.get("current_hp", 0)), 0)
+        block = _safe_int(enemy.get("block"), 0)
+        if hp > 0:
+            alive_enemy_count += 1
+            total_enemy_hp += hp
+            total_enemy_block += block
+    return (
+        _safe_int(player.get("hp", player.get("current_hp")), 0),
+        _safe_int(player.get("block"), 0),
+        _safe_int(player.get("energy", player.get("current_energy")), 0),
+        len(player_hand),
+        len(draw_pile),
+        len(discard_pile),
+        len(exhaust_pile),
+        alive_enemy_count,
+        total_enemy_hp,
+        total_enemy_block,
+    )
+
+
+def _loop_progress_signature(state: dict[str, Any]) -> tuple[Any, ...]:
+    progress = _extract_progress(state)
+    state_type = progress["state_type"]
+    if state_type in COMBAT_SCREENS:
+        return (
+            state_type,
+            progress["act"],
+            progress["floor"],
+            *_combat_loop_progress_signature(state),
+        )
+    return (
+        state_type,
+        progress["act"],
+        progress["floor"],
+        progress["hp"],
+        progress["gold"],
+        progress["deck_count"],
+        progress["relic_count"],
+        progress["potion_count"],
+    )
+
+
+def _enemy_loop_signature(enemy: dict[str, Any]) -> tuple[Any, ...]:
+    intents = enemy.get("intents") if isinstance(enemy.get("intents"), list) else []
+    intent = intents[0] if intents and isinstance(intents[0], dict) else {}
+    return (
+        _lower(enemy.get("name") or enemy.get("id")),
+        _safe_int(enemy.get("hp", enemy.get("current_hp", 0)), 0),
+        _safe_int(enemy.get("block"), 0),
+        _lower(intent.get("intent") or enemy.get("intent") or enemy.get("intent_name")),
+        _safe_int(intent.get("damage", enemy.get("intent_damage")), 0),
+        _safe_int(intent.get("hits", intent.get("multiplier")), 0),
+    )
+
+
+def _loop_state_signature(state: dict[str, Any], legal: list[dict[str, Any]]) -> tuple[Any, ...]:
+    progress = _extract_progress(state)
+    state_type = progress["state_type"]
+    legal_sig = _legal_action_signature(legal)
+    if state_type in COMBAT_SCREENS:
+        battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
+        player = battle.get("player") if isinstance(battle.get("player"), dict) else (_extract_player_snapshot(state) or {})
+        enemies = battle.get("enemies") if isinstance(battle.get("enemies"), list) else []
+        player_hand = player.get("hand") if isinstance(player.get("hand"), list) else []
+        enemy_sig = tuple(
+            _enemy_loop_signature(enemy)
+            for enemy in enemies
+            if isinstance(enemy, dict) and _safe_int(enemy.get("hp", enemy.get("current_hp", 0)), 0) > 0
+        )
+        return (
+            state_type,
+            progress["act"],
+            progress["floor"],
+            _safe_int(player.get("hp", player.get("current_hp")), 0),
+            _safe_int(player.get("block"), 0),
+            _safe_int(player.get("energy", player.get("current_energy")), 0),
+            len(player_hand),
+            enemy_sig,
+            legal_sig,
+        )
+    return (
+        state_type,
+        progress["act"],
+        progress["floor"],
+        progress["hp"],
+        progress["gold"],
+        progress["deck_count"],
+        progress["relic_count"],
+        progress["potion_count"],
+        legal_sig,
+    )
 
 
 def _is_selection_screen(state_type: str, legal: list[dict[str, Any]]) -> bool:
@@ -427,15 +588,18 @@ def _next_reward_claim_signature(
 
 def _choose_repeat_escape_action(
     legal: list[dict[str, Any]],
+    avoid_action_signature: str = "",
 ) -> dict[str, Any] | None:
     if not legal:
         return None
     for action_name in ESCAPE_ACTION_NAMES:
         for action in legal:
-            if action.get("action") == action_name:
+            if action.get("action") == action_name and _action_signature(action) != avoid_action_signature:
                 return action
     if len(legal) > 1:
-        return legal[1]
+        for action in legal:
+            if _action_signature(action) != avoid_action_signature:
+                return action
     return legal[0]
 
 
@@ -443,16 +607,31 @@ def _choose_repeat_escape_action(
 class RepeatLoopTracker:
     trigger_count: int = 3
     max_repeats: int = 20
-    last_state_key: str = ""
+    last_transition_key: tuple[Any, ...] | None = None
+    last_action_signature: str = ""
     repeat_count: int = 0
 
-    def observe(self, state_type: str, legal: list[dict[str, Any]]) -> int:
-        current_key = f"{(state_type or '').strip().lower()}:{len(legal)}"
-        if current_key == self.last_state_key:
+    def observe_transition(
+        self,
+        before_state: dict[str, Any],
+        before_legal: list[dict[str, Any]],
+        action: dict[str, Any] | None,
+        after_state: dict[str, Any],
+    ) -> int:
+        action_sig = _action_signature(action)
+        before_sig = _loop_state_signature(before_state, before_legal)
+        after_sig = _loop_state_signature(after_state, _enabled_legal_actions(after_state))
+        before_progress = _loop_progress_signature(before_state)
+        after_progress = _loop_progress_signature(after_state)
+        current_key = (before_sig, action_sig, after_sig)
+        stagnant = before_sig == after_sig and before_progress == after_progress
+        repeated_action = bool(action_sig) and action_sig == self.last_action_signature
+        if stagnant and repeated_action and current_key == self.last_transition_key:
             self.repeat_count += 1
         else:
-            self.last_state_key = current_key
             self.repeat_count = 0
+        self.last_transition_key = current_key
+        self.last_action_signature = action_sig
         return self.repeat_count
 
     def choose_escape_action(
@@ -461,7 +640,7 @@ class RepeatLoopTracker:
     ) -> dict[str, Any] | None:
         if self.repeat_count < self.trigger_count:
             return None
-        return _choose_repeat_escape_action(legal)
+        return _choose_repeat_escape_action(legal, self.last_action_signature)
 
     def should_abort(self) -> bool:
         return self.repeat_count >= self.max_repeats
@@ -1279,6 +1458,7 @@ def _select_action_nn(
     combat_safety_rerank: bool = False,
     beam_search: int = 0,
     turn_planner: Any | None = None,
+    act1_route_mode: str = DEFAULT_ACT1_ROUTE_MODE,
 ) -> tuple[int, dict, str, CombatMctsTrace | None]:
     """Select action using NN (argmax / deterministic).
 
@@ -1290,15 +1470,30 @@ def _select_action_nn(
 
     try:
         if st in COMBAT_SCREENS:
-            if combat_mcts_agent is not None and combat_pipe_getter is not None:
+            mcts_screen_mode = str(getattr(combat_mcts_agent, "_screen_mode", "always")) if combat_mcts_agent is not None else "always"
+            mcts_min_floor = int(getattr(combat_mcts_agent, "_min_floor", 0)) if combat_mcts_agent is not None else 0
+            run = state.get("run") if isinstance(state.get("run"), dict) else {}
+            current_floor = _safe_int(run.get("floor", 0), 0)
+            screen_match = (
+                mcts_screen_mode == "always"
+                or (mcts_screen_mode == "boss" and st == "boss")
+                or (mcts_screen_mode == "elite" and st == "elite")
+                or (mcts_screen_mode == "boss_elite" and st in ("boss", "elite"))
+            )
+            use_combat_mcts = (
+                combat_mcts_agent is not None
+                and combat_pipe_getter is not None
+                and (screen_match or current_floor >= mcts_min_floor)
+            )
+            if use_combat_mcts:
                 fm = None
+                restored_state: dict[str, Any] | None = None
                 try:
                     fm = PipeCombatForwardModel.from_current_state(
                         combat_pipe_getter,
                         max_step_budget=getattr(combat_mcts_agent, "_max_step_budget", 200),
                     )
                     action, root = combat_mcts_agent.choose_action(fm)
-                    action_idx = _match_legal_action_index(legal, action)
                     top_actions, root_value = _summarize_mcts_root(root)
                     trace_meta = CombatMctsTrace(
                         chosen_action=dict(action) if isinstance(action, dict) else {},
@@ -1306,20 +1501,32 @@ def _select_action_nn(
                         sims=int(getattr(combat_mcts_agent.config, "num_simulations", 0)),
                         root_value=root_value,
                     )
-                    if action_idx < len(legal):
-                        return action_idx, legal[action_idx], "combat_mcts", trace_meta
-                    return 0, legal[0], "combat_mcts", trace_meta
                 finally:
                     if fm is not None:
                         try:
                             restored = fm.cleanup_and_restore()
                             if restored is None:
                                 fm.cleanup()
+                            else:
+                                restored_state = restored
                         except Exception:
                             try:
                                 fm.cleanup()
                             except Exception:
                                 pass
+                effective_legal = legal
+                if isinstance(restored_state, dict):
+                    restored_legal = restored_state.get("legal_actions")
+                    if isinstance(restored_legal, list) and restored_legal:
+                        effective_legal = restored_legal
+                action_idx = _match_legal_action_index(
+                    effective_legal,
+                    action,
+                    allow_action_only_fallback=False,
+                )
+                if action_idx is not None and action_idx < len(effective_legal):
+                    return action_idx, effective_legal[action_idx], "combat_mcts", trace_meta
+                logger.debug("combat_mcts action no longer matches restored legal set; falling back to plain combat NN")
             if combat_teacher_override is not None and combat_teacher_override.mode == "full_replace":
                 action_idx, action, action_source = _select_action_combat_teacher(
                     state=state,
@@ -1432,6 +1639,15 @@ def _select_action_nn(
                 logits, _values, _dq, _boss_ready, _action_adv = ppo_net(state_t, action_t)
             # Argmax (deterministic)
             logits = logits.squeeze(0)  # (MAX_ACTIONS,)
+            map_override = _choose_act1_safe_map_action(
+                state,
+                legal,
+                logits.detach().cpu().numpy(),
+                route_mode=act1_route_mode,
+            )
+            if map_override is not None:
+                action_idx, action, action_source = map_override
+                return action_idx, action, action_source, None
             action_idx = int(logits.argmax().item())
             action_source = "nn"
 
@@ -1474,8 +1690,259 @@ def _select_action_heuristic(
     elif st == "card_select":
         candidate = choose_deterministic_card_select_action(state, legal)
     if candidate is not None:
-        return _match_legal_action_index(legal, candidate), candidate
+        idx = _match_legal_action_index(legal, candidate)
+        return (idx if idx is not None else 0), candidate
     return 0, legal[0]
+
+
+def _map_node_type(action: dict[str, Any] | None) -> str:
+    if not isinstance(action, dict):
+        return ""
+    return _lower(
+        action.get("node_type")
+        or action.get("point_type")
+        or action.get("type")
+        or action.get("label")
+    )
+
+
+def _player_richness(player: dict[str, Any] | None) -> int:
+    if not isinstance(player, dict):
+        return -1
+    score = len(player)
+    for key in ("deck", "hand", "relics", "potions", "status"):
+        value = player.get(key)
+        if isinstance(value, list):
+            score += 4 + len(value)
+    for key in ("hp", "current_hp", "max_hp", "gold", "block", "energy", "max_energy"):
+        if player.get(key) is not None:
+            score += 1
+    return score
+
+
+def _extract_best_player(state: dict[str, Any]) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    top_player = state.get("player")
+    if isinstance(top_player, dict):
+        candidates.append(top_player)
+    for key in ("map", "shop", "rest_site", "event", "rewards", "card_reward", "battle"):
+        container = state.get(key)
+        if isinstance(container, dict) and isinstance(container.get("player"), dict):
+            candidates.append(container["player"])
+    if not candidates:
+        return {}
+    return max(candidates, key=_player_richness)
+
+
+def _find_map_option_index(
+    action: dict[str, Any],
+    next_options: list[dict[str, Any]],
+) -> int | None:
+    if not next_options:
+        return None
+
+    action_index = action.get("index")
+    action_col = action.get("col")
+    action_row = action.get("row")
+    action_type = _map_node_type(action)
+
+    for idx, option in enumerate(next_options):
+        if not isinstance(option, dict):
+            continue
+        if action_index is not None and option.get("index") == action_index:
+            return idx
+        if (
+            action_col is not None and action_row is not None
+            and option.get("col") == action_col and option.get("row") == action_row
+        ):
+            return idx
+
+    fallback_candidates = [
+        idx for idx, option in enumerate(next_options)
+        if isinstance(option, dict) and _map_node_type(option) == action_type
+    ]
+    if len(fallback_candidates) == 1:
+        return fallback_candidates[0]
+
+    if (
+        isinstance(action_index, int)
+        and 0 <= action_index < len(next_options)
+        and isinstance(next_options[action_index], dict)
+    ):
+        return int(action_index)
+    return None
+
+
+def _build_map_graph(
+    map_state: dict[str, Any],
+) -> tuple[dict[tuple[int, int], str], dict[tuple[int, int], list[tuple[int, int]]]]:
+    node_type_map: dict[tuple[int, int], str] = {}
+    adjacency: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for node in map_state.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        key = (_safe_int(node.get("col"), -1), _safe_int(node.get("row"), -1))
+        node_type_map[key] = _map_node_type(node)
+        adjacency[key] = [
+            (_safe_int(child[0], -1), _safe_int(child[1], -1))
+            for child in (node.get("children") or [])
+            if isinstance(child, (list, tuple)) and len(child) >= 2
+        ]
+    return node_type_map, adjacency
+
+
+def _option_route_structure(
+    map_state: dict[str, Any],
+    option: dict[str, Any],
+) -> dict[str, Any]:
+    node_type_map, adjacency = _build_map_graph(map_state)
+    key = (_safe_int(option.get("col"), -1), _safe_int(option.get("row"), -1))
+    option_type = node_type_map.get(key) or _map_node_type(option)
+    child_keys = adjacency.get(key, [])
+    child_types = [node_type_map.get(child, "") for child in child_keys]
+    non_empty_child_types = [child_type for child_type in child_types if child_type]
+    forced_next_elite = bool(non_empty_child_types) and all(
+        child_type == "elite" for child_type in non_empty_child_types
+    )
+    return {
+        "option_type": option_type,
+        "child_types": tuple(non_empty_child_types),
+        "forced_next_elite": forced_next_elite,
+        "has_rest_child": any(child_type == "restsite" for child_type in non_empty_child_types),
+        "has_shop_child": any(child_type == "shop" for child_type in non_empty_child_types),
+        "has_non_elite_child": any(child_type != "elite" for child_type in non_empty_child_types),
+    }
+
+
+def _score_act1_route(
+    state: dict[str, Any],
+    route_features: np.ndarray,
+    route_structure: dict[str, Any] | None = None,
+    route_mode: str = DEFAULT_ACT1_ROUTE_MODE,
+) -> float:
+    player = _extract_best_player(state)
+    hp = _safe_float(player.get("hp", player.get("current_hp", 0.0)), 0.0)
+    max_hp = max(1.0, _safe_float(player.get("max_hp", 1.0), 1.0))
+    hp_ratio = max(0.0, min(1.0, hp / max_hp))
+    gold = _safe_int(player.get("gold", 0), 0)
+    floor = _safe_int((state.get("run") or {}).get("floor", 0), 0)
+
+    problem_vector = compute_problem_vector(state)
+    elite_ready = float(problem_vector[7]) if len(problem_vector) > 7 else 0.0
+    boss_answer = float(problem_vector[8]) if len(problem_vector) > 8 else 0.0
+
+    min_elite = float(route_features[0]) * 5.0
+    max_shop = float(route_features[1]) * 3.0
+    max_rest = float(route_features[2]) * 5.0
+    avg_monster = float(route_features[3]) * 10.0
+    rows_to_boss = float(route_features[4]) * 16.0
+
+    low_hp = max(0.0, (0.72 - hp_ratio) / 0.42)
+    rich_enough = 1.0 if gold >= 120 else 0.65 if gold >= 75 else 0.25 if gold >= 50 else 0.0
+    early_act = 1.0 if floor <= 8 else 0.55 if floor <= 11 else 0.2
+    boss_pressure = max(0.0, (0.62 - boss_answer) / 0.32) * max(0.0, (6.0 - rows_to_boss) / 6.0)
+
+    route_mode = _lower(route_mode) or DEFAULT_ACT1_ROUTE_MODE
+    option_type = _lower((route_structure or {}).get("option_type"))
+    forced_next_elite = bool((route_structure or {}).get("forced_next_elite"))
+    has_rest_child = bool((route_structure or {}).get("has_rest_child"))
+    has_shop_child = bool((route_structure or {}).get("has_shop_child"))
+
+    elite_penalty = min_elite * (
+        2.9
+        - 1.6 * elite_ready
+        - 0.9 * hp_ratio
+        + 0.6 * early_act
+        + 0.4 * boss_pressure
+    )
+    elite_bonus = min_elite * max(0.0, elite_ready + hp_ratio - 1.55) * 0.35
+    rest_bonus = max_rest * (1.9 * low_hp + 0.55 * boss_pressure)
+    shop_bonus = max_shop * (0.95 * rich_enough + 0.25 * boss_pressure)
+    monster_penalty = avg_monster * (0.18 + 0.75 * low_hp)
+    forced_next_elite_penalty = 0.0
+    immediate_type_bonus = 0.0
+
+    child_recovery_bonus = 0.0
+    if route_mode == "funnel_penalty":
+        forced_next_elite_penalty = (
+            (6.0 + 2.0 * low_hp + 1.0 * early_act)
+            if forced_next_elite
+            else 0.0
+        )
+        if option_type == "elite":
+            immediate_type_bonus -= 0.9 - 0.25 * elite_ready - 0.15 * hp_ratio
+        elif option_type == "restsite":
+            immediate_type_bonus += 0.15 + 0.2 * low_hp
+        elif option_type == "shop":
+            immediate_type_bonus += 0.1 + 0.15 * rich_enough
+        elif option_type == "unknown" and forced_next_elite:
+            immediate_type_bonus -= 1.6 + 0.8 * low_hp
+        if forced_next_elite and has_rest_child:
+            child_recovery_bonus += 0.1
+        if forced_next_elite and has_shop_child:
+            child_recovery_bonus += 0.05
+
+    route_score = (
+        -elite_penalty
+        + elite_bonus
+        + rest_bonus
+        + shop_bonus
+        - monster_penalty
+        - forced_next_elite_penalty
+        + immediate_type_bonus
+        + child_recovery_bonus
+    )
+    # Act 1 routing is a strategic override, not a tiny local hint. Keep the
+    # route prior strong enough to beat a noisy single-step logit when the
+    # future path clearly forces elites or offers scarce recovery.
+    return float(route_score * 3.5)
+
+
+def _choose_act1_safe_map_action(
+    state: dict[str, Any],
+    legal: list[dict[str, Any]],
+    logits: np.ndarray,
+    route_mode: str = DEFAULT_ACT1_ROUTE_MODE,
+) -> tuple[int, dict[str, Any], str] | None:
+    if _lower(state.get("state_type")) != "map" or not legal:
+        return None
+    run = state.get("run") if isinstance(state.get("run"), dict) else {}
+    if _safe_int(run.get("act", 0), 0) != 1:
+        return None
+
+    action_logits = np.asarray(logits[:len(legal)], dtype=np.float32)
+    map_state = state.get("map") if isinstance(state.get("map"), dict) else {}
+    next_options = _extract_map_paths(state)
+    if map_state and next_options:
+        route_features = _compute_route_features(map_state, next_options)
+        route_scores: list[tuple[float, int]] = []
+        for idx, action in enumerate(legal):
+            if _lower(action.get("action")) != "choose_map_node":
+                continue
+            option_idx = _find_map_option_index(action, next_options)
+            if option_idx is None:
+                continue
+            route_bias = _score_act1_route(
+                state,
+                route_features[option_idx],
+                _option_route_structure(map_state, next_options[option_idx]),
+                route_mode=route_mode,
+            )
+            route_scores.append((float(action_logits[idx]) + route_bias, idx))
+        if route_scores:
+            _, best_idx = max(route_scores, key=lambda item: item[0])
+            return int(best_idx), legal[int(best_idx)], "nn_map_plan"
+
+    non_elite_indices = [
+        idx for idx, action in enumerate(legal)
+        if _map_node_type(action) != "elite"
+    ]
+    if not non_elite_indices:
+        best_idx = int(np.argmax(action_logits)) if len(action_logits) > 0 else 0
+        return best_idx, legal[best_idx], "nn_map_safe"
+
+    best_idx = max(non_elite_indices, key=lambda idx: float(action_logits[idx]))
+    return int(best_idx), legal[int(best_idx)], "nn_map_safe"
 
 
 def _raw_action_key(action: dict[str, Any] | None) -> tuple[Any, ...] | None:
@@ -1486,34 +1953,47 @@ def _raw_action_key(action: dict[str, Any] | None) -> tuple[Any, ...] | None:
         action.get("card_index"),
         action.get("slot"),
         action.get("target"),
+        action.get("target_id"),
         action.get("index"),
         action.get("screen_type"),
     )
 
 
-def _match_legal_action_index(legal: list[dict[str, Any]], action: dict[str, Any] | None) -> int:
+def _match_legal_action_index(
+    legal: list[dict[str, Any]],
+    action: dict[str, Any] | None,
+    *,
+    allow_action_only_fallback: bool = True,
+) -> int | None:
     if not legal or not isinstance(action, dict):
-        return 0
+        return None
+    action_name = _lower(action.get("action"))
     raw_key = _raw_action_key(action)
     if raw_key is not None:
         for idx, legal_action in enumerate(legal):
             if _raw_action_key(legal_action) == raw_key:
                 return idx
+    # Card/potion-like actions are too brittle for loose fallback because a
+    # restore can leave a same-name action with different target/cost/card
+    # identity. If the strict raw key misses here, we would rather abandon the
+    # MCTS/root action and fall back to plain NN than execute the wrong card.
+    if action_name in {"play_card", "use_potion", "combat_select_card", "combat_confirm_selection", "select_card_option"}:
+        return None
     normalized = normalize_action(action)
     normalized_key = _raw_action_key(normalized)
     if normalized_key is not None:
         for idx, legal_action in enumerate(legal):
             if _raw_action_key(normalize_action(legal_action)) == normalized_key:
                 return idx
-    action_name = _lower(action.get("action"))
     label = str(action.get("label") or "")
     for idx, legal_action in enumerate(legal):
         if _lower(legal_action.get("action")) == action_name and str(legal_action.get("label") or "") == label:
             return idx
-    for idx, legal_action in enumerate(legal):
-        if _lower(legal_action.get("action")) == action_name:
-            return idx
-    return 0
+    if allow_action_only_fallback:
+        for idx, legal_action in enumerate(legal):
+            if _lower(legal_action.get("action")) == action_name:
+                return idx
+    return None
 
 
 def _summarize_mcts_root(root: Any, k: int = 3) -> tuple[list[dict[str, Any]], float]:
@@ -1930,6 +2410,15 @@ def _dispatch_action_with_fallbacks(
     client: PipeBackedFullRunClient | ApiBackedFullRunClient,
     action: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str]:
+    action_name = _lower(action.get("action"))
+    allow_shape_fallbacks = action_name not in {
+        "play_card",
+        "end_turn",
+        "combat_select_card",
+        "combat_confirm_selection",
+        "select_card_option",
+        "use_potion",
+    }
     attempts: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -1943,9 +2432,9 @@ def _dispatch_action_with_fallbacks(
         attempts.append(candidate)
 
     _append_attempt(action)
-    stripped = {k: v for k, v in action.items() if k not in ("target_id", "slot", "target")}
-    _append_attempt(stripped)
-    _append_attempt({"action": "end_turn"})
+    if allow_shape_fallbacks:
+        stripped = {k: v for k, v in action.items() if k not in ("target_id", "slot", "target")}
+        _append_attempt(stripped)
 
     errors: list[str] = []
     for candidate in attempts:
@@ -1954,12 +2443,27 @@ def _dispatch_action_with_fallbacks(
         except Exception as exc:
             errors.append(f"{candidate.get('action', '?')}:{exc}")
 
+    if action_name == "wait":
+        try:
+            state = client.get_state()
+            return state, None, "; ".join(errors)
+        except Exception as exc:
+            errors.append(f"get_state:{exc}")
+    return None, None, "; ".join(errors)
+
+
+def _clear_client_state_cache(
+    client: PipeBackedFullRunClient | ApiBackedFullRunClient,
+    *,
+    reason: str,
+) -> None:
+    clear_fn = getattr(client, "clear_state_cache", None)
+    if clear_fn is None:
+        return
     try:
-        state = client.get_state()
-        return state, None, "; ".join(errors)
+        clear_fn()
     except Exception as exc:
-        errors.append(f"get_state:{exc}")
-        return None, None, "; ".join(errors)
+        logger.debug("clear_state_cache failed (%s): %s", reason, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1989,6 +2493,7 @@ def run_single_game(
     combat_safety_rerank: bool = False,
     beam_search: int = 0,
     turn_planner: Any | None = None,
+    act1_route_mode: str = DEFAULT_ACT1_ROUTE_MODE,
 ) -> tuple[GameResult, list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
     """Run one game and return the result."""
     result = GameResult(
@@ -1998,6 +2503,9 @@ def run_single_game(
     run_id = f"eval-{strategy}-{seed}-{uuid.uuid4().hex[:12]}"
     trace_steps: list[dict[str, Any]] | None = [] if capture_trace else None
     trajectory_records: list[dict[str, Any]] | None = [] if capture_trajectory else None
+
+    if combat_mcts_agent is not None:
+        _clear_client_state_cache(client, reason=f"pre_game:{seed}")
 
     try:
         state = client.reset(
@@ -2181,18 +2689,15 @@ def run_single_game(
             continue
 
         auto_action = _choose_auto_progress_action(state, st, legal, last_reward_claim_sig)
-        abort_after_action = False
         action_source = strategy
         combat_mcts_trace = None
         if auto_action is not None:
             action_idx, action = 0, auto_action
             action_source = "auto_progress"
         else:
-            loop_tracker.observe(st, legal)
             escape_action = loop_tracker.choose_escape_action(legal)
             if escape_action is not None:
                 action_idx, action = 0, escape_action
-                abort_after_action = loop_tracker.should_abort()
                 action_source = "repeat_escape"
             elif strategy == "nn":
                 action_idx, action, action_source, combat_mcts_trace = _select_action_nn(
@@ -2210,6 +2715,7 @@ def run_single_game(
                     combat_safety_rerank=combat_safety_rerank,
                     beam_search=beam_search,
                     turn_planner=turn_planner,
+                    act1_route_mode=act1_route_mode,
                 )
             elif strategy == "random":
                 action_idx, action = _select_action_random(state, legal)
@@ -2273,10 +2779,11 @@ def run_single_game(
                 )
             )
         last_reward_claim_sig = _next_reward_claim_signature(st, state, action_for_logging)
+        loop_tracker.observe_transition(state, legal, action_for_logging, next_state)
         state = next_state
 
         result.total_steps += 1
-        if abort_after_action:
+        if loop_tracker.should_abort():
             result.outcome = "timeout"
             result.error_msg = f"repeat_loop:{st}"
             _record_timeout_snapshot(result)
@@ -2314,6 +2821,9 @@ def run_single_game(
     if result.act1_cleared and result.boss_hp_fraction_dealt <= 0:
         result.boss_hp_fraction_dealt = 1.0
 
+    if combat_mcts_agent is not None:
+        _clear_client_state_cache(client, reason=f"post_game:{seed}")
+
     return result, trace_steps, trajectory_records
 
 
@@ -2342,6 +2852,7 @@ def evaluate_batch(
     combat_safety_rerank: bool = False,
     beam_search: int = 0,
     turn_planner: Any | None = None,
+    act1_route_mode: str = DEFAULT_ACT1_ROUTE_MODE,
 ) -> tuple[
     list[GameResult],
     dict[str, list[dict[str, Any]]],
@@ -2382,6 +2893,7 @@ def evaluate_batch(
                 combat_safety_rerank=combat_safety_rerank,
                 beam_search=beam_search,
                 turn_planner=turn_planner,
+                act1_route_mode=act1_route_mode,
             )
         except Exception as e:
             logger.warning("Game %d/%d crashed: %s", i + 1, num_games, e)
@@ -2409,6 +2921,8 @@ def evaluate_batch(
                 "[%s] %d/%d games done | avg_floor=%.1f | errors=%d",
                 strategy, i + 1, num_games, avg_floor, errors,
             )
+        if combat_mcts_agent is not None:
+            _clear_client_state_cache(client, reason=f"batch_loop:{seed}")
 
     return results, trace_payloads, trajectory_payloads
 
@@ -2803,6 +3317,26 @@ def main() -> int:
         "--combat-mcts-continuation-value", action="store_true", default=False,
         help="Use teacher-trained continuation_value_head (win_prob) instead of PPO value_head for MCTS leaf evaluation",
     )
+    parser.add_argument(
+        "--act1-route-mode",
+        type=str,
+        default=DEFAULT_ACT1_ROUTE_MODE,
+        choices=["conservative", "funnel_penalty"],
+        help="Act1 map planner mode: conservative keeps route-level elite avoidance only; funnel_penalty also avoids next-hop forced-elite funnels",
+    )
+    parser.add_argument(
+        "--combat-mcts-screen-mode",
+        type=str,
+        default=DEFAULT_COMBAT_MCTS_SCREEN_MODE,
+        choices=["always", "boss", "elite", "boss_elite"],
+        help="Which combat screens always enable MCTS during evaluation",
+    )
+    parser.add_argument(
+        "--combat-mcts-min-floor",
+        type=int,
+        default=DEFAULT_COMBAT_MCTS_MIN_FLOOR,
+        help="Also enable combat MCTS on any combat screen at or after this floor (default: 5)",
+    )
     parser.add_argument("--port", type=int, default=15527,
                         help="Godot simulator pipe port (default: 15527)")
     parser.add_argument(
@@ -3094,15 +3628,21 @@ def main() -> int:
                     dirichlet_alpha=0.0,
                     dirichlet_fraction=0.0,
                     num_determinizations=1,
+                    final_action_mode="visit_q_blend",
+                    final_action_top_k=3,
+                    final_action_q_weight=0.35,
                 ),
                 training=False,
                 device=device,
+                ppo_net=ppo_net,
             )
             combat_mcts_agent._max_step_budget = int(args.combat_mcts_step_budget)
+            combat_mcts_agent._screen_mode = str(getattr(args, "combat_mcts_screen_mode", DEFAULT_COMBAT_MCTS_SCREEN_MODE))
+            combat_mcts_agent._min_floor = max(0, int(getattr(args, "combat_mcts_min_floor", DEFAULT_COMBAT_MCTS_MIN_FLOOR)))
             if getattr(args, "combat_mcts_continuation_value", False):
                 from combat_nn import CombatNNEvaluator as _CombatNNEvaluator
                 combat_mcts_agent.evaluator = _CombatNNEvaluator(
-                    combat_net, vocab, device=device, use_continuation_value=True,
+                    combat_net, vocab, device=device, use_continuation_value=True, ppo_net=ppo_net,
                 )
                 logger.info("MCTS evaluator: using continuation_value_head (win_prob)")
             tactical_weight = max(0.0, min(1.0, float(args.combat_mcts_tactical_weight)))
@@ -3124,66 +3664,64 @@ def main() -> int:
 
         logger.info("Models loaded on %s", device)
 
-    # Connect to Godot
-    spawned_sim_proc = None
-    if args.auto_launch:
-        if args.transport == "http":
-            logger.warning("--auto-launch is only supported for Sim pipe transports; ignoring for transport=http")
-        else:
-            launch_protocol = "bin" if args.transport == "pipe-binary" else "json"
-            logger.info(
-                "Auto-launching fresh Sim host from %s on port %d (%s)",
-                Path(args.headless_dll).resolve(),
-                args.port,
-                launch_protocol,
-            )
-            spawned_sim_proc = start_headless_sim(
-                port=args.port,
-                repo_root=args.repo_root,
-                dll_path=args.headless_dll,
-                protocol=launch_protocol,
-            )
-            atexit.register(lambda: stop_process(spawned_sim_proc))
+    launch_protocol = "bin" if args.transport == "pipe-binary" else "json"
 
-    logger.info("Connecting to simulator on port %d via %s...", args.port, args.transport)
-    client: PipeBackedFullRunClient | ApiBackedFullRunClient
-    if args.transport == "http":
-        client = ApiBackedFullRunClient(base_url=f"http://127.0.0.1:{args.port}")
-        try:
-            client.get_state()
-        except Exception as http_exc:
-            logger.error("Failed to connect to HTTP simulator: %s", http_exc)
-            return 1
-    elif args.transport == "pipe":
-        try:
-            client = create_full_run_client(
+    def _start_and_connect_eval_client() -> tuple[PipeBackedFullRunClient | ApiBackedFullRunClient, Any | None]:
+        local_spawned = None
+        if args.auto_launch:
+            if args.transport == "http":
+                logger.warning("--auto-launch is only supported for Sim pipe transports; ignoring for transport=http")
+            else:
+                logger.info(
+                    "Auto-launching fresh Sim host from %s on port %d (%s)",
+                    Path(args.headless_dll).resolve(),
+                    args.port,
+                    launch_protocol,
+                )
+                local_spawned = start_headless_sim(
+                    port=args.port,
+                    repo_root=args.repo_root,
+                    dll_path=args.headless_dll,
+                    protocol=launch_protocol,
+                )
+        logger.info("Connecting to simulator on port %d via %s...", args.port, args.transport)
+        local_client: PipeBackedFullRunClient | ApiBackedFullRunClient
+        if args.transport == "http":
+            local_client = ApiBackedFullRunClient(base_url=f"http://127.0.0.1:{args.port}")
+            local_client.get_state()
+        elif args.transport == "pipe":
+            try:
+                local_client = create_full_run_client(
+                    port=args.port,
+                    use_pipe=True,
+                    transport=args.transport,
+                    ready_timeout_s=15.0,
+                )
+                local_client._ensure_connected()
+            except Exception as e:
+                logger.warning("Pipe unavailable on port %d (%s). Falling back to HTTP.", args.port, e)
+                local_client = ApiBackedFullRunClient(base_url=f"http://127.0.0.1:{args.port}")
+                local_client.get_state()
+        else:
+            local_client = create_full_run_client(
                 port=args.port,
                 use_pipe=True,
                 transport=args.transport,
                 ready_timeout_s=15.0,
             )
-            client._ensure_connected()
-        except Exception as e:
-            logger.warning("Pipe unavailable on port %d (%s). Falling back to HTTP.", args.port, e)
-            client = ApiBackedFullRunClient(base_url=f"http://127.0.0.1:{args.port}")
-            try:
-                client.get_state()
-            except Exception as http_exc:
-                logger.error("Failed to connect to Godot: %s", http_exc)
-                return 1
-    else:
-        client = create_full_run_client(
-            port=args.port,
-            use_pipe=True,
-            transport=args.transport,
-            ready_timeout_s=15.0,
-        )
-        try:
-            client._ensure_connected()
-        except Exception as e:
-            logger.error("Failed to connect to simulator: %s", e)
-            return 1
-    logger.info("Connected via %s", getattr(client, "transport_name", args.transport))
+            local_client._ensure_connected()
+        logger.info("Connected via %s", getattr(local_client, "transport_name", args.transport))
+        return local_client, local_spawned
+
+    # Connect to Godot
+    spawned_sim_proc = None
+    try:
+        client, spawned_sim_proc = _start_and_connect_eval_client()
+    except Exception as connect_exc:
+        logger.error("Failed to connect to simulator: %s", connect_exc)
+        return 1
+    if spawned_sim_proc is not None:
+        atexit.register(lambda: stop_process(spawned_sim_proc))
 
     seeds = _load_seed_list(args.seeds_file, args.seed_suite, args.num_games)
     trace_seeds = _parse_trace_seed_arg(args.trace_seeds)
@@ -3368,30 +3906,84 @@ def main() -> int:
     # Run evaluations
     all_results: dict[str, list[GameResult]] = {}
     all_summaries: dict[str, dict[str, Any]] = {}
+    fresh_host_per_game = bool(
+        args.auto_launch
+        and args.transport != "http"
+        and getattr(args, "combat_mcts_sims", 0) > 0
+    )
+    if fresh_host_per_game:
+        logger.info("MCTS evaluation isolation enabled: restarting fresh host for each seed")
 
     for strategy in strategies:
-        results, trace_payloads, trajectory_payloads = evaluate_batch(
-            client=client,
-            strategy=strategy,
-            seeds=seeds,
-            character_id=args.character,
-            ascension_level=args.ascension,
-            game_timeout=args.game_timeout,
-            max_steps=args.max_steps,
-            ppo_net=ppo_net,
-            combat_net=combat_net,
-            combat_teacher_override=combat_teacher_override,
-            combat_bc_override=combat_bc_override,
-            combat_mcts_agent=combat_mcts_agent,
-            vocab=vocab,
-            device=device,
-            trace_seeds=trace_seeds,
-            trajectory_seeds=trajectory_seeds,
-            lethal_probe=getattr(args, "lethal_probe", False),
-            combat_safety_rerank=getattr(args, "combat_safety_rerank", False),
-            beam_search=getattr(args, "beam_search", 0),
-            turn_planner=_turn_planner,
-        )
+        if fresh_host_per_game:
+            results = []
+            trace_payloads = {}
+            trajectory_payloads = {}
+            try:
+                client.close()
+            except Exception:
+                pass
+            stop_process(spawned_sim_proc)
+            spawned_sim_proc = None
+            for seed in seeds:
+                client, spawned_sim_proc = _start_and_connect_eval_client()
+                seed_results, seed_trace_payloads, seed_trajectory_payloads = evaluate_batch(
+                    client=client,
+                    strategy=strategy,
+                    seeds=[seed],
+                    character_id=args.character,
+                    ascension_level=args.ascension,
+                    game_timeout=args.game_timeout,
+                    max_steps=args.max_steps,
+                    ppo_net=ppo_net,
+                    combat_net=combat_net,
+                    combat_teacher_override=combat_teacher_override,
+                    combat_bc_override=combat_bc_override,
+                    combat_mcts_agent=combat_mcts_agent,
+                    vocab=vocab,
+                    device=device,
+                    trace_seeds=trace_seeds,
+                    trajectory_seeds=trajectory_seeds,
+                    lethal_probe=getattr(args, "lethal_probe", False),
+                    combat_safety_rerank=getattr(args, "combat_safety_rerank", False),
+                    beam_search=getattr(args, "beam_search", 0),
+                    turn_planner=_turn_planner,
+                    act1_route_mode=str(getattr(args, "act1_route_mode", DEFAULT_ACT1_ROUTE_MODE)),
+                )
+                results.extend(seed_results)
+                trace_payloads.update(seed_trace_payloads)
+                trajectory_payloads.update(seed_trajectory_payloads)
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                stop_process(spawned_sim_proc)
+                spawned_sim_proc = None
+            client, spawned_sim_proc = _start_and_connect_eval_client()
+        else:
+            results, trace_payloads, trajectory_payloads = evaluate_batch(
+                client=client,
+                strategy=strategy,
+                seeds=seeds,
+                character_id=args.character,
+                ascension_level=args.ascension,
+                game_timeout=args.game_timeout,
+                max_steps=args.max_steps,
+                ppo_net=ppo_net,
+                combat_net=combat_net,
+                combat_teacher_override=combat_teacher_override,
+                combat_bc_override=combat_bc_override,
+                combat_mcts_agent=combat_mcts_agent,
+                vocab=vocab,
+                device=device,
+                trace_seeds=trace_seeds,
+                trajectory_seeds=trajectory_seeds,
+                lethal_probe=getattr(args, "lethal_probe", False),
+                combat_safety_rerank=getattr(args, "combat_safety_rerank", False),
+                beam_search=getattr(args, "beam_search", 0),
+                turn_planner=_turn_planner,
+                act1_route_mode=str(getattr(args, "act1_route_mode", DEFAULT_ACT1_ROUTE_MODE)),
+            )
         all_results[strategy] = results
         summary = compute_summary(results)
         all_summaries[strategy] = summary

@@ -740,10 +740,22 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 				{
 					continue;
 				}
-				int slot = localPlayer.GetPotionSlotIndex(potion);
-				List<uint> targetIds = GetValidPotionTargetIds(potion, CombatManager.Instance.DebugOnlyGetState());
-				if (potion.TargetType.IsSingleTarget() && targetIds.Count > 0)
+				if (!CanUsePotionInCombatManually(potion))
 				{
+					continue;
+				}
+				int slot = localPlayer.GetPotionSlotIndex(potion);
+				if (slot < 0)
+				{
+					continue;
+				}
+				List<uint> targetIds = GetValidPotionTargetIds(potion, CombatManager.Instance.DebugOnlyGetState());
+				if (potion.TargetType.IsSingleTarget())
+				{
+					if (targetIds.Count == 0)
+					{
+						continue;
+					}
 					foreach (uint targetId2 in targetIds)
 					{
 						actions.Add(new FullRunSimulationLegalAction
@@ -762,7 +774,7 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 					Action = "use_potion",
 					Slot = slot,
 					Label = SafeGetText(() => potion.Title),
-					IsSupported = potion.Usage == PotionUsage.CombatOnly || potion.Usage == PotionUsage.AnyTime
+					IsSupported = true
 				});
 			}
 			if (combatState.CanEndTurn)
@@ -814,6 +826,12 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			TargetType.AnyPlayer => creature.IsPlayer && creature.IsHittable,
 			_ => true
 		};
+	}
+
+	private static bool CanUsePotionInCombatManually(PotionModel potion)
+	{
+		return !potion.IsQueued
+			&& (potion.Usage == PotionUsage.CombatOnly || potion.Usage == PotionUsage.AnyTime);
 	}
 
 	private static string GetMerchantEntryLabel(MerchantEntry entry)

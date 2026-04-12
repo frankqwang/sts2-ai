@@ -34,6 +34,85 @@ from combat_nn import (
 from vocab import Vocab, load_vocab
 
 logger = logging.getLogger(__name__)
+_PIPE_STEP_FAIL_DIAG_PATH = Path.cwd() / "STS2AI" / "Artifacts" / "tmp" / "mcts_pipe_step_fail_latest.json"
+
+
+def _combat_diag_snapshot(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
+    player = battle.get("player") if isinstance(battle.get("player"), dict) else {}
+    hand = player.get("hand") if isinstance(player.get("hand"), list) else []
+    enemies = battle.get("enemies") if isinstance(battle.get("enemies"), list) else []
+    return {
+        "state_type": state.get("state_type"),
+        "terminal": state.get("terminal"),
+        "run_floor": ((state.get("run") or {}).get("floor")),
+        "player_hp": player.get("hp", player.get("current_hp")),
+        "player_block": player.get("block"),
+        "player_energy": player.get("energy", player.get("current_energy")),
+        "hand": [
+            {
+                "index": card.get("index"),
+                "id": card.get("id"),
+                "label": card.get("label"),
+                "cost": card.get("cost"),
+            }
+            for card in hand if isinstance(card, dict)
+        ],
+        "enemies": [
+            {
+                "id": enemy.get("id") or enemy.get("name"),
+                "hp": enemy.get("hp", enemy.get("current_hp")),
+                "block": enemy.get("block"),
+            }
+            for enemy in enemies if isinstance(enemy, dict)
+        ],
+        "legal_actions": [
+            {
+                "action": action.get("action"),
+                "label": action.get("label"),
+                "card_index": action.get("card_index"),
+                "target_id": action.get("target_id"),
+                "slot": action.get("slot"),
+                "cost": action.get("cost"),
+                "card_id": action.get("card_id") or action.get("id"),
+            }
+            for action in (state.get("legal_actions") or [])
+            if isinstance(action, dict)
+        ],
+    }
+
+
+def _write_pipe_step_fail_diag(*, error: Exception, action: dict[str, Any], clean: dict[str, Any], state: dict[str, Any], legal: list[dict[str, Any]]) -> None:
+    try:
+        _PIPE_STEP_FAIL_DIAG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "error": str(error),
+            "action": action,
+            "clean_action": clean,
+            "legal_before_step": legal,
+            "state_snapshot": _combat_diag_snapshot(state),
+        }
+        _PIPE_STEP_FAIL_DIAG_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _with_required_target(action: dict[str, Any], source: dict[str, Any], preferred_target: Any) -> dict[str, Any] | None:
+    valid_targets = source.get("valid_target_ids") if isinstance(source.get("valid_target_ids"), list) else []
+    requires_target = bool(source.get("requires_target"))
+    if not requires_target:
+        return dict(action)
+    if preferred_target is not None and preferred_target in valid_targets:
+        patched = dict(action)
+        patched["target_id"] = preferred_target
+        return patched
+    if len(valid_targets) == 1:
+        patched = dict(action)
+        patched["target_id"] = valid_targets[0]
+        return patched
+    return None
 
 
 def _safe_load_state_dict(model: torch.nn.Module, state_dict: dict[str, Any]) -> None:
@@ -56,12 +135,13 @@ class CombatMCTSAgent:
         config: MCTSConfig | None = None,
         training: bool = False,
         device: torch.device | None = None,
+        ppo_net: Any | None = None,
     ):
         self.network = network
         self.vocab = vocab
         self.config = config or MCTSConfig()
         self.training = training
-        self.evaluator = CombatNNEvaluator(network, vocab, device=device)
+        self.evaluator = CombatNNEvaluator(network, vocab, device=device, ppo_net=ppo_net)
 
     def choose_action(
         self,
@@ -83,7 +163,12 @@ class CombatMCTSAgent:
             root = mcts_search(forward_model, self.evaluator, self.config)
 
         temperature = self.config.temperature if self.training else 0.0
-        action = root.best_action(temperature=temperature)
+        action = root.best_action(
+            temperature=temperature,
+            mode=getattr(self.config, "final_action_mode", "visit"),
+            top_k=getattr(self.config, "final_action_top_k", 3),
+            q_weight=getattr(self.config, "final_action_q_weight", 0.35),
+        )
 
         return action, root
 
@@ -219,8 +304,19 @@ class HttpCombatForwardModel:
 # Pipe-based forward model (FAST — production MCTS)
 # ---------------------------------------------------------------------------
 
-# Screen types where combat is still active
-_COMBAT_ACTIVE_STATES = {"combat", "monster", "elite", "boss", "hand_select", "card_select"}
+# Screen types where combat is still active.
+# `combat_pending` is an async transition state inside the combat lifecycle, not
+# a post-combat victory screen. Treating it as terminal causes MCTS to
+# hallucinate immediate wins after ordinary actions.
+_COMBAT_ACTIVE_STATES = {
+    "combat",
+    "monster",
+    "elite",
+    "boss",
+    "hand_select",
+    "card_select",
+    "combat_pending",
+}
 
 
 def _check_terminal(state: dict[str, Any]) -> tuple[bool, bool]:
@@ -250,7 +346,7 @@ def _check_terminal(state: dict[str, Any]) -> tuple[bool, bool]:
 
 
 def _reconcile_action(action: dict[str, Any],
-                      server_legal: list[dict[str, Any]]) -> dict[str, Any]:
+                      server_legal: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Match MCTS tree action to server's current legal_actions.
 
     After save/load, card_index may map to a DIFFERENT card because hand
@@ -268,40 +364,113 @@ def _reconcile_action(action: dict[str, Any],
     target = action.get("target_id")
     label = action.get("label", "")
     slot = action.get("slot")
+    card_id = action.get("card_id") or action.get("id")
+    cost = action.get("cost")
 
     _FIELDS = ("action", "index", "card_index", "hand_index",
-               "slot", "target_id", "target", "col", "row", "value", "label")
+               "slot", "target_id", "target", "col", "row", "value", "label", "card_id", "id", "cost")
 
     if not server_legal:
         return {k: v for k, v in action.items() if k in _FIELDS}
 
-    # 1. Exact match by label + target
+    def _match_play_like(la: dict[str, Any]) -> bool:
+        if la.get("action") != act_type:
+            return False
+        if card_id and (la.get("card_id") or la.get("id")) != card_id:
+            return False
+        if label and la.get("label") != label:
+            return False
+        if cost is not None and la.get("cost") != cost:
+            return False
+        return True
+
+    # Card-like actions are the main restore boundary hazard. After save/load,
+    # hand order and transient legal payloads can shift even when the visible
+    # card name stays the same, so we try to reconstruct the action from stable
+    # card metadata first and only keep server-provided indices/targets.
+    # 1. Exact match by card metadata when available.
+    if card_id and cost is not None:
+        for la in server_legal:
+            if (
+                la.get("action") == act_type
+                and (la.get("card_id") or la.get("id")) == card_id
+                and la.get("cost") == cost
+                and la.get("target_id") == target
+            ):
+                candidate = {k: v for k, v in la.items() if k in _FIELDS}
+                if act_type == "play_card" and candidate.get("target_id") is None:
+                    return _with_required_target(candidate, la, target)
+                return candidate
+
+    if label and cost is not None:
+        for la in server_legal:
+            if (
+                la.get("action") == act_type
+                and la.get("label") == label
+                and la.get("cost") == cost
+                and la.get("target_id") == target
+            ):
+                candidate = {k: v for k, v in la.items() if k in _FIELDS}
+                if act_type == "play_card" and candidate.get("target_id") is None:
+                    return _with_required_target(candidate, la, target)
+                return candidate
+
+    # 2. Exact match by label + target
     if label:
         for la in server_legal:
             if (la.get("action") == act_type
                     and la.get("label") == label
                     and la.get("target_id") == target):
-                return {k: v for k, v in la.items() if k in _FIELDS}
+                candidate = {k: v for k, v in la.items() if k in _FIELDS}
+                if act_type == "play_card" and candidate.get("target_id") is None:
+                    return _with_required_target(candidate, la, target)
+                return candidate
 
     # 2. Match by label only (server provides correct card_index/target)
+    if label and cost is not None:
+        for la in server_legal:
+            if la.get("action") == act_type and la.get("label") == label and la.get("cost") == cost:
+                candidate = {k: v for k, v in la.items() if k in _FIELDS}
+                if act_type == "play_card" and candidate.get("target_id") is None:
+                    return _with_required_target(candidate, la, target)
+                return candidate
+
     if label:
         for la in server_legal:
             if la.get("action") == act_type and la.get("label") == label:
-                return {k: v for k, v in la.items() if k in _FIELDS}
+                candidate = {k: v for k, v in la.items() if k in _FIELDS}
+                if act_type == "play_card" and candidate.get("target_id") is None:
+                    return _with_required_target(candidate, la, target)
+                return candidate
 
     # 3. Match by slot (for potions — slot is reliable across save/load)
+    if act_type in {"play_card", "combat_select_card", "combat_confirm_selection"}:
+        if target is not None:
+            for la in server_legal:
+                if _match_play_like(la) and la.get("target_id") == target:
+                    return {k: v for k, v in la.items() if k in _FIELDS}
+        for la in server_legal:
+            if _match_play_like(la):
+                candidate = {k: v for k, v in la.items() if k in _FIELDS}
+                if candidate.get("target_id") is None:
+                    return _with_required_target(candidate, la, target)
+                return candidate
+        return None
+
     if slot is not None:
         for la in server_legal:
             if la.get("action") == act_type and la.get("slot") == slot:
                 return {k: v for k, v in la.items() if k in _FIELDS}
 
     # 4. Match on action type alone (end_turn, proceed, etc.)
-    for la in server_legal:
-        if la.get("action") == act_type:
-            return {k: v for k, v in la.items() if k in _FIELDS}
+    if act_type not in {"play_card", "use_potion", "combat_select_card", "combat_confirm_selection", "select_card_option"}:
+        for la in server_legal:
+            if la.get("action") == act_type:
+                return {k: v for k, v in la.items() if k in _FIELDS}
 
-    # 5. Fallback
-    return {k: v for k, v in action.items() if k in _FIELDS}
+    # Card-like actions should not fall back to a stale action payload if the
+    # current state no longer exposes them as legal.
+    return None
 
 
 class PipeCombatForwardModel:
@@ -429,9 +598,51 @@ class PipeCombatForwardModel:
     def get_legal_actions(self) -> list[dict[str, Any]]:
         legal = self._state.get("legal_actions", [])
         if isinstance(legal, list):
-            return [a for a in legal
-                    if isinstance(a, dict) and a.get("is_enabled") is not False]
+            battle = self._state.get("battle") if isinstance(self._state.get("battle"), dict) else {}
+            player = battle.get("player") if isinstance(battle.get("player"), dict) else {}
+            hand = player.get("hand") if isinstance(player.get("hand"), list) else []
+            enriched: list[dict[str, Any]] = []
+            for action in legal:
+                if not isinstance(action, dict) or action.get("is_enabled") is False:
+                    continue
+                action_copy = dict(action)
+                # Reset card metadata every loop iteration. This used to leak the
+                # previous card's id/cost/targetability into the next legal action,
+                # which made MCTS reconcile stale actions and produced bogus
+                # EnergyCostTooHigh / requires-target failures.
+                card: dict[str, Any] | None = None
+                card_index = action_copy.get("card_index")
+                if isinstance(card_index, int) and 0 <= card_index < len(hand):
+                    card = hand[card_index]
+                if isinstance(card, dict):
+                    card_id = card.get("id") or card.get("label")
+                    if card_id:
+                        action_copy.setdefault("card_id", card_id)
+                        action_copy.setdefault("id", card_id)
+                        action_copy.setdefault("label", card.get("label") or card_id)
+                    if card.get("cost") is not None:
+                        action_copy.setdefault("cost", card.get("cost"))
+                    if card.get("requires_target") is not None:
+                        action_copy.setdefault("requires_target", bool(card.get("requires_target")))
+                    if isinstance(card.get("valid_target_ids"), list):
+                        action_copy.setdefault("valid_target_ids", list(card.get("valid_target_ids")))
+                enriched.append(action_copy)
+            return enriched
         return []
+
+    def _refresh_until_actionable(self, max_polls: int = 30, sleep_s: float = 0.005) -> None:
+        import time
+        for _ in range(max(1, int(max_polls))):
+            legal = self._state.get("legal_actions", [])
+            if isinstance(legal, list) and any(
+                isinstance(a, dict) and a.get("is_enabled") is not False for a in legal
+            ):
+                return
+            st = (self._state.get("state_type") or "").lower()
+            if st == "game_over" or self._state.get("terminal") or st not in _COMBAT_ACTIVE_STATES:
+                return
+            time.sleep(sleep_s)
+            self._state = self._pipe.call("state")
 
     def step(self, action: dict[str, Any]) -> None:
         if self._is_terminal:
@@ -450,13 +661,26 @@ class PipeCombatForwardModel:
             resp = self._pipe.call("load_state", {"state_id": self._state_id})
             if isinstance(resp, dict) and "state_type" in resp:
                 self._state = resp
+            self._refresh_until_actionable(max_polls=40, sleep_s=0.005)
             self._needs_restore = False
 
         # Reconcile action with server's current legal_actions.
         # After load_state, the server's legal_actions are the ground truth.
         # The MCTS tree's stored action may have stale target_id (e.g., DEFEND
         # stored with target_id from a different branch, or STRIKE missing target).
-        clean = _reconcile_action(action, self.get_legal_actions())
+        legal_before_step = self.get_legal_actions()
+        clean = _reconcile_action(action, legal_before_step)
+        if clean is None:
+            _write_pipe_step_fail_diag(
+                error=RuntimeError("MCTS branch action is no longer legal in current server state"),
+                action=dict(action) if isinstance(action, dict) else {},
+                clean={},
+                state=dict(self._state) if isinstance(self._state, dict) else {},
+                legal=legal_before_step,
+            )
+            self._is_terminal = True
+            self._player_won = False
+            return
 
         try:
             result = self._pipe.call("step", clean)
@@ -471,19 +695,15 @@ class PipeCombatForwardModel:
                 return
 
             # Poll until state is actionable (combat init may need frames)
-            import time
-            for _ in range(30):
-                legal = self._state.get("legal_actions", [])
-                if isinstance(legal, list) and any(
-                    isinstance(a, dict) and a.get("is_enabled") is not False for a in legal
-                ):
-                    break
-                st = (self._state.get("state_type") or "").lower()
-                if st == "game_over" or self._state.get("terminal") or st not in _COMBAT_ACTIVE_STATES:
-                    break
-                time.sleep(0.005)
-                self._state = self._pipe.call("state")
+            self._refresh_until_actionable(max_polls=30, sleep_s=0.005)
         except Exception as e:
+            _write_pipe_step_fail_diag(
+                error=e,
+                action=dict(action) if isinstance(action, dict) else {},
+                clean=dict(clean) if isinstance(clean, dict) else {},
+                state=dict(self._state) if isinstance(self._state, dict) else {},
+                legal=legal_before_step,
+            )
             logger.warning("Pipe step failed: %s", e)
             self._is_terminal = True
             return

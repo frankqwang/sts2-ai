@@ -2946,7 +2946,7 @@ def main() -> int:
     mcts_config = MCTSConfig(num_simulations=args.mcts_sims, c_puct=1.5,
                               temperature=1.0, dirichlet_alpha=0.3, dirichlet_fraction=0.25)
     mcts_agent = CombatMCTSAgent(network=mcts_net, vocab=vocab, config=mcts_config,
-                                  training=True, device=device)
+                                  training=True, device=device, ppo_net=ppo_net)
     # Exclude shared symbolic_head params from the combat optimizer — the PPO
     # optimizer owns them. Combat's backward still accumulates gradients on
     # those params via autograd; they are consumed at PPO step time. This
@@ -3217,7 +3217,7 @@ def main() -> int:
         _cpu_mcts_net = copy.deepcopy(mcts_net).cpu().eval()
         _cpu_mcts_agent = CombatMCTSAgent(
             network=_cpu_mcts_net, vocab=vocab, config=mcts_config,
-            training=False, device=torch.device("cpu"))
+            training=False, device=torch.device("cpu"), ppo_net=_cpu_ppo_net)
 
         # Export PPO actor to ONNX for ORT CPU inference (Branch C)
         try:
@@ -3801,17 +3801,17 @@ def main() -> int:
                 entry["offline_ranking_state_context_gate"] = round(
                     float(ppo_net.offline_ranking_state_context_gate.detach().item()), 6
                 )
-            if hasattr(combat_net, "main_action_context_gate"):
+            if hasattr(mcts_net, "main_action_context_gate"):
                 entry["combat_main_action_context_gate"] = round(
-                    float(combat_net.main_action_context_gate.detach().item()), 6
+                    float(mcts_net.main_action_context_gate.detach().item()), 6
                 )
-            if hasattr(combat_net, "main_state_context_gate"):
+            if hasattr(mcts_net, "main_state_context_gate"):
                 entry["combat_main_state_context_gate"] = round(
-                    float(combat_net.main_state_context_gate.detach().item()), 6
+                    float(mcts_net.main_state_context_gate.detach().item()), 6
                 )
-            if hasattr(combat_net, "teacher_action_context_gate"):
+            if hasattr(mcts_net, "teacher_action_context_gate"):
                 entry["combat_teacher_action_context_gate"] = round(
-                    float(combat_net.teacher_action_context_gate.detach().item()), 6
+                    float(mcts_net.teacher_action_context_gate.detach().item()), 6
                 )
             metrics_history.append(entry)
             if metrics_log is not None:

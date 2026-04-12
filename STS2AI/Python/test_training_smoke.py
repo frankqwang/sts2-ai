@@ -5712,3 +5712,317 @@ class TestSymbolicFeaturesHead:
         assert qp_grad is not None and qp_grad.abs().max().item() > 0.0, \
             "After out_proj is nonzero, gradients should flow to query_proj " \
             "through cross-attention — the autograd chain is broken"
+def test_pipe_combat_forward_model_keeps_combat_pending_non_terminal():
+    from combat_mcts_agent import _check_terminal
+
+    is_terminal, player_won = _check_terminal({
+        "state_type": "combat_pending",
+        "terminal": False,
+        "legal_actions": [],
+    })
+
+    assert is_terminal is False
+    assert player_won is False
+
+
+def test_mcts_puct_uses_prior_when_parent_has_zero_visits():
+    from mcts_core import MCTSNode
+
+    root = MCTSNode()
+    legal = [
+        {"action": "play_card", "label": "LOW", "target_id": 1},
+        {"action": "play_card", "label": "HIGH", "target_id": 2},
+    ]
+    root.expand(legal, np.array([0.1, 0.9], dtype=np.float32))
+
+    _key, child = root.select_child(c_puct=1.5)
+
+    assert child.action["label"] == "HIGH"
+
+
+def test_mcts_best_action_visit_q_blend_can_override_top_visits():
+    from mcts_core import MCTSNode
+
+    root = MCTSNode()
+    root.visit_count = 300
+    legal = [
+        {"action": "play_card", "label": "BASH", "card_index": 0, "target_id": 1},
+        {"action": "play_card", "label": "STRIKE", "card_index": 1, "target_id": 1},
+        {"action": "play_card", "label": "DEFEND", "card_index": 2, "target_id": 1},
+    ]
+    root.expand(legal, np.array([0.7, 0.2, 0.1], dtype=np.float32))
+
+    bash = root.children[("play_card", None, 0, None, 1, None)]
+    strike = root.children[("play_card", None, 1, None, 1, None)]
+    defend = root.children[("play_card", None, 2, None, 1, None)]
+
+    bash.visit_count = 120
+    bash.total_value = 60.0   # q = 0.5
+    strike.visit_count = 105
+    strike.total_value = 94.5  # q = 0.9
+    defend.visit_count = 75
+    defend.total_value = 52.5  # q = 0.7
+
+    best = root.best_action(mode="visit_q_blend", temperature=0.0, top_k=2, q_weight=0.45)
+
+    assert best["label"] == "STRIKE"
+
+def test_match_legal_action_index_distinguishes_target_id():
+    from evaluate_ai import _match_legal_action_index
+
+    legal = [
+        {"action": "play_card", "label": "BASH", "card_index": 0, "target_id": 1},
+        {"action": "play_card", "label": "BASH", "card_index": 0, "target_id": 2},
+        {"action": "play_card", "label": "BASH", "card_index": 0, "target_id": 3},
+    ]
+
+    idx = _match_legal_action_index(legal, {"action": "play_card", "label": "BASH", "card_index": 0, "target_id": 3})
+
+    assert idx == 2
+
+
+def test_match_legal_action_index_does_not_loose_match_play_card():
+    from evaluate_ai import _match_legal_action_index
+
+    legal = [
+        {"action": "play_card", "label": "DEFEND_IRONCLAD", "card_index": 0, "target_id": None, "cost": 1},
+        {"action": "end_turn"},
+    ]
+
+    idx = _match_legal_action_index(
+        legal,
+        {"action": "play_card", "label": "DEFEND_IRONCLAD", "card_index": 1, "target_id": None, "cost": 2},
+    )
+
+    assert idx is None
+
+
+def test_pipe_forward_model_get_legal_actions_does_not_bleed_card_metadata():
+    from combat_mcts_agent import PipeCombatForwardModel
+
+    state = {
+        "state_type": "monster",
+        "battle": {
+            "player": {
+                "hand": [
+                    {
+                        "id": "STRIKE_IRONCLAD",
+                        "label": "STRIKE_IRONCLAD",
+                        "cost": 1,
+                        "requires_target": True,
+                        "valid_target_ids": [11, 12],
+                    }
+                ]
+            }
+        },
+        "legal_actions": [
+            {"action": "play_card", "card_index": 0},
+            {"action": "end_turn"},
+        ],
+    }
+
+    fm = PipeCombatForwardModel(pipe=None, state_id="s0", state=state)
+    legal = fm.get_legal_actions()
+
+    assert legal[0]["card_id"] == "STRIKE_IRONCLAD"
+    assert legal[0]["cost"] == 1
+    assert legal[1]["action"] == "end_turn"
+    assert "card_id" not in legal[1]
+    assert "cost" not in legal[1]
+
+
+def test_dispatch_action_with_fallbacks_does_not_mutate_combat_action():
+    from evaluate_ai import _dispatch_action_with_fallbacks
+
+    class DummyClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def act(self, payload: dict[str, object]) -> dict[str, object]:
+            self.calls.append(dict(payload))
+            raise RuntimeError("rejected")
+
+        def get_state(self) -> dict[str, object]:
+            raise AssertionError("combat action dispatch should not refresh state after rejection")
+
+    client = DummyClient()
+    action = {"action": "use_potion", "slot": 0, "target_id": 0}
+
+    next_state, executed_action, dispatch_error = _dispatch_action_with_fallbacks(client, action)
+
+    assert next_state is None
+    assert executed_action is None
+    assert client.calls == [action]
+    assert "use_potion:rejected" in dispatch_error
+
+
+def test_pipe_client_rejected_step_with_state_raises_api_error():
+    from full_run_env import PipeBackedFullRunClient
+    from sts2_singleplayer_env import SingleplayerApiError
+
+    class DummyPipe:
+        def connect(self, timeout_s: float | None = None) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+        def call(self, method: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+            assert method == "step"
+            return {
+                "accepted": False,
+                "error": "Potion slot 0 is empty.",
+                "failure_code": "full_run_combat_action_rejected",
+                "state": {"state_type": "monster"},
+            }
+
+    client = object.__new__(PipeBackedFullRunClient)
+    client.port = 15527
+    client.protocol = "json"
+    client.poll_interval_s = 0.0
+    client.connect_timeout_s = 1.0
+    client._pipe = DummyPipe()
+    client._connected = True
+    client._last_step_info = None
+    client._http_fallback = None
+    client._call_count_since_fallback = 0
+    client._consecutive_failures = 0
+    client._dead = False
+
+    with pytest.raises(SingleplayerApiError) as exc_info:
+        client.act({"action": "use_potion", "slot": 0})
+
+    exc = exc_info.value
+    assert "full_run_combat_action_rejected" in str(exc)
+    assert getattr(exc, "latest_state", None) == {"state_type": "monster"}
+
+
+def test_choose_act1_safe_map_action_avoids_elite_when_possible():
+    from evaluate_ai import _choose_act1_safe_map_action
+
+    state = _make_synthetic_state("map")
+    state["map"] = {
+        "boss": {"row": 4},
+        "next_options": [
+            {"index": 0, "col": 0, "row": 1, "type": "monster"},
+            {"index": 1, "col": 1, "row": 1, "type": "monster"},
+        ],
+        "nodes": [
+            {"col": 0, "row": 1, "type": "monster", "children": [(0, 2)]},
+            {"col": 0, "row": 2, "type": "elite", "children": [(0, 3)]},
+            {"col": 0, "row": 3, "type": "monster", "children": []},
+            {"col": 1, "row": 1, "type": "monster", "children": [(1, 2)]},
+            {"col": 1, "row": 2, "type": "restsite", "children": [(1, 3)]},
+            {"col": 1, "row": 3, "type": "monster", "children": []},
+        ],
+    }
+    legal = [
+        {"action": "choose_map_node", "index": 0, "label": "monster", "col": 0, "row": 1},
+        {"action": "choose_map_node", "index": 1, "label": "monster", "col": 1, "row": 1},
+    ]
+    logits = np.asarray([5.0, 0.1], dtype=np.float32)
+
+    choice = _choose_act1_safe_map_action(state, legal, logits)
+
+    assert choice is not None
+    idx, action, source = choice
+    assert idx == 1
+    assert action["label"] == "monster"
+    assert source == "nn_map_plan"
+
+
+def test_choose_act1_safe_map_action_prefers_rest_route_when_low_hp():
+    from evaluate_ai import _choose_act1_safe_map_action
+
+    state = _make_synthetic_state("map")
+    state["player"]["hp"] = 22
+    state["map"] = {
+        "boss": {"row": 4},
+        "next_options": [
+            {"index": 0, "col": 0, "row": 1, "type": "monster"},
+            {"index": 1, "col": 1, "row": 1, "type": "monster"},
+        ],
+        "nodes": [
+            {"col": 0, "row": 1, "type": "monster", "children": [(0, 2)]},
+            {"col": 0, "row": 2, "type": "shop", "children": [(0, 3)]},
+            {"col": 0, "row": 3, "type": "monster", "children": []},
+            {"col": 1, "row": 1, "type": "monster", "children": [(1, 2)]},
+            {"col": 1, "row": 2, "type": "restsite", "children": [(1, 3)]},
+            {"col": 1, "row": 3, "type": "monster", "children": []},
+        ],
+    }
+    legal = [
+        {"action": "choose_map_node", "index": 0, "label": "monster", "col": 0, "row": 1},
+        {"action": "choose_map_node", "index": 1, "label": "monster", "col": 1, "row": 1},
+    ]
+    logits = np.asarray([5.0, 0.1], dtype=np.float32)
+
+    choice = _choose_act1_safe_map_action(state, legal, logits)
+
+    assert choice is not None
+    idx, _action, source = choice
+    assert idx == 1
+    assert source == "nn_map_plan"
+
+
+def test_choose_act1_safe_map_action_keeps_only_elite_option():
+    from evaluate_ai import _choose_act1_safe_map_action
+
+    state = _make_synthetic_state("map")
+    state["map"] = {
+        "boss": {"row": 3},
+        "next_options": [
+            {"index": 0, "col": 0, "row": 1, "type": "elite"},
+        ],
+        "nodes": [
+            {"col": 0, "row": 1, "type": "elite", "children": [(0, 2)]},
+            {"col": 0, "row": 2, "type": "monster", "children": []},
+        ],
+    }
+    legal = [
+        {"action": "choose_map_node", "index": 0, "label": "elite", "col": 0, "row": 1},
+    ]
+    logits = np.asarray([5.0], dtype=np.float32)
+
+    choice = _choose_act1_safe_map_action(state, legal, logits)
+
+    assert choice is not None
+    idx, action, source = choice
+    assert idx == 0
+    assert action["label"] == "elite"
+    assert source == "nn_map_plan"
+
+
+def test_choose_act1_safe_map_action_avoids_forced_elite_funnel():
+    from evaluate_ai import _choose_act1_safe_map_action
+
+    state = _make_synthetic_state("map")
+    state["player"]["hp"] = 48
+    state["map"] = {
+        "boss": {"row": 7},
+        "next_options": [
+            {"index": 0, "col": 0, "row": 4, "type": "unknown"},
+            {"index": 1, "col": 1, "row": 4, "type": "restsite"},
+        ],
+        "nodes": [
+            {"col": 0, "row": 4, "type": "unknown", "children": [(0, 5)]},
+            {"col": 0, "row": 5, "type": "elite", "children": [(0, 6)]},
+            {"col": 0, "row": 6, "type": "monster", "children": []},
+            {"col": 1, "row": 4, "type": "restsite", "children": [(1, 5)]},
+            {"col": 1, "row": 5, "type": "monster", "children": [(1, 6)]},
+            {"col": 1, "row": 6, "type": "shop", "children": []},
+        ],
+    }
+    legal = [
+        {"action": "choose_map_node", "index": 0, "label": "unknown", "col": 0, "row": 4},
+        {"action": "choose_map_node", "index": 1, "label": "restsite", "col": 1, "row": 4},
+    ]
+    logits = np.asarray([5.0, 0.2], dtype=np.float32)
+
+    choice = _choose_act1_safe_map_action(state, legal, logits)
+
+    assert choice is not None
+    idx, action, source = choice
+    assert idx == 1
+    assert action["label"] == "restsite"
+    assert source == "nn_map_plan"

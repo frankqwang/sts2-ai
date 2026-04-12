@@ -43,6 +43,7 @@ from rl_encoder_v2 import (
     _safe_float,
     _safe_int,
     _extract_player,
+    build_structured_state,
 )
 from mcts_core import NNEvaluator, action_key
 from symbolic_features_head import SymbolicFeaturesHead
@@ -835,13 +836,15 @@ class CombatNNEvaluator:
 
     def __init__(self, network: CombatPolicyValueNetwork, vocab: Vocab,
                  device: torch.device | None = None,
-                 use_continuation_value: bool = False):
+                 use_continuation_value: bool = False,
+                 ppo_net: Any | None = None):
         self.device = device or _auto_device()
         self.network = network.to(self.device)
         self.vocab = vocab
         self.network.eval()
         self._use_amp = self.device.type == "cuda"
         self._use_continuation_value = use_continuation_value
+        self._ppo_net = ppo_net
 
     def evaluate(
         self,
@@ -851,6 +854,19 @@ class CombatNNEvaluator:
         """Evaluate combat state → (policy, value)."""
         sf = build_combat_features(state, self.vocab)
         af = build_combat_action_features(state, legal_actions, self.vocab)
+
+        if self._ppo_net is not None and hasattr(self._ppo_net, "compute_deck_repr"):
+            try:
+                ss = build_structured_state(state, self.vocab)
+                deck_t = {
+                    "deck_ids": torch.tensor(ss.deck_ids).unsqueeze(0).to(self.device),
+                    "deck_aux": torch.tensor(ss.deck_aux).unsqueeze(0).float().to(self.device),
+                    "deck_mask": torch.tensor(ss.deck_mask).unsqueeze(0).bool().to(self.device),
+                }
+                with torch.no_grad():
+                    sf["deck_repr"] = self._ppo_net.compute_deck_repr(deck_t).squeeze(0).detach().cpu().numpy()
+            except Exception:
+                pass
 
         state_t = _tensorize_features(sf, self.device)
         action_t = _tensorize_features(af, self.device)
@@ -898,6 +914,20 @@ class CombatNNEvaluator:
         all_sf = [build_combat_features(s, self.vocab) for s in states]
         all_af = [build_combat_action_features(s, la, self.vocab)
                   for s, la in zip(states, legal_actions_list)]
+
+        if self._ppo_net is not None and hasattr(self._ppo_net, "compute_deck_repr"):
+            for sf, state in zip(all_sf, states):
+                try:
+                    ss = build_structured_state(state, self.vocab)
+                    deck_t = {
+                        "deck_ids": torch.tensor(ss.deck_ids).unsqueeze(0).to(self.device),
+                        "deck_aux": torch.tensor(ss.deck_aux).unsqueeze(0).float().to(self.device),
+                        "deck_mask": torch.tensor(ss.deck_mask).unsqueeze(0).bool().to(self.device),
+                    }
+                    with torch.no_grad():
+                        sf["deck_repr"] = self._ppo_net.compute_deck_repr(deck_t).squeeze(0).detach().cpu().numpy()
+                except Exception:
+                    pass
 
         # Stack along batch dimension
         batch_state: dict[str, torch.Tensor] = {}
