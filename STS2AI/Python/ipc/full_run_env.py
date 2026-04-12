@@ -536,21 +536,24 @@ class PipeBackedFullRunClient:
         if isinstance(info, dict):
             self._last_step_info = dict(info)
         if not bool(result.get("accepted", False)):
-            # C# sometimes returns accepted=False even when the action executed
-            # successfully (e.g., choose_map_node transitions to combat but reports
-            # not accepted). If we got a valid state back, use it anyway.
             state = result.get("state")
-            if isinstance(state, dict) and state.get("state_type"):
-                logger.debug("Pipe step not accepted but got valid state: %s",
-                             state.get("state_type"))
-                return state
+            failure_code = (
+                result.get("failure_code")
+                or result.get("failureCode")
+                or result.get("FailureCode")
+            )
+            error_text = str(result.get("error") or "Unknown full-run env step error")
+            if failure_code:
+                error_text = f"{error_text} [{failure_code}]"
             error = SingleplayerApiError(
-                str(result.get("error") or "Unknown full-run env step error")
+                error_text
             )
             if isinstance(state, dict):
                 setattr(error, "latest_state", state)
             if isinstance(info, dict):
                 setattr(error, "step_info", info)
+            if isinstance(failure_code, str) and failure_code:
+                setattr(error, "failure_code", failure_code)
             raise error
         state = result.get("state")
         if isinstance(state, dict):

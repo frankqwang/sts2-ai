@@ -134,7 +134,11 @@ class MCTSNode:
     def puct_score(self, parent_visits: int, c_puct: float) -> float:
         """PUCT selection score (higher = more promising to explore)."""
         exploitation = self.q_value
-        exploration = c_puct * self.prior * math.sqrt(parent_visits) / (1 + self.visit_count)
+        # When parent_visits == 0 (freshly expanded root), using sqrt(0) wipes
+        # out the prior term entirely and the first child in iteration order
+        # wins every tie. That makes low-sim searches degenerate into
+        # "always pick legal[0] first", which is not valid PUCT behavior.
+        exploration = c_puct * self.prior * math.sqrt(max(1, parent_visits)) / (1 + self.visit_count)
         return exploitation + exploration
 
     def expand(self, legal_actions: list[dict], priors: np.ndarray) -> None:
@@ -161,7 +165,14 @@ class MCTSNode:
         assert best_key is not None
         return best_key, self.children[best_key]
 
-    def best_action(self, temperature: float = 0.0) -> dict[str, Any]:
+    def best_action(
+        self,
+        temperature: float = 0.0,
+        *,
+        mode: str = "visit",
+        top_k: int = 3,
+        q_weight: float = 0.35,
+    ) -> dict[str, Any]:
         """Select action based on visit counts.
 
         temperature=0: argmax (deterministic)
@@ -171,8 +182,26 @@ class MCTSNode:
             raise ValueError("No children to select from")
 
         if temperature < 1e-6:
-            # Deterministic: highest visit count
-            best = max(self.children.values(), key=lambda c: c.visit_count)
+            if mode == "visit_q_blend":
+                ranked = sorted(
+                    self.children.values(),
+                    key=lambda c: (c.visit_count, c.prior, c.q_value),
+                    reverse=True,
+                )
+                candidates = ranked[:max(1, min(int(top_k), len(ranked)))]
+                total_visits = max(1, sum(child.visit_count for child in self.children.values()))
+                blend_q_weight = max(0.0, min(1.0, float(q_weight)))
+
+                def _score(child: MCTSNode) -> tuple[float, int, float]:
+                    visit_frac = child.visit_count / total_visits
+                    q_norm = (child.q_value + 1.0) * 0.5
+                    blended = (1.0 - blend_q_weight) * visit_frac + blend_q_weight * q_norm
+                    return blended, child.visit_count, child.q_value
+
+                best = max(candidates, key=_score)
+            else:
+                # Deterministic: highest visit count
+                best = max(self.children.values(), key=lambda c: c.visit_count)
             return best.action
         else:
             # Stochastic: sample proportional to visit_count^(1/T)
@@ -231,6 +260,9 @@ class MCTSConfig:
     dirichlet_alpha: float = 0.3    # root noise
     dirichlet_fraction: float = 0.25
     num_determinizations: int = 1   # >1 for information set MCTS
+    final_action_mode: str = "visit"
+    final_action_top_k: int = 3
+    final_action_q_weight: float = 0.35
 
 
 _EVAL_BATCH_SIZE = 8  # leaves to accumulate before batch NN forward pass

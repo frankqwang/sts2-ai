@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable
 
@@ -32,10 +34,51 @@ def _source_roots(repo_root: Path) -> Iterable[Path]:
             yield root
 
 
+def _host_project_path(repo_root: Path) -> Path:
+    return repo_root / "STS2AI" / "ENV" / "Sim" / "Host" / "headless_sim_host_0991.csproj"
+
+
+def _resolve_msbuild_path(raw_value: str, *, repo_root: Path, host_project: Path) -> Path | None:
+    value = raw_value.strip()
+    if not value:
+        return None
+    value = value.replace("$(MSBuildThisFileDirectory)", str(host_project.parent) + os.sep)
+    if "$(" in value:
+        return None
+    expanded = Path(os.path.expandvars(value))
+    if expanded.is_absolute():
+        return expanded
+    return (host_project.parent / expanded).resolve()
+
+
+def _host_upstream_root(repo_root: Path) -> Path | None:
+    host_project = _host_project_path(repo_root)
+    if not host_project.exists():
+        return None
+    try:
+        root = ET.parse(host_project).getroot()
+    except ET.ParseError:
+        return None
+    for prop_group in root.findall("PropertyGroup"):
+        upstream_node = prop_group.find("UpstreamRoot")
+        if upstream_node is None or upstream_node.text is None:
+            continue
+        resolved = _resolve_msbuild_path(upstream_node.text, repo_root=repo_root, host_project=host_project)
+        if resolved is not None and resolved.exists():
+            return resolved
+    return None
+
+
 def _newest_source_file(repo_root: Path) -> tuple[Path | None, float]:
     newest_path: Path | None = None
     newest_mtime = 0.0
-    for root in _source_roots(repo_root):
+    candidate_roots = list(_source_roots(repo_root))
+    upstream_root = _host_upstream_root(repo_root)
+    if upstream_root is not None:
+        candidate_roots.extend(
+            path for path in (upstream_root / "src", upstream_root / "System", upstream_root / "Properties") if path.exists()
+        )
+    for root in candidate_roots:
         for path in root.rglob("*.cs"):
             try:
                 mtime = path.stat().st_mtime
@@ -57,8 +100,11 @@ def ensure_host_binary_is_fresh(*, repo_root: Path, dll_path: Path) -> None:
         host_mtime = dll_path.stat().st_mtime
     except OSError as exc:
         raise RuntimeError(f"Unable to stat HeadlessSim host binary: {dll_path}") from exc
-    # Small tolerance to avoid false positives on coarse timestamp resolutions.
-    if host_mtime + 1.0 < newest_source_mtime:
+    # Windows + dotnet build can leave source and output mtimes within a couple
+    # of seconds of each other even when the rebuild succeeded. Keep a slightly
+    # larger tolerance so the freshness guard catches real stale hosts without
+    # tripping immediately after a successful local build.
+    if host_mtime + 3.0 < newest_source_mtime:
         raise RuntimeError(
             "HeadlessSim host binary is stale: "
             f"{dll_path} is older than source {newest_source}. "

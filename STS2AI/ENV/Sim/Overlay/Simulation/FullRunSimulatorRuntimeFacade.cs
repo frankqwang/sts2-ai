@@ -1683,18 +1683,22 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			AbstractRoom preFinishedRoom = AbstractRoom.FromSerializable(snapshot.PreFinishedRoom, restored)!;
 			await RunManager.Instance.LoadIntoLatestMapCoord(preFinishedRoom);
 			_forceMapView = false;
+			// Room bootstrap can consume run/player RNG (shop rolls, combat setup, etc.).
+			// Reapply saved RNG state after the room is reconstructed so subsequent
+			// random branches match the saved snapshot as closely as possible.
+			// This matters for MCTS save/load parity: even when visible room state
+			// matches, drifted RNG will make later simulated branches diverge.
+			RestoreRunAndPlayerRandomState(restored, snapshot);
 
 			switch (savedSnapshot.StateType)
 			{
 				case "shop":
-					RestorePlayerRngState(restored, snapshot);
 					if (RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is MerchantRoom restoredMerchantRoom && savedSnapshot.ShopSnapshot != null)
 					{
 						ApplyShopSnapshot(restoredMerchantRoom, savedSnapshot.ShopSnapshot);
 					}
 					break;
 				case "treasure":
-					RestoreTreasureGeneratorState(restored, snapshot);
 					if (savedSnapshot.TreasureSnapshot != null)
 					{
 						ApplyTreasureSnapshot(savedSnapshot.TreasureSnapshot, restored);
@@ -2200,6 +2204,8 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			if (savedPlayers.TryGetValue(player.NetId, out SerializablePlayer? savedPlayer))
 			{
 				player.PlayerRng.LoadFromSerializable(savedPlayer.Rng);
+				player.PlayerOdds.LoadFromSerializable(savedPlayer.Odds);
+				player.RelicGrabBag.LoadFromSerializable(savedPlayer.RelicGrabBag);
 			}
 		}
 	}
@@ -2208,6 +2214,12 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	{
 		restored.Rng.LoadFromSerializable(snapshot.SerializableRng);
 		restored.SharedRelicGrabBag.LoadFromSerializable(snapshot.SerializableSharedRelicGrabBag);
+	}
+
+	private static void RestoreRunAndPlayerRandomState(RunState restored, Saves.SerializableRun snapshot)
+	{
+		RestoreTreasureGeneratorState(restored, snapshot);
+		RestorePlayerRngState(restored, snapshot);
 	}
 
 	private static void ApplyShopSnapshot(MerchantRoom merchantRoom, SavedShopSnapshot snapshot)
@@ -2412,13 +2424,35 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			});
 		}
 
+		HashSet<uint> savedEnemyCombatIds = snapshot.Creatures
+			.Select(static creature => creature.CombatId)
+			.Where(static combatId => combatId > 0)
+			.ToHashSet();
+		HashSet<string> savedEnemyIds = snapshot.Creatures
+			.Select(static creature => creature.Id ?? string.Empty)
+			.Where(static id => !string.IsNullOrWhiteSpace(id))
+			.ToHashSet(StringComparer.Ordinal);
+		foreach (Creature staleEnemy in combatState.Enemies
+			.Where(enemy => !savedEnemyCombatIds.Contains(enemy.CombatId ?? 0)
+				&& !savedEnemyIds.Contains(enemy.ModelId.Entry))
+			.ToList())
+		{
+			FullRunSimulationTrace.Write(
+				$"combat_restore.remove_stale_enemy combat_id={staleEnemy.CombatId ?? 0} id={staleEnemy.ModelId.Entry} hp={staleEnemy.CurrentHp}");
+			CombatManager.Instance.RemoveCreature(staleEnemy);
+			combatState.RemoveCreature(staleEnemy);
+		}
+
 		foreach (SerializableCreatureState savedCreature in snapshot.Creatures)
 		{
 			Creature? creature = combatState.Enemies.FirstOrDefault(enemy => (enemy.CombatId ?? 0) == savedCreature.CombatId || enemy.ModelId.Entry == savedCreature.Id);
 			if (creature != null)
 			{
 				RestoreCreatureState(creature, savedCreature);
+				continue;
 			}
+			FullRunSimulationTrace.Write(
+				$"combat_restore.missing_saved_enemy combat_id={savedCreature.CombatId} id={savedCreature.Id} hp={savedCreature.Hp}");
 		}
 
 		foreach (SavedCombatMonsterMoveSnapshot moveSnapshot in snapshot.MonsterMoves)
