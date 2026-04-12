@@ -54,7 +54,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	private bool _suppressTerminalRewardsTransitionOnce;
 
 	/// <summary>
-	/// MCTS state snapshot cache. Maps state_id → serialized run snapshot.
+	/// MCTS state snapshot cache. Maps state_id -> serialized run snapshot.
 	/// Used for save/load state during tree search.
 	/// </summary>
 	private readonly Dictionary<string, SavedRunSnapshot> _stateCache = new();
@@ -243,7 +243,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationTrace.Write("headless_reset.after_cleanup");
 		// TestMode makes the entire engine skip Godot-specific code:
 		// PreloadManager skips asset loading, MapRoom.Enter() skips scene creation,
-		// Cmd.Wait/VfxCmd/CardCmd skip animations — pure game logic only.
+		// Cmd.Wait/VfxCmd/CardCmd skip animations - pure game logic only.
 		TestSupport.TestMode.IsOn = true;
 		_runtimeScope = new SimulationRuntimeScope();
 		_selectorScope = CardSelectCmd.UseSelector(FullRunSimulationChoiceBridge.Instance);
@@ -270,47 +270,24 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationTrace.Write($"headless_reset.after_create_run seed={seed} character={character.Id.Entry} ascension={ascensionLevel}");
 		try
 		{
-			RunManager.Instance.SetUpTest(runState, new NetSingleplayerGameService(), shouldSave: false);
+			RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: false, dailyTime: null);
 		}
 		catch (Exception ex)
 		{
-			FullRunSimulationTrace.Write($"headless_reset.setup_test_exception={ex}");
+			FullRunSimulationTrace.Write($"headless_reset.setup_singleplayer_exception={ex}");
 			throw;
 		}
-		FullRunSimulationTrace.Write("headless_reset.after_setup_test");
+		FullRunSimulationTrace.Write("headless_reset.after_setup_singleplayer");
 		try
 		{
-			RunManager.Instance.GenerateRooms();
+			await RunManager.Instance.StartPreparedSinglePlayerRun(runState, doTransition: false);
 		}
 		catch (Exception ex)
 		{
-			FullRunSimulationTrace.Write($"headless_reset.generate_rooms_exception={ex}");
+			FullRunSimulationTrace.Write($"headless_reset.start_prepared_run_exception={ex}");
 			throw;
 		}
-		FullRunSimulationTrace.Write("headless_reset.after_generate_rooms");
-		await PreloadManager.LoadRunAssets(runState.Players.Select(static p => p.Character));
-		FullRunSimulationTrace.Write("headless_reset.after_load_run_assets");
-		await PreloadManager.LoadActAssets(runState.Acts[0]);
-		FullRunSimulationTrace.Write("headless_reset.after_load_act_assets");
-		await RunManager.Instance.FinalizeStartingRelics();
-		FullRunSimulationTrace.Write("headless_reset.after_finalize_starting_relics");
-		RunManager.Instance.Launch();
-		FullRunSimulationTrace.Write("headless_reset.after_launch");
-		// SetActInternal generates the map. Then enter the starting map point
-		// so Neow event triggers (matching Godot's EnterAct flow exactly).
-		await RunManager.Instance.SetActInternal(0);
-		FullRunSimulationTrace.Write($"headless_reset.after_set_act_internal started_with_neow={runState.ExtraFields.StartedWithNeow}");
-		if (runState.ExtraFields.StartedWithNeow)
-		{
-			// Walk the starting map point → triggers Neow event room
-			await RunManager.Instance.EnterMapCoord(runState.Map.StartingMapPoint.coord);
-			FullRunSimulationTrace.Write("headless_reset.after_enter_neow_map_coord");
-		}
-		else
-		{
-			runState.PushRoom(new MapRoom());
-			FullRunSimulationTrace.Write("headless_reset.after_push_map_room");
-		}
+		FullRunSimulationTrace.Write($"headless_reset.after_start_prepared_run started_with_neow={runState.ExtraFields.StartedWithNeow}");
 		EpisodeNumber++;
 		CurrentSeed = seed;
 		CurrentCharacterId = character.Id.Entry;
@@ -353,7 +330,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 	/// <summary>
 	/// Execute a batch of actions sequentially, returning the final result.
-	/// All actions run within a single main-thread invocation — no HTTP or
+	/// All actions run within a single main-thread invocation - no HTTP or
 	/// frame-scheduling overhead between steps.  If any action is rejected,
 	/// the batch stops and returns that rejection along with how many
 	/// actions succeeded.
@@ -481,7 +458,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 						};
 					}
 
-					// In pure-sim, Clock.YieldAsync() is a no-op — cap to 1 iteration.
+					// In pure-sim, Clock.YieldAsync() is a no-op - cap to 1 iteration.
 					int eventWaitMax = CombatSimulationRuntime.IsPureCombatSimulator ? 1 : 20;
 					for (int waitIter = 0; waitIter < eventWaitMax; waitIter++)
 					{
@@ -558,9 +535,9 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 						};
 					}
 
-					// Task didn't complete → likely waiting for card selection (smith/forge).
+					// Task didn't complete -> likely waiting for card selection (smith/forge).
 					// Check if a card selection prompt is now pending.
-					// In pure-sim, Clock.YieldAsync() is a no-op — cap to 1 iteration.
+					// In pure-sim, Clock.YieldAsync() is a no-op - cap to 1 iteration.
 					int restWaitMax = CombatSimulationRuntime.IsPureCombatSimulator ? 1 : 20;
 					for (int waitIter = 0; waitIter < restWaitMax; waitIter++)
 					{
@@ -603,7 +580,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 						};
 					}
 
-					// In pure-sim, Clock.YieldAsync() is a no-op — cap to 1 iteration.
+					// In pure-sim, Clock.YieldAsync() is a no-op - cap to 1 iteration.
 					int shopWaitMax = CombatSimulationRuntime.IsPureCombatSimulator ? 1 : 20;
 					for (int waitIter = 0; waitIter < shopWaitMax; waitIter++)
 					{
@@ -1092,9 +1069,9 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationDiagnostics.Increment("settle.wait_state_change.calls");
 		string? previousSignature = previousState == null ? null : BuildStateChangeSignature(previousState);
 
-		// Phase 1: synchronous settlement — no ProcessFrame wait.
+		// Phase 1: synchronous settlement - no ProcessFrame wait.
 		// In pure-simulator mode most actions (reward claims, event choices, card
-		// plays…) execute synchronously, so the state is ready immediately after
+		// plays... execute synchronously, so the state is ready immediately after
 		// the ActionExecutor drains. This avoids the 1-frame overhead that the old
 		// 240-iteration loop paid on every single action.
 		// Use Clock.YieldAsync() instead of Task.Yield() so that ImmediateSimulatorClock
@@ -1127,8 +1104,8 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			}
 		}
 
-		// Phase 2: fallback for scene transitions (map → room, room → map).
-		// In pure simulator mode (ImmediateSimulatorClock), Phase 1 is sufficient —
+		// Phase 2: fallback for scene transitions (map -> room, room -> map).
+		// In pure simulator mode (ImmediateSimulatorClock), Phase 1 is sufficient -
 		// all game logic runs synchronously, so state is always settled after Phase 1.
 		// Skip Phase 2 entirely when Godot engine is absent or in pure sim mode.
 		ISimulatorClock clock = CombatSimulationRuntime.Clock;
@@ -1137,7 +1114,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		ulong stateDeadline = canUseFrameDeadline ? Time.GetTicksMsec() + stateTimeout : 0UL;
 		// When no frame-based deadline is available (pure-sim or no engine),
 		// Clock.YieldAsync() is a no-op and we never Task.Yield(), so state
-		// cannot change between iterations — Phase 2 is pure waste. Skip it.
+		// cannot change between iterations - Phase 2 is pure waste. Skip it.
 		int maxPhase2Iters = canUseFrameDeadline ? 100 : 0;
 		if (maxPhase2Iters == 0)
 		{
@@ -1208,7 +1185,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.calls");
 		string previousSignature = BuildStateChangeSignature(previousState);
 
-		// Phase 1: synchronous settlement — await the ActionExecutor first,
+		// Phase 1: synchronous settlement - await the ActionExecutor first,
 		// then check if state is already actionable without spending a frame.
 		// Use Clock.YieldAsync() so ImmediateSimulatorClock continues synchronously.
 		await CombatSimulationRuntime.Clock.YieldAsync();
@@ -1218,7 +1195,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			if (!execTask.IsCompleted)
 			{
 				FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.phase1_blocked_executor");
-				// Executor blocked — likely waiting for player input (hand_select).
+				// Executor blocked - likely waiting for player input (hand_select).
 				// Return early if the state is already actionable to avoid deadlock.
 				ObservedState mid = ObserveState();
 				if (mid.Signature != previousSignature
@@ -1272,7 +1249,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			}
 		}
 
-		// Phase 2: fallback — handles enemy-turn resolution and post-combat
+		// Phase 2: fallback - handles enemy-turn resolution and post-combat
 		// scene transitions. Skip in pure sim mode (ImmediateSimulatorClock makes
 		// all game logic synchronous so Phase 1 is always sufficient) or when
 		// no Godot engine is available.
@@ -1282,7 +1259,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		ulong combatDeadline = canUseFrameDeadline ? Time.GetTicksMsec() + combatTimeout : 0UL;
 		// When no frame-based deadline is available (pure-sim or no engine),
 		// Clock.YieldAsync() is a no-op and we never Task.Yield(), so state
-		// cannot change between iterations — Phase 2 is pure waste. Skip it.
+		// cannot change between iterations - Phase 2 is pure waste. Skip it.
 		int maxCombatIters = canUseFrameDeadline ? 100 : 0;
 		if (maxCombatIters == 0)
 		{
@@ -1561,7 +1538,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	/// Save the current game state as a snapshot for MCTS tree search.
 	/// Returns a state_id that can be used with LoadState to restore.
 	/// Captures: run progression, player state, RNG counters, map position.
-	/// Note: mid-combat creature state (HP, powers) is NOT yet captured —
+	/// Note: mid-combat creature state (HP, powers) is NOT yet captured -
 	/// combat snapshots restore to the beginning of the encounter.
 	/// </summary>
 	public string SaveState()
@@ -1685,7 +1662,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 		RunManager.Instance.Launch();
 		// Pure simulator: skip NRun.Create (no Godot nodes needed) and EnterAct
-		// (which would call SetActInternal → ClearVisitedMapCoordsDebug, destroying
+		// (which would call SetActInternal -> ClearVisitedMapCoordsDebug, destroying
 		// the restored visit history, and FadeIn/NRun Godot UI calls).
 		// Instead: generate the map from SavedMapsToLoad (set by InitializeSavedRun)
 		// then either re-enter the saved room (combat/event) or show the map.
@@ -1753,7 +1730,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationStateSnapshot restoredState = hasCombatSnapshot
 			? GetState()
 			: await WaitForLoadedStateAsync(savedSnapshot.StateType);
-		// Skip signature verification for combat states — combat save/load
+		// Skip signature verification for combat states - combat save/load
 		// is inherently lossy (restores to encounter start, not exact mid-turn).
 		if (SupportsExactSnapshot(savedSnapshot.StateType))
 		{
@@ -2019,7 +1996,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			"treasure" => true,
 			// Combat states: skip exact signature verification because
 			// NetCombatCardDb rebuild after restore changes card IDs.
-			// Combat save/load is inherently lossy (CLAUDE.md §2).
+			// Combat save/load is inherently lossy (CLAUDE.md section 2).
 			"monster" => false,
 			"elite" => false,
 			"boss" => false,
@@ -2495,7 +2472,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		// stale card instances in the singleton DB, causing
 		// "Card ... could not be found in combat ID database!" crashes.
 		// Use RebuildCardMappings (NOT StartCombat) to avoid re-subscribing
-		// to pile events — event handlers are already registered from the
+		// to pile events - event handlers are already registered from the
 		// original StartCombat call and must not be duplicated.
 		try
 		{
@@ -2507,7 +2484,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 		catch (Exception)
 		{
-			// Best-effort — don't let DB rebuild failure block the restore.
+			// Best-effort - don't let DB rebuild failure block the restore.
 		}
 	}
 
@@ -2962,7 +2939,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		string previousSignature,
 		Func<FullRunSimulatorRuntimeFacade, ObservedState, string, bool> hasProgress)
 	{
-		// In pure-sim, Clock.YieldAsync() is a no-op — iterating more than once
+		// In pure-sim, Clock.YieldAsync() is a no-op - iterating more than once
 		// cannot advance state. Keep 1 iteration as a safety check.
 		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 8 : 64;
 		for (int attempt = 0; attempt < maxAttempts; attempt++)
@@ -3000,7 +2977,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		string previousSignature,
 		Func<FullRunSimulatorRuntimeFacade, ObservedState, string, bool> hasProgress)
 	{
-		// In pure-sim, Clock.YieldAsync() is a no-op — iterating more than once
+		// In pure-sim, Clock.YieldAsync() is a no-op - iterating more than once
 		// cannot advance state. Keep 1 iteration as a safety check.
 		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 8 : 32;
 		for (int attempt = 0; attempt < maxAttempts; attempt++)

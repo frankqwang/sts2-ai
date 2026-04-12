@@ -650,15 +650,7 @@ public partial class NGame : Control
 
 	private async Task StartRun(RunState runState)
 	{
-		using (new NetLoadingHandle(RunManager.Instance.NetService))
-		{
-			await PreloadManager.LoadRunAssets(runState.Players.Select((Player p) => p.Character));
-			await PreloadManager.LoadActAssets(runState.Acts[0]);
-			await RunManager.Instance.FinalizeStartingRelics();
-			RunManager.Instance.Launch();
-			RootSceneContainer.SetCurrentScene(NRun.Create(runState));
-			await RunManager.Instance.EnterAct(0, doTransition: false);
-		}
+		await RunManager.Instance.StartPreparedSinglePlayerRun(runState, doTransition: false);
 	}
 
 	public override void _Input(InputEvent inputEvent)

@@ -241,8 +241,8 @@ public static partial class McpMod
             seed = game.DebugSeedOverride ?? SeedHelper.GetRandomSeed();
         }
 
-        // Bypass NGame.StartNewSingleplayerRun so spectator start-up exactly matches
-        // sim's fully-unlocked initialization instead of re-reading profile progress.
+        // Bypass NGame.StartNewSingleplayerRun so spectator can force a fully
+        // unlocked run while still using the shared singleplayer launch flow.
         var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false)
             .Select(static act => act.ToMutable())
             .ToList();
@@ -254,11 +254,18 @@ public static partial class McpMod
             ascension,
             seed);
         RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: true, dailyTime: null);
-
-        MethodInfo? startRunMethod = game.GetType().GetMethod("StartRun", BindingFlags.NonPublic | BindingFlags.Instance);
-        if (startRunMethod == null)
-            return Error("Could not find NGame.StartRun via reflection");
-        TaskHelper.RunSafely((Task)startRunMethod.Invoke(game, new object[] { runState })!);
+        MethodInfo? startPreparedRunMethod = typeof(RunManager).GetMethod("StartPreparedSinglePlayerRun", BindingFlags.Instance | BindingFlags.Public);
+        if (startPreparedRunMethod != null)
+        {
+            TaskHelper.RunSafely((Task)startPreparedRunMethod.Invoke(RunManager.Instance, new object[] { runState, false })!);
+        }
+        else
+        {
+            MethodInfo? legacyStartRunMethod = game.GetType().GetMethod("StartRun", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (legacyStartRunMethod == null)
+                return Error("Could not find shared run starter on RunManager or legacy NGame.StartRun");
+            TaskHelper.RunSafely((Task)legacyStartRunMethod.Invoke(game, new object[] { runState })!);
+        }
 
         return new Dictionary<string, object?>
         {
