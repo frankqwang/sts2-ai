@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Simulation;
 
 namespace STS2_MCP;
@@ -244,6 +245,7 @@ public static partial class McpMod
         FullRunApiState? lastChangedState = null;
         string? lastChangedSignature = null;
         int stablePolls = 0;
+        DateTime lastSignatureChangeAt = DateTime.MinValue;
 
         while (DateTime.UtcNow <= deadline)
         {
@@ -259,6 +261,7 @@ public static partial class McpMod
                 {
                     lastChangedSignature = signature;
                     stablePolls = 1;
+                    lastSignatureChangeAt = DateTime.UtcNow;
                 }
 
                 if (state.terminal)
@@ -269,8 +272,10 @@ public static partial class McpMod
                     && state.state_type != "menu"
                     && state.state_type != "loading";
                 bool actionable = state.terminal || (state.legal_actions?.Count ?? 0) > 0;
+                bool queueIdle = IsStepStateSettled();
+                bool stableLongEnough = DateTime.UtcNow - lastSignatureChangeAt >= GetRequiredStableDuration(state);
 
-                if (settled && actionable && stablePolls >= 2)
+                if (settled && actionable && queueIdle && stablePolls >= 2 && stableLongEnough)
                     return state;
             }
 
@@ -281,6 +286,27 @@ public static partial class McpMod
             return lastChangedState;
 
         throw new TimeoutException("Timed out waiting for changed API state.");
+    }
+
+    private static bool IsStepStateSettled()
+    {
+        var actionExecutor = RunManager.Instance?.ActionExecutor;
+        if (actionExecutor == null)
+            return true;
+
+        if (actionExecutor.CurrentlyRunningAction != null)
+            return false;
+
+        return !actionExecutor.IsRunning;
+    }
+
+    private static TimeSpan GetRequiredStableDuration(FullRunApiState state)
+    {
+        return state.state_type switch
+        {
+            "monster" or "elite" or "boss" or "hand_select" => TimeSpan.FromMilliseconds(400),
+            _ => TimeSpan.FromMilliseconds(50)
+        };
     }
 
     private static object ShapeApiStepResult(FullRunApiState state, bool accepted, string? error, string? stepInfoCode)

@@ -290,7 +290,7 @@ public class RunManager : IRunLobbyListener
 			await PreloadManager.LoadActAssets(runState.Acts[0]);
 			await FinalizeStartingRelics();
 			Launch();
-			NGame.Instance.RootSceneContainer.SetCurrentScene(NRun.Create(runState));
+			NGame.Instance?.RootSceneContainer?.SetCurrentScene(NRun.Create(runState));
 			await EnterAct(0, doTransition);
 		}
 	}
