@@ -133,7 +133,7 @@ internal static class FullRunSimulationStateBuilder
 		{
 			return "combat_rewards";
 		}
-		if (forceMapView)
+		if (forceMapView && HasAvailableMapOptions(runState))
 		{
 			return "map";
 		}
@@ -845,6 +845,26 @@ internal static class FullRunSimulationStateBuilder
 			Row = point.coord.row,
 			PointType = point.PointType.ToString().ToLowerInvariant()
 		}).ToList();
+	}
+
+	private static bool HasAvailableMapOptions(RunState runState)
+	{
+		if (runState.Map == null)
+		{
+			return false;
+		}
+
+		if (runState.CurrentMapPoint != null)
+		{
+			return runState.CurrentMapPoint.Children.Any();
+		}
+
+		if (runState.Map.startMapPoints.Count > 0)
+		{
+			return true;
+		}
+
+		return runState.Map.StartingMapPoint?.Children.Any() == true;
 	}
 
 	private static List<FullRunSimulationMapNode> BuildFullMapNodes(RunState runState)

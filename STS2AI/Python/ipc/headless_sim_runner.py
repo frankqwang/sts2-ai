@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Iterable
 
 if __package__ in {None, ""}:
     python_root = Path(__file__).resolve().parents[1]
@@ -18,6 +19,80 @@ from sts2ai_paths import REPO_ROOT, SIM_HOST_EXE, SIM_LEGACY_DLL
 
 DEFAULT_REPO_ROOT = REPO_ROOT
 DEFAULT_DLL_PATH = SIM_HOST_EXE if SIM_HOST_EXE.exists() else SIM_LEGACY_DLL
+
+
+def _source_roots(repo_root: Path) -> Iterable[Path]:
+    candidates = (
+        repo_root / "src",
+        repo_root / "STS2AI" / "ENV" / "Sim" / "Overlay",
+        repo_root / "STS2AI" / "ENV" / "Sim" / "Runtime",
+    )
+    for root in candidates:
+        if root.exists():
+            yield root
+
+
+def _newest_source_file(repo_root: Path) -> tuple[Path | None, float]:
+    newest_path: Path | None = None
+    newest_mtime = 0.0
+    for root in _source_roots(repo_root):
+        for path in root.rglob("*.cs"):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if mtime > newest_mtime:
+                newest_mtime = mtime
+                newest_path = path
+    return newest_path, newest_mtime
+
+
+def ensure_host_binary_is_fresh(*, repo_root: Path, dll_path: Path) -> None:
+    if not dll_path.exists():
+        raise FileNotFoundError(f"HeadlessSim host binary does not exist: {dll_path}")
+    newest_source, newest_source_mtime = _newest_source_file(repo_root)
+    if newest_source is None:
+        return
+    try:
+        host_mtime = dll_path.stat().st_mtime
+    except OSError as exc:
+        raise RuntimeError(f"Unable to stat HeadlessSim host binary: {dll_path}") from exc
+    # Small tolerance to avoid false positives on coarse timestamp resolutions.
+    if host_mtime + 1.0 < newest_source_mtime:
+        raise RuntimeError(
+            "HeadlessSim host binary is stale: "
+            f"{dll_path} is older than source {newest_source}. "
+            "Rebuild STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj before auto-launch."
+        )
+
+
+def _kill_stale_headless_processes(*, port: int, dll_path: Path) -> None:
+    if sys.platform != "win32":
+        return
+    resolved = dll_path.resolve()
+    escaped_path = str(resolved).replace("'", "''")
+    escaped_name = resolved.name.replace("'", "''")
+    port_arg = f"--port {port}"
+    command = (
+        f"$targetPath = '{escaped_path}'; "
+        f"$targetName = '{escaped_name}'; "
+        f"$portArg = '{port_arg}'; "
+        "$procs = Get-CimInstance Win32_Process | Where-Object { "
+        "$_.CommandLine -and $_.CommandLine -like ('*' + $portArg + '*') -and ("
+        "($_.ExecutablePath -eq $targetPath) -or "
+        "($_.Name -eq 'dotnet.exe' -and $_.CommandLine -like ('*' + $targetName + '*'))"
+        ") }; "
+        "foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        pass
 
 
 def _build_launch_command(host_path: Path, protocol: str, port: int) -> list[str]:
@@ -39,6 +114,8 @@ def start_headless_sim(
     repo_root = Path(repo_root)
     dll_path = Path(dll_path)
     protocol = str(protocol).strip().lower()
+    ensure_host_binary_is_fresh(repo_root=repo_root, dll_path=dll_path)
+    _kill_stale_headless_processes(port=port, dll_path=dll_path)
     launch_cmd = _build_launch_command(dll_path, protocol, port)
     proc = subprocess.Popen(
         launch_cmd,

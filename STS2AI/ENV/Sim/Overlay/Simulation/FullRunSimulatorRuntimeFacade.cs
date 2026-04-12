@@ -1290,11 +1290,14 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 		FullRunSimulationStateSnapshot fallback = GetState();
 		FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.fallback_get_state");
+		TracePotentialWaitStall("headless_wait_combat_followup.fallback", fallback);
 		if (fallback.StateType == "combat_pending")
 		{
 			FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.force_map_view");
 			_forceMapView = true;
-			return GetState();
+			FullRunSimulationStateSnapshot forced = GetState();
+			TracePotentialWaitStall("headless_wait_combat_followup.force_map_result", forced);
+			return forced;
 		}
 
 		return fallback;
@@ -1442,11 +1445,14 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 		FullRunSimulationStateSnapshot fallback = GetState();
 		FullRunSimulationDiagnostics.Increment("settle.wait_explicit.fallback_get_state");
+		TracePotentialWaitStall("headless_wait_explicit.fallback", fallback);
 		if (fallback.StateType == "combat_pending")
 		{
 			FullRunSimulationDiagnostics.Increment("settle.wait_explicit.force_map_view");
 			_forceMapView = true;
-			return GetState();
+			FullRunSimulationStateSnapshot forced = GetState();
+			TracePotentialWaitStall("headless_wait_explicit.force_map_result", forced);
+			return forced;
 		}
 
 		return fallback;
@@ -2783,6 +2789,31 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		return new ObservedState(snapshot, BuildStateChangeSignature(snapshot));
 	}
 
+	private void TracePotentialWaitStall(string prefix, FullRunSimulationStateSnapshot snapshot)
+	{
+		bool emptyMap = snapshot.StateType == "map" && snapshot.MapOptions.Count == 0;
+		bool noLegalCombat = IsCombatState(snapshot.StateType) && snapshot.LegalActions.Count == 0;
+		if (!emptyMap && !noLegalCombat)
+		{
+			return;
+		}
+
+		RunState? runState = RunManager.Instance.DebugOnlyGetState();
+		CombatState? combatState = CombatManager.Instance.DebugOnlyGetState();
+		Task? pendingTurnTransition = CombatManager.Instance.DebugOnlyGetPendingTurnTransitionTask();
+		string currentMapCoord = runState?.CurrentMapCoord.ToString() ?? "null";
+		int currentMapChildren = runState?.CurrentMapPoint?.Children?.Count ?? -1;
+
+		FullRunSimulationTrace.Write(
+			$"{prefix} state={snapshot.StateType} room={snapshot.RoomType ?? "null"} legal={snapshot.LegalActions.Count} map_options={snapshot.MapOptions.Count} " +
+			$"force_map={_forceMapView} run_in_progress={RunManager.Instance.IsInProgress} combat_in_progress={CombatManager.Instance.IsInProgress} " +
+			$"play_phase={CombatManager.Instance.IsPlayPhase} player_actions_disabled={CombatManager.Instance.PlayerActionsDisabled} " +
+			$"current_side={combatState?.CurrentSide} round={combatState?.RoundNumber} " +
+			$"enemy_started={CombatManager.Instance.IsEnemyTurnStarted} ending_p1={CombatManager.Instance.EndingPlayerTurnPhaseOne} " +
+			$"ending_p2={CombatManager.Instance.EndingPlayerTurnPhaseTwo} pending_turn_task={(pendingTurnTransition != null && !pendingTurnTransition.IsCompleted)} " +
+			$"action_executor_running={RunManager.Instance.ActionExecutor.IsRunning} current_map_coord={currentMapCoord} current_map_children={currentMapChildren}");
+	}
+
 	private bool HasExplicitWaitProgress(string previousSignature, ObservedState observedState)
 	{
 		FullRunSimulationStateSnapshot snapshot = observedState.Snapshot;
@@ -2838,7 +2869,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	{
 		// In pure-sim, Clock.YieldAsync() is a no-op — iterating more than once
 		// cannot advance state. Keep 1 iteration as a safety check.
-		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 1 : 64;
+		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 8 : 64;
 		for (int attempt = 0; attempt < maxAttempts; attempt++)
 		{
 			if (!HasPendingPureCombatContinuation())
@@ -2850,6 +2881,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			if (CombatSimulationRuntime.IsPureCombatSimulator)
 			{
 				await CombatSimulationRuntime.Clock.YieldAsync();
+				await Task.Yield();
 			}
 			else
 			{
@@ -2875,13 +2907,14 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	{
 		// In pure-sim, Clock.YieldAsync() is a no-op — iterating more than once
 		// cannot advance state. Keep 1 iteration as a safety check.
-		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 1 : 32;
+		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 8 : 32;
 		for (int attempt = 0; attempt < maxAttempts; attempt++)
 		{
 			FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.yield_iterations");
 			if (CombatSimulationRuntime.IsPureCombatSimulator)
 			{
 				await CombatSimulationRuntime.Clock.YieldAsync();
+				await Task.Yield();
 			}
 			else
 			{

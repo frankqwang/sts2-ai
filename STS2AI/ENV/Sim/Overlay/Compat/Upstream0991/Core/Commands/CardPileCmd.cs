@@ -937,6 +937,10 @@ public static class CardPileCmd
 		}
 		if (LocalContext.IsMe(player))
 		{
+			if (SkipCombatPresentation)
+			{
+				return;
+			}
 			if (pileType == PileType.Hand)
 			{
 				await Cmd.Wait(0.1f);
