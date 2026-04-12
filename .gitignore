@@ -17,6 +17,7 @@ scenes
 shaders
 themes
 steam
+*.uid
 
 /STS2AI/ENV/Sim/Host/bin/
 
