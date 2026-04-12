@@ -19,7 +19,6 @@ using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Utilities;
 using MegaCrit.Sts2.Core.Random;
-using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
@@ -112,7 +111,7 @@ public sealed class Vantom : MonsterModel
 			.WithAttackerFx(null, "event:/sfx/enemy/enemy_attacks/vantom/vantom_inky_lance")
 			.WithHitFx("vfx/vfx_attack_blunt")
 			.Execute(null);
-		if (!CombatSimulationRuntime.IsPureCombatSimulator && TestMode.IsOff && base.Creature.IsAlive)
+		if (TestMode.IsOff && base.Creature.IsAlive)
 		{
 			await Cmd.CustomScaledWait(1f, 1f);
 			NRunMusicController.Instance?.UpdateMusicParameter("vantom_progress", 1f);
@@ -131,7 +130,7 @@ public sealed class Vantom : MonsterModel
 			.WithAttackerFx(null, "event:/sfx/enemy/enemy_attacks/vantom/vantom_inky_lance")
 			.WithHitFx("vfx/vfx_attack_blunt")
 			.Execute(null);
-		if (!CombatSimulationRuntime.IsPureCombatSimulator && TestMode.IsOff && base.Creature.IsAlive)
+		if (TestMode.IsOff && base.Creature.IsAlive)
 		{
 			NRunMusicController.Instance?.UpdateMusicParameter("vantom_progress", 2f);
 			await Cmd.CustomScaledWait(1f, 1f);
@@ -145,13 +144,6 @@ public sealed class Vantom : MonsterModel
 
 	private async Task DismemberMove(IReadOnlyList<Creature> targets)
 	{
-		if (CombatSimulationRuntime.IsPureCombatSimulator)
-		{
-			await DamageCmd.Attack(DismemberDamage).FromMonster(this).WithNoAttackerAnim().Execute(null);
-			await CardPileCmd.AddToCombatAndPreview<Wound>(targets, PileType.Discard, 3, addedByPlayer: false);
-			return;
-		}
-
 		if (TestMode.IsOff && base.Creature.IsAlive)
 		{
 			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineController?.GetAnimationState();
@@ -176,7 +168,7 @@ public sealed class Vantom : MonsterModel
 		SfxCmd.Play("event:/sfx/enemy/enemy_attacks/vantom/vantom_buff");
 		await CreatureCmd.TriggerAnim(base.Creature, "BUFF", 0.6f);
 		await PowerCmd.Apply<StrengthPower>(base.Creature, 2m, base.Creature, null);
-		if (!CombatSimulationRuntime.IsPureCombatSimulator && TestMode.IsOff && base.Creature.IsAlive)
+		if (TestMode.IsOff && base.Creature.IsAlive)
 		{
 			await Cmd.CustomScaledWait(1f, 1f);
 			SfxCmd.Play("event:/sfx/enemy/enemy_attacks/vantom/vantom_extend_1");
