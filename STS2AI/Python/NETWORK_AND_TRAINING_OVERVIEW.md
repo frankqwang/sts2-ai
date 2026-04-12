@@ -335,7 +335,7 @@ Meaning:
 
 Current example:
 
-- `artifacts/skada/ironclad_matchup_bridge`
+- `STS2AI/Artifacts/skada/ironclad_matchup_bridge`
 
 This data is loaded explicitly by `train_hybrid.py` and used every iteration.
 
@@ -347,8 +347,8 @@ Meaning:
 
 Current examples:
 
-- `artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_320.jsonl`
-- `artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_2000_balanced.jsonl`
+- `STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_320.jsonl`
+- `STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_2000_balanced.jsonl`
 
 This data is also loaded explicitly and trained every iteration when enabled.
 

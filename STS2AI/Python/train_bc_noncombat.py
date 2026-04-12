@@ -192,7 +192,7 @@ def train_bc(
     weight_decay: float = 1e-4,
     val_split: float = 0.1,
     device: torch.device = torch.device("cpu"),
-    output_dir: Path = Path("artifacts/bc_pretrain"),
+    output_dir: Path = Path("STS2AI/Artifacts/bc_pretrain"),
 ) -> Path:
     """Train the non-combat brain via behavioral cloning."""
 

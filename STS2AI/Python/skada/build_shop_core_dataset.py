@@ -18,10 +18,13 @@ from collections import Counter, defaultdict, deque
 from pathlib import Path
 from typing import Any
 
+_PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(_PYTHON_ROOT))
 from skada_context import DeckTracker, dict_factory, fetch_many, safe_float, safe_int, slugify
 from skada_db import DB_PATH
 from skada_priors import SkadaPriors
+from sts2ai_paths import ARTIFACTS_ROOT
 
 
 ACTION_LABELS = {"none", "remove", "buy_card", "buy_relic", "buy_potion", "multi_action"}
@@ -421,7 +424,7 @@ def main() -> int:
     char_prefix = "multi" if len(normalized_characters) > 1 else (
         normalized_characters[0].lower() if len(normalized_characters) == 1 else "all"
     )
-    base_dir = db_path.resolve().parents[3] / "artifacts" / "skada"
+    base_dir = ARTIFACTS_ROOT / "skada"
     visit_output = Path(args.visit_output) if args.visit_output else (base_dir / f"{char_prefix}_shop_visit.jsonl")
     item_output = Path(args.item_output) if args.item_output else (base_dir / f"{char_prefix}_shop_item_choice.jsonl")
     manifest_path = Path(args.manifest) if args.manifest else (base_dir / f"{char_prefix}_shop_core.manifest.json")

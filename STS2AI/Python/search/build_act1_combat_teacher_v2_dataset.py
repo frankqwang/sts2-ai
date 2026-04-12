@@ -617,7 +617,7 @@ def main() -> None:
     parser.add_argument("--low-hp-attacker-threshold", type=int, default=12)
     parser.add_argument("--danger-net-incoming-threshold", type=int, default=10)
     parser.add_argument("--include-baseline-matches", action="store_true", default=False)
-    parser.add_argument("--output", default="artifacts/combat_teacher/ironclad_act1_solver_v2_dataset.jsonl")
+    parser.add_argument("--output", default="STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset.jsonl")
     args = parser.parse_args()
 
     seeds = [str(seed).strip() for seed in args.seed if str(seed).strip()]

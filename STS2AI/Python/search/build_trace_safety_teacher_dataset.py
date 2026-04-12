@@ -218,7 +218,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build focused combat_teacher samples from trajectory traces.")
     parser.add_argument(
         "--trajectory-glob",
-        default="artifacts/combat_trace/nn_trajectory/*_trajectory.jsonl",
+        default="STS2AI/Artifacts/combat_trace/nn_trajectory/*_trajectory.jsonl",
         help="Glob for trajectory JSONL files.",
     )
     parser.add_argument(
@@ -228,7 +228,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--output",
-        default="artifacts/combat_teacher/trace_safety_teacher_dataset.jsonl",
+        default="STS2AI/Artifacts/combat_teacher/trace_safety_teacher_dataset.jsonl",
         help="Output JSONL path.",
     )
     parser.add_argument(

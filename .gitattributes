@@ -46,3 +46,4 @@ checkpoints/**/*.pt filter=lfs diff=lfs merge=lfs -text
 # Local experiment artifacts and reproducibility data
 *.sqlite filter=lfs diff=lfs merge=lfs -text
 artifacts/**/*.pt filter=lfs diff=lfs merge=lfs -text
+STS2AI/Artifacts/**/*.pt filter=lfs diff=lfs merge=lfs -text

@@ -23,9 +23,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+_PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(_PYTHON_ROOT))
 from skada_db import DB_PATH
 from skada_priors import SkadaPriors
+from sts2ai_paths import ARTIFACTS_ROOT
 
 
 def _slug(card_id: str | None) -> str:
@@ -322,7 +325,7 @@ def main() -> int:
     elif len(normalized_characters) > 1:
         char_suffix = "_multi"
     output_path = Path(args.output) if args.output else (
-        db_path.resolve().parents[2] / "Artifacts" / "skada" / f"card_reward_pick{char_suffix}_{args.max_runs}.jsonl"
+        ARTIFACTS_ROOT / "skada" / f"card_reward_pick{char_suffix}_{args.max_runs}.jsonl"
     )
     manifest_path = Path(args.manifest) if args.manifest else output_path.with_suffix(".manifest.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)

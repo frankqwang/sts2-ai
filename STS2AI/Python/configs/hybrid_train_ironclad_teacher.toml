@@ -33,7 +33,7 @@ max_iterations = 500
 episodes_per_iter = 0
 episode_timeout = 90.0
 max_episode_steps = 600
-output_dir = "artifacts/hybrid_training"
+output_dir = "STS2AI/Artifacts/hybrid_training"
 
 [ppo]
 ppo_lr = 1e-4
@@ -129,7 +129,7 @@ offline_noncombat_ranking_min_spread = 0.001
 # `offline_combat_teacher_data_dir`:
 # Use the best-known high-quality solver-labeled combat dataset rather than
 # the old deleted `combat_teacher_post_wizardly` path.
-offline_combat_teacher_data_dir = "artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_320.jsonl"
+offline_combat_teacher_data_dir = "STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_320.jsonl"
 # `offline_combat_teacher_loss_weight`:
 # Multiplier applied to the total combat teacher loss inside hybrid.
 # Old default was 0.1. We raise it to 0.2 so teacher corrections actually

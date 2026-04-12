@@ -15,15 +15,15 @@ from skada.skada_context import STARTER_DECKS, act_from_floor, is_basic_slug, is
 from skada.skada_priors import SkadaPriors
 from skada.train_campfire_model import CampfireChoiceModel
 from skada.train_shop_core_model import ACTION_LABELS, ShopActionModel, ShopItemChoiceModel
+from sts2ai_paths import ARTIFACTS_ROOT, DATASETS_ROOT
 
 logger = logging.getLogger(__name__)
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_ARTIFACTS_ROOT = _REPO_ROOT / "artifacts" / "skada"
+_ARTIFACTS_ROOT = ARTIFACTS_ROOT / "skada"
 _DEFAULT_CAMPFIRE_MODEL = _ARTIFACTS_ROOT / "ironclad_act1_relaxed_campfire_model" / "campfire_choice_best.pt"
 _DEFAULT_SHOP_ACTION_MODEL = _ARTIFACTS_ROOT / "ironclad_act1_quality_shop_core_model" / "shop_action_best.pt"
 _DEFAULT_SHOP_ITEM_MODEL = _ARTIFACTS_ROOT / "ironclad_act1_relaxed_shop_core_model" / "shop_item_choice_best.pt"
-_DEFAULT_DB_PATH = _REPO_ROOT / "STS2AI" / "Assets" / "datasets" / "skada" / "skada_analytics.sqlite"
+_DEFAULT_DB_PATH = DATASETS_ROOT / "skada" / "skada_analytics.sqlite"
 
 _ENV_CAMPFIRE_MODEL = "STS2_SKADA_IRONCLAD_CAMPFIRE_MODEL"
 _ENV_SHOP_ACTION_MODEL = "STS2_SKADA_IRONCLAD_SHOP_ACTION_MODEL"

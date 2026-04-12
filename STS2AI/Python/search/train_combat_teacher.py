@@ -405,7 +405,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train combat teacher stack V1 from combat_teacher_dataset.v1")
     parser.add_argument("--dataset", required=True, help="combat_teacher_dataset.v1 JSONL")
     parser.add_argument("--combat-checkpoint", required=True, help="Combat checkpoint used to initialize the teacher model")
-    parser.add_argument("--output-dir", default="artifacts/combat_teacher", help="Output directory root")
+    parser.add_argument("--output-dir", default="STS2AI/Artifacts/combat_teacher", help="Output directory root")
     parser.add_argument("--main-combat-path-mode", choices=["mlp", "light_attention"], default="mlp",
                         help="Which main combat policy/value path to train: legacy mlp baseline or light_attention residual")
     parser.add_argument("--teacher-scorer-mode", choices=["mlp", "light_attention"], default="light_attention",

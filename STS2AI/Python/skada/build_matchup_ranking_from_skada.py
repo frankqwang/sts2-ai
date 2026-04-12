@@ -5,7 +5,7 @@ This is the simplest useful bridge for hybrid non-combat ranking experiments:
 
 - Input:
   - cleaned Skada `card_reward` JSONL rows (for example
-    `artifacts/skada/ironclad_card_reward.jsonl`)
+    `STS2AI/Artifacts/skada/ironclad_card_reward.jsonl`)
 - Output:
   - `derived/rl/ranking_sample.jsonl`
   - `tensors/sample_XXXXX.npz`

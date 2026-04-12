@@ -16,10 +16,13 @@ from collections import Counter, defaultdict, deque
 from pathlib import Path
 from typing import Any
 
+_PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(_PYTHON_ROOT))
 from skada_context import DeckTracker, dict_factory, fetch_many, safe_float, safe_int
 from skada_db import DB_PATH
 from skada_priors import SkadaPriors
+from sts2ai_paths import ARTIFACTS_ROOT
 
 
 def build_dataset(
@@ -256,7 +259,7 @@ def main() -> int:
         char_suffix = "multi_"
 
     output_path = Path(args.output) if args.output else (
-        db_path.resolve().parents[3] / "artifacts" / "skada" / f"{char_suffix}campfire_choice.jsonl"
+        ARTIFACTS_ROOT / "skada" / f"{char_suffix}campfire_choice.jsonl"
     )
     manifest_path = Path(args.manifest) if args.manifest else output_path.with_suffix(".manifest.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
