@@ -16,6 +16,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.TestSupport;
 
@@ -387,6 +388,7 @@ internal static class Program
 			BinaryOpcode.StepLocalPolicy => await ProcessBinaryStepLocalPolicyAsync(service, session, cache),
 			BinaryOpcode.LoadOrtModel => ProcessBinaryLoadOrtModel(requestBytes),
 			BinaryOpcode.RunCombatLocal => await ProcessBinaryRunCombatLocalAsync(service, session, requestBytes, cache),
+			BinaryOpcode.SkipCombat => await ProcessBinarySkipCombatAsync(service, session, cache),
 				_ => BinaryProtocol.BuildErrorResponse(opcode, BinaryStatus.ProtocolError, "unknown_method", $"Unknown opcode: {(byte)opcode}")
 			};
 		}
@@ -796,6 +798,69 @@ internal static class Program
 			return BinaryProtocol.BuildErrorResponse(
 				BinaryOpcode.RunCombatLocal, BinaryStatus.SimulatorError,
 				"ort_combat_error", ex.Message);
+		}
+	}
+
+	/// <summary>
+	/// Build Mode: instantly win the current combat by killing all enemies.
+	/// Only works when in a combat state. Returns the post-combat state
+	/// (typically combat_rewards or map).
+	/// </summary>
+	private static async Task<byte[]> ProcessBinarySkipCombatAsync(
+		FullRunTrainingEnvService service,
+		BinarySessionState session,
+		RequestStateCache cache)
+	{
+		try
+		{
+			var snapshot = GetSnapshot(service, cache);
+			bool isCombat = snapshot.StateType is "monster" or "elite" or "boss" or "combat";
+
+			if (!isCombat)
+			{
+				// Not in combat — just return current state
+				var noopResult = new FullRunSimulationStepResult { Accepted = true, State = snapshot };
+				return BinaryProtocol.BuildStepResponse(session, noopResult, snapshot);
+			}
+
+			// Enter pure-combat-simulator mode to skip all UI/presentation code
+			// (replay writer, music, achievements, save, map screen, etc.)
+			// This makes it safe to call EndCombatInternal from both headless sim
+			// AND visible Godot client — same logic path.
+			using (CombatSimulationRuntime.EnterPureCombatSimulator())
+			{
+				await CombatManager.Instance.EndCombatInternal();
+			}
+			cache.Snapshot = null;
+			cache.ApiState = null;
+
+			// Auto-advance through any pending transitions (rewards screen, etc.)
+			for (int i = 0; i < 30; i++)
+			{
+				var advSnapshot = GetSnapshot(service, cache);
+				if (advSnapshot.IsTerminal || advSnapshot.StateType == "game_over")
+					break;
+				if (advSnapshot.LegalActions.Count > 0)
+					break;
+				await service.StepAsync(
+					new FullRunSimulationActionRequest { Action = "wait" });
+				cache.Snapshot = null;
+				cache.ApiState = null;
+			}
+
+			FullRunSimulationDiagnostics.Increment("request.skip_combat.calls");
+
+			// Get final state and return using standard step response format
+			var finalSnapshot = GetSnapshot(service, cache);
+			var finalResult = new FullRunSimulationStepResult { Accepted = true, State = finalSnapshot };
+			return BinaryProtocol.BuildStepResponse(session, finalResult, finalSnapshot);
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine($"[SkipCombat] error: {ex.Message}");
+			return BinaryProtocol.BuildErrorResponse(
+				BinaryOpcode.SkipCombat, BinaryStatus.SimulatorError,
+				"skip_combat_error", ex.Message);
 		}
 	}
 

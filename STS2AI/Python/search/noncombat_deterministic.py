@@ -2,6 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+try:
+    from search.skada_noncombat_priors import (
+        choose_prior_aware_remove_action,
+        choose_prior_aware_rest_action,
+        choose_prior_aware_shop_action,
+    )
+except Exception:
+    choose_prior_aware_remove_action = None
+    choose_prior_aware_rest_action = None
+    choose_prior_aware_shop_action = None
+
 
 _BASIC_CARD_PRIORITY = {
     "ASCENDERS_BANE": 100.0,
@@ -95,6 +106,11 @@ def choose_deterministic_card_select_action(state: dict[str, Any], legal: list[d
     if not selectable:
         return confirm
 
+    if ("remove" in screen_type or "purge" in screen_type or "remove" in prompt or "purge" in prompt) and choose_prior_aware_remove_action is not None:
+        prior_choice = choose_prior_aware_remove_action(state, legal)
+        if prior_choice is not None:
+            return prior_choice
+
     if "upgrade" in screen_type or "upgrade" in prompt:
         return max(selectable, key=lambda action: _upgrade_priority(_card_from_index(state, action)))
 
@@ -110,6 +126,11 @@ def choose_deterministic_rest_action(
     *,
     hp_rest_threshold: float = 0.5,
 ) -> dict[str, Any] | None:
+    if choose_prior_aware_rest_action is not None:
+        prior_choice = choose_prior_aware_rest_action(state, legal)
+        if prior_choice is not None:
+            return prior_choice
+
     player = state.get("player") or {}
     hp = float(player.get("hp") or 0.0)
     max_hp = float(player.get("max_hp") or 1.0)
@@ -131,6 +152,11 @@ def choose_deterministic_rest_action(
 
 
 def choose_deterministic_shop_action(state: dict[str, Any], legal: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if choose_prior_aware_shop_action is not None:
+        prior_choice = choose_prior_aware_shop_action(state, legal)
+        if prior_choice is not None:
+            return prior_choice
+
     shop = state.get("shop") or {}
     items = shop.get("items") or []
     item_by_index: dict[int, dict[str, Any]] = {}

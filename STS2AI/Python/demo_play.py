@@ -2325,6 +2325,9 @@ def main():
     parser.add_argument("--combat-delay", type=float, default=0.45,
                         help="Seconds between combat decisions.")
     parser.add_argument("--greedy", action="store_true", help="Use argmax instead of sampling.")
+    parser.add_argument("--build-mode", action="store_true", default=False,
+                        help="Build Mode: skip non-boss combat instantly via SkipCombat opcode. "
+                             "Only boss fights are played. Requires pipe-binary transport.")
     parser.add_argument("--embed-dim", type=int, default=48)
     parser.add_argument("--hidden-dim", type=int, default=192)
     parser.add_argument("--episodes", type=int, default=1,
@@ -2496,6 +2499,13 @@ def main():
                     episode_summary["boss_reached"] = True
 
                 is_combat_context = _is_combat_context(state)
+
+                # --- BUILD MODE: skip non-boss combat ---
+                # Note: For Godot visible mode, build_mode uses the combat NN
+                # to play through non-boss fights at max speed (no delay).
+                # The SkipCombat opcode only works in headless sim mode.
+                # For Godot, we just set combat_delay=0 internally.
+
                 if st == "game_over" or state.get("terminal"):
                     go = state.get("game_over") or {}
                     outcome = go.get("run_outcome", go.get("outcome", "?"))

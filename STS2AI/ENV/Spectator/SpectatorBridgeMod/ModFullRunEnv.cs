@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Threading;
+using MegaCrit.Sts2.Core.Combat;
 
 namespace STS2_MCP;
 
@@ -133,6 +134,50 @@ public static partial class McpMod
         catch (Exception ex)
         {
             SendError(response, 500, $"Full run env step failed: {ex.Message}");
+        }
+    }
+
+    private static void HandlePostFullRunEnvSkipCombat(HttpListenerResponse response)
+    {
+        try
+        {
+            Dictionary<string, object?> beforeState = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
+            string stateType = GetStateType(beforeState);
+
+            if (stateType != "monster" && stateType != "elite" && stateType != "boss" && stateType != "combat")
+            {
+                // Not in combat — just return current state
+                SendJson(response, ShapeFullRunEnvStepResult(beforeState, true, null, "not_in_combat"));
+                return;
+            }
+
+            // End combat instantly — Godot has full UI context so EndCombatInternal
+            // handles presentation (rewards, music, scene transitions) correctly.
+            RunOnMainThread(async () =>
+            {
+                await CombatManager.Instance.EndCombatInternal();
+                return new Dictionary<string, object?>();
+            }).GetAwaiter().GetResult();
+
+            // Wait for state to settle (combat_rewards, map, etc.)
+            Dictionary<string, object?> state;
+            try
+            {
+                state = WaitForChangedFullRunEnvState(
+                    beforeState,
+                    timeoutMs: 5000,
+                    pollDelayMs: 50);
+            }
+            catch (TimeoutException)
+            {
+                state = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
+            }
+
+            SendJson(response, ShapeFullRunEnvStepResult(state, true, null, "combat_skipped"));
+        }
+        catch (Exception ex)
+        {
+            SendError(response, 500, $"Skip combat failed: {ex.Message}");
         }
     }
 

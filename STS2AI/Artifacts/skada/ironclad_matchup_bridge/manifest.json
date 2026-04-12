@@ -1,0 +1,10 @@
+{
+  "schema_version": "skada_matchup_bridge.v1",
+  "input_path": "C:\\Users\\Administrator\\Desktop\\sts2Raw2\\artifacts\\skada\\ironclad_card_reward.jsonl",
+  "output_dir": "C:\\Users\\Administrator\\Desktop\\sts2Raw2\\artifacts\\skada\\ironclad_matchup_bridge",
+  "character": "IRONCLAD",
+  "num_samples": 1622,
+  "avg_score_spread": 0.253206,
+  "chosen_is_best_rate": 1.0,
+  "ranking_path": "C:\\Users\\Administrator\\Desktop\\sts2Raw2\\artifacts\\skada\\ironclad_matchup_bridge\\derived\\rl\\ranking_sample.jsonl"
+}

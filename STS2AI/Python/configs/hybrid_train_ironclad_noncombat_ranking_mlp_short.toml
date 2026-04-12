@@ -1,0 +1,89 @@
+# Short IRONCLAD hybrid A/B profile for offline non-combat ranking experiments.
+#
+# Intent:
+# - Keep the main combat rollout path fixed.
+# - Keep offline combat teacher fixed.
+# - Turn on the bridged Skada card_reward ranking dataset.
+# - Leave only the non-combat ranking head structure as the A/B variable.
+
+[environment]
+pipe = true
+transport = "pipe-binary"
+auto_launch = true
+num_envs = 2
+start_port = 15567
+character_id = "IRONCLAD"
+
+[training]
+max_iterations = 20
+episodes_per_iter = 0
+episode_timeout = 90.0
+max_episode_steps = 600
+output_dir = "STS2AI/Artifacts/hybrid_ab_noncombat_ranking_mlp"
+
+[ppo]
+ppo_lr = 1e-4
+ppo_epochs = 4
+ppo_minibatch = 32
+ppo_entropy_coeff = 0.1
+ppo_clip = 0.2
+boss_readiness_coeff = 0.05
+
+[mcts]
+mcts = false
+
+[combat_ppo]
+combat_ppo_lr = 3e-4
+combat_ppo_epochs = 4
+combat_ppo_minibatch = 64
+combat_ppo_entropy_coeff = 0.05
+combat_ppo_clip = 0.2
+combat_monster_reward_weight = 0.7
+
+[architecture]
+embed_dim = 48
+combat_hidden_dim = 192
+combat_main_path_mode = "mlp"
+offline_noncombat_ranking_head_mode = "mlp"
+deck_repr_dim = 0
+
+[saved_offline_episodes]
+saved_offline_episodes_enabled = true
+saved_offline_episodes_min_floor = 14
+saved_offline_replay_traces_enabled = true
+saved_offline_metrics_log_enabled = true
+
+[offline_noncombat_ranking]
+# Bridged Skada card_reward ranking data.
+offline_noncombat_ranking_data_dir = "STS2AI/Artifacts/skada/ironclad_matchup_bridge"
+offline_noncombat_ranking_batch_size = 32
+# Keep this moderate: we want the ranking head to matter, but not dominate PPO.
+offline_noncombat_ranking_loss_weight = 0.1
+# Two updates per iter is enough for a short A/B to surface head-structure signal.
+offline_noncombat_ranking_updates_per_iter = 2
+offline_noncombat_ranking_warmup_iters = 0
+offline_noncombat_ranking_loss_decay_tau = 0.0
+offline_noncombat_ranking_blend_beta = 0.0
+offline_noncombat_ranking_min_spread = 0.0
+
+[offline_combat_teacher]
+offline_combat_teacher_data_dir = "STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_320.jsonl"
+offline_combat_teacher_loss_weight = 0.2
+offline_combat_teacher_batch_size = 64
+offline_combat_teacher_updates_per_iter = 4
+offline_combat_teacher_warmup_iters = 0
+
+[counterfactual]
+counterfactual_scoring = false
+counterfactual_weight = 0.0
+skada_prior_weight = 0.15
+skada_boss_weights = false
+
+[kl]
+kl_warmstart = false
+kl_beta_start = 0.5
+kl_beta_decay = 2000
+
+[milestones]
+boss_entry_quality_weight = 0.0
+early_damage_potion_penalty_weight = 0.0

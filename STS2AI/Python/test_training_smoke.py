@@ -301,6 +301,137 @@ class _FakeCombatTurnEnv:
         return copy.deepcopy(self._current)
 
 
+class TestCombatSafetyRerank:
+    def test_rerank_prefers_finishing_low_hp_attacker(self):
+        from combat_safety import rerank_combat_logits_with_safety
+
+        state = _make_teacher_combat_state(
+            [
+                {"id": "STRIKE_IRONCLAD", "name": "Strike", "cost": 1, "type": "Attack", "is_upgraded": False},
+                {"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "type": "Skill", "is_upgraded": False},
+            ]
+        )
+        state["battle"]["enemies"] = [
+            {
+                "entity_id": "slime-a",
+                "combat_id": 1,
+                "name": "Slime A",
+                "hp": 11,
+                "max_hp": 11,
+                "block": 0,
+                "intents": [{"type": "attack", "total_damage": 3}],
+                "status": [],
+            },
+            {
+                "entity_id": "slime-b",
+                "combat_id": 3,
+                "name": "Slime B",
+                "hp": 2,
+                "max_hp": 10,
+                "block": 0,
+                "intents": [{"type": "attack", "total_damage": 4}],
+                "status": [],
+            },
+        ]
+        legal = [
+            {"action": "play_card", "card_index": 0, "label": "Strike", "card_id": "STRIKE_IRONCLAD", "target_id": 1, "is_enabled": True},
+            {"action": "play_card", "card_index": 0, "label": "Strike", "card_id": "STRIKE_IRONCLAD", "target_id": 3, "is_enabled": True},
+            {"action": "play_card", "card_index": 1, "label": "Defend", "card_id": "DEFEND_IRONCLAD", "is_enabled": True},
+            {"action": "end_turn", "is_enabled": True},
+        ]
+
+        reranked, _adjustments = rerank_combat_logits_with_safety(
+            state,
+            legal,
+            np.asarray([0.6, 0.4, 0.2, -0.5], dtype=np.float32),
+        )
+
+        assert int(np.argmax(reranked)) == 1
+
+    def test_rerank_prefers_defend_over_bloodletting_in_danger(self):
+        from combat_safety import rerank_combat_logits_with_safety
+
+        state = _make_teacher_combat_state(
+            [
+                {"id": "BLOODLETTING", "name": "Bloodletting", "cost": 0, "type": "Skill", "is_upgraded": False},
+                {"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "type": "Skill", "is_upgraded": False},
+                {"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "type": "Skill", "is_upgraded": False},
+            ]
+        )
+        state["battle"]["player"]["hp"] = 31
+        state["battle"]["player"]["current_hp"] = 31
+        state["battle"]["player"]["block"] = 0
+        state["battle"]["player"]["energy"] = 1
+        state["battle"]["enemies"] = [
+            {
+                "entity_id": "jaw-worm",
+                "combat_id": 1,
+                "name": "Jaw Worm",
+                "hp": 36,
+                "max_hp": 36,
+                "block": 0,
+                "intents": [{"type": "attack", "total_damage": 16}],
+                "status": [],
+            }
+        ]
+        legal = [
+            {"action": "play_card", "card_index": 0, "label": "Bloodletting", "card_id": "BLOODLETTING", "is_enabled": True},
+            {"action": "play_card", "card_index": 1, "label": "Defend", "card_id": "DEFEND_IRONCLAD", "is_enabled": True},
+            {"action": "play_card", "card_index": 2, "label": "Defend", "card_id": "DEFEND_IRONCLAD", "is_enabled": True},
+            {"action": "end_turn", "is_enabled": True},
+        ]
+
+        reranked, _adjustments = rerank_combat_logits_with_safety(
+            state,
+            legal,
+            np.asarray([1.2, 0.3, 0.2, -0.5], dtype=np.float32),
+        )
+
+        assert int(np.argmax(reranked)) in {1, 2}
+
+    def test_heuristic_prefers_block_in_high_pressure_turn(self):
+        from heuristic_combat import heuristic_combat_action
+
+        state = _make_teacher_combat_state(
+            [
+                {"id": "GRAPPLE", "name": "Grapple", "cost": 1, "type": "Attack", "is_upgraded": False},
+                {"id": "STRIKE_IRONCLAD", "name": "Strike", "cost": 1, "type": "Attack", "is_upgraded": False},
+                {"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "type": "Skill", "is_upgraded": False},
+                {"id": "STRIKE_IRONCLAD", "name": "Strike", "cost": 1, "type": "Attack", "is_upgraded": False},
+                {"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "type": "Skill", "is_upgraded": False},
+            ]
+        )
+        state["battle"]["player"]["hp"] = 7
+        state["battle"]["player"]["current_hp"] = 7
+        state["battle"]["player"]["block"] = 0
+        state["battle"]["player"]["energy"] = 3
+        state["battle"]["enemies"] = [
+            {
+                "entity_id": "lagavulin",
+                "combat_id": 1,
+                "name": "Lagavulin",
+                "hp": 59,
+                "max_hp": 77,
+                "block": 0,
+                "intents": [{"type": "attack", "total_damage": 22}],
+                "status": [],
+            }
+        ]
+        legal = [
+            {"action": "play_card", "card_index": 0, "label": "Grapple", "card_id": "GRAPPLE", "target_id": 1, "is_enabled": True},
+            {"action": "play_card", "card_index": 1, "label": "Strike", "card_id": "STRIKE_IRONCLAD", "target_id": 1, "is_enabled": True},
+            {"action": "play_card", "card_index": 2, "label": "Defend", "card_id": "DEFEND_IRONCLAD", "is_enabled": True},
+            {"action": "play_card", "card_index": 3, "label": "Strike", "card_id": "STRIKE_IRONCLAD", "target_id": 1, "is_enabled": True},
+            {"action": "play_card", "card_index": 4, "label": "Defend", "card_id": "DEFEND_IRONCLAD", "is_enabled": True},
+            {"action": "end_turn", "is_enabled": True},
+        ]
+
+        action_idx, action = heuristic_combat_action(legal, state)
+        assert action_idx in {2, 4}
+        assert action["card_id"] == "DEFEND_IRONCLAD"
+
+
+
 class _DummyBaselinePolicy:
     def score(self, state: dict, legal_actions: list[dict]) -> dict:
         return {
@@ -2111,6 +2242,118 @@ class TestEvaluateHarness:
 
         assert action_idx == 0
         assert source == "combat_teacher_direct_lethal_blend"
+
+    def test_combat_teacher_mode_aliases_normalize_to_readable_modes(self):
+        from evaluate_ai import _normalize_combat_teacher_mode
+
+        assert _normalize_combat_teacher_mode("replace") == "full_replace"
+        assert _normalize_combat_teacher_mode("full_replace") == "full_replace"
+        assert _normalize_combat_teacher_mode("rerank") == "hard_override"
+        assert _normalize_combat_teacher_mode("hard_override") == "hard_override"
+
+    def test_train_hybrid_config_aliases_map_to_internal_dest_names(self):
+        from train_hybrid import _flatten_config_mapping
+
+        payload = {
+            "offline_noncombat_ranking": {
+                "offline_noncombat_ranking_data_dir": "rank.jsonl",
+                "offline_noncombat_ranking_loss_weight": 0.2,
+            },
+            "saved_offline_episodes": {
+                "saved_offline_episodes_enabled": False,
+                "saved_offline_episodes_min_floor": 18,
+            },
+            "offline_combat_teacher": {
+                "offline_combat_teacher_data_dir": "teacher.jsonl",
+                "offline_combat_teacher_updates_per_iter": 4,
+            },
+        }
+
+        flat = _flatten_config_mapping(payload)
+
+        assert flat["matchup_data_dir"] == "rank.jsonl"
+        assert flat["matchup_loss_weight"] == pytest.approx(0.2)
+        assert flat["save_offline_data"] is False
+        assert flat["offline_min_floor"] == 18
+        assert flat["combat_teacher_data_dir"] == "teacher.jsonl"
+        assert flat["combat_teacher_updates_per_iter"] == 4
+
+    def test_combat_teacher_trainer_main_path_mode_toggles_attention_params(self):
+        from combat_nn import CombatPolicyValueNetwork
+        from search.train_combat_teacher import _configure_main_combat_path_mode
+        from vocab import load_vocab
+
+        network = CombatPolicyValueNetwork(vocab=load_vocab(), embed_dim=32, hidden_dim=128)
+
+        mode = _configure_main_combat_path_mode(network, "mlp")
+        assert mode == "mlp"
+        assert network.main_action_context_gate.item() == 0.0
+        assert network.main_state_context_gate.item() == 0.0
+        assert network.main_action_context_gate.requires_grad is False
+        assert network.main_state_context_gate.requires_grad is False
+        assert network.main_action_context_attn.in_proj_weight.requires_grad is False
+
+        mode = _configure_main_combat_path_mode(network, "light_attention")
+        assert mode == "light_attention"
+        assert network.main_action_context_gate.item() == 0.0
+        assert network.main_state_context_gate.item() == 0.0
+        assert network.main_action_context_gate.requires_grad is True
+        assert network.main_state_context_gate.requires_grad is True
+        assert network.main_action_context_attn.in_proj_weight.requires_grad is True
+
+    def test_train_hybrid_main_path_mode_toggles_attention_params(self):
+        from combat_nn import CombatPolicyValueNetwork
+        from train_hybrid import _configure_main_combat_path_mode
+        from vocab import load_vocab
+
+        network = CombatPolicyValueNetwork(vocab=load_vocab(), embed_dim=32, hidden_dim=128)
+
+        mode = _configure_main_combat_path_mode(network, "mlp")
+        assert mode == "mlp"
+        assert network.main_action_context_gate.item() == 0.0
+        assert network.main_state_context_gate.item() == 0.0
+        assert network.main_action_context_gate.requires_grad is False
+        assert network.main_state_context_gate.requires_grad is False
+        assert network.main_action_context_attn.in_proj_weight.requires_grad is False
+
+        mode = _configure_main_combat_path_mode(network, "light_attention")
+        assert mode == "light_attention"
+        assert network.main_action_context_gate.item() == 0.0
+        assert network.main_state_context_gate.item() == 0.0
+        assert network.main_action_context_gate.requires_grad is True
+        assert network.main_state_context_gate.requires_grad is True
+        assert network.main_action_context_attn.in_proj_weight.requires_grad is True
+
+    def test_train_hybrid_offline_noncombat_ranking_head_mode_toggles_attention_params(self):
+        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from train_hybrid import _configure_offline_noncombat_ranking_head_mode
+        from vocab import load_vocab
+
+        network = FullRunPolicyNetworkV2(vocab=load_vocab(), embed_dim=32)
+
+        mode = _configure_offline_noncombat_ranking_head_mode(network, "mlp")
+        assert mode == "mlp"
+        assert network.offline_ranking_action_context_gate.item() == 0.0
+        assert network.offline_ranking_state_context_gate.item() == 0.0
+        assert network.offline_ranking_action_context_gate.requires_grad is False
+        assert network.offline_ranking_state_context_gate.requires_grad is False
+        assert network.offline_ranking_action_context_attn.in_proj_weight.requires_grad is False
+
+        mode = _configure_offline_noncombat_ranking_head_mode(network, "light_attention")
+        assert mode == "light_attention"
+        assert network.offline_ranking_action_context_gate.item() == 0.0
+        assert network.offline_ranking_state_context_gate.item() == 0.0
+        assert network.offline_ranking_action_context_gate.requires_grad is True
+        assert network.offline_ranking_state_context_gate.requires_grad is True
+        assert network.offline_ranking_action_context_attn.in_proj_weight.requires_grad is True
+
+        mode = _configure_offline_noncombat_ranking_head_mode(network, "transformer")
+        assert mode == "transformer"
+        assert network.offline_ranking_action_context_gate.item() == 0.0
+        assert network.offline_ranking_state_context_gate.item() == 0.0
+        assert network.offline_ranking_action_context_gate.requires_grad is True
+        assert network.offline_ranking_state_context_gate.requires_grad is True
+        assert next(network.offline_ranking_transformer.parameters()).requires_grad is True
 
     def test_combat_teacher_runtime_override_bad_end_turn_only_when_baseline_ends_turn(self):
         from evaluate_ai import _combat_teacher_runtime_override_source
@@ -4848,6 +5091,8 @@ class TestMatchupScoreHead:
         final_layer = net.matchup_score_head[-1]
         assert final_layer.weight.abs().max().item() == 0.0
         assert final_layer.bias.abs().max().item() == 0.0
+        assert net.offline_ranking_action_context_gate.item() == 0.0
+        assert net.offline_ranking_state_context_gate.item() == 0.0
 
     def test_matchup_head_param_count_reasonable(self):
         from rl_policy_v2 import FullRunPolicyNetworkV2
@@ -4879,6 +5124,36 @@ class TestMatchupScoreHead:
         missing, unexpected = net_new.load_state_dict(old_sd, strict=False)
         assert any("matchup_score" in k for k in missing)
         assert len(unexpected) == 0
+
+    def test_matchup_head_mode_toggles_attention_params(self):
+        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from vocab import load_vocab
+
+        net = FullRunPolicyNetworkV2(vocab=load_vocab(), embed_dim=32)
+
+        mode = net.configure_offline_noncombat_ranking_head_mode("mlp")
+        assert mode == "mlp"
+        assert net.offline_ranking_action_context_gate.item() == 0.0
+        assert net.offline_ranking_state_context_gate.item() == 0.0
+        assert net.offline_ranking_action_context_gate.requires_grad is False
+        assert net.offline_ranking_state_context_gate.requires_grad is False
+        assert net.offline_ranking_action_context_attn.in_proj_weight.requires_grad is False
+
+        mode = net.configure_offline_noncombat_ranking_head_mode("light_attention")
+        assert mode == "light_attention"
+        assert net.offline_ranking_action_context_gate.item() == 0.0
+        assert net.offline_ranking_state_context_gate.item() == 0.0
+        assert net.offline_ranking_action_context_gate.requires_grad is True
+        assert net.offline_ranking_state_context_gate.requires_grad is True
+        assert net.offline_ranking_action_context_attn.in_proj_weight.requires_grad is True
+
+        mode = net.configure_offline_noncombat_ranking_head_mode("transformer")
+        assert mode == "transformer"
+        assert net.offline_ranking_action_context_gate.item() == 0.0
+        assert net.offline_ranking_state_context_gate.item() == 0.0
+        assert net.offline_ranking_action_context_gate.requires_grad is True
+        assert net.offline_ranking_state_context_gate.requires_grad is True
+        assert next(net.offline_ranking_transformer.parameters()).requires_grad is True
 
 
 class TestMatchupDataset:

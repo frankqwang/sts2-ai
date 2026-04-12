@@ -329,7 +329,7 @@ class BinaryPipeClient(PipeClient):
             }
 
         symbol_updates = 0
-        if opcode in {OP_RESET, OP_STATE, OP_STEP, OP_BATCH_STEP, OP_LOAD_STATE, OP_IMPORT_STATE, OP_LOAD_ORT_MODEL, 0x0C}:
+        if opcode in {OP_RESET, OP_STATE, OP_STEP, OP_BATCH_STEP, OP_LOAD_STATE, OP_IMPORT_STATE, OP_LOAD_ORT_MODEL, 0x0C, 0x0F}:
             symbol_updates = self._read_symbol_updates(reader)
         payload = self._decode_payload(opcode, reader)
         if isinstance(payload, dict):
@@ -385,6 +385,16 @@ class BinaryPipeClient(PipeClient):
             return {"reset": bool(reader.read_u8())}
         if opcode == OP_LOAD_ORT_MODEL:
             return {"loaded": bool(reader.read_u8())}
+        if opcode == 0x0F:  # SkipCombat — same response format as Step
+            accepted = bool(reader.read_u8())
+            error = reader.read_optional_string()
+            state = self._decode_state(reader)
+            return {
+                "accepted": accepted,
+                "error": error,
+                "state": state,
+                "skipped": True,
+            }
         if opcode == 0x0C:  # RunCombatLocal
             combat_steps = reader.read_u16()
             elapsed_ms = reader.read_f32()
@@ -458,6 +468,9 @@ class BinaryPipeClient(PipeClient):
             return bytes([OP_RESET_PERF_STATS])
         if method == "step_local_policy":
             return bytes([OP_STEP_LOCAL_POLICY])
+        if method == "skip_combat":
+            body.append(0x0F)  # OP_SkipCombat
+            return bytes(body)
         if method == "run_combat_local":
             body.append(0x0C)  # OP_RunCombatLocal
             body.extend(struct.pack("<H", int(params.get("max_steps", 600))))

@@ -5,7 +5,7 @@ the full trajectory of (state_tensor, action_tensor, action_idx, reward,
 screen_type) is saved as a .pt file.
 
 Usage:
-    saver = EpisodeDataSaver(output_dir="artifacts/offline_data", min_floor=14)
+    saver = EpisodeDataSaver(output_dir="STS2AI/Artifacts/offline_data", min_floor=14)
     # During episode collection, call per-step:
     saver.add_step(state_dict, actions_dict, action_idx, reward, screen_type, log_prob, value)
     # At episode end:
@@ -30,7 +30,7 @@ class EpisodeDataSaver:
 
     def __init__(
         self,
-        output_dir: str | Path = "artifacts/offline_data",
+        output_dir: str | Path = "STS2AI/Artifacts/offline_data",
         min_floor: int = 14,
         save_victories: bool = True,
         max_files: int = 50000,

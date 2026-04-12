@@ -31,6 +31,7 @@ import random
 import signal
 import sys
 import time
+import tomllib
 import traceback
 from collections import deque
 import multiprocessing as mp
@@ -103,6 +104,248 @@ DEFAULT_REPO_ROOT = REPO_ROOT
 DEFAULT_OUTPUT_DIR = ARTIFACTS_ROOT / "hybrid_training"
 DEFAULT_MATCHUP_DATA_DIR = DATASETS_ROOT / "card_ranking_post_wizardly"
 DEFAULT_COMBAT_TEACHER_DATA = DATASETS_ROOT / "combat_teacher_post_wizardly" / "teacher.jsonl"
+
+# Backward-compatible config aliases for older opaque names. The right-hand side
+# is the argparse dest / canonical internal name actually consumed by training.
+_CONFIG_ALIASES = {
+    "offline_noncombat_ranking_data_dir": "matchup_data_dir",
+    "offline_noncombat_ranking_batch_size": "matchup_batch_size",
+    "offline_noncombat_ranking_loss_weight": "matchup_loss_weight",
+    "offline_noncombat_ranking_updates_per_iter": "matchup_updates_per_iter",
+    "offline_noncombat_ranking_warmup_iters": "matchup_warmup_iters",
+    "offline_noncombat_ranking_loss_decay_tau": "matchup_loss_decay_tau",
+    "offline_noncombat_ranking_blend_beta": "matchup_blend_beta",
+    "offline_noncombat_ranking_min_spread": "matchup_min_spread",
+    "saved_offline_episodes_enabled": "save_offline_data",
+    "saved_offline_episodes_min_floor": "offline_min_floor",
+    "saved_offline_replay_traces_enabled": "save_replay_traces",
+    "saved_offline_metrics_log_enabled": "save_metrics_log",
+    "offline_combat_teacher_data_dir": "combat_teacher_data_dir",
+    "offline_combat_teacher_loss_weight": "combat_teacher_loss_weight",
+    "offline_combat_teacher_batch_size": "combat_teacher_batch_size",
+    "offline_combat_teacher_updates_per_iter": "combat_teacher_updates_per_iter",
+    "offline_combat_teacher_warmup_iters": "combat_teacher_warmup_iters",
+}
+
+
+def _peek_config_path(argv: list[str]) -> str | None:
+    """Read --config early so file values can become parser defaults."""
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=str, default=None)
+    known, _unknown = pre_parser.parse_known_args(argv)
+    return known.config
+
+
+def _flatten_config_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested TOML tables into parser dest -> value pairs.
+
+    Config files keep related settings grouped in sections, but leaf keys are
+    still expected to match argparse dest names such as `ppo_lr` or
+    `combat_teacher_loss_weight`.
+    """
+    flat: dict[str, Any] = {}
+
+    def _visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if isinstance(value, dict):
+                _visit(value)
+            else:
+                normalized_key = str(key).replace("-", "_")
+                flat[_CONFIG_ALIASES.get(normalized_key, normalized_key)] = value
+
+    _visit(payload)
+    return flat
+
+
+def _load_train_hybrid_config(path: str | Path | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    config_path = Path(path)
+    payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Config root must be a TOML table: {config_path}")
+    return _flatten_config_mapping(payload)
+
+
+def _configure_main_combat_path_mode(
+    network: CombatPolicyValueNetwork,
+    mode: str,
+) -> str:
+    """Choose whether the main combat rollout path trains residual attention.
+
+    `mlp` preserves the legacy main path by freezing the residual attention
+    parameters and forcing both gates to 0.
+    `light_attention` leaves the residual branch trainable.
+    """
+    normalized = str(mode or "mlp").strip().lower()
+    if normalized not in {"mlp", "light_attention"}:
+        raise ValueError(f"Unsupported combat_main_path_mode: {mode}")
+
+    attention_names = {
+        "main_action_context_gate",
+        "main_state_context_gate",
+    }
+    attention_prefixes = (
+        "main_action_context_attn.",
+        "main_action_context_norm.",
+        "main_action_context_ffn.",
+        "main_action_context_ffn_norm.",
+    )
+    use_attention = normalized == "light_attention"
+    with torch.no_grad():
+        if hasattr(network, "main_action_context_gate"):
+            network.main_action_context_gate.fill_(0.0)
+        if hasattr(network, "main_state_context_gate"):
+            network.main_state_context_gate.fill_(0.0)
+    for name, param in network.named_parameters():
+        if name in attention_names or any(name.startswith(prefix) for prefix in attention_prefixes):
+            param.requires_grad = use_attention
+    return normalized
+
+
+def _configure_offline_noncombat_ranking_head_mode(
+    network: FullRunPolicyNetworkV2,
+    mode: str,
+) -> str:
+    """Choose whether offline non-combat ranking uses residual attention."""
+    return network.configure_offline_noncombat_ranking_head_mode(mode)
+
+
+def _training_data_source_summary(
+    *,
+    args,
+    effective_counterfactual_scoring: bool,
+    effective_counterfactual_weight: float,
+    matchup_dataset_size: int,
+    combat_teacher_dataset_size: int,
+) -> dict[str, Any]:
+    """Describe which data sources currently influence training and how much."""
+    return {
+        "summary": {
+            "character_id": str(args.character_id),
+            "transport": str(args.transport),
+            "num_envs": int(args.num_envs),
+            "max_iterations": int(args.max_iterations),
+            "combat_main_path_mode": str(getattr(args, "combat_main_path_mode", "mlp")),
+            "offline_noncombat_ranking_head_mode": str(
+                getattr(args, "offline_noncombat_ranking_head_mode", "mlp")
+            ),
+        },
+        "online_data": {
+            "noncombat_ppo_rollouts": {
+                "enabled": not bool(getattr(args, "freeze_ppo", False)),
+                "role": "Primary non-combat learning signal from live self-play episodes.",
+                "notes": [
+                    "Collected into ppo_buffer from live simulator episodes.",
+                    "Merged with a floor-depth weight, so deeper runs count more.",
+                ],
+            },
+            "combat_ppo_rollouts": {
+                "enabled": not bool(getattr(args, "freeze_combat", False)),
+                "role": "Online combat policy/value updates from NN-selected combat actions.",
+                "notes": [
+                    "Only NN-selected combat steps are stored; MCTS-chosen steps are excluded.",
+                    f"Monster hallway combat reward merge weight: {float(args.combat_monster_reward_weight):.3f}.",
+                ],
+            },
+            "combat_search_examples": {
+                "enabled": bool(getattr(args, "mcts", False)),
+                "role": "Higher-quality combat supervision generated by MCTS search.",
+                "notes": [
+                    f"MCTS sims per search: {int(args.mcts_sims)}.",
+                    "Used to train the combat search/value head when MCTS is enabled.",
+                ],
+            },
+        },
+        "offline_or_auxiliary_data": {
+            "offline_noncombat_ranking": {
+                "enabled": matchup_dataset_size > 0,
+                "canonical_arg": "matchup_data_dir",
+                "recommended_alias": "offline_noncombat_ranking_data_dir",
+                "samples": int(matchup_dataset_size),
+                "weight": float(args.matchup_loss_weight),
+                "warmup_iters": int(args.matchup_warmup_iters),
+                "updates_per_iter": int(args.matchup_updates_per_iter),
+                "notes": [
+                    "Supervises non-combat card preference / ranking score head.",
+                    "Legacy internal name is 'matchup'; the clearer config alias is 'offline_noncombat_ranking_*'.",
+                    f"Ranking head mode: {getattr(args, 'offline_noncombat_ranking_head_mode', 'mlp')}.",
+                    "Loss weight is fixed unless matchup_loss_decay_tau is enabled.",
+                ],
+            },
+            "offline_combat_teacher": {
+                "enabled": combat_teacher_dataset_size > 0,
+                "canonical_arg": "combat_teacher_data_dir",
+                "recommended_alias": "offline_combat_teacher_data_dir",
+                "samples": int(combat_teacher_dataset_size),
+                "weight": float(args.combat_teacher_loss_weight),
+                "warmup_iters": int(args.combat_teacher_warmup_iters),
+                "updates_per_iter": int(args.combat_teacher_updates_per_iter),
+                "notes": [
+                    "Offline turn-solver teacher data for combat reranking.",
+                    "The clearer config alias is 'offline_combat_teacher_*'.",
+                    "As the dataset grows, fixed per-iter updates reduce per-sample revisit frequency.",
+                ],
+            },
+            "counterfactual_reward": {
+                "enabled": bool(effective_counterfactual_scoring),
+                "weight": float(effective_counterfactual_weight),
+                "notes": [
+                    "Reward shaping term blended into non-combat PPO rewards.",
+                    f"Skada prior blend gamma: {float(args.skada_prior_weight):.3f}.",
+                ],
+            },
+            "saved_offline_episodes": {
+                "enabled": bool(args.save_offline_data),
+                "min_floor": int(args.offline_min_floor),
+                "canonical_arg": "save_offline_data",
+                "recommended_alias": "saved_offline_episodes_enabled",
+                "notes": [
+                    "Saves high-quality episodes to disk for future offline training.",
+                    "This saver does not automatically feed back into the current run.",
+                ],
+            },
+        },
+    }
+
+
+def _write_training_flow_snapshot(
+    output_dir: Path,
+    summary: dict[str, Any],
+) -> None:
+    (output_dir / "training_sources.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    md_lines = [
+        "# Hybrid Training Data Flow",
+        "",
+        "This file is generated at launch time so each training run records",
+        "which data sources are active and how strongly they influence updates.",
+        "",
+        "## Online Data",
+    ]
+    for name, payload in summary.get("online_data", {}).items():
+        md_lines.append(f"- `{name}`: enabled={payload.get('enabled')}")
+        md_lines.append(f"  role: {payload.get('role')}")
+        for note in payload.get("notes", []):
+            md_lines.append(f"  note: {note}")
+    md_lines.extend(["", "## Offline / Auxiliary Data"])
+    for name, payload in summary.get("offline_or_auxiliary_data", {}).items():
+        detail_bits = []
+        if "samples" in payload:
+            detail_bits.append(f"samples={payload['samples']}")
+        if "weight" in payload:
+            detail_bits.append(f"weight={payload['weight']}")
+        if "updates_per_iter" in payload:
+            detail_bits.append(f"updates_per_iter={payload['updates_per_iter']}")
+        suffix = f" ({', '.join(detail_bits)})" if detail_bits else ""
+        md_lines.append(f"- `{name}`: enabled={payload.get('enabled')}{suffix}")
+        for note in payload.get("notes", []):
+            md_lines.append(f"  note: {note}")
+    (output_dir / "training_flow.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 
 
 def _signal_handler(signum, frame):
@@ -683,6 +926,8 @@ class CombatPPOTrainer:
         total_ploss = 0.0
         total_vloss = 0.0
         total_entropy = 0.0
+        total_ratio_mean = 0.0
+        total_clip_fraction = 0.0
         num_updates = 0
 
         for _epoch in range(self.ppo_epochs):
@@ -714,6 +959,7 @@ class CombatPPOTrainer:
                 surr1 = ratio * mb_advantages
                 surr2 = ratio.clamp(1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * mb_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
+                clip_fraction = ((ratio - 1.0).abs() > self.clip_epsilon).float().mean()
 
                 # Value loss (clamp returns to [-1, 1] to match Tanh output)
                 mb_returns_clamped = mb_returns.clamp(-1.0, 1.0)
@@ -730,6 +976,8 @@ class CombatPPOTrainer:
                 total_ploss += policy_loss.item()
                 total_vloss += value_loss.item()
                 total_entropy += entropy.item()
+                total_ratio_mean += ratio.mean().item()
+                total_clip_fraction += clip_fraction.item()
                 num_updates += 1
 
         num_updates = max(num_updates, 1)
@@ -737,6 +985,8 @@ class CombatPPOTrainer:
             "combat_ppo_ploss": total_ploss / num_updates,
             "combat_ppo_vloss": total_vloss / num_updates,
             "combat_entropy": total_entropy / num_updates,
+            "combat_ppo_ratio_mean": total_ratio_mean / num_updates,
+            "combat_ppo_clip_fraction": total_clip_fraction / num_updates,
         }
 
 
@@ -925,6 +1175,8 @@ def collect_unified_episode(
     # Step 2 / Phase 5 options
     boss_entry_quality_weight: float = 0.0,
     early_damage_potion_penalty_weight: float = 0.0,
+    # Build mode
+    build_mode: bool = False,
 ) -> tuple[StructuredRolloutBuffer, list[MCTSTrainingExample], dict]:
     """Collect one episode with PPO for non-combat and MCTS/PPO for combat.
 
@@ -1293,6 +1545,38 @@ def collect_unified_episode(
         else:
             _repeat_count = 0
             _last_action_key = _cur_action_key
+
+        # ----- BUILD MODE: skip non-boss combat instantly -----
+        if build_mode and st in COMBAT_SCREENS:
+            _combat_room_type = _detect_combat_room_type(st, state)
+            if _pending_boss_deck_size is not None:
+                _combat_room_type = "boss"
+
+            if _combat_room_type != "boss":
+                # Non-boss combat: skip instantly via SkipCombat opcode
+                if not in_combat:
+                    in_combat = True
+                    stats["combats"] += 1
+
+                raw_pipe = pipe() if callable(pipe) else pipe
+                try:
+                    result = raw_pipe.call("skip_combat")
+                    post_state = result.get("state", result)
+                    post_st = (post_state.get("state_type") or "").lower()
+                    # Give small positive reward for surviving
+                    if len(ppo_buffer) > 0:
+                        ppo_buffer.rewards[-1] += 0.05
+                    prev_state = state
+                    state = post_state
+                    in_combat = False
+                    stats.setdefault("build_mode_skips", 0)
+                    stats["build_mode_skips"] += 1
+                    _episode_trace.append(
+                        f"[{step_i}] BUILD_MODE_SKIP #{stats['combats']} {_combat_room_type}")
+                    continue
+                except Exception as skip_err:
+                    _episode_trace.append(f"[{step_i}] BUILD_MODE_SKIP_ERROR: {skip_err}")
+                    # Fall through to normal combat path
 
         # ----- COMBAT: LOCAL ORT (skip per-step Python inference) -----
         if st in COMBAT_SCREENS and use_local_ort and pipe is not None:
@@ -2063,7 +2347,14 @@ def mcts_train_step(
 # ---------------------------------------------------------------------------
 
 def main() -> int:
+    config_path = _peek_config_path(sys.argv[1:])
     parser = argparse.ArgumentParser(description="Unified PPO + MCTS hybrid training")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=config_path,
+        help="Optional TOML config file. Leaf keys should match argparse dest names.",
+    )
     # Environment
     parser.add_argument("--pipe", action="store_true", help="Use pipe for MCTS (recommended)")
     parser.add_argument(
@@ -2128,6 +2419,10 @@ def main() -> int:
                         help="Entity embedding dimension (default: 48)")
     parser.add_argument("--combat-hidden-dim", type=int, default=192,
                         help="Combat NN hidden dimension (default: 192)")
+    parser.add_argument("--combat-main-path-mode", choices=["mlp", "light_attention"], default="mlp",
+                        help="Main combat rollout path structure. 'mlp' keeps the legacy policy/value path; "
+                             "'light_attention' enables a residual state/action attention branch in the "
+                             "main combat policy/value path. Recommended to test only in hybrid/PPO training.")
     parser.add_argument("--deck-repr-dim", type=int, default=0,
                         help="Deck embedding dimension for build_plan_z bridge (0=disabled, 64=recommended)")
     parser.add_argument("--vectorized", action="store_true", default=False,
@@ -2164,8 +2459,8 @@ def main() -> int:
                         help="Reward weight for monster combat data during merge (default 1.0). "
                              "Setting <1.0 keeps monster data in buffer but dampens its loss contribution. "
                              "Ignored when --combat-boss-only is set. Recommended: 0.1 for focus on boss/elite.")
-    parser.add_argument("--matchup-loss-decay-tau", type=float, default=0.0,
-                        help="Exponential decay tau for matchup_loss_weight (0=no decay, 300=recommended)")
+    parser.add_argument("--matchup-loss-decay-tau", "--offline-noncombat-ranking-loss-decay-tau", type=float, default=0.0,
+                        help="Exponential decay tau for offline non-combat ranking loss weight (0=no decay, 300=recommended)")
 
     # Checkpoints
     parser.add_argument("--resume", type=str, default=str(MAINLINE_CHECKPOINT),
@@ -2211,11 +2506,11 @@ def main() -> int:
                         help="Number of iterations for KL beta decay (Phase 4)")
 
     # --- Offline data saving ---
-    parser.add_argument("--save-offline-data", action="store_true", default=True,
-                        help="Save high-quality episodes for offline RL (default: True)")
-    parser.add_argument("--no-save-offline-data", dest="save_offline_data", action="store_false")
-    parser.add_argument("--offline-min-floor", type=int, default=14,
-                        help="Min floor to save episode (default: 14)")
+    parser.add_argument("--save-offline-data", "--saved-offline-episodes", dest="save_offline_data", action="store_true", default=True,
+                        help="Save high-quality episodes for future offline use (default: True)")
+    parser.add_argument("--no-save-offline-data", "--no-saved-offline-episodes", dest="save_offline_data", action="store_false")
+    parser.add_argument("--offline-min-floor", "--saved-offline-episodes-min-floor", type=int, default=14,
+                        help="Min floor required before saved offline episodes are written (default: 14)")
     parser.add_argument("--save-replay-traces", action="store_true", default=True,
                         help="Write per-episode replay trace files (default: True)")
     parser.add_argument("--no-save-replay-traces", dest="save_replay_traces", action="store_false")
@@ -2227,18 +2522,38 @@ def main() -> int:
     parser.add_argument("--no-screen-local-delta", dest="screen_local_delta", action="store_false")
 
     # --- Matchup ranking data ---
-    parser.add_argument("--matchup-data-dir", type=str, default=str(DEFAULT_MATCHUP_DATA_DIR),
-                        help="Directory containing offline card ranking data (JSONL + NPZ)")
-    parser.add_argument("--matchup-batch-size", type=int, default=32,
-                        help="Batch size for matchup ranking loss (default: 32)")
-    parser.add_argument("--matchup-loss-weight", type=float, default=0.1,
-                        help="Weight for matchup ranking loss (default: 0.1)")
-    parser.add_argument("--matchup-warmup-iters", type=int, default=100,
-                        help="Skip matchup loss for first N iterations (default: 100)")
-    parser.add_argument("--matchup-blend-beta", type=float, default=0.0,
-                        help="Blend matchup_score_head into teacher signal (0=off, 0.3=recommended)")
-    parser.add_argument("--matchup-min-spread", type=float, default=0.001,
-                        help="Filter out ranking samples with score spread below this (default: 0.001)")
+    parser.add_argument("--matchup-data-dir", "--offline-noncombat-ranking-data-dir",
+                        type=str, default=str(DEFAULT_MATCHUP_DATA_DIR),
+                        help="Offline non-combat ranking dataset path (legacy name: matchup-data-dir)")
+    parser.add_argument("--matchup-batch-size", "--offline-noncombat-ranking-batch-size",
+                        type=int, default=32,
+                        help="Batch size for offline non-combat ranking loss (default: 32)")
+    parser.add_argument("--matchup-loss-weight", "--offline-noncombat-ranking-loss-weight",
+                        type=float, default=0.1,
+                        help="Weight for offline non-combat ranking loss (default: 0.1)")
+    parser.add_argument("--matchup-updates-per-iter", "--offline-noncombat-ranking-updates-per-iter",
+                        type=int, default=1,
+                        help="How many offline non-combat ranking updates to run per iteration (default: 1)")
+    parser.add_argument("--matchup-warmup-iters", "--offline-noncombat-ranking-warmup-iters",
+                        type=int, default=100,
+                        help="Skip offline non-combat ranking loss for first N iterations (default: 100)")
+    parser.add_argument("--matchup-blend-beta", "--offline-noncombat-ranking-blend-beta", type=float, default=0.0,
+                        help="Blend the non-combat ranking score head into teacher signal (0=off, 0.3=recommended)")
+    parser.add_argument("--matchup-min-spread", "--offline-noncombat-ranking-min-spread", type=float, default=0.001,
+                        help="Filter out offline non-combat ranking samples with spread below this (default: 0.001)")
+    parser.add_argument(
+        "--offline-noncombat-ranking-head-mode",
+        "--matchup-head-mode",
+        type=str,
+        choices=["mlp", "light_attention", "transformer"],
+        default="mlp",
+        help=(
+            "Structure used by the offline non-combat ranking scorer. "
+            "'mlp' keeps the legacy option scorer; 'light_attention' adds a "
+            "residual attention block over screen context plus candidate options; "
+            "'transformer' uses a deeper transformer-style residual scorer."
+        ),
+    )
 
     # --- Skada community priors ---
     parser.add_argument("--skada-prior-weight", type=float, default=0.15,
@@ -2249,14 +2564,30 @@ def main() -> int:
                         help="Path to Skada analytics SQLite DB (default: auto-detect)")
 
     # --- Combat teacher data (offline turn-solver teacher) ---
-    parser.add_argument("--combat-teacher-data-dir", type=str, default=str(DEFAULT_COMBAT_TEACHER_DATA),
-                        help="JSONL file or directory containing combat teacher dataset (from build_combat_teacher_dataset.py)")
-    parser.add_argument("--combat-teacher-loss-weight", type=float, default=0.1,
-                        help="Weight for combat teacher loss (default: 0.1)")
-    parser.add_argument("--combat-teacher-batch-size", type=int, default=32,
-                        help="Batch size for combat teacher loss (default: 32)")
-    parser.add_argument("--combat-teacher-warmup-iters", type=int, default=0,
-                        help="Skip combat teacher loss for first N iterations (default: 0)")
+    parser.add_argument("--combat-teacher-data-dir", "--offline-combat-teacher-data-dir",
+                        type=str, default=str(DEFAULT_COMBAT_TEACHER_DATA),
+                        help="Offline combat teacher dataset path (JSONL or directory)")
+    parser.add_argument("--combat-teacher-loss-weight", "--offline-combat-teacher-loss-weight",
+                        type=float, default=0.1,
+                        help="Weight for offline combat teacher loss (default: 0.1)")
+    parser.add_argument("--combat-teacher-batch-size", "--offline-combat-teacher-batch-size",
+                        type=int, default=32,
+                        help="Batch size for offline combat teacher loss (default: 32)")
+    parser.add_argument("--combat-teacher-updates-per-iter", "--offline-combat-teacher-updates-per-iter",
+                        type=int, default=1,
+                        help="How many offline combat teacher updates to run per iteration (default: 1)")
+    parser.add_argument("--combat-teacher-warmup-iters", "--offline-combat-teacher-warmup-iters",
+                        type=int, default=0,
+                        help="Skip offline combat teacher loss for first N iterations (default: 0)")
+
+    # --- Build Mode (non-boss combat auto-win) ---
+    parser.add_argument("--build-mode", action="store_true", default=False,
+                        help="Build Mode: auto-win non-boss combat (monster/elite) via save/load "
+                             "state. Only boss fights are played normally. Use this to isolate "
+                             "non-combat brain training and test deck-building quality.")
+    parser.add_argument("--build-mode-hp-restore", type=float, default=1.0,
+                        help="HP fraction to restore after auto-win combat in build mode "
+                             "(1.0 = full HP, 0.8 = 80%% of max HP). Default: 1.0")
 
     # --- Step 2 / Phase 5: Macro Milestone PPO (boss-entry build quality) ---
     parser.add_argument("--boss-entry-quality-weight", type=float, default=0.0,
@@ -2266,6 +2597,14 @@ def main() -> int:
     parser.add_argument("--early-damage-potion-penalty-weight", type=float, default=0.0,
                         help="Step 2 / Phase 5: scale per-use penalty for using a damage potion "
                              "before reaching the boss zone. 0.0 = disabled (default), 1.0 = -0.05/use.")
+
+    if config_path:
+        config_overrides = _load_train_hybrid_config(config_path)
+        known_dests = {action.dest for action in parser._actions}
+        unknown_keys = sorted(key for key in config_overrides if key not in known_dests)
+        if unknown_keys:
+            logger.warning("Ignoring unknown config keys from %s: %s", config_path, ", ".join(unknown_keys))
+        parser.set_defaults(**{key: value for key, value in config_overrides.items() if key in known_dests})
 
     args = parser.parse_args()
     if args.seed is not None:
@@ -2326,13 +2665,16 @@ def main() -> int:
             config_payload[_key] = str(_value)
     config_payload["effective_counterfactual_scoring"] = effective_counterfactual_scoring
     config_payload["effective_counterfactual_weight"] = effective_counterfactual_weight
-    (output_dir / "config.json").write_text(json.dumps(config_payload, indent=2))
+    if args.config:
+        config_payload["config"] = str(Path(args.config).resolve())
+    (output_dir / "config.json").write_text(json.dumps(config_payload, indent=2), encoding="utf-8")
     metrics_log = output_dir / "metrics.jsonl" if args.save_metrics_log else None
     metrics_history: list[dict[str, Any]] = []
     health_monitor = TrainingHealthMonitor()
     health_check_interval = 25
 
-    # Matchup ranking dataset (offline card ranking data)
+    # Offline non-combat ranking data mainly shapes card/shop/campfire preference.
+    # It complements live PPO data instead of replacing it.
     matchup_dataset = None
     if args.matchup_data_dir:
         from matchup_dataset import MatchupRankingDataset
@@ -2340,7 +2682,7 @@ def main() -> int:
             args.matchup_data_dir,
             min_spread=args.matchup_min_spread,
         )
-        logger.info("Matchup ranking dataset: %d samples from %s (filtered %d with spread < %.4f)",
+        logger.info("Offline non-combat ranking dataset: %d samples from %s (filtered %d with spread < %.4f)",
                      len(matchup_dataset), args.matchup_data_dir,
                      matchup_dataset._filtered_count, args.matchup_min_spread)
         if len(matchup_dataset) > 0:
@@ -2350,7 +2692,9 @@ def main() -> int:
                          stats.get("score_std", 0),
                          stats.get("skip_best_rate", 0) * 100)
 
-    # Combat teacher dataset (offline turn-solver teacher data)
+    # Offline combat teacher data is separate from live combat PPO/MCTS data.
+    # Keep its batch/update schedule explicit so dataset growth does not
+    # silently reduce its influence on the combat network.
     combat_teacher_dataset = None
     if args.combat_teacher_data_dir:
         from combat_teacher_dataset import load_combat_teacher_samples
@@ -2366,10 +2710,10 @@ def main() -> int:
             # Only use train-split samples
             ct_samples = [s for s in ct_samples if str(s.split or "train") == "train"]
             combat_teacher_dataset = CombatTeacherTorchDataset(ct_samples, vocab=vocab)
-            logger.info("Combat teacher dataset: %d samples from %s",
+            logger.info("Offline combat teacher dataset: %d samples from %s",
                          len(combat_teacher_dataset), args.combat_teacher_data_dir)
         else:
-            logger.warning("Combat teacher dataset: 0 samples found in %s", args.combat_teacher_data_dir)
+            logger.warning("Offline combat teacher dataset: 0 samples found in %s", args.combat_teacher_data_dir)
 
     # Offline data saver
     episode_saver = None
@@ -2379,7 +2723,16 @@ def main() -> int:
             output_dir=offline_dir,
             min_floor=args.offline_min_floor,
         )
-        logger.info("Offline data saver: floor >= %d → %s", args.offline_min_floor, offline_dir)
+        logger.info("Saved offline episodes: floor >= %d → %s", args.offline_min_floor, offline_dir)
+
+    training_source_summary = _training_data_source_summary(
+        args=args,
+        effective_counterfactual_scoring=effective_counterfactual_scoring,
+        effective_counterfactual_weight=effective_counterfactual_weight,
+        matchup_dataset_size=len(matchup_dataset) if matchup_dataset is not None else 0,
+        combat_teacher_dataset_size=len(combat_teacher_dataset) if combat_teacher_dataset is not None else 0,
+    )
+    _write_training_flow_snapshot(output_dir, training_source_summary)
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -2428,6 +2781,11 @@ def main() -> int:
         embed_dim=args.embed_dim,
         use_symbolic_features=use_symbolic_features,
         symbolic_proj_dim=symbolic_proj_dim,
+        offline_noncombat_ranking_head_mode=getattr(
+            args,
+            "offline_noncombat_ranking_head_mode",
+            "mlp",
+        ),
     )
     deck_repr_dim = getattr(args, "deck_repr_dim", 0)
 
@@ -2527,6 +2885,15 @@ def main() -> int:
             _safe_load_state_dict(ppo_net, ckpt["model_state_dict"], "PPO")
         logger.info("Loaded PPO from %s", args.resume_ppo)
 
+    offline_noncombat_ranking_head_mode = _configure_offline_noncombat_ranking_head_mode(
+        ppo_net,
+        getattr(args, "offline_noncombat_ranking_head_mode", "mlp"),
+    )
+    logger.info(
+        "Offline non-combat ranking head mode: %s",
+        offline_noncombat_ranking_head_mode,
+    )
+
     if args.resume_mcts:
         ckpt = torch.load(args.resume_mcts, map_location="cpu", weights_only=False)
         if "mcts_model" in ckpt:
@@ -2534,6 +2901,12 @@ def main() -> int:
         elif "model_state_dict" in ckpt:
             _safe_load_state_dict(mcts_net, ckpt["model_state_dict"], "combat")
         logger.info("Loaded combat policy from %s", args.resume_mcts)
+
+    combat_main_path_mode = _configure_main_combat_path_mode(
+        mcts_net,
+        getattr(args, "combat_main_path_mode", "mlp"),
+    )
+    logger.info("Combat main rollout path mode: %s", combat_main_path_mode)
 
     # Initialize combat deck_encoder from PPO deck_encoder (transfer learned representation)
     if deck_repr_dim > 0 and hasattr(mcts_net, 'deck_encoder') and hasattr(ppo_net, 'deck_encoder'):
@@ -2792,6 +3165,7 @@ def main() -> int:
             ppo_ort_session=_ppo_ort_session,
             boss_entry_quality_weight=args.boss_entry_quality_weight,
             early_damage_potion_penalty_weight=args.early_damage_potion_penalty_weight,
+            build_mode=getattr(args, "build_mode", False),
         )
 
     # Load Skada community priors (card quality, synergies, boss difficulty)
@@ -3255,8 +3629,12 @@ def main() -> int:
                     and len(matchup_dataset) > 0
                     and not getattr(args, "freeze_ppo", False)):
                 ppo_net.train()
-                mb = matchup_dataset.sample_batch(args.matchup_batch_size, device=device)
-                if mb is not None and "state_tensors" in mb and "action_tensors" in mb:
+                matchup_updates = max(1, int(getattr(args, "matchup_updates_per_iter", 1)))
+                matchup_rank_losses: list[float] = []
+                for _ in range(matchup_updates):
+                    mb = matchup_dataset.sample_batch(args.matchup_batch_size, device=device)
+                    if mb is None or "state_tensors" not in mb or "action_tensors" not in mb:
+                        continue
                     pred_scores_full = ppo_net.compute_matchup_scores(
                         mb["state_tensors"], mb["action_tensors"])
                     # pred_scores is (B, MAX_ACTIONS=30), target is (B, MAX_OPTIONS=4)
@@ -3276,7 +3654,9 @@ def main() -> int:
                     ppo_trainer.optimizer.zero_grad()
                     total_rloss.backward()
                     ppo_trainer.optimizer.step()
-                    matchup_rank_loss_val = rank_loss.item()
+                    matchup_rank_losses.append(rank_loss.item())
+                if matchup_rank_losses:
+                    matchup_rank_loss_val = float(sum(matchup_rank_losses) / len(matchup_rank_losses))
 
             # --- Train combat teacher (offline turn-solver teacher data) ---
             ct_loss_val = 0.0
@@ -3292,40 +3672,53 @@ def main() -> int:
                     _stack_batch as _ct_stack_batch,
                 )
                 mcts_net.train()
-                # Sample a random batch
-                ct_bs = min(args.combat_teacher_batch_size, len(combat_teacher_dataset))
-                ct_indices = random.sample(range(len(combat_teacher_dataset)), ct_bs)
-                ct_raw_batch = [combat_teacher_dataset[i] for i in ct_indices]
-                ct_batch = _ct_stack_batch(ct_raw_batch, device)
+                ct_updates = max(1, int(getattr(args, "combat_teacher_updates_per_iter", 1)))
+                ct_loss_history: list[float] = []
+                ct_ce_history: list[float] = []
+                ct_rank_history: list[float] = []
+                ct_cont_history: list[float] = []
+                for _ in range(ct_updates):
+                    # Sample a random batch each update so large teacher datasets
+                    # can keep meaningful influence on combat training.
+                    ct_bs = min(args.combat_teacher_batch_size, len(combat_teacher_dataset))
+                    ct_indices = random.sample(range(len(combat_teacher_dataset)), ct_bs)
+                    ct_raw_batch = [combat_teacher_dataset[i] for i in ct_indices]
+                    ct_batch = _ct_stack_batch(ct_raw_batch, device)
 
-                ct_logits, _ct_value, ct_action_scores, ct_continuation = mcts_net.forward_teacher(
-                    ct_batch["state_features"], ct_batch["action_features"])
-                ct_action_mask = ct_batch["action_features"]["action_mask"]
-                ct_masked_scores = ct_action_scores.masked_fill(~ct_action_mask, -1e9)
+                    ct_logits, _ct_value, ct_action_scores, ct_continuation = mcts_net.forward_teacher(
+                        ct_batch["state_features"], ct_batch["action_features"])
+                    ct_action_mask = ct_batch["action_features"]["action_mask"]
+                    ct_masked_scores = ct_action_scores.masked_fill(~ct_action_mask, -1e9)
 
-                # Teacher best-action CE (on action_score head)
-                ct_ce = F.cross_entropy(ct_masked_scores, ct_batch["teacher_best_action_index"])
+                    # Teacher best-action CE (on action_score head)
+                    ct_ce = F.cross_entropy(ct_masked_scores, ct_batch["teacher_best_action_index"])
 
-                # Regret-weighted pairwise ranking (clamp regrets to avoid numerical explosion)
-                ct_regrets_clamped = ct_batch["regrets"].clamp(max=10.0)
-                ct_rank = _regret_weighted_pairwise_ranking(
-                    ct_masked_scores, ct_regrets_clamped,
-                    ct_batch["teacher_best_action_index"], ct_action_mask,
-                    ct_batch["sample_weight"])
+                    # Regret-weighted pairwise ranking (clamp regrets to avoid numerical explosion)
+                    ct_regrets_clamped = ct_batch["regrets"].clamp(max=10.0)
+                    ct_rank = _regret_weighted_pairwise_ranking(
+                        ct_masked_scores, ct_regrets_clamped,
+                        ct_batch["teacher_best_action_index"], ct_action_mask,
+                        ct_batch["sample_weight"])
 
-                # Continuation value regression (win_prob, hp_loss, potion_cost)
-                ct_cont = F.mse_loss(ct_continuation, ct_batch["continuation_targets"])
+                    # Continuation value regression (win_prob, hp_loss, potion_cost)
+                    ct_cont = F.mse_loss(ct_continuation, ct_batch["continuation_targets"])
 
-                ct_total = args.combat_teacher_loss_weight * (ct_ce + ct_rank + ct_cont)
-                combat_ppo_trainer.optimizer.zero_grad()
-                ct_total.backward()
-                torch.nn.utils.clip_grad_norm_(mcts_net.parameters(), 1.0)
-                combat_ppo_trainer.optimizer.step()
+                    ct_total = args.combat_teacher_loss_weight * (ct_ce + ct_rank + ct_cont)
+                    combat_ppo_trainer.optimizer.zero_grad()
+                    ct_total.backward()
+                    torch.nn.utils.clip_grad_norm_(mcts_net.parameters(), 1.0)
+                    combat_ppo_trainer.optimizer.step()
 
-                ct_loss_val = ct_total.item()
-                ct_ce_val = ct_ce.item()
-                ct_rank_val = ct_rank.item()
-                ct_cont_val = ct_cont.item()
+                    ct_loss_history.append(ct_total.item())
+                    ct_ce_history.append(ct_ce.item())
+                    ct_rank_history.append(ct_rank.item())
+                    ct_cont_history.append(ct_cont.item())
+
+                if ct_loss_history:
+                    ct_loss_val = float(sum(ct_loss_history) / len(ct_loss_history))
+                    ct_ce_val = float(sum(ct_ce_history) / len(ct_ce_history))
+                    ct_rank_val = float(sum(ct_rank_history) / len(ct_rank_history))
+                    ct_cont_val = float(sum(ct_cont_history) / len(ct_cont_history))
 
             _update_end = time.monotonic()
             iter_time = _update_end - iter_start
@@ -3362,6 +3755,9 @@ def main() -> int:
                 "ppo_vloss": ppo_metrics.get("value_loss", ppo_metrics.get("ppo_vloss", 0)),
                 "ppo_entropy": ppo_metrics.get("entropy", ppo_metrics.get("ppo_entropy", 0)),
                 "boss_readiness_loss": ppo_metrics.get("boss_readiness_loss", 0),
+                "boss_readiness_weighted": ppo_metrics.get("boss_readiness_loss", 0) * args.boss_readiness_coeff,
+                "ppo_ratio_mean": ppo_metrics.get("ratio_mean", 0),
+                "ppo_clip_fraction": ppo_metrics.get("clip_fraction", 0),
                 "mcts_ploss": mcts_metrics.get("mcts_ploss", 0),
                 "mcts_vloss": mcts_metrics.get("mcts_vloss", 0),
                 "combat_search_ploss": mcts_metrics.get("mcts_ploss", 0),
@@ -3370,11 +3766,15 @@ def main() -> int:
                 "combat_ppo_ploss": combat_ppo_metrics.get("combat_ppo_ploss", 0),
                 "combat_ppo_vloss": combat_ppo_metrics.get("combat_ppo_vloss", 0),
                 "combat_entropy": combat_ppo_metrics.get("combat_entropy", 0),
+                "combat_ppo_ratio_mean": combat_ppo_metrics.get("combat_ppo_ratio_mean", 0),
+                "combat_ppo_clip_fraction": combat_ppo_metrics.get("combat_ppo_clip_fraction", 0),
                 "matchup_rank_loss": round(matchup_rank_loss_val, 6),
                 "combat_teacher_loss": round(ct_loss_val, 6),
                 "combat_teacher_ce": round(ct_ce_val, 6),
                 "combat_teacher_rank": round(ct_rank_val, 6),
                 "combat_teacher_cont": round(ct_cont_val, 6),
+                "offline_noncombat_ranking_head_mode": offline_noncombat_ranking_head_mode,
+                "combat_main_path_mode": combat_main_path_mode,
                 "avg_ep_time": avg_ep,
                 "iter_time_s": iter_time,
                 "collect_time_s": round(_collect_time, 3),
@@ -3392,6 +3792,27 @@ def main() -> int:
                 "deck_size_at_boss_mean": round(deck_size_at_boss_mean, 2),
                 "card_reward_skip_rate": round(card_reward_skip_rate, 4),
             }
+
+            if hasattr(ppo_net, "offline_ranking_action_context_gate"):
+                entry["offline_ranking_action_context_gate"] = round(
+                    float(ppo_net.offline_ranking_action_context_gate.detach().item()), 6
+                )
+            if hasattr(ppo_net, "offline_ranking_state_context_gate"):
+                entry["offline_ranking_state_context_gate"] = round(
+                    float(ppo_net.offline_ranking_state_context_gate.detach().item()), 6
+                )
+            if hasattr(combat_net, "main_action_context_gate"):
+                entry["combat_main_action_context_gate"] = round(
+                    float(combat_net.main_action_context_gate.detach().item()), 6
+                )
+            if hasattr(combat_net, "main_state_context_gate"):
+                entry["combat_main_state_context_gate"] = round(
+                    float(combat_net.main_state_context_gate.detach().item()), 6
+                )
+            if hasattr(combat_net, "teacher_action_context_gate"):
+                entry["combat_teacher_action_context_gate"] = round(
+                    float(combat_net.teacher_action_context_gate.detach().item()), 6
+                )
             metrics_history.append(entry)
             if metrics_log is not None:
                 with open(metrics_log, "a") as f:
@@ -3399,17 +3820,26 @@ def main() -> int:
 
             logger.info(
                 "Iter %3d | floor %.1f | vic %d/%d | boss %.0f%% act1 %.0f%% boss_hp %.2f deck@boss %.1f skip %.0f%% | ppo %d combat %d cppo %d | "
-                "ppo_pl %.4f ppo_vl %.4f ppo_ent %.3f boss_r %.4f | search_pl %.4f search_vl %.4f | "
-                "cppo_pl %.4f cppo_vl %.4f cbt_ent %.3f | %.0fs",
+                "ppo_pl %.4f ppo_vl %.4f ppo_ent %.3f ppo_clip %.2f ratio %.3f boss_r %.4f (w %.5f) | "
+                "search_pl %.4f search_vl %.4f | cppo_pl %.4f cppo_vl %.4f cbt_ent %.3f cppo_clip %.2f | "
+                "rank[%s] a_gate %.4f s_gate %.4f | combat[%s] a_gate %.4f s_gate %.4f t_gate %.4f | %.0fs",
                 iteration, avg_floor, victories, args.episodes_per_iter,
                 boss_reach_rate * 100.0, act1_clear_rate * 100.0,
                 boss_hp_fraction_mean, deck_size_at_boss_mean, card_reward_skip_rate * 100.0,
                 ppo_steps, mcts_decisions, combat_ppo_steps,
                 entry["ppo_ploss"], entry["ppo_vloss"], entry.get("ppo_entropy", 0),
-                entry["boss_readiness_loss"],
+                entry.get("ppo_clip_fraction", 0), entry.get("ppo_ratio_mean", 0),
+                entry["boss_readiness_loss"], entry.get("boss_readiness_weighted", 0),
                 entry["mcts_ploss"], entry["mcts_vloss"],
                 entry["combat_ppo_ploss"], entry["combat_ppo_vloss"],
-                entry["combat_entropy"],
+                entry["combat_entropy"], entry.get("combat_ppo_clip_fraction", 0),
+                entry.get("offline_noncombat_ranking_head_mode", "mlp"),
+                entry.get("offline_ranking_action_context_gate", 0.0),
+                entry.get("offline_ranking_state_context_gate", 0.0),
+                entry.get("combat_main_path_mode", "mlp"),
+                entry.get("combat_main_action_context_gate", 0.0),
+                entry.get("combat_main_state_context_gate", 0.0),
+                entry.get("combat_teacher_action_context_gate", 0.0),
                 iter_time,
             )
 
@@ -3516,8 +3946,15 @@ def main() -> int:
                     "ppo_model": ppo_net.state_dict(),
                     "mcts_model": mcts_net.state_dict(),
                     "iteration": iteration,
-                    "ppo_config": {"embed_dim": args.embed_dim},
-                    "mcts_config": {"embed_dim": args.embed_dim, "hidden_dim": args.combat_hidden_dim},
+                    "ppo_config": {
+                        "embed_dim": args.embed_dim,
+                        "offline_noncombat_ranking_head_mode": offline_noncombat_ranking_head_mode,
+                    },
+                    "mcts_config": {
+                        "embed_dim": args.embed_dim,
+                        "hidden_dim": args.combat_hidden_dim,
+                        "combat_main_path_mode": combat_main_path_mode,
+                    },
                 }, output_dir / f"hybrid_{iteration:05d}.pt")
 
     except Exception as e:
@@ -3526,6 +3963,15 @@ def main() -> int:
             "ppo_model": ppo_net.state_dict(),
             "mcts_model": mcts_net.state_dict(),
             "crash": str(e),
+            "ppo_config": {
+                "embed_dim": args.embed_dim,
+                "offline_noncombat_ranking_head_mode": offline_noncombat_ranking_head_mode,
+            },
+            "mcts_config": {
+                "embed_dim": args.embed_dim,
+                "hidden_dim": args.combat_hidden_dim,
+                "combat_main_path_mode": combat_main_path_mode,
+            },
         }, output_dir / "hybrid_crash.pt")
         raise
     finally:
@@ -3555,8 +4001,15 @@ def main() -> int:
         "ppo_model": ppo_net.state_dict(),
         "mcts_model": mcts_net.state_dict(),
         "iteration": end_iter - 1,
-        "ppo_config": {"embed_dim": args.embed_dim},
-        "mcts_config": {"embed_dim": args.embed_dim, "hidden_dim": args.combat_hidden_dim},
+        "ppo_config": {
+            "embed_dim": args.embed_dim,
+            "offline_noncombat_ranking_head_mode": offline_noncombat_ranking_head_mode,
+        },
+        "mcts_config": {
+            "embed_dim": args.embed_dim,
+            "hidden_dim": args.combat_hidden_dim,
+            "combat_main_path_mode": combat_main_path_mode,
+        },
     }, output_dir / "hybrid_final.pt")
 
     logger.info("Training complete.")

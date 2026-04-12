@@ -21,6 +21,7 @@ param(
     [string]$AppDataRoot = "",
     [switch]$MuteAudio,
     [switch]$Greedy,
+    [switch]$BuildMode,
     [string[]]$PythonExtraArgs = @(),
     [string[]]$GodotExtraArgs = @()
 )
@@ -218,6 +219,9 @@ if (-not [string]::IsNullOrWhiteSpace($MetricsFile)) {
 }
 if ($Greedy) {
     $pythonArgs += "--greedy"
+}
+if ($BuildMode) {
+    $pythonArgs += "--build-mode"
 }
 if ($PythonExtraArgs.Count -gt 0) {
     $pythonArgs += $PythonExtraArgs
