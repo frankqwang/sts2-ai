@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
@@ -20,10 +21,12 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Events;
+using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Runs.History;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 using MegaCrit.Sts2.Core.Settings;
@@ -1927,7 +1930,103 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 
 		_rewardsTriggered = true;
-		TaskHelper.RunSafely(RewardsCmd.OfferForRoomEnd(me, pendingCombatRoom));
+		TaskHelper.RunSafely(OfferPostCombatRewardsAsync(me, pendingCombatRoom));
+		return true;
+	}
+
+	private async Task OfferPostCombatRewardsAsync(Player player, CombatRoom room)
+	{
+		RewardsSet rewardsSet = BuildRewardsSetForRoomEnd(player, room);
+		List<Reward> rewards = await rewardsSet.GenerateWithoutOffering();
+		await Hook.BeforeRewardsOffered(player.RunState, player, rewards);
+		if (!LocalContext.IsMe(player))
+		{
+			return;
+		}
+
+		foreach (Reward reward in rewards)
+		{
+			reward.MarkContentAsSeen();
+		}
+
+		while (true)
+		{
+			Reward? selectedReward = await FullRunSimulationChoiceBridge.Instance.GetSelectedRewardAsync(rewards, canProceed: true);
+			if (selectedReward == null)
+			{
+				foreach (Reward reward in rewards.ToList())
+				{
+					reward.OnSkipped();
+				}
+				return;
+			}
+
+			bool removeReward = selectedReward switch
+			{
+				CardReward cardReward => await ResolveCardRewardAsync(cardReward),
+				_ => await selectedReward.OnSelectWrapper()
+			};
+
+			if (removeReward)
+			{
+				rewards.Remove(selectedReward);
+			}
+		}
+	}
+
+	private static RewardsSet BuildRewardsSetForRoomEnd(Player player, CombatRoom room)
+	{
+		RewardsSet rewardsSet = new RewardsSet(player);
+		EncounterModel? encounter = room.Encounter;
+		if (encounter != null && !encounter.ShouldGiveRewards)
+		{
+			return rewardsSet.EmptyForRoom(room);
+		}
+
+		return rewardsSet.WithRewardsFromRoom(room);
+	}
+
+	private async Task<bool> ResolveCardRewardAsync(CardReward reward)
+	{
+		List<CardModel> chosenCards = new List<CardModel>();
+		List<CardCreationResult> options = FullRunUpstreamCompat.GetMutableCardRewardOptions(reward);
+
+		while (true)
+		{
+			IReadOnlyList<CardRewardAlternative> alternatives = CardRewardAlternative.Generate(reward);
+			_suppressTerminalRewardsTransitionOnce = true;
+			CardModel? selectedCard = await FullRunSimulationChoiceBridge.Instance.GetSelectedCardRewardAsync(options, alternatives, reward.CanSkip);
+			if (selectedCard == null)
+			{
+				reward.OnSkipped();
+				return true;
+			}
+
+			CardPileAddResult addResult = await CardPileCmd.Add(selectedCard, PileType.Deck);
+			if (!addResult.success || addResult.cardAdded == null)
+			{
+				return false;
+			}
+
+			CardModel addedCard = addResult.cardAdded;
+			chosenCards.Add(addedCard);
+			options.RemoveAll((CardCreationResult option) => option.Card == selectedCard);
+			RunManager.Instance.RewardSynchronizer.SyncLocalObtainedCard(addedCard);
+
+			if (!Hook.ShouldAllowSelectingMoreCardRewards(reward.Player.RunState, reward.Player, reward))
+			{
+				break;
+			}
+		}
+
+		foreach (CardModel chosenCard in chosenCards)
+		{
+			reward.Player.RunState.CurrentMapPointHistoryEntry
+				.GetEntry(LocalContext.NetId.Value)
+				.CardChoices.Add(new CardChoiceHistoryEntry(chosenCard, wasPicked: true));
+		}
+
+		reward.OnSkipped();
 		return true;
 	}
 

@@ -8,6 +8,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Simulation;
 
@@ -245,11 +247,20 @@ public static partial class McpMod
         FullRunApiState? lastChangedState = null;
         string? lastChangedSignature = null;
         int stablePolls = 0;
-        DateTime lastSignatureChangeAt = DateTime.MinValue;
 
         while (DateTime.UtcNow <= deadline)
         {
+            // Wait for action queue to finish, then snapshot state.
+            // Poll IsActionExecutorBusy on main thread — if busy, skip this poll
+            // and let the game continue processing. Only snapshot when idle.
+            bool busy = RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult();
+            if (busy)
+            {
+                Thread.Sleep(delay);
+                continue;
+            }
             FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+
             string signature = GetApiStateSignature(state);
             if (!string.Equals(signature, previousSignature, StringComparison.Ordinal))
             {
@@ -261,7 +272,6 @@ public static partial class McpMod
                 {
                     lastChangedSignature = signature;
                     stablePolls = 1;
-                    lastSignatureChangeAt = DateTime.UtcNow;
                 }
 
                 if (state.terminal)
@@ -272,10 +282,8 @@ public static partial class McpMod
                     && state.state_type != "menu"
                     && state.state_type != "loading";
                 bool actionable = state.terminal || (state.legal_actions?.Count ?? 0) > 0;
-                bool queueIdle = IsStepStateSettled();
-                bool stableLongEnough = DateTime.UtcNow - lastSignatureChangeAt >= GetRequiredStableDuration(state);
 
-                if (settled && actionable && queueIdle && stablePolls >= 2 && stableLongEnough)
+                if (settled && actionable && stablePolls >= 2)
                     return state;
             }
 
@@ -288,25 +296,70 @@ public static partial class McpMod
         throw new TimeoutException("Timed out waiting for changed API state.");
     }
 
-    private static bool IsStepStateSettled()
+    private static bool IsStepStateSettled(FullRunApiState state)
+    {
+        if (IsActionExecutorBusy())
+            return false;
+
+        if (!IsCombatLike(state.state_type))
+            return true;
+
+        return !IsCombatPresentationBusy();
+    }
+
+    private static bool IsCombatReadyForPlayerInput()
+    {
+        if (!CombatManager.Instance.IsInProgress || !CombatManager.Instance.IsPlayPhase || CombatManager.Instance.PlayerActionsDisabled)
+            return false;
+
+        var hand = NCombatRoom.Instance?.Ui?.Hand;
+        if (hand != null && hand.CurrentMode != NPlayerHand.Mode.Play)
+            return false;
+
+        if (IsActionExecutorBusy())
+            return false;
+
+        return !IsCombatPresentationBusy();
+    }
+
+    private static bool IsActionExecutorBusy()
     {
         var actionExecutor = RunManager.Instance?.ActionExecutor;
         if (actionExecutor == null)
-            return true;
-
-        if (actionExecutor.CurrentlyRunningAction != null)
             return false;
 
-        return !actionExecutor.IsRunning;
+        if (actionExecutor.CurrentlyRunningAction != null)
+            return true;
+
+        return actionExecutor.IsRunning;
     }
 
-    private static TimeSpan GetRequiredStableDuration(FullRunApiState state)
+    private static bool IsCombatPresentationBusy()
     {
-        return state.state_type switch
+        var combatRoom = NCombatRoom.Instance;
+        var hand = combatRoom?.Ui?.Hand;
+        if (hand != null && hand.InCardPlay)
+            return true;
+
+        var playQueue = combatRoom?.Ui?.PlayQueue;
+        if (playQueue != null && playQueue.GetChildCount() > 0)
+            return true;
+
+        if (combatRoom != null)
         {
-            "monster" or "elite" or "boss" or "hand_select" => TimeSpan.FromMilliseconds(400),
-            _ => TimeSpan.FromMilliseconds(50)
-        };
+            foreach (var creatureNode in combatRoom.CreatureNodes)
+            {
+                if (creatureNode.Visuals.IsPlayingHurtAnimation())
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCombatLike(string? stateType)
+    {
+        return stateType is "monster" or "elite" or "boss" or "hand_select";
     }
 
     private static object ShapeApiStepResult(FullRunApiState state, bool accepted, string? error, string? stepInfoCode)
@@ -698,13 +751,27 @@ public static partial class McpMod
     {
         if (!TryGetDict(state, "battle", out Dictionary<string, object?> battleState))
             return;
+        if (TryGetDict(battleState, "card_selection", out Dictionary<string, object?> cardSelectionState))
+        {
+            foreach (Dictionary<string, object?> card in EnumerateDictionaries(cardSelectionState.TryGetValue("selectable_cards", out object? rawCards) ? rawCards : null))
+            {
+                actions.Add(new Dictionary<string, object?>
+                {
+                    ["action"] = "combat_select_card",
+                    ["card_index"] = GetInt(card, "index", -1)
+                });
+            }
+
+            AppendIfTrue(actions, cardSelectionState, "can_confirm", new Dictionary<string, object?> { ["action"] = "combat_confirm_selection" });
+            return;
+        }
         if (!TryGetDict(battleState, "player", out Dictionary<string, object?> playerState)
             && !TryGetDict(state, "player", out playerState))
             return;
 
         string turn = GetString(battleState, "turn");
         bool isPlayPhase = GetBool(battleState, "is_play_phase", defaultValue: true);
-        if (turn != "player" || !isPlayPhase)
+        if (turn != "player" || !isPlayPhase || !IsCombatReadyForPlayerInput())
             return;
 
         List<Dictionary<string, object?>> enemies = EnumerateDictionaries(battleState.TryGetValue("enemies", out object? rawEnemies) ? rawEnemies : null)

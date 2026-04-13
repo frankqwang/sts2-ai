@@ -73,14 +73,15 @@ public static partial class McpMod
 
         try
         {
-            // Card selection overlays can appear on top of any room (events, rest sites, combat)
             var topOverlay = NOverlayStack.Instance?.Peek();
-            if (topOverlay is NCardGridSelectionScreen cardSelectScreen)
+            bool combatOverlayCardSelection = currentRoom is CombatRoom && CombatManager.Instance.IsInProgress
+                && (topOverlay is NCardGridSelectionScreen || topOverlay is NChooseACardSelectionScreen);
+            if (!combatOverlayCardSelection && topOverlay is NCardGridSelectionScreen cardSelectScreen)
             {
                 result["state_type"] = "card_select";
                 result["card_select"] = BuildCardSelectState(cardSelectScreen, runState);
             }
-            else if (topOverlay is NChooseACardSelectionScreen chooseCardScreen)
+            else if (!combatOverlayCardSelection && topOverlay is NChooseACardSelectionScreen chooseCardScreen)
             {
                 result["state_type"] = "card_select";
                 result["card_select"] = BuildChooseCardState(chooseCardScreen, runState);
@@ -95,7 +96,8 @@ public static partial class McpMod
                 result["state_type"] = "game_over";
                 result["game_over"] = BuildGameOverState(gameOverScreen, runState);
             }
-            else if (topOverlay is IOverlayScreen
+            else if (!combatOverlayCardSelection
+                     && topOverlay is IOverlayScreen
                      && topOverlay is not NRewardsScreen
                      && topOverlay is not NCardRewardSelectionScreen)
             {
@@ -114,6 +116,20 @@ public static partial class McpMod
                         result["state_type"] = "hand_select";
                         result["hand_select"] = BuildHandSelectState(playerHand, runState);
                         result["battle"] = BuildBattleState(runState, combatRoom);
+                    }
+                    else if (topOverlay is NCardGridSelectionScreen combatCardSelectScreen)
+                    {
+                        result["state_type"] = combatRoom.RoomType.ToString().ToLower();
+                        var battle = BuildBattleState(runState, combatRoom);
+                        battle["card_selection"] = BuildCombatCardSelectionState(combatCardSelectScreen, runState);
+                        result["battle"] = battle;
+                    }
+                    else if (topOverlay is NChooseACardSelectionScreen combatChooseCardScreen)
+                    {
+                        result["state_type"] = combatRoom.RoomType.ToString().ToLower();
+                        var battle = BuildBattleState(runState, combatRoom);
+                        battle["card_selection"] = BuildCombatChooseCardSelectionState(combatChooseCardScreen, runState);
+                        result["battle"] = battle;
                     }
                     else
                     {
@@ -344,6 +360,8 @@ public static partial class McpMod
         {
             state["energy"] = combatState.Energy;
             state["max_energy"] = combatState.MaxEnergy;
+            state["potion_slots"] = player.PotionSlots.Count;
+            state["open_potion_slots"] = player.PotionSlots.Count(static potion => potion == null);
 
             // Stars (The Regent's resource, conditionally shown)
             if (player.Character.ShouldAlwaysShowStarCounter || combatState.Stars > 0)
@@ -534,6 +552,12 @@ public static partial class McpMod
             ["status"] = BuildPowersState(creature)
         };
 
+        if (monster != null)
+        {
+            state["next_move_id"] = monster.NextMove.Id;
+            state["intends_to_attack"] = monster.IntendsToAttack;
+        }
+
         // Intents
         if (monster?.NextMove is MoveState moveState)
         {
@@ -549,6 +573,13 @@ public static partial class McpMod
                     var targets = creature.CombatState?.PlayerCreatures;
                     if (targets != null)
                     {
+                        if (intent is AttackIntent attackIntent)
+                        {
+                            intentData["total_damage"] = attackIntent.GetTotalDamage(targets, creature);
+                            intentData["damage"] = attackIntent.GetSingleDamage(targets, creature);
+                            intentData["repeats"] = attackIntent.Repeats;
+                        }
+
                         string label = intent.GetIntentLabel(targets, creature).GetFormattedText();
                         intentData["label"] = StripRichTextTags(label);
 
@@ -1709,6 +1740,38 @@ public static partial class McpMod
         state["can_cancel"] = state["can_skip"];
 
         return state;
+    }
+
+    private static Dictionary<string, object?> BuildCombatCardSelectionState(NCardGridSelectionScreen screen, RunState runState)
+    {
+        Dictionary<string, object?> state = BuildCardSelectState(screen, runState);
+        return new Dictionary<string, object?>
+        {
+            ["prompt"] = state.TryGetValue("prompt", out object? prompt) ? prompt : null,
+            ["mode"] = state.TryGetValue("screen_type", out object? mode) ? mode : null,
+            ["min_select"] = state.TryGetValue("min_select", out object? minSelect) ? minSelect : 0,
+            ["max_select"] = state.TryGetValue("max_select", out object? maxSelect) ? maxSelect : 0,
+            ["can_confirm"] = state.TryGetValue("can_confirm", out object? canConfirm) ? canConfirm : false,
+            ["can_cancel"] = state.TryGetValue("can_cancel", out object? canCancel) ? canCancel : false,
+            ["selectable_cards"] = state.TryGetValue("cards", out object? cards) ? cards : new List<Dictionary<string, object?>>(),
+            ["selected_cards"] = state.TryGetValue("selected_cards", out object? selectedCards) ? selectedCards : new List<Dictionary<string, object?>>()
+        };
+    }
+
+    private static Dictionary<string, object?> BuildCombatChooseCardSelectionState(NChooseACardSelectionScreen screen, RunState runState)
+    {
+        Dictionary<string, object?> state = BuildChooseCardState(screen, runState);
+        return new Dictionary<string, object?>
+        {
+            ["prompt"] = state.TryGetValue("prompt", out object? prompt) ? prompt : null,
+            ["mode"] = "ChooseCard",
+            ["min_select"] = 0,
+            ["max_select"] = 1,
+            ["can_confirm"] = false,
+            ["can_cancel"] = state.TryGetValue("can_cancel", out object? canCancel) ? canCancel : false,
+            ["selectable_cards"] = state.TryGetValue("cards", out object? cards) ? cards : new List<Dictionary<string, object?>>(),
+            ["selected_cards"] = new List<Dictionary<string, object?>>()
+        };
     }
 
     private static Dictionary<string, object?> BuildHandSelectState(NPlayerHand hand, RunState runState)

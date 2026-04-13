@@ -97,33 +97,22 @@ public static class SpectatorApiStateBuilder
 		return state;
 	}
 
-	/// <summary>Lightweight signature for change-detection polling.</summary>
+	/// <summary>
+	/// Full-state signature for change-detection polling.
+	/// Serializes the entire DTO to JSON and hashes it, so any field change is detected.
+	/// </summary>
 	public static string Signature(FullRunApiState state)
 	{
-		var sb = new System.Text.StringBuilder(128);
-		sb.Append(state.state_type);
-		sb.Append('|'); sb.Append(state.terminal ? '1' : '0');
-		sb.Append('|'); sb.Append(state.run?.floor ?? 0);
-		sb.Append('|'); sb.Append(state.run_outcome ?? "");
-		sb.Append('|'); sb.Append(state.legal_actions?.Count ?? 0);
-		if (state.legal_actions != null)
-		{
-			foreach (var a in state.legal_actions)
-			{
-				sb.Append('|'); sb.Append(a.action);
-				sb.Append(':'); sb.Append(a.index ?? -1);
-				sb.Append('/'); sb.Append(a.card_index ?? -1);
-				sb.Append('/'); sb.Append(a.slot ?? -1);
-				sb.Append('/'); sb.Append(a.target_id ?? 0);
-				sb.Append(','); sb.Append(a.col ?? -1);
-				sb.Append(','); sb.Append(a.row ?? -1);
-				sb.Append(','); sb.Append(a.reward_type ?? "");
-				sb.Append(','); sb.Append(a.reward_key ?? "");
-				sb.Append(','); sb.Append(a.label ?? "");
-			}
-		}
-		return sb.ToString();
+		string json = System.Text.Json.JsonSerializer.Serialize(state, _signatureJsonOptions);
+		// Use a fast hash — we only need collision resistance within a single polling loop
+		int hash = json.GetHashCode();
+		return $"{state.state_type}|{hash}";
 	}
+
+	private static readonly System.Text.Json.JsonSerializerOptions _signatureJsonOptions = new()
+	{
+		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+	};
 
 	// ── Run info ──────────────────────────────────────────────
 
@@ -209,7 +198,8 @@ public static class SpectatorApiStateBuilder
 			turn = GetString(dict, "turn") ?? "player",
 			is_play_phase = GetBool(dict, "is_play_phase"),
 			player = ConvertPlayerState(GetDict(rootState, "player")),
-			enemies = GetListOfDicts(dict, "enemies").Select(ConvertEnemy).ToList()
+			enemies = GetListOfDicts(dict, "enemies").Select(ConvertEnemy).ToList(),
+			card_selection = ConvertCombatCardSelectionState(GetDict(dict, "card_selection"))
 		};
 		return battle;
 	}
@@ -439,6 +429,22 @@ public static class SpectatorApiStateBuilder
 			max_select = GetInt(dict, "max_select") ?? 0,
 			can_confirm = GetBool(dict, "can_confirm"),
 			cards = GetListOfDicts(dict, "cards").Select((d, i) => ConvertCard(d, i)).ToList(),
+			selected_cards = GetListOfDicts(dict, "selected_cards").Select((d, i) => ConvertCard(d, i)).ToList()
+		};
+	}
+
+	private static FullRunApiCombatCardSelectionState? ConvertCombatCardSelectionState(Dictionary<string, object?>? dict)
+	{
+		if (dict == null) return null;
+		return new FullRunApiCombatCardSelectionState
+		{
+			prompt = GetString(dict, "prompt"),
+			mode = GetString(dict, "mode"),
+			min_select = GetInt(dict, "min_select") ?? 0,
+			max_select = GetInt(dict, "max_select") ?? 0,
+			can_confirm = GetBool(dict, "can_confirm"),
+			can_cancel = GetBool(dict, "can_cancel"),
+			selectable_cards = GetListOfDicts(dict, "selectable_cards").Select((d, i) => ConvertCard(d, i)).ToList(),
 			selected_cards = GetListOfDicts(dict, "selected_cards").Select((d, i) => ConvertCard(d, i)).ToList()
 		};
 	}

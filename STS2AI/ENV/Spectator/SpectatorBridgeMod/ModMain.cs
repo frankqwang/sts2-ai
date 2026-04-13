@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Nodes.Debug;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
 
 namespace STS2_MCP;
 
@@ -27,6 +28,7 @@ public static partial class McpMod
     private static NAiDecisionOverlay? _decisionOverlay;
     private static string? _decisionOverlayFile;
     private static bool _ftuesDisabled;
+    private static bool _fastModeSet;
     internal static readonly JsonSerializerOptions _jsonOptions = new()
     {
         WriteIndented = true,
@@ -93,12 +95,32 @@ public static partial class McpMod
         }
 
         EnsureFtuesDisabled();
+        EnsureFastModeInstant();
         EnsureDecisionOverlayAttached();
 
         // Manually drive overlay update since Godot won't call _Process on mod assemblies
         if (GodotObject.IsInstanceValid(_decisionOverlay))
         {
             _decisionOverlay.ManualProcess();
+        }
+    }
+
+    private static void EnsureFastModeInstant()
+    {
+        if (_fastModeSet)
+            return;
+        try
+        {
+            var saveManager = SaveManager.Instance;
+            if (saveManager == null)
+                return;
+            saveManager.PrefsSave.FastMode = FastModeType.Instant;
+            _fastModeSet = true;
+            GD.Print("[STS2 MCP Spectator] FastMode set to Instant for spectator mode");
+        }
+        catch
+        {
+            // Save not ready yet; retry next frame.
         }
     }
 
