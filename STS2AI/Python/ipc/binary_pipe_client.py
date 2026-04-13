@@ -37,10 +37,13 @@ OP_PERF_STATS = 0x08
 OP_RESET_PERF_STATS = 0x09
 OP_STEP_LOCAL_POLICY = 0x0A
 OP_LOAD_ORT_MODEL = 0x0B
+OP_RUN_COMBAT_LOCAL = 0x0C
 OP_EXPORT_STATE = 0x0D
 OP_IMPORT_STATE = 0x0E
-PROTOCOL_VERSION = 9
-BINARY_SCHEMA_HASH = "sts2-binary-schema-2026-04-09a"
+OP_SKIP_COMBAT = 0x0F
+OP_SEARCH_COMBAT_MCTS = 0x10
+PROTOCOL_VERSION = 10
+BINARY_SCHEMA_HASH = "sts2-binary-schema-2026-04-13c"
 
 STATE_TYPES = {
     0: "other",
@@ -329,7 +332,7 @@ class BinaryPipeClient(PipeClient):
             }
 
         symbol_updates = 0
-        if opcode in {OP_RESET, OP_STATE, OP_STEP, OP_BATCH_STEP, OP_LOAD_STATE, OP_IMPORT_STATE, OP_LOAD_ORT_MODEL, 0x0C, 0x0F}:
+        if opcode in {OP_RESET, OP_STATE, OP_STEP, OP_BATCH_STEP, OP_LOAD_STATE, OP_IMPORT_STATE, OP_LOAD_ORT_MODEL, OP_RUN_COMBAT_LOCAL, OP_SKIP_COMBAT}:
             symbol_updates = self._read_symbol_updates(reader)
         payload = self._decode_payload(opcode, reader)
         if isinstance(payload, dict):
@@ -384,8 +387,20 @@ class BinaryPipeClient(PipeClient):
         if opcode == OP_RESET_PERF_STATS:
             return {"reset": bool(reader.read_u8())}
         if opcode == OP_LOAD_ORT_MODEL:
-            return {"loaded": bool(reader.read_u8())}
-        if opcode == 0x0F:  # SkipCombat — same response format as Step
+            payload = {"loaded": bool(reader.read_u8())}
+            if reader._offset + 4 <= len(reader._data):
+                payload["has_value"] = bool(reader.read_u8())
+                payload["has_deck_inputs"] = bool(reader.read_u8())
+                payload["has_continuation_output"] = bool(reader.read_u8())
+                payload["has_extra_scalars_input"] = bool(reader.read_u8())
+            if reader._offset < len(reader._data):
+                payload["execution_provider"] = reader.read_string()
+            if reader._offset < len(reader._data):
+                payload["requested_device"] = reader.read_string()
+            if reader._offset < len(reader._data):
+                payload["fell_back_to_cpu"] = bool(reader.read_u8())
+            return payload
+        if opcode == OP_SKIP_COMBAT:
             accepted = bool(reader.read_u8())
             error = reader.read_optional_string()
             state = self._decode_state(reader)
@@ -395,7 +410,7 @@ class BinaryPipeClient(PipeClient):
                 "state": state,
                 "skipped": True,
             }
-        if opcode == 0x0C:  # RunCombatLocal
+        if opcode == OP_RUN_COMBAT_LOCAL:
             combat_steps = reader.read_u16()
             elapsed_ms = reader.read_f32()
             # Timing breakdown (6 floats, may not be present in older builds)
@@ -416,6 +431,54 @@ class BinaryPipeClient(PipeClient):
                 "timing": timing,
                 "state": state,
             }
+        if opcode == OP_SEARCH_COMBAT_MCTS:
+            action_index = reader.read_i16()
+            count = reader.read_u16()
+            visit_counts = [reader.read_i32() for _ in range(count)]
+            visit_probs = [reader.read_f32() for _ in range(count)]
+            q_values = [reader.read_f32() for _ in range(count)]
+            priors = [reader.read_f32() for _ in range(count)]
+            payload = {
+                "action_index": action_index,
+                "visit_counts": visit_counts,
+                "visit_probs": visit_probs,
+                "q_values": q_values,
+                "priors": priors,
+                "root_value": reader.read_f32(),
+                "search_ms": reader.read_f32(),
+                "restored_ok": bool(reader.read_u8()),
+                "snapshot_count": reader.read_i32(),
+            }
+            if reader._offset + (11 * 4) + (8 * 4) <= len(reader._data):
+                payload["breakdown"] = {
+                    "simulation_count": reader.read_i32(),
+                    "save_state_count": reader.read_i32(),
+                    "load_state_count": reader.read_i32(),
+                    "delete_state_count": reader.read_i32(),
+                    "step_count": reader.read_i32(),
+                    "advance_state_count": reader.read_i32(),
+                    "eval_call_count": reader.read_i32(),
+                    "eval_batch_count": reader.read_i32(),
+                    "eval_state_count": reader.read_i32(),
+                    "select_child_count": reader.read_i32(),
+                    "backprop_count": reader.read_i32(),
+                    "save_state_ms": reader.read_f32(),
+                    "load_state_ms": reader.read_f32(),
+                    "delete_state_ms": reader.read_f32(),
+                    "step_ms": reader.read_f32(),
+                    "advance_state_ms": reader.read_f32(),
+                    "eval_ms": reader.read_f32(),
+                    "selection_ms": reader.read_f32(),
+                    "backprop_ms": reader.read_f32(),
+                }
+            if reader._offset < len(reader._data):
+                debug_trace_json = reader.read_optional_string()
+                if debug_trace_json:
+                    try:
+                        payload["debug_trace"] = json.loads(debug_trace_json)
+                    except Exception:
+                        payload["debug_trace_json"] = debug_trace_json
+            return payload
         raise RuntimeError(f"Unsupported binary response opcode: {opcode}")
 
     def _encode_request(self, method: str, params: dict[str, Any]) -> bytes:
@@ -469,10 +532,10 @@ class BinaryPipeClient(PipeClient):
         if method == "step_local_policy":
             return bytes([OP_STEP_LOCAL_POLICY])
         if method == "skip_combat":
-            body.append(0x0F)  # OP_SkipCombat
+            body.append(OP_SKIP_COMBAT)
             return bytes(body)
         if method == "run_combat_local":
-            body.append(0x0C)  # OP_RunCombatLocal
+            body.append(OP_RUN_COMBAT_LOCAL)
             body.extend(struct.pack("<H", int(params.get("max_steps", 600))))
             return bytes(body)
         if method == "load_ort_model":
@@ -480,6 +543,20 @@ class BinaryPipeClient(PipeClient):
             path_bytes = str(params.get("path", "")).encode("utf-8")
             body.extend(struct.pack("<H", len(path_bytes)))
             body.extend(path_bytes)
+            return bytes(body)
+        if method == "search_combat_mcts":
+            body.append(OP_SEARCH_COMBAT_MCTS)
+            body.extend(struct.pack("<H", int(params.get("num_simulations", 0))))
+            body.extend(struct.pack("<f", float(params.get("c_puct", 1.5))))
+            body.extend(struct.pack("<f", float(params.get("dirichlet_alpha", 0.0))))
+            body.extend(struct.pack("<f", float(params.get("dirichlet_fraction", 0.0))))
+            body.extend(struct.pack("<H", int(params.get("max_step_budget", 200))))
+            mode = str(params.get("final_action_mode", "visit")).strip().lower()
+            body.append(1 if mode == "visit_q_blend" else 0)
+            body.extend(struct.pack("<H", int(params.get("final_action_top_k", 3))))
+            body.extend(struct.pack("<f", float(params.get("final_action_q_weight", 0.35))))
+            body.append(1 if bool(params.get("use_continuation_value", False)) else 0)
+            body.append(1 if bool(params.get("debug_trace", False)) else 0)
             return bytes(body)
         raise ValueError(f"Unsupported binary pipe method: {method}")
 

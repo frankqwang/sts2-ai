@@ -203,6 +203,8 @@ def run_audit(args: argparse.Namespace) -> dict[str, Any]:
         ),
         training=False,
         device=device,
+        backend=str(getattr(args, "combat_mcts_backend", "python")),
+        use_continuation_value=bool(getattr(args, "combat_mcts_continuation_value", False)),
     )
     client = create_full_run_client(
         port=int(args.port),
@@ -212,6 +214,8 @@ def run_audit(args: argparse.Namespace) -> dict[str, Any]:
     )
     assert isinstance(client, PipeBackedFullRunClient)
     client._ensure_connected()
+    if args.ort_model_path:
+        client.load_ort_model(str(Path(args.ort_model_path).resolve()))
 
     root_state = drive_to_state(client, args.seed, COMBAT_TYPES)
     root_summary = _state_summary(root_state)
@@ -307,7 +311,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--combat-mcts-sims", type=int, default=50)
     parser.add_argument("--combat-mcts-c-puct", type=float, default=1.5)
     parser.add_argument("--combat-mcts-step-budget", type=int, default=200)
+    parser.add_argument("--combat-mcts-backend", choices=["python", "csharp"], default="python")
+    parser.add_argument("--combat-mcts-continuation-value", action="store_true", default=False)
     parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument("--ort-model-path", default=None)
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--headless-dll", default=str(DEFAULT_DLL_PATH))
     parser.add_argument("--auto-launch", action="store_true", default=False)

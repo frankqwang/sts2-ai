@@ -14,6 +14,7 @@ import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,14 @@ from combat_nn import (
     build_combat_action_features,
     build_combat_features,
 )
+from symbolic_features_head import SymbolicFeaturesHead
 from vocab import Vocab, load_vocab
+
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 # Combat feature constants — keep in sync with rl_encoder_v2.py / combat_nn.py
@@ -42,6 +50,84 @@ ENEMY_AUX_DIM = 40
 
 
 MAX_DECK_SIZE = 50  # from rl_encoder_v2
+MAX_PILE_SIZE = 30
+
+
+def _infer_symbolic_proj_dim(state_dict: dict[str, Any] | None) -> int:
+    if not isinstance(state_dict, dict):
+        return 0
+    out_proj = state_dict.get("symbolic_head.out_proj.weight")
+    if isinstance(out_proj, torch.Tensor) and out_proj.ndim == 2:
+        return int(out_proj.shape[0])
+    return 0
+
+
+def _infer_deck_repr_dim(state_dict: dict[str, Any] | None) -> int:
+    if not isinstance(state_dict, dict):
+        return 0
+    for key in ("deck_encoder.norm.weight", "deck_encoder.proj.weight"):
+        tensor = state_dict.get(key)
+        if isinstance(tensor, torch.Tensor) and tensor.ndim >= 1:
+            return int(tensor.shape[0])
+    return 0
+
+
+def _merged_export_state_dict(
+    ppo_state_dict: dict[str, Any] | None,
+    mcts_state_dict: dict[str, Any],
+) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    if isinstance(ppo_state_dict, dict):
+        for prefix in ("entity_emb.", "symbolic_head."):
+            for key, value in ppo_state_dict.items():
+                if key.startswith(prefix):
+                    merged[key] = value
+    merged.update(mcts_state_dict)
+    return merged
+
+
+def _build_export_network(
+    vocab: Vocab,
+    mcts_state_dict: dict[str, Any],
+    *,
+    ppo_state_dict: dict[str, Any] | None = None,
+    device: str = "cpu",
+) -> CombatPolicyValueNetwork:
+    merged_state = _merged_export_state_dict(ppo_state_dict, mcts_state_dict)
+
+    card_w = merged_state.get("entity_emb.card_embed.weight")
+    action_w = merged_state.get("action_proj.weight")
+    embed_dim = int(card_w.shape[1]) if isinstance(card_w, torch.Tensor) and card_w.ndim == 2 else 32
+    hidden_dim = int(action_w.shape[0]) if isinstance(action_w, torch.Tensor) and action_w.ndim == 2 else 128
+    deck_repr_dim = _infer_deck_repr_dim(merged_state)
+    has_adapter = any("delta_logits_head" in key for key in merged_state)
+    has_pile_encoders = any("draw_pile_encoder" in key for key in merged_state)
+    symbolic_proj_dim = _infer_symbolic_proj_dim(merged_state)
+    symbolic_head = (
+        SymbolicFeaturesHead(vocab=vocab, embed_dim=embed_dim, proj_dim=symbolic_proj_dim)
+        if symbolic_proj_dim > 0
+        else None
+    )
+
+    network = CombatPolicyValueNetwork(
+        vocab=vocab,
+        embed_dim=embed_dim,
+        hidden_dim=hidden_dim,
+        deck_repr_dim=deck_repr_dim,
+        residual_adapter=has_adapter,
+        pile_specific=has_pile_encoders,
+        symbolic_head=symbolic_head,
+    )
+
+    current = network.state_dict()
+    filtered = {
+        key: value
+        for key, value in merged_state.items()
+        if key in current and current[key].shape == value.shape
+    }
+    network.load_state_dict(filtered, strict=False)
+    network.to(device).eval()
+    return network
 
 
 class CombatActorONNXWrapper(nn.Module):
@@ -50,10 +136,18 @@ class CombatActorONNXWrapper(nn.Module):
     Supports optional deck inputs for build_plan_z models (deck_repr_dim > 0).
     """
 
-    def __init__(self, network: CombatPolicyValueNetwork, has_deck: bool = False):
+    def __init__(
+        self,
+        network: CombatPolicyValueNetwork,
+        has_deck: bool = False,
+        has_pile: bool = False,
+        include_continuation: bool = False,
+    ):
         super().__init__()
         self.network = network
         self.has_deck = has_deck
+        self.has_pile = has_pile
+        self.include_continuation = include_continuation
 
     def forward(
         self,
@@ -72,7 +166,16 @@ class CombatActorONNXWrapper(nn.Module):
         deck_ids: torch.Tensor | None = None,     # (B, 50) int64
         deck_aux: torch.Tensor | None = None,     # (B, 50, 51) float32
         deck_mask: torch.Tensor | None = None,    # (B, 50) float32 (1/0)
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        draw_pile_ids: torch.Tensor | None = None,     # (B, 30) int64
+        draw_pile_aux: torch.Tensor | None = None,     # (B, 30, 53) float32
+        draw_pile_mask: torch.Tensor | None = None,    # (B, 30) float32 (1/0)
+        discard_pile_ids: torch.Tensor | None = None,  # (B, 30) int64
+        discard_pile_aux: torch.Tensor | None = None,  # (B, 30, 53) float32
+        discard_pile_mask: torch.Tensor | None = None, # (B, 30) float32 (1/0)
+        exhaust_pile_ids: torch.Tensor | None = None,  # (B, 30) int64
+        exhaust_pile_aux: torch.Tensor | None = None,  # (B, 30, 53) float32
+        exhaust_pile_mask: torch.Tensor | None = None, # (B, 30) float32 (1/0)
+    ) -> tuple[torch.Tensor, ...]:
         state_features = {
             "scalars": scalars,
             "hand_ids": hand_ids,
@@ -93,12 +196,26 @@ class CombatActorONNXWrapper(nn.Module):
             state_features["deck_ids"] = deck_ids
             state_features["deck_aux"] = deck_aux
             state_features["deck_mask"] = deck_mask.bool()
+        if self.has_pile and draw_pile_ids is not None:
+            state_features["draw_pile_ids"] = draw_pile_ids
+            state_features["draw_pile_aux"] = draw_pile_aux
+            state_features["draw_pile_mask"] = draw_pile_mask.bool()
+            state_features["discard_pile_ids"] = discard_pile_ids
+            state_features["discard_pile_aux"] = discard_pile_aux
+            state_features["discard_pile_mask"] = discard_pile_mask.bool()
+            state_features["exhaust_pile_ids"] = exhaust_pile_ids
+            state_features["exhaust_pile_aux"] = exhaust_pile_aux
+            state_features["exhaust_pile_mask"] = exhaust_pile_mask.bool()
         action_features = {
             "action_type_ids": action_type_ids,
             "target_card_ids": target_card_ids,
             "target_enemy_ids": target_enemy_ids,
             "action_mask": action_mask.bool(),
         }
+        if self.include_continuation:
+            logits, value, _action_scores, continuation = self.network.forward_teacher(state_features, action_features)
+            win_prob = continuation[:, 0:1]
+            return logits, value, win_prob
         logits, value = self.network(state_features, action_features)
         return logits, value
 
@@ -106,9 +223,16 @@ class CombatActorONNXWrapper(nn.Module):
 def load_combat_network(checkpoint_path: str, vocab: Vocab, device: str = "cpu") -> CombatPolicyValueNetwork:
     """Load combat network from checkpoint."""
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ppo_state = ckpt.get("ppo_model")
     state_dict = ckpt.get("mcts_model") or ckpt.get("model_state_dict")
     if not isinstance(state_dict, dict):
         raise ValueError(f"No combat model found in {checkpoint_path}")
+    return _build_export_network(
+        vocab,
+        state_dict,
+        ppo_state_dict=ppo_state if isinstance(ppo_state, dict) else None,
+        device=device,
+    )
 
     # Auto-detect dimensions
     card_w = state_dict.get("entity_emb.card_embed.weight")
@@ -172,7 +296,12 @@ def load_combat_network(checkpoint_path: str, vocab: Vocab, device: str = "cpu")
     return network
 
 
-def make_dummy_inputs(batch: int = 1, device: str = "cpu", has_deck: bool = False) -> tuple[list[torch.Tensor], list[str]]:
+def make_dummy_inputs(
+    batch: int = 1,
+    device: str = "cpu",
+    has_deck: bool = False,
+    has_pile: bool = False,
+) -> tuple[list[torch.Tensor], list[str]]:
     """Create dummy inputs for ONNX tracing."""
     inputs = [
         torch.zeros(batch, COMBAT_SCALAR_DIM, dtype=torch.float32, device=device),
@@ -201,38 +330,99 @@ def make_dummy_inputs(batch: int = 1, device: str = "cpu", has_deck: bool = Fals
             torch.ones(batch, MAX_DECK_SIZE, dtype=torch.float32, device=device),
         ])
         names.extend(["deck_ids", "deck_aux", "deck_mask"])
+    if has_pile:
+        inputs.extend([
+            torch.zeros(batch, MAX_PILE_SIZE, dtype=torch.int64, device=device),
+            torch.zeros(batch, MAX_PILE_SIZE, CARD_AUX_DIM, dtype=torch.float32, device=device),
+            torch.ones(batch, MAX_PILE_SIZE, dtype=torch.float32, device=device),
+            torch.zeros(batch, MAX_PILE_SIZE, dtype=torch.int64, device=device),
+            torch.zeros(batch, MAX_PILE_SIZE, CARD_AUX_DIM, dtype=torch.float32, device=device),
+            torch.ones(batch, MAX_PILE_SIZE, dtype=torch.float32, device=device),
+            torch.zeros(batch, MAX_PILE_SIZE, dtype=torch.int64, device=device),
+            torch.zeros(batch, MAX_PILE_SIZE, CARD_AUX_DIM, dtype=torch.float32, device=device),
+            torch.ones(batch, MAX_PILE_SIZE, dtype=torch.float32, device=device),
+        ])
+        names.extend([
+            "draw_pile_ids", "draw_pile_aux", "draw_pile_mask",
+            "discard_pile_ids", "discard_pile_aux", "discard_pile_mask",
+            "exhaust_pile_ids", "exhaust_pile_aux", "exhaust_pile_mask",
+        ])
     return inputs, names
 
 
 def export_onnx(
     network: CombatPolicyValueNetwork,
     output_path: str,
-    opset_version: int = 17,
-) -> None:
+    opset_version: int = 18,
+    export_mode: str = "auto",
+    include_continuation: bool = False,
+) -> str:
     """Export combat actor to ONNX."""
     has_deck = network.deck_repr_dim > 0
-    wrapper = CombatActorONNXWrapper(network, has_deck=has_deck)
+    has_pile = bool(getattr(network, "pile_repr_dim", 0) > 0)
+    wrapper = CombatActorONNXWrapper(
+        network,
+        has_deck=has_deck,
+        has_pile=has_pile,
+        include_continuation=include_continuation,
+    )
     wrapper.eval()
 
-    inputs, input_names = make_dummy_inputs(batch=1, device="cpu", has_deck=has_deck)
+    inputs, input_names = make_dummy_inputs(
+        batch=1,
+        device="cpu",
+        has_deck=has_deck,
+        has_pile=has_pile,
+    )
     wrapper.to("cpu")
 
     # Dynamic axes for batch dimension
     dynamic_axes = {name: {0: "batch"} for name in input_names}
     dynamic_axes["policy_logits"] = {0: "batch"}
     dynamic_axes["value"] = {0: "batch"}
+    output_names = ["policy_logits", "value"]
+    if include_continuation:
+        dynamic_axes["continuation"] = {0: "batch"}
+        output_names.append("continuation")
 
-    torch.onnx.export(
-        wrapper,
-        tuple(inputs),
-        output_path,
-        input_names=input_names,
-        output_names=["policy_logits", "value"],
-        dynamic_axes=dynamic_axes,
-        opset_version=opset_version,
-        do_constant_folding=True,
+    normalized_mode = str(export_mode or "auto").strip().lower()
+    if normalized_mode not in {"auto", "dynamo", "legacy"}:
+        raise ValueError(f"Unsupported export_mode={export_mode!r}")
+
+    if normalized_mode == "auto":
+        attempted_modes = ["legacy", "dynamo"] if int(opset_version) < 18 else ["dynamo", "legacy"]
+    else:
+        attempted_modes = [normalized_mode]
+    last_error: Exception | None = None
+    used_mode = attempted_modes[-1]
+    for used_mode in attempted_modes:
+        try:
+            current_opset = max(int(opset_version), 18) if used_mode == "dynamo" else int(opset_version)
+            torch.onnx.export(
+                wrapper,
+                tuple(inputs),
+                output_path,
+                input_names=input_names,
+                output_names=output_names,
+                dynamic_axes=dynamic_axes,
+                opset_version=current_opset,
+                do_constant_folding=True,
+                dynamo=(used_mode == "dynamo"),
+                external_data=False,
+            )
+            break
+        except Exception as exc:
+            last_error = exc
+            print(f"ONNX export via {used_mode} failed: {exc}")
+    else:
+        raise RuntimeError(f"Failed to export ONNX via modes={attempted_modes}") from last_error
+
+    print(
+        f"Exported ONNX to {output_path} "
+        f"(mode={used_mode}, opset={current_opset}, has_deck={has_deck}, has_pile={has_pile}, "
+        f"include_continuation={include_continuation})"
     )
-    print(f"Exported ONNX to {output_path} (has_deck={has_deck})")
+    return used_mode
 
 
 def export_from_training_snapshot(
@@ -241,32 +431,28 @@ def export_from_training_snapshot(
     vocab: Vocab,
     output_path: str,
     policy_version: int = 0,
+    opset_version: int = 18,
+    export_mode: str = "auto",
+    include_continuation: bool = False,
 ) -> float:
     """Export ONNX from a training snapshot. Returns export time in ms."""
     import time
     t0 = time.perf_counter()
 
-    # Auto-detect config from state dict
-    card_w = mcts_state_dict.get("entity_emb.card_embed.weight")
-    action_w = mcts_state_dict.get("action_proj.weight")
-    embed_dim = int(card_w.shape[1]) if card_w is not None else 32
-    hidden_dim = int(action_w.shape[0]) if action_w is not None else 128
-    deck_w = mcts_state_dict.get("deck_encoder.proj.weight")
-    deck_repr_dim = int(deck_w.shape[0]) if deck_w is not None else 0
-    has_adapter = any("delta_logits_head" in k for k in mcts_state_dict)
-
-    has_pile = any("draw_pile_encoder" in k for k in mcts_state_dict)
-    network = CombatPolicyValueNetwork(
-        vocab=vocab, embed_dim=embed_dim, hidden_dim=hidden_dim,
-        deck_repr_dim=deck_repr_dim, residual_adapter=has_adapter,
-        pile_specific=has_pile,
+    network = _build_export_network(
+        vocab,
+        mcts_state_dict,
+        ppo_state_dict=ppo_state_dict if isinstance(ppo_state_dict, dict) else None,
+        device="cpu",
     )
-    current = network.state_dict()
-    filtered = {k: v for k, v in mcts_state_dict.items() if k in current and current[k].shape == v.shape}
-    network.load_state_dict(filtered, strict=False)
-    network.cpu().eval()
 
-    export_onnx(network, output_path)
+    export_onnx(
+        network,
+        output_path,
+        opset_version=opset_version,
+        export_mode=export_mode,
+        include_continuation=include_continuation,
+    )
     elapsed_ms = (time.perf_counter() - t0) * 1000
     return elapsed_ms
 
@@ -357,7 +543,19 @@ def main():
     parser = argparse.ArgumentParser(description="Export combat actor to ONNX")
     parser.add_argument("--checkpoint", required=True, help="Combat checkpoint path")
     parser.add_argument("--output", default="actor_combat.onnx", help="ONNX output path")
-    parser.add_argument("--opset", type=int, default=17, help="ONNX opset version")
+    parser.add_argument("--opset", type=int, default=18, help="ONNX opset version")
+    parser.add_argument(
+        "--exporter",
+        choices=("auto", "dynamo", "legacy"),
+        default="auto",
+        help="ONNX exporter backend. auto tries dynamo first and falls back to legacy.",
+    )
+    parser.add_argument(
+        "--include-continuation-output",
+        action="store_true",
+        default=False,
+        help="Also export a scalar continuation output (win_prob) for C# MCTS leaf evaluation.",
+    )
     parser.add_argument("--dump-fixtures", default=None, help="Directory to dump real feature fixtures")
     parser.add_argument("--fixture-port", type=int, default=21580, help="HeadlessSim port for fixtures")
     parser.add_argument("--fixture-samples", type=int, default=10, help="Number of fixture samples")
@@ -368,7 +566,13 @@ def main():
     print(f"Loaded combat network: embed_dim={network.entity_emb.card_embed.embedding_dim}, "
           f"hidden_dim={network.state_encoder[0].in_features}")
 
-    export_onnx(network, args.output, opset_version=args.opset)
+    export_onnx(
+        network,
+        args.output,
+        opset_version=args.opset,
+        export_mode=str(args.exporter),
+        include_continuation=bool(args.include_continuation_output),
+    )
 
     if args.dump_fixtures:
         dump_real_fixtures(network, vocab, args.dump_fixtures,

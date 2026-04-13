@@ -389,6 +389,7 @@ internal static class Program
 			BinaryOpcode.LoadOrtModel => ProcessBinaryLoadOrtModel(requestBytes),
 			BinaryOpcode.RunCombatLocal => await ProcessBinaryRunCombatLocalAsync(service, session, requestBytes, cache),
 			BinaryOpcode.SkipCombat => await ProcessBinarySkipCombatAsync(service, session, cache),
+			BinaryOpcode.SearchCombatMcts => await ProcessBinarySearchCombatMctsAsync(service, requestBytes, cache),
 				_ => BinaryProtocol.BuildErrorResponse(opcode, BinaryStatus.ProtocolError, "unknown_method", $"Unknown opcode: {(byte)opcode}")
 			};
 		}
@@ -864,6 +865,65 @@ internal static class Program
 		}
 	}
 
+	private static async Task<byte[]> ProcessBinarySearchCombatMctsAsync(
+		FullRunTrainingEnvService service,
+		byte[] requestBytes,
+		RequestStateCache cache)
+	{
+		if (_ortPolicy == null)
+		{
+			return BinaryProtocol.BuildErrorResponse(
+				BinaryOpcode.SearchCombatMcts,
+				BinaryStatus.SimulatorError,
+				"ort_not_loaded",
+				"ORT model not loaded. Send LoadOrtModel first.");
+		}
+
+		try
+		{
+			BinarySearchCombatMctsRequest request = BinaryProtocol.ParseSearchCombatMctsRequest(requestBytes);
+			FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
+			bool isCombat = snapshot.StateType is "monster" or "elite" or "boss" or "combat" or "hand_select" or "card_select" or "combat_pending";
+			if (!isCombat)
+			{
+				return BinaryProtocol.BuildErrorResponse(
+					BinaryOpcode.SearchCombatMcts,
+					BinaryStatus.ProtocolError,
+					"not_in_combat",
+					$"search_combat_mcts requires a combat state, got '{snapshot.StateType}'.");
+			}
+
+			CombatMctsSearchEngine engine = new CombatMctsSearchEngine(service, _ortPolicy, _mctsRng);
+			CombatMctsResult result = await engine.SearchAsync(
+				snapshot,
+				new CombatMctsConfig
+				{
+					NumSimulations = Math.Max(1, request.NumSimulations),
+					CPuct = request.CPuct,
+					DirichletAlpha = request.DirichletAlpha,
+					DirichletFraction = request.DirichletFraction,
+					MaxStepBudget = Math.Max(1, request.MaxStepBudget),
+				FinalActionMode = request.FinalActionMode,
+				FinalActionTopK = Math.Max(1, request.FinalActionTopK),
+				FinalActionQWeight = request.FinalActionQWeight,
+				UseContinuationValue = request.UseContinuationValue,
+				EnableDebugTrace = request.EnableDebugTrace,
+			});
+			cache.Snapshot = service.GetState();
+			cache.ApiState = null;
+			return BinaryProtocol.BuildSearchCombatMctsResponse(result);
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine($"[MCTS] SearchCombatMcts error: {ex}");
+			return BinaryProtocol.BuildErrorResponse(
+				BinaryOpcode.SearchCombatMcts,
+				BinaryStatus.SimulatorError,
+				"combat_mcts_error",
+				ex.Message);
+		}
+	}
+
 	private static byte[] ProcessBinaryResetPerfStats()
 	{
 		FullRunSimulationDiagnostics.Reset();
@@ -873,6 +933,7 @@ internal static class Program
 	// --- Local ORT actor policy ---
 	private static OrtActorPolicy? _ortPolicy;
 	private static Random _ortRng = new Random(42);
+	private static Random _mctsRng = new Random(1234);
 
 	private static byte[] ProcessBinaryLoadOrtModel(byte[] requestBytes)
 	{
@@ -889,7 +950,8 @@ internal static class Program
 			string? vocabPath = Path.Combine(Path.GetDirectoryName(onnxPath) ?? "", "vocab_mapping.json");
 			if (!File.Exists(vocabPath)) vocabPath = null;
 			_ortPolicy = new OrtActorPolicy(onnxPath, argmax: false, vocabPath: vocabPath);
-			Console.Error.WriteLine($"[ORT] Loaded model from {onnxPath} (vocab={vocabPath != null})");
+			Console.Error.WriteLine(
+				$"[ORT] Loaded model from {onnxPath} (vocab={vocabPath != null}, provider={_ortPolicy.ExecutionProviderName}, requested={_ortPolicy.RequestedDevice}, fallback={_ortPolicy.FellBackToCpu})");
 
 			// Use standard response format: status + opcode + payload
 			using var ms = new MemoryStream();
@@ -898,6 +960,13 @@ internal static class Program
 			writer.Write((byte)BinaryOpcode.LoadOrtModel);
 			writer.Write((ushort)0); // zero symbol updates
 			writer.Write((byte)1); // loaded = true
+			writer.Write((byte)(_ortPolicy.Metadata.HasValueOutput ? 1 : 0));
+			writer.Write((byte)(_ortPolicy.Metadata.HasDeckInputs ? 1 : 0));
+			writer.Write((byte)(_ortPolicy.Metadata.HasContinuationOutput ? 1 : 0));
+			writer.Write((byte)(_ortPolicy.Metadata.HasExtraScalarsInput ? 1 : 0));
+			BinaryProtocol.WriteString(writer, _ortPolicy.ExecutionProviderName);
+			BinaryProtocol.WriteString(writer, _ortPolicy.RequestedDevice);
+			writer.Write((byte)(_ortPolicy.FellBackToCpu ? 1 : 0));
 			return ms.ToArray();
 		}
 		catch (Exception ex)

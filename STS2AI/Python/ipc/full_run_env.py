@@ -301,6 +301,9 @@ class ApiBackedFullRunClient:
     def run_combat_local(self, *, max_steps: int = 600) -> dict[str, Any]:
         raise SingleplayerApiError("Local ORT rollout is only supported on pipe-binary clients.")
 
+    def search_combat_mcts(self, **kwargs: Any) -> dict[str, Any]:
+        raise SingleplayerApiError("C# combat MCTS is only supported on pipe-binary clients.")
+
     def close(self) -> None:
         self._singleplayer.close()
 
@@ -390,6 +393,8 @@ class FullRunClientLike(Protocol):
     def load_ort_model(self, path: str) -> bool: ...
 
     def run_combat_local(self, *, max_steps: int = 600) -> dict[str, Any]: ...
+
+    def search_combat_mcts(self, **kwargs: Any) -> dict[str, Any]: ...
 
     def wait_for_state_change(
         self,
@@ -688,6 +693,13 @@ class PipeBackedFullRunClient:
             raise SingleplayerApiError("Local ORT rollout requires pipe-binary transport.")
         self._ensure_connected()
         result = self._pipe.call("run_combat_local", {"max_steps": int(max_steps)})
+        return result if isinstance(result, dict) else {}
+
+    def search_combat_mcts(self, **kwargs: Any) -> dict[str, Any]:
+        if not self.supports_local_ort:
+            raise SingleplayerApiError("C# combat MCTS requires pipe-binary transport.")
+        self._ensure_connected()
+        result = self._pipe.call("search_combat_mcts", kwargs)
         return result if isinstance(result, dict) else {}
 
     def close(self) -> None:

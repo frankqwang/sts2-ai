@@ -2431,6 +2431,18 @@ def main() -> int:
                         help="Use C# local ORT CPU actor for combat (3x+ throughput, requires ONNX model loaded in sim)")
     parser.add_argument("--ort-model-path", type=str, default=None,
                         help="Path to ONNX actor model (auto-loads into each HeadlessSim on startup)")
+    parser.add_argument(
+        "--combat-mcts-backend",
+        choices=["python", "csharp"],
+        default="python",
+        help="Combat MCTS backend. 'csharp' requires pipe-binary transport and an ORT model loaded in the simulator.",
+    )
+    parser.add_argument(
+        "--combat-mcts-continuation-value",
+        action="store_true",
+        default=False,
+        help="Use continuation_value_head for combat MCTS leaf evaluation. When backend=csharp this is forwarded to the simulator search request.",
+    )
     parser.add_argument("--iter-time-budget", type=float, default=0,
                         help="Max seconds per iter for episode collection (0=no limit, 4.0=recommended with --local-ort)")
     parser.add_argument("--zero-cuda-collector", action="store_true", default=False,
@@ -2943,10 +2955,22 @@ def main() -> int:
         boss_readiness_coeff=args.boss_readiness_coeff,
     )
 
+    requested_combat_mcts_backend = str(getattr(args, "combat_mcts_backend", "python") or "python").strip().lower()
+    initial_transport = args.transport or ("pipe-binary" if args.pipe else "http")
+    combat_mcts_backend = requested_combat_mcts_backend
+    if requested_combat_mcts_backend == "csharp" and initial_transport != "pipe-binary":
+        logger.warning(
+            "combat_mcts_backend=csharp requires pipe-binary transport; falling back to python backend for transport=%s",
+            initial_transport,
+        )
+        combat_mcts_backend = "python"
+
     mcts_config = MCTSConfig(num_simulations=args.mcts_sims, c_puct=1.5,
                               temperature=1.0, dirichlet_alpha=0.3, dirichlet_fraction=0.25)
     mcts_agent = CombatMCTSAgent(network=mcts_net, vocab=vocab, config=mcts_config,
-                                  training=True, device=device, ppo_net=ppo_net)
+                                  training=True, device=device, ppo_net=ppo_net,
+                                  backend=combat_mcts_backend,
+                                  use_continuation_value=bool(args.combat_mcts_continuation_value))
     # Exclude shared symbolic_head params from the combat optimizer — the PPO
     # optimizer owns them. Combat's backward still accumulates gradients on
     # those params via autograd; they are consumed at PPO step time. This
@@ -3041,7 +3065,7 @@ def main() -> int:
                 ppo_net.param_count(), mcts_net.param_count(), len(env_ports))
 
     # Pipe clients — reuse from PipeBackedFullRunClient (single session per port)
-    transport = args.transport or ("pipe-binary" if args.pipe else "http")
+    transport = initial_transport
     use_pipe_transport = transport in {"pipe", "pipe-binary"}
     pipe_clients: dict[int, Any] = {}
     spawned_env_procs: list[Any] = []
@@ -3096,7 +3120,8 @@ def main() -> int:
         return 1
 
     # --- Load ORT model into each HeadlessSim (if --local-ort) ---
-    if args.local_ort and args.ort_model_path and use_pipe_transport:
+    need_sim_ort = bool(args.local_ort or combat_mcts_backend == "csharp")
+    if need_sim_ort and args.ort_model_path and use_pipe_transport:
         import os
         ort_abs = os.path.abspath(args.ort_model_path)
         for port, raw_pipe in pipe_clients.items():
@@ -3106,6 +3131,10 @@ def main() -> int:
                 logger.info("ORT model loaded on port %d: %s", port, "OK" if loaded else "FAILED")
             except Exception as e:
                 logger.warning("ORT model load failed on port %d: %s", port, e)
+    elif combat_mcts_backend == "csharp" and use_pipe_transport:
+        logger.warning(
+            "combat_mcts_backend=csharp is enabled but --ort-model-path was not provided; simulator search will only work if the host already has an ORT model loaded."
+        )
 
     # --- Multi-process batch inference setup ---
     inf_server = None
@@ -3217,7 +3246,9 @@ def main() -> int:
         _cpu_mcts_net = copy.deepcopy(mcts_net).cpu().eval()
         _cpu_mcts_agent = CombatMCTSAgent(
             network=_cpu_mcts_net, vocab=vocab, config=mcts_config,
-            training=False, device=torch.device("cpu"), ppo_net=_cpu_ppo_net)
+            training=False, device=torch.device("cpu"), ppo_net=_cpu_ppo_net,
+            backend=combat_mcts_backend,
+            use_continuation_value=bool(args.combat_mcts_continuation_value))
 
         # Export PPO actor to ONNX for ORT CPU inference (Branch C)
         try:

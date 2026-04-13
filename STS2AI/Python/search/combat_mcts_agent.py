@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 from mcts_core import (
@@ -24,6 +25,7 @@ from mcts_core import (
     MCTSConfig,
     MCTSNode,
     UniformEvaluator,
+    action_key,
     mcts_search,
     mcts_search_with_determinization,
 )
@@ -125,6 +127,71 @@ def _safe_load_state_dict(model: torch.nn.Module, state_dict: dict[str, Any]) ->
     model.load_state_dict(filtered, strict=False)
 
 
+class _CSharpMCTSChild:
+    def __init__(self, *, action: dict[str, Any], visit_count: int, prior: float, q_value: float):
+        self.action = action
+        self.visit_count = int(visit_count)
+        self.prior = float(prior)
+        self._q_value = float(q_value)
+        self.total_value = self._q_value * self.visit_count
+
+    @property
+    def q_value(self) -> float:
+        return self._q_value
+
+
+class CSharpMCTSRoot:
+    def __init__(
+        self,
+        *,
+        legal_actions: list[dict[str, Any]],
+        action_index: int,
+        visit_counts: list[int],
+        visit_probs: list[float],
+        q_values: list[float],
+        priors: list[float],
+        root_value: float,
+    ):
+        self._legal_actions = [dict(action) for action in legal_actions]
+        self._action_index = int(action_index)
+        self._visit_probs = np.array(visit_probs, dtype=np.float32)
+        self._children_ordered: list[_CSharpMCTSChild] = []
+        self.children: dict[tuple, _CSharpMCTSChild] = {}
+        for idx, action in enumerate(self._legal_actions):
+            child = _CSharpMCTSChild(
+                action=action,
+                visit_count=visit_counts[idx] if idx < len(visit_counts) else 0,
+                prior=priors[idx] if idx < len(priors) else 0.0,
+                q_value=q_values[idx] if idx < len(q_values) else 0.0,
+            )
+            self._children_ordered.append(child)
+            self.children[action_key(action)] = child
+        self.visit_count = int(sum(child.visit_count for child in self._children_ordered))
+        self.total_value = float(root_value) * self.visit_count
+        self._root_value = float(root_value)
+
+    @property
+    def q_value(self) -> float:
+        return self._root_value
+
+    def visit_distribution(self) -> tuple[list[dict[str, Any]], np.ndarray]:
+        return [dict(action) for action in self._legal_actions], self._visit_probs.copy()
+
+    def best_action(
+        self,
+        temperature: float = 0.0,
+        *,
+        mode: str = "visit",
+        top_k: int = 3,
+        q_weight: float = 0.35,
+    ) -> dict[str, Any]:
+        _ = temperature, mode, top_k, q_weight
+        if not self._legal_actions:
+            raise ValueError("No children to select from")
+        idx = min(max(self._action_index, 0), len(self._legal_actions) - 1)
+        return dict(self._legal_actions[idx])
+
+
 class CombatMCTSAgent:
     """MCTS-based combat agent with neural network guidance."""
 
@@ -136,17 +203,28 @@ class CombatMCTSAgent:
         training: bool = False,
         device: torch.device | None = None,
         ppo_net: Any | None = None,
+        *,
+        backend: str = "python",
+        use_continuation_value: bool = False,
     ):
         self.network = network
         self.vocab = vocab
         self.config = config or MCTSConfig()
         self.training = training
-        self.evaluator = CombatNNEvaluator(network, vocab, device=device, ppo_net=ppo_net)
+        self.backend = str(backend or "python").strip().lower()
+        self.use_continuation_value = bool(use_continuation_value)
+        self.evaluator = CombatNNEvaluator(
+            network,
+            vocab,
+            device=device,
+            use_continuation_value=use_continuation_value,
+            ppo_net=ppo_net,
+        )
 
     def choose_action(
         self,
         forward_model: CombatForwardModel,
-    ) -> tuple[dict[str, Any], MCTSNode]:
+    ) -> tuple[dict[str, Any], MCTSNode | CSharpMCTSRoot]:
         """Run MCTS and choose an action.
 
         Args:
@@ -156,6 +234,10 @@ class CombatMCTSAgent:
             action: chosen action dict
             root: MCTS root node (for extracting training targets)
         """
+        if self.backend == "csharp":
+            root = self._choose_action_csharp(forward_model)
+            return root.best_action(), root
+
         if self.config.num_determinizations > 1:
             root = mcts_search_with_determinization(
                 forward_model, self.evaluator, self.config)
@@ -171,6 +253,35 @@ class CombatMCTSAgent:
         )
 
         return action, root
+
+    def _choose_action_csharp(self, forward_model: CombatForwardModel) -> CSharpMCTSRoot:
+        if not isinstance(forward_model, PipeCombatForwardModel):
+            raise TypeError("C# combat MCTS backend requires PipeCombatForwardModel.")
+        pipe = forward_model._pipe
+        params = {
+            "num_simulations": int(getattr(self.config, "num_simulations", 0)),
+            "c_puct": float(getattr(self.config, "c_puct", 1.5)),
+            "dirichlet_alpha": float(getattr(self.config, "dirichlet_alpha", 0.0)),
+            "dirichlet_fraction": float(getattr(self.config, "dirichlet_fraction", 0.0)),
+            "max_step_budget": int(getattr(forward_model, "_max_step_budget", 200)),
+            "final_action_mode": str(getattr(self.config, "final_action_mode", "visit")),
+            "final_action_top_k": int(getattr(self.config, "final_action_top_k", 3)),
+            "final_action_q_weight": float(getattr(self.config, "final_action_q_weight", 0.35)),
+            "use_continuation_value": bool(self.use_continuation_value),
+        }
+        result = pipe.call("search_combat_mcts", params)
+        legal_actions = forward_model.get_legal_actions()
+        if not isinstance(result, dict):
+            raise RuntimeError("search_combat_mcts did not return a payload dict.")
+        return CSharpMCTSRoot(
+            legal_actions=legal_actions,
+            action_index=int(result.get("action_index", 0)),
+            visit_counts=list(result.get("visit_counts") or []),
+            visit_probs=list(result.get("visit_probs") or []),
+            q_values=list(result.get("q_values") or []),
+            priors=list(result.get("priors") or []),
+            root_value=float(result.get("root_value", 0.0)),
+        )
 
     def choose_action_from_state(
         self,

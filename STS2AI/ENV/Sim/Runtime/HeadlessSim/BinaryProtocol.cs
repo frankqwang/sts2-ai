@@ -48,7 +48,8 @@ internal enum BinaryOpcode : byte
 	RunCombatLocal = 0x0C,
 	ExportState = 0x0D,
 	ImportState = 0x0E,
-	SkipCombat = 0x0F
+	SkipCombat = 0x0F,
+	SearchCombatMcts = 0x10
 }
 
 internal enum BinaryStatus : byte
@@ -151,10 +152,33 @@ internal sealed class BinarySessionState
 	}
 }
 
+internal sealed class BinarySearchCombatMctsRequest
+{
+	public int NumSimulations { get; init; }
+
+	public float CPuct { get; init; }
+
+	public float DirichletAlpha { get; init; }
+
+	public float DirichletFraction { get; init; }
+
+	public int MaxStepBudget { get; init; }
+
+	public string FinalActionMode { get; init; } = "visit";
+
+	public int FinalActionTopK { get; init; }
+
+	public float FinalActionQWeight { get; init; }
+
+	public bool UseContinuationValue { get; init; }
+
+	public bool EnableDebugTrace { get; init; }
+}
+
 internal static class BinaryProtocol
 {
-	private const ushort ProtocolVersion = 9;
-	internal const string BinarySchemaHash = "sts2-binary-schema-2026-04-09a";
+	private const ushort ProtocolVersion = 10;
+	internal const string BinarySchemaHash = "sts2-binary-schema-2026-04-13c";
 	private static readonly string BuildGitSha = ResolveBuildGitSha();
 
 	private static readonly Dictionary<string, byte> ActionTypeToCode = new(StringComparer.OrdinalIgnoreCase)
@@ -414,6 +438,27 @@ internal static class BinaryProtocol
 		return actions;
 	}
 
+	public static BinarySearchCombatMctsRequest ParseSearchCombatMctsRequest(ReadOnlySpan<byte> request)
+	{
+		BinaryRequestReader reader = new(request);
+		reader.ReadOpcode(BinaryOpcode.SearchCombatMcts);
+		BinarySearchCombatMctsRequest parsed = new BinarySearchCombatMctsRequest
+		{
+			NumSimulations = reader.ReadUInt16(),
+			CPuct = reader.ReadSingle(),
+			DirichletAlpha = reader.ReadSingle(),
+			DirichletFraction = reader.ReadSingle(),
+			MaxStepBudget = reader.ReadUInt16(),
+			FinalActionMode = DecodeFinalActionMode(reader.ReadByte()),
+			FinalActionTopK = reader.ReadUInt16(),
+			FinalActionQWeight = reader.ReadSingle(),
+			UseContinuationValue = reader.ReadByte() != 0,
+			EnableDebugTrace = reader.HasRemaining && reader.ReadByte() != 0,
+		};
+		reader.ThrowIfRemaining();
+		return parsed;
+	}
+
 	public static byte[] BuildStateResponse(BinaryOpcode opcode, BinarySessionState session, FullRunSimulationStateSnapshot snapshot)
 	{
 		return BuildStateEnvelope(BinaryStatus.Ok, opcode, session, snapshot);
@@ -449,6 +494,57 @@ internal static class BinaryProtocol
 		WriteOptionalString(writer, result.Error);
 		writer.Write(statePayload);
 		FullRunSimulationDiagnostics.Increment("binary.state_bytes", statePayload.Length);
+		return stream.ToArray();
+	}
+
+	public static byte[] BuildSearchCombatMctsResponse(CombatMctsResult result)
+	{
+		using MemoryStream stream = new();
+		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+		writer.Write((byte)BinaryStatus.Ok);
+		writer.Write((byte)BinaryOpcode.SearchCombatMcts);
+		writer.Write((short)result.ActionIndex);
+		writer.Write((ushort)result.VisitCounts.Length);
+		foreach (int visitCount in result.VisitCounts)
+		{
+			writer.Write(visitCount);
+		}
+		foreach (float visitProb in result.VisitProbs)
+		{
+			writer.Write(visitProb);
+		}
+		foreach (float qValue in result.QValues)
+		{
+			writer.Write(qValue);
+		}
+		foreach (float prior in result.Priors)
+		{
+			writer.Write(prior);
+		}
+		writer.Write(result.RootValue);
+		writer.Write(result.SearchMs);
+		writer.Write((byte)(result.RestoredOk ? 1 : 0));
+		writer.Write(result.SnapshotCount);
+		writer.Write(result.Breakdown.SimulationCount);
+		writer.Write(result.Breakdown.SaveStateCount);
+		writer.Write(result.Breakdown.LoadStateCount);
+		writer.Write(result.Breakdown.DeleteStateCount);
+		writer.Write(result.Breakdown.StepCount);
+		writer.Write(result.Breakdown.AdvanceStateCount);
+		writer.Write(result.Breakdown.EvalCallCount);
+		writer.Write(result.Breakdown.EvalBatchCount);
+		writer.Write(result.Breakdown.EvalStateCount);
+		writer.Write(result.Breakdown.SelectChildCount);
+		writer.Write(result.Breakdown.BackpropCount);
+		writer.Write(result.Breakdown.SaveStateMs);
+		writer.Write(result.Breakdown.LoadStateMs);
+		writer.Write(result.Breakdown.DeleteStateMs);
+		writer.Write(result.Breakdown.StepMs);
+		writer.Write(result.Breakdown.AdvanceStateMs);
+		writer.Write(result.Breakdown.EvalMs);
+		writer.Write(result.Breakdown.SelectionMs);
+		writer.Write(result.Breakdown.BackpropMs);
+		WriteOptionalString(writer, result.DebugTraceJson);
 		return stream.ToArray();
 	}
 
@@ -1418,6 +1514,16 @@ internal static class BinaryProtocol
 			.ToLowerInvariant();
 	}
 
+	private static byte EncodeFinalActionMode(string? mode)
+	{
+		return string.Equals(mode, "visit_q_blend", StringComparison.OrdinalIgnoreCase) ? (byte)1 : (byte)0;
+	}
+
+	private static string DecodeFinalActionMode(byte code)
+	{
+		return code == 1 ? "visit_q_blend" : "visit";
+	}
+
 	private ref struct BinaryRequestReader
 	{
 		private ReadOnlySpan<byte> _buffer;
@@ -1473,6 +1579,14 @@ internal static class BinaryProtocol
 			return value;
 		}
 
+		public float ReadSingle()
+		{
+			EnsureAvailable(4);
+			float value = BitConverter.ToSingle(_buffer.Slice(_offset, 4));
+			_offset += 4;
+			return value;
+		}
+
 		public string? ReadOptionalString()
 		{
 			bool hasValue = ReadByte() != 0;
@@ -1495,6 +1609,8 @@ internal static class BinaryProtocol
 				throw new InvalidOperationException($"Binary request had {_buffer.Length - _offset} trailing bytes.");
 			}
 		}
+
+		public bool HasRemaining => _offset < _buffer.Length;
 
 		private void EnsureAvailable(int count)
 		{

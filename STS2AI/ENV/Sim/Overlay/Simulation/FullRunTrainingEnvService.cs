@@ -46,6 +46,15 @@ public sealed class FullRunTrainingEnvService
 		return ExecuteSerialized(() => ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).SaveState());
 	}
 
+	/// <summary>
+	/// Save current game state for MCTS restore.
+	/// Fast combat-local snapshots are disabled; this now routes to the full snapshot path.
+	/// </summary>
+	public string SaveSearchState(bool includeFullFallback = false)
+	{
+		return ExecuteSerialized(() => ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).SaveSearchState(includeFullFallback));
+	}
+
 	/// <summary>Restore game to a previously saved state.</summary>
 	public Task<FullRunSimulationStateSnapshot> LoadState(string stateId)
 	{
