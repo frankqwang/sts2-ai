@@ -22,6 +22,7 @@ RiderTestRunner
 icudt_godot.dat
 
 /STS2AI/ENV/Sim/Host/bin/
+/STS2AI/Python/STS2AI
 
 # System files
 **/.DS_Store
