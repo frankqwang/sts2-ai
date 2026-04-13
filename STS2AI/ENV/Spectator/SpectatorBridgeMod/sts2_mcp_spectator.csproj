@@ -6,10 +6,13 @@
     <LangVersion>12.0</LangVersion>
     <AssemblyName>sts2_mcp_spectator</AssemblyName>
     <RootNamespace>STS2_MCP</RootNamespace>
-    <STS2AssemblyDir Condition="'$(STS2AssemblyDir)' == ''">C:\Users\Administrator\Desktop\sts2_0991\.godot\mono\temp\bin\Debug</STS2AssemblyDir>
+    <STS2AssemblyDir Condition="'$(STS2AssemblyDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\..\.godot\mono\temp\bin\Debug</STS2AssemblyDir>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Shared DTO types for unified protocol (also compiled into HeadlessSim) -->
+    <Compile Include="..\..\Sim\Overlay\Simulation\FullRunApiStateDtos.cs" Link="Shared\FullRunApiStateDtos.cs" />
+
     <Reference Include="sts2">
       <HintPath>$(STS2AssemblyDir)\sts2.dll</HintPath>
       <Private>false</Private>

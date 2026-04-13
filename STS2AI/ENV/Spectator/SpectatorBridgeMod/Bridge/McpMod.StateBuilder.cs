@@ -48,6 +48,9 @@ namespace STS2_MCP;
 
 public static partial class McpMod
 {
+    // Internal accessors for SpectatorApiStateBuilder (Dict → DTO conversion layer)
+    internal static Dictionary<string, object?> BuildGameStateForApi() => BuildGameState();
+
     private static Dictionary<string, object?> BuildGameState()
     {
         var result = new Dictionary<string, object?>();
@@ -66,59 +69,105 @@ public static partial class McpMod
             result["state_type"] = "unknown";
             return result;
         }
-
-        // Card selection overlays can appear on top of any room (events, rest sites, combat)
-        var topOverlay = NOverlayStack.Instance?.Peek();
         var currentRoom = runState.CurrentRoom;
-        if (topOverlay is NCardGridSelectionScreen cardSelectScreen)
+
+        try
         {
-            result["state_type"] = "card_select";
-            result["card_select"] = BuildCardSelectState(cardSelectScreen, runState);
-        }
-        else if (topOverlay is NChooseACardSelectionScreen chooseCardScreen)
-        {
-            result["state_type"] = "card_select";
-            result["card_select"] = BuildChooseCardState(chooseCardScreen, runState);
-        }
-        else if (topOverlay is NChooseARelicSelection relicSelectScreen)
-        {
-            result["state_type"] = "relic_select";
-            result["relic_select"] = BuildRelicSelectState(relicSelectScreen, runState);
-        }
-        else if (topOverlay is NGameOverScreen gameOverScreen)
-        {
-            result["state_type"] = "game_over";
-            result["game_over"] = BuildGameOverState(gameOverScreen, runState);
-        }
-        else if (topOverlay is IOverlayScreen
-                 && topOverlay is not NRewardsScreen
-                 && topOverlay is not NCardRewardSelectionScreen)
-        {
-            // Catch-all for unhandled overlays — prevents soft-locks
-            result["state_type"] = "overlay";
-            result["overlay"] = BuildOverlayState((Node)topOverlay, runState);
-        }
-        else if (currentRoom is CombatRoom combatRoom)
-        {
-            if (CombatManager.Instance.IsInProgress)
+            var topOverlay = NOverlayStack.Instance?.Peek();
+            bool combatOverlayCardSelection = currentRoom is CombatRoom && CombatManager.Instance.IsInProgress
+                && (topOverlay is NCardGridSelectionScreen || topOverlay is NChooseACardSelectionScreen);
+            if (!combatOverlayCardSelection && topOverlay is NCardGridSelectionScreen cardSelectScreen)
             {
-                // Check for in-combat hand card selection (e.g., "Select a card to exhaust")
-                var playerHand = NPlayerHand.Instance;
-                if (playerHand != null && playerHand.IsInCardSelection)
+                result["state_type"] = "card_select";
+                result["card_select"] = BuildCardSelectState(cardSelectScreen, runState);
+            }
+            else if (!combatOverlayCardSelection && topOverlay is NChooseACardSelectionScreen chooseCardScreen)
+            {
+                result["state_type"] = "card_select";
+                result["card_select"] = BuildChooseCardState(chooseCardScreen, runState);
+            }
+            else if (topOverlay is NChooseARelicSelection relicSelectScreen)
+            {
+                result["state_type"] = "relic_select";
+                result["relic_select"] = BuildRelicSelectState(relicSelectScreen, runState);
+            }
+            else if (topOverlay is NGameOverScreen gameOverScreen)
+            {
+                result["state_type"] = "game_over";
+                result["game_over"] = BuildGameOverState(gameOverScreen, runState);
+            }
+            else if (!combatOverlayCardSelection
+                     && topOverlay is IOverlayScreen
+                     && topOverlay is not NRewardsScreen
+                     && topOverlay is not NCardRewardSelectionScreen)
+            {
+                // Catch-all for unhandled overlays — prevents soft-locks
+                result["state_type"] = "overlay";
+                result["overlay"] = BuildOverlayState((Node)topOverlay, runState);
+            }
+            else if (currentRoom is CombatRoom combatRoom)
+            {
+                if (CombatManager.Instance.IsInProgress)
                 {
-                    result["state_type"] = "hand_select";
-                    result["hand_select"] = BuildHandSelectState(playerHand, runState);
-                    result["battle"] = BuildBattleState(runState, combatRoom);
+                    // Check for in-combat hand card selection (e.g., "Select a card to exhaust")
+                    var playerHand = NPlayerHand.Instance;
+                    if (playerHand != null && playerHand.IsInCardSelection)
+                    {
+                        result["state_type"] = "hand_select";
+                        result["hand_select"] = BuildHandSelectState(playerHand, runState);
+                        result["battle"] = BuildBattleState(runState, combatRoom);
+                    }
+                    else if (topOverlay is NCardGridSelectionScreen combatCardSelectScreen)
+                    {
+                        result["state_type"] = combatRoom.RoomType.ToString().ToLower();
+                        var battle = BuildBattleState(runState, combatRoom);
+                        battle["card_selection"] = BuildCombatCardSelectionState(combatCardSelectScreen, runState);
+                        result["battle"] = battle;
+                    }
+                    else if (topOverlay is NChooseACardSelectionScreen combatChooseCardScreen)
+                    {
+                        result["state_type"] = combatRoom.RoomType.ToString().ToLower();
+                        var battle = BuildBattleState(runState, combatRoom);
+                        battle["card_selection"] = BuildCombatChooseCardSelectionState(combatChooseCardScreen, runState);
+                        result["battle"] = battle;
+                    }
+                    else
+                    {
+                        result["state_type"] = combatRoom.RoomType.ToString().ToLower(); // monster, elite, boss
+                        result["battle"] = BuildBattleState(runState, combatRoom);
+                    }
                 }
                 else
                 {
-                    result["state_type"] = combatRoom.RoomType.ToString().ToLower(); // monster, elite, boss
-                    result["battle"] = BuildBattleState(runState, combatRoom);
+                    // After combat ends, check: map open (post-rewards) > overlays > fallback
+                    if (NMapScreen.Instance is { IsOpen: true })
+                    {
+                        result["state_type"] = "map";
+                        result["map"] = BuildMapState(runState);
+                    }
+                    else
+                    {
+                        var overlay = NOverlayStack.Instance?.Peek();
+                        if (overlay is NCardRewardSelectionScreen cardScreen)
+                        {
+                            result["state_type"] = "card_reward";
+                            result["card_reward"] = BuildCardRewardState(cardScreen, runState);
+                        }
+                        else if (overlay is NRewardsScreen rewardsScreen)
+                        {
+                            result["state_type"] = "combat_rewards";
+                            result["rewards"] = BuildRewardsState(rewardsScreen, runState);
+                        }
+                        else
+                        {
+                            result["state_type"] = combatRoom.RoomType.ToString().ToLower();
+                            result["message"] = "Combat ended. Waiting for rewards...";
+                        }
+                    }
                 }
             }
-            else
+            else if (currentRoom is EventRoom eventRoom)
             {
-                // After combat ends, check: map open (post-rewards) > overlays > fallback
                 if (NMapScreen.Instance is { IsOpen: true })
                 {
                     result["state_type"] = "map";
@@ -126,86 +175,66 @@ public static partial class McpMod
                 }
                 else
                 {
-                    var overlay = NOverlayStack.Instance?.Peek();
-                    if (overlay is NCardRewardSelectionScreen cardScreen)
-                    {
-                        result["state_type"] = "card_reward";
-                        result["card_reward"] = BuildCardRewardState(cardScreen, runState);
-                    }
-                    else if (overlay is NRewardsScreen rewardsScreen)
-                    {
-                        result["state_type"] = "combat_rewards";
-                        result["rewards"] = BuildRewardsState(rewardsScreen, runState);
-                    }
-                    else
-                    {
-                        result["state_type"] = combatRoom.RoomType.ToString().ToLower();
-                        result["message"] = "Combat ended. Waiting for rewards...";
-                    }
+                    result["state_type"] = "event";
+                    result["event"] = BuildEventState(eventRoom, runState);
                 }
             }
-        }
-        else if (currentRoom is EventRoom eventRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
+            else if (currentRoom is MapRoom)
             {
                 result["state_type"] = "map";
                 result["map"] = BuildMapState(runState);
             }
-            else
+            else if (currentRoom is MerchantRoom merchantRoom)
             {
-                result["state_type"] = "event";
-                result["event"] = BuildEventState(eventRoom, runState);
+                if (NMapScreen.Instance is { IsOpen: true })
+                {
+                    result["state_type"] = "map";
+                    result["map"] = BuildMapState(runState);
+                }
+                else
+                {
+                    result["state_type"] = "shop";
+                    result["shop"] = BuildShopState(merchantRoom, runState);
+                }
             }
-        }
-        else if (currentRoom is MapRoom)
-        {
-            result["state_type"] = "map";
-            result["map"] = BuildMapState(runState);
-        }
-        else if (currentRoom is MerchantRoom merchantRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
+            else if (currentRoom is RestSiteRoom restSiteRoom)
             {
-                result["state_type"] = "map";
-                result["map"] = BuildMapState(runState);
+                if (NMapScreen.Instance is { IsOpen: true })
+                {
+                    result["state_type"] = "map";
+                    result["map"] = BuildMapState(runState);
+                }
+                else
+                {
+                    result["state_type"] = "rest_site";
+                    result["rest_site"] = BuildRestSiteState(restSiteRoom, runState);
+                }
             }
-            else
+            else if (currentRoom is TreasureRoom treasureRoom)
             {
-                result["state_type"] = "shop";
-                result["shop"] = BuildShopState(merchantRoom, runState);
-            }
-        }
-        else if (currentRoom is RestSiteRoom restSiteRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
-            {
-                result["state_type"] = "map";
-                result["map"] = BuildMapState(runState);
-            }
-            else
-            {
-                result["state_type"] = "rest_site";
-                result["rest_site"] = BuildRestSiteState(restSiteRoom, runState);
-            }
-        }
-        else if (currentRoom is TreasureRoom treasureRoom)
-        {
-            if (NMapScreen.Instance is { IsOpen: true })
-            {
-                result["state_type"] = "map";
-                result["map"] = BuildMapState(runState);
+                if (NMapScreen.Instance is { IsOpen: true })
+                {
+                    result["state_type"] = "map";
+                    result["map"] = BuildMapState(runState);
+                }
+                else
+                {
+                    result["state_type"] = "treasure";
+                    result["treasure"] = BuildTreasureState(treasureRoom, runState);
+                }
             }
             else
             {
-                result["state_type"] = "treasure";
-                result["treasure"] = BuildTreasureState(treasureRoom, runState);
+                result["state_type"] = "unknown";
+                result["room_type"] = currentRoom?.GetType().Name;
             }
         }
-        else
+        catch (Exception ex)
         {
-            result["state_type"] = "unknown";
+            result.Clear();
+            result["state_type"] = "loading";
             result["room_type"] = currentRoom?.GetType().Name;
+            result["message"] = $"State build in progress: {ex.GetType().Name}";
         }
 
         // Common run info
@@ -331,6 +360,8 @@ public static partial class McpMod
         {
             state["energy"] = combatState.Energy;
             state["max_energy"] = combatState.MaxEnergy;
+            state["potion_slots"] = player.PotionSlots.Count;
+            state["open_potion_slots"] = player.PotionSlots.Count(static potion => potion == null);
 
             // Stars (The Regent's resource, conditionally shown)
             if (player.Character.ShouldAlwaysShowStarCounter || combatState.Stars > 0)
@@ -521,6 +552,12 @@ public static partial class McpMod
             ["status"] = BuildPowersState(creature)
         };
 
+        if (monster != null)
+        {
+            state["next_move_id"] = monster.NextMove.Id;
+            state["intends_to_attack"] = monster.IntendsToAttack;
+        }
+
         // Intents
         if (monster?.NextMove is MoveState moveState)
         {
@@ -536,6 +573,13 @@ public static partial class McpMod
                     var targets = creature.CombatState?.PlayerCreatures;
                     if (targets != null)
                     {
+                        if (intent is AttackIntent attackIntent)
+                        {
+                            intentData["total_damage"] = attackIntent.GetTotalDamage(targets, creature);
+                            intentData["damage"] = attackIntent.GetSingleDamage(targets, creature);
+                            intentData["repeats"] = attackIntent.Repeats;
+                        }
+
                         string label = intent.GetIntentLabel(targets, creature).GetFormattedText();
                         intentData["label"] = StripRichTextTags(label);
 
@@ -640,11 +684,13 @@ public static partial class McpMod
         var player = LocalContext.GetMe(runState);
         if (player != null)
             state["player"] = BuildNonCombatPlayerState(player);
+        var localEvent = eventRoom.LocalMutableEvent;
         var eventModel = eventRoom.CanonicalEvent;
         bool isAncient = eventModel is AncientEventModel;
         state["event_id"] = eventModel.Id.Entry;
         state["event_name"] = SafeGetText(() => eventModel.Title);
         state["is_ancient"] = isAncient;
+        state["is_finished"] = localEvent.IsFinished;
 
         // Check dialogue state for ancients
         bool inDialogue = false;
@@ -663,39 +709,53 @@ public static partial class McpMod
         // Event body text
         state["body"] = SafeGetText(() => eventModel.Description);
 
-        // Options from UI
+        // Options: prefer game model (matches Sim) with fallback to UI buttons
         var options = new List<Dictionary<string, object?>>();
-        if (uiRoom != null)
+        try
         {
-            var buttons = FindAll<NEventOptionButton>(uiRoom);
-            int index = 0;
-            foreach (var button in buttons)
+            // Snapshot the options list to avoid mutation during iteration
+            var currentOptions = localEvent.CurrentOptions.ToList();
+            for (int i = 0; i < currentOptions.Count; i++)
             {
-                var opt = button.Option;
-                var optData = new Dictionary<string, object?>
+                var opt = currentOptions[i];
+                options.Add(new Dictionary<string, object?>
                 {
-                    ["index"] = index,
-                    ["text_key"] = opt.TextKey,
+                    ["index"] = i,
+                    ["text"] = SafeGetText(() => opt.Title?.GetRawText()),
                     ["title"] = SafeGetText(() => opt.Title),
-                    ["description"] = SafeGetText(() => opt.Description),
                     ["is_locked"] = opt.IsLocked,
-                    ["is_proceed"] = opt.IsProceed,
-                    ["was_chosen"] = opt.WasChosen
-                };
-                var effectInfo = InferEventOptionEffects(opt);
-                foreach (var kv in effectInfo)
-                    optData[kv.Key] = kv.Value;
-                if (opt.Relic != null)
+                    ["is_chosen"] = opt.WasChosen,
+                    ["is_proceed"] = opt.IsProceed
+                });
+            }
+        }
+        catch
+        {
+            // Fallback to UI buttons if game model is mid-mutation
+            options.Clear();
+            if (uiRoom != null)
+            {
+                var buttons = FindAll<NEventOptionButton>(uiRoom);
+                int bi = 0;
+                foreach (var button in buttons)
                 {
-                    optData["relic_name"] = SafeGetText(() => opt.Relic.Title);
-                    optData["relic_description"] = SafeGetText(() => opt.Relic.DynamicDescription);
+                    var opt = button.Option;
+                    options.Add(new Dictionary<string, object?>
+                    {
+                        ["index"] = bi++,
+                        ["text"] = SafeGetText(() => opt.Title?.GetRawText()),
+                        ["title"] = SafeGetText(() => opt.Title),
+                        ["is_locked"] = opt.IsLocked,
+                        ["is_chosen"] = opt.WasChosen,
+                        ["is_proceed"] = opt.IsProceed
+                    });
                 }
-                optData["keywords"] = BuildHoverTips(opt.HoverTips);
-                options.Add(optData);
-                index++;
             }
         }
         state["options"] = options;
+        // Match Sim logic: no options + not finished = in dialogue
+        if (!localEvent.IsFinished && options.Count == 0)
+            state["in_dialogue"] = true;
 
         return state;
     }
@@ -1321,42 +1381,46 @@ public static partial class McpMod
         }
         state["visited"] = visited;
 
-        // Next options — read travelable state from UI nodes
+        // Next options — read from game logic (matches Sim's BuildMapOptions exactly)
         var nextOptions = new List<Dictionary<string, object?>>();
-        var mapScreen = NMapScreen.Instance;
-        if (mapScreen != null)
+        IEnumerable<MapPoint> candidatePoints;
+        if (runState.CurrentMapPoint != null)
         {
-            var travelable = FindAll<NMapPoint>(mapScreen)
-                .Where(mp => mp.State == MapPointState.Travelable)
-                .OrderBy(mp => mp.Point.coord.col)
-                .ToList();
-
-            int index = 0;
-            foreach (var nmp in travelable)
+            candidatePoints = runState.CurrentMapPoint.Children;
+        }
+        else if (map.startMapPoints.Count > 0)
+        {
+            candidatePoints = map.startMapPoints;
+        }
+        else
+        {
+            candidatePoints = map.StartingMapPoint.Children;
+        }
+        int index = 0;
+        foreach (var pt in candidatePoints.OrderBy(p => p.coord.row).ThenBy(p => p.coord.col))
+        {
+            var option = new Dictionary<string, object?>
             {
-                var pt = nmp.Point;
-                var option = new Dictionary<string, object?>
+                ["index"] = index,
+                ["col"] = pt.coord.col,
+                ["row"] = pt.coord.row,
+                ["type"] = pt.PointType.ToString(),
+                ["point_type"] = pt.PointType.ToString().ToLowerInvariant()
+            };
+
+            // 1-level lookahead
+            var children = pt.Children
+                .OrderBy(c => c.coord.col)
+                .Select(c => new Dictionary<string, object?>
                 {
-                    ["index"] = index,
-                    ["col"] = pt.coord.col,
-                    ["row"] = pt.coord.row,
-                    ["type"] = pt.PointType.ToString()
-                };
+                    ["col"] = c.coord.col, ["row"] = c.coord.row,
+                    ["type"] = c.PointType.ToString()
+                }).ToList();
+            if (children.Count > 0)
+                option["leads_to"] = children;
 
-                // 1-level lookahead
-                var children = pt.Children
-                    .OrderBy(c => c.coord.col)
-                    .Select(c => new Dictionary<string, object?>
-                    {
-                        ["col"] = c.coord.col, ["row"] = c.coord.row,
-                        ["type"] = c.PointType.ToString()
-                    }).ToList();
-                if (children.Count > 0)
-                    option["leads_to"] = children;
-
-                nextOptions.Add(option);
-                index++;
-            }
+            nextOptions.Add(option);
+            index++;
         }
         state["next_options"] = nextOptions;
 
@@ -1676,6 +1740,38 @@ public static partial class McpMod
         state["can_cancel"] = state["can_skip"];
 
         return state;
+    }
+
+    private static Dictionary<string, object?> BuildCombatCardSelectionState(NCardGridSelectionScreen screen, RunState runState)
+    {
+        Dictionary<string, object?> state = BuildCardSelectState(screen, runState);
+        return new Dictionary<string, object?>
+        {
+            ["prompt"] = state.TryGetValue("prompt", out object? prompt) ? prompt : null,
+            ["mode"] = state.TryGetValue("screen_type", out object? mode) ? mode : null,
+            ["min_select"] = state.TryGetValue("min_select", out object? minSelect) ? minSelect : 0,
+            ["max_select"] = state.TryGetValue("max_select", out object? maxSelect) ? maxSelect : 0,
+            ["can_confirm"] = state.TryGetValue("can_confirm", out object? canConfirm) ? canConfirm : false,
+            ["can_cancel"] = state.TryGetValue("can_cancel", out object? canCancel) ? canCancel : false,
+            ["selectable_cards"] = state.TryGetValue("cards", out object? cards) ? cards : new List<Dictionary<string, object?>>(),
+            ["selected_cards"] = state.TryGetValue("selected_cards", out object? selectedCards) ? selectedCards : new List<Dictionary<string, object?>>()
+        };
+    }
+
+    private static Dictionary<string, object?> BuildCombatChooseCardSelectionState(NChooseACardSelectionScreen screen, RunState runState)
+    {
+        Dictionary<string, object?> state = BuildChooseCardState(screen, runState);
+        return new Dictionary<string, object?>
+        {
+            ["prompt"] = state.TryGetValue("prompt", out object? prompt) ? prompt : null,
+            ["mode"] = "ChooseCard",
+            ["min_select"] = 0,
+            ["max_select"] = 1,
+            ["can_confirm"] = false,
+            ["can_cancel"] = state.TryGetValue("can_cancel", out object? canCancel) ? canCancel : false,
+            ["selectable_cards"] = state.TryGetValue("cards", out object? cards) ? cards : new List<Dictionary<string, object?>>(),
+            ["selected_cards"] = new List<Dictionary<string, object?>>()
+        };
     }
 
     private static Dictionary<string, object?> BuildHandSelectState(NPlayerHand hand, RunState runState)

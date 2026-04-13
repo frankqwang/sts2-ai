@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from rl_reward_shaping import (
+from core.rl_reward_shaping import (
     _extract_player,
     _extract_progress,
     _lower,

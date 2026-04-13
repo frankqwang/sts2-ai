@@ -35,8 +35,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from vocab import Vocab, load_vocab
-from rl_encoder_v2 import (
+from core.vocab import Vocab, load_vocab
+from core.rl_encoder_v2 import (
     CARD_AUX_DIM,
     ENEMY_AUX_DIM,
     MAX_ACTIONS,
@@ -64,8 +64,8 @@ from rl_encoder_v2 import (
     build_structured_actions,
     build_structured_state,
 )
-from relic_tags import NUM_RELIC_TAGS
-from symbolic_features_head import SymbolicFeaturesHead
+from core.relic_tags import NUM_RELIC_TAGS
+from core.symbolic_features_head import SymbolicFeaturesHead
 
 logger = logging.getLogger(__name__)
 

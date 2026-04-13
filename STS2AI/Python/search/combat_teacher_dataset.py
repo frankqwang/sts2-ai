@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from combat_teacher_common import COMBAT_TEACHER_SCHEMA_VERSION
+from search.combat_teacher_common import COMBAT_TEACHER_SCHEMA_VERSION
 
 
 STRICT_MOTIF_REGRET_MARGIN = 0.05

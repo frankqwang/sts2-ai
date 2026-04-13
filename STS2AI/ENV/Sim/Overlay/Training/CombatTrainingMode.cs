@@ -28,7 +28,7 @@ public static class CombatTrainingMode
 		string? seed = string.IsNullOrWhiteSpace(seedOverride) ? CommandLineHelper.GetValue("trainer-seed") : seedOverride;
 		if (!string.IsNullOrWhiteSpace(seed))
 		{
-			return seed;
+			return SeedHelper.CanonicalizeSeed(seed);
 		}
 		return SeedHelper.GetRandomSeed();
 	}

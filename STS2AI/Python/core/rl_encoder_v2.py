@@ -37,14 +37,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vocab import Vocab, load_vocab, _slugify
-from card_tags import (
+from core.vocab import Vocab, load_vocab, _slugify
+from core.card_tags import (
     load_card_tags, FUNCTIONAL_TAGS, FUNCTIONAL_TAG_TO_IDX, NUM_FUNCTIONAL_TAGS,
 )
-from relic_tags import (
+from core.relic_tags import (
     load_relic_tags, RELIC_FUNCTIONAL_TAGS, RELIC_TAG_TO_IDX, NUM_RELIC_TAGS,
 )
-from rl_reward_shaping import extract_next_boss_token
+from core.rl_reward_shaping import extract_next_boss_token
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -484,7 +484,7 @@ def build_structured_state(state: dict, vocab: Vocab) -> StructuredState:
     scalars[17] = min(_n_deck / 30.0, 1.0)       # deck size (redundant with [10] but finer)
 
     # --- Problem vector (9 dims): deck capability assessment ---
-    from rl_reward_shaping import compute_problem_vector
+    from core.rl_reward_shaping import compute_problem_vector
     pv = compute_problem_vector(state)
     scalars[20:29] = pv  # [frontload, aoe, block, draw, energy, scaling, consistency, elite_ready, boss_answer]
     scalars[18] = 0.0

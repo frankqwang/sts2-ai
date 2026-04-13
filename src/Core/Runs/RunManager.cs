@@ -282,6 +282,19 @@ public class RunManager : IRunLobbyListener
 		InitializeNewRun();
 	}
 
+	public async Task StartPreparedSinglePlayerRun(RunState runState, bool doTransition = false)
+	{
+		using (new NetLoadingHandle(NetService))
+		{
+			await PreloadManager.LoadRunAssets(runState.Players.Select((Player p) => p.Character));
+			await PreloadManager.LoadActAssets(runState.Acts[0]);
+			await FinalizeStartingRelics();
+			Launch();
+			NGame.Instance?.RootSceneContainer?.SetCurrentScene(NRun.Create(runState));
+			await EnterAct(0, doTransition);
+		}
+	}
+
 	private void InitializeShared(INetGameService netService, PeerInputSynchronizer inputSynchronizer, bool shouldSave, DateTimeOffset? dailyTime, long startTime, long runTime, long winTime)
 	{
 		if (State == null)

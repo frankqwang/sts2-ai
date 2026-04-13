@@ -37,8 +37,11 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Unlocks;
+using System.Threading.Tasks;
 
 namespace STS2_MCP;
 
@@ -197,7 +200,6 @@ public static partial class McpMod
         if (game == null || mainMenu == null || !mainMenu.IsVisibleInTree())
             return Error("Main menu is not active");
 
-        var unlockState = SaveManager.Instance.GenerateUnlockStateFromProgress();
         var charSelectScreen = TryGetCharacterSelectScreen(mainMenu);
 
         CharacterModel? character = null;
@@ -217,9 +219,6 @@ public static partial class McpMod
 
         character ??= ModelDb.Character<Ironclad>();
 
-        if (!unlockState.Characters.Contains(character))
-            return Error($"Character '{character.Id.Entry}' is locked");
-
         int requestedAscension = charSelectScreen?.Visible == true ? charSelectScreen.Lobby.Ascension : 0;
         if (data.TryGetValue("ascension", out var ascensionElem))
             requestedAscension = ascensionElem.GetInt32();
@@ -227,8 +226,7 @@ public static partial class McpMod
         if (requestedAscension < 0)
             return Error("Ascension must be >= 0");
 
-        int maxAscension = Math.Max(0, SaveManager.Instance.Progress.GetOrCreateCharacterStats(character.Id).MaxAscension);
-        int ascension = Math.Clamp(requestedAscension, 0, maxAscension);
+        int ascension = requestedAscension;
 
         string seed;
         if (data.TryGetValue("seed", out var seedElem))
@@ -243,8 +241,31 @@ public static partial class McpMod
             seed = game.DebugSeedOverride ?? SeedHelper.GetRandomSeed();
         }
 
-        var acts = ActModel.GetRandomList(seed, unlockState, isMultiplayer: false).ToList();
-        TaskHelper.RunSafely(game.StartNewSingleplayerRun(character, shouldSave: true, acts, new List<ModifierModel>(), seed, ascension));
+        // Bypass NGame.StartNewSingleplayerRun so spectator can force a fully
+        // unlocked run while still using the shared singleplayer launch flow.
+        var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false)
+            .Select(static act => act.ToMutable())
+            .ToList();
+        Player player = Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId);
+        RunState runState = RunState.CreateForNewRun(
+            new List<Player> { player },
+            acts,
+            Array.Empty<ModifierModel>(),
+            ascension,
+            seed);
+        RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: true, dailyTime: null);
+        MethodInfo? startPreparedRunMethod = typeof(RunManager).GetMethod("StartPreparedSinglePlayerRun", BindingFlags.Instance | BindingFlags.Public);
+        if (startPreparedRunMethod != null)
+        {
+            TaskHelper.RunSafely((Task)startPreparedRunMethod.Invoke(RunManager.Instance, new object[] { runState, false })!);
+        }
+        else
+        {
+            MethodInfo? legacyStartRunMethod = game.GetType().GetMethod("StartRun", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (legacyStartRunMethod == null)
+                return Error("Could not find shared run starter on RunManager or legacy NGame.StartRun");
+            TaskHelper.RunSafely((Task)legacyStartRunMethod.Invoke(game, new object[] { runState })!);
+        }
 
         return new Dictionary<string, object?>
         {
@@ -481,16 +502,16 @@ public static partial class McpMod
 
         int index = indexElem.GetInt32();
 
-        var buttons = FindAll<NEventOptionButton>(uiRoom)
-            .Where(b => !b.Option.IsLocked)
-            .ToList();
+        var buttons = FindAll<NEventOptionButton>(uiRoom).ToList();
 
         if (buttons.Count == 0)
-            return Error("No unlocked event options available");
+            return Error("No event options available");
         if (index < 0 || index >= buttons.Count)
-            return Error($"Event option index {index} out of range ({buttons.Count} unlocked options)");
+            return Error($"Event option index {index} out of range ({buttons.Count} options)");
 
         var button = buttons[index];
+        if (button.Option.IsLocked)
+            return Error($"Event option index {index} is locked");
         string title = SafeGetText(() => button.Option.Title) ?? "option";
         button.ForceClick();
 
@@ -783,6 +804,17 @@ public static partial class McpMod
             return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Closing shop inventory" };
         }
 
+        if (NEventRoom.Instance is { } eventRoom)
+        {
+            var proceedButton = FindAll<NEventOptionButton>(eventRoom)
+                .FirstOrDefault(static button => button.Option.IsProceed && !button.Option.IsLocked);
+            if (proceedButton != null)
+            {
+                proceedButton.ForceClick();
+                return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Proceeding from event" };
+            }
+        }
+
         return ExecuteProceed();
     }
 
@@ -1041,38 +1073,127 @@ public static partial class McpMod
 
     private static Dictionary<string, object?> ExecuteCombatSelectCard(Dictionary<string, JsonElement> data)
     {
+        // 1. Try hand selection mode (e.g., discard from hand)
         var hand = NPlayerHand.Instance;
-        if (hand == null || !hand.IsInCardSelection)
-            return Error("No in-combat card selection is active");
-
-        if (!data.TryGetValue("card_index", out var indexElem))
-            return Error("Missing 'card_index' (index of the card in hand)");
-
-        int index = indexElem.GetInt32();
-        var holders = hand.ActiveHolders;
-        if (index < 0 || index >= holders.Count)
-            return Error($"Card index {index} out of range ({holders.Count} selectable cards)");
-
-        var holder = holders[index];
-        string cardName = SafeGetText(() => holder.CardModel?.Title) ?? "unknown";
-
-        // Emit the Pressed signal — same path the game UI uses
-        holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
-
-        return new Dictionary<string, object?>
+        if (hand != null && hand.IsInCardSelection)
         {
-            ["status"] = "ok",
-            ["message"] = $"Selecting card from hand: {cardName}"
-        };
+            if (!data.TryGetValue("card_index", out var handIndexElem))
+                return Error("Missing 'card_index' (index of the card in hand)");
+
+            int handIndex = handIndexElem.GetInt32();
+            var holders = hand.ActiveHolders;
+            if (handIndex < 0 || handIndex >= holders.Count)
+                return Error($"Card index {handIndex} out of range ({holders.Count} selectable cards)");
+
+            var holder = holders[handIndex];
+            string cardName = SafeGetText(() => holder.CardModel?.Title) ?? "unknown";
+            holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
+
+            return new Dictionary<string, object?>
+            {
+                ["status"] = "ok",
+                ["message"] = $"Selecting card from hand: {cardName}"
+            };
+        }
+
+        // 2. Try card grid overlay selection (e.g., Headbutt pick from discard pile)
+        var overlay = NOverlayStack.Instance?.Peek();
+        if (overlay is NCardGridSelectionScreen gridScreen)
+        {
+            if (!data.TryGetValue("card_index", out var gridIndexElem))
+                return Error("Missing 'card_index'");
+
+            int gridIndex = gridIndexElem.GetInt32();
+            var grid = FindFirst<NCardGrid>(gridScreen);
+            if (grid == null)
+                return Error("Card grid not found in combat selection overlay");
+
+            var gridHolders = FindAllSortedByPosition<NGridCardHolder>(grid);
+            if (gridIndex < 0 || gridIndex >= gridHolders.Count)
+                return Error($"Card index {gridIndex} out of range ({gridHolders.Count} cards)");
+
+            var gridHolder = gridHolders[gridIndex];
+            string gridCardName = SafeGetText(() => gridHolder.CardModel?.Title) ?? "unknown";
+
+            if (gridHolder.CardModel != null && TryInvokeCardGridSelection(gridScreen, gridHolder.CardModel))
+            {
+                return new Dictionary<string, object?>
+                {
+                    ["status"] = "ok",
+                    ["message"] = $"Combat selecting card: {gridCardName}"
+                };
+            }
+            grid.EmitSignal(NCardGrid.SignalName.HolderPressed, gridHolder);
+            gridHolder.EmitSignal(NCardHolder.SignalName.Pressed, gridHolder);
+
+            return new Dictionary<string, object?>
+            {
+                ["status"] = "ok",
+                ["message"] = $"Combat selecting card: {gridCardName}"
+            };
+        }
+        else if (overlay is NChooseACardSelectionScreen chooseScreen)
+        {
+            if (!data.TryGetValue("card_index", out var chooseIndexElem))
+                return Error("Missing 'card_index'");
+
+            int chooseIndex = chooseIndexElem.GetInt32();
+            var chooseHolders = FindAllSortedByPosition<NGridCardHolder>(chooseScreen);
+            if (chooseIndex < 0 || chooseIndex >= chooseHolders.Count)
+                return Error($"Card index {chooseIndex} out of range ({chooseHolders.Count} cards)");
+
+            var chooseHolder = chooseHolders[chooseIndex];
+            string chooseCardName = SafeGetText(() => chooseHolder.CardModel?.Title) ?? "unknown";
+            var chooseGrid = FindFirst<NCardGrid>(chooseScreen);
+            if (chooseGrid != null)
+                chooseGrid.EmitSignal(NCardGrid.SignalName.HolderPressed, chooseHolder);
+            chooseHolder.EmitSignal(NCardHolder.SignalName.Pressed, chooseHolder);
+
+            return new Dictionary<string, object?>
+            {
+                ["status"] = "ok",
+                ["message"] = $"Combat choosing card: {chooseCardName}"
+            };
+        }
+
+        return Error("No in-combat card selection is active (neither hand-select nor card grid overlay)");
     }
 
     private static Dictionary<string, object?> ExecuteCombatConfirmSelection()
     {
+        // 1. Try hand selection confirm
         var hand = NPlayerHand.Instance;
-        if (hand == null || !hand.IsInCardSelection)
-            return Error("No in-combat card selection is active");
+        if (hand != null && hand.IsInCardSelection)
+        {
+            var handConfirmBtn = hand.GetNodeOrNull<NConfirmButton>("%SelectModeConfirmButton");
+            if (handConfirmBtn != null && handConfirmBtn.IsEnabled)
+            {
+                handConfirmBtn.ForceClick();
+                return new Dictionary<string, object?>
+                {
+                    ["status"] = "ok",
+                    ["message"] = "Confirming hand card selection"
+                };
+            }
+        }
 
-        var confirmBtn = hand.GetNodeOrNull<NConfirmButton>("%SelectModeConfirmButton");
+        // 2. Try card grid overlay confirm
+        var overlay = NOverlayStack.Instance?.Peek();
+        if (overlay is NCardGridSelectionScreen gridScreen)
+        {
+            var gridConfirmBtn = gridScreen.GetNodeOrNull<Godot.Button>("%ConfirmButton");
+            if (gridConfirmBtn != null && gridConfirmBtn.Visible && !gridConfirmBtn.Disabled)
+            {
+                gridConfirmBtn.EmitSignal(Godot.BaseButton.SignalName.Pressed);
+                return new Dictionary<string, object?>
+                {
+                    ["status"] = "ok",
+                    ["message"] = "Confirming combat grid card selection"
+                };
+            }
+        }
+
+        var confirmBtn = hand?.GetNodeOrNull<NConfirmButton>("%SelectModeConfirmButton");
         if (confirmBtn == null || !confirmBtn.IsEnabled)
             return Error("Confirm button is not enabled — select more cards first");
 

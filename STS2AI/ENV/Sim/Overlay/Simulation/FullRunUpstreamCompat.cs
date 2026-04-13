@@ -49,6 +49,12 @@ internal static class FullRunUpstreamCompat
 			?? throw new InvalidOperationException("CardReward._cards is unavailable."));
 	}
 
+	public static List<CardCreationResult> GetMutableCardRewardOptions(CardReward reward)
+	{
+		return (List<CardCreationResult>)(CardRewardCardsField.GetValue(reward)
+			?? throw new InvalidOperationException("CardReward._cards is unavailable."));
+	}
+
 	public static CardCreationSource GetCardRewardSource(CardReward reward)
 	{
 		object? options = CardRewardOptionsProperty.GetValue(reward);
