@@ -60,9 +60,17 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	private readonly Dictionary<string, SavedRunSnapshot> _stateCache = new();
 	private int _nextStateId;
 
-	public sealed class SavedRunSnapshot
+	private enum SavedSnapshotKind
 	{
-		public Saves.SerializableRun RunSnapshot { get; set; } = null!;
+		FullRun = 0,
+		CombatSearch = 1
+	}
+
+	private sealed class SavedRunSnapshot
+	{
+		public SavedSnapshotKind Kind { get; set; } = SavedSnapshotKind.FullRun;
+
+		public Saves.SerializableRun? RunSnapshot { get; set; }
 
 		public string ExactSignature { get; set; } = string.Empty;
 
@@ -75,6 +83,12 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		public SavedShopSnapshot? ShopSnapshot { get; set; }
 
 		public SavedTreasureSnapshot? TreasureSnapshot { get; set; }
+
+		public SerializableRoom? CombatRoomSnapshot { get; set; }
+
+		public string CombatEncounterId { get; set; } = string.Empty;
+
+		public SavedCombatRandomStateSnapshot? CombatRandomState { get; set; }
 	}
 
 	public sealed class SavedShopSnapshot
@@ -153,6 +167,10 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		public List<SerializableCard> PlayPile { get; init; } = new();
 
 		public int Stars { get; init; }
+
+		public int MaxPotionCount { get; init; }
+
+		public List<SerializablePotion> Potions { get; init; } = new();
 	}
 
 	public sealed class SavedCombatMonsterMoveSnapshot
@@ -168,6 +186,24 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		public bool CurrentMovePerformedAtLeastOnce { get; init; }
 
 		public bool SpawnedThisTurn { get; init; }
+	}
+
+	public sealed class SavedCombatRandomStateSnapshot
+	{
+		public SerializableRunRngSet RunRng { get; init; } = new SerializableRunRngSet();
+
+		public SerializableRelicGrabBag SharedRelicGrabBag { get; init; } = new SerializableRelicGrabBag();
+
+		public Dictionary<ulong, SavedCombatPlayerRandomStateSnapshot> Players { get; init; } = new();
+	}
+
+	public sealed class SavedCombatPlayerRandomStateSnapshot
+	{
+		public SerializablePlayerRngSet Rng { get; init; } = new SerializablePlayerRngSet();
+
+		public SerializablePlayerOddsSet Odds { get; init; } = new SerializablePlayerOddsSet();
+
+		public SerializableRelicGrabBag RelicGrabBag { get; init; } = new SerializableRelicGrabBag();
 	}
 
 	private static readonly FieldInfo CombatManagerIsPlayPhaseField = typeof(CombatManager).GetField("<IsPlayPhase>k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)
@@ -1562,17 +1598,46 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			throw new FullRunSimulationRuntimeException("no_active_episode", "No active episode to save.");
 
 		FullRunSimulationStateSnapshot state = _lastObservedState ?? GetState();
-		// NOTE: combat snapshots are allowed for MCTS tree search.
-		// Exact signature verification is skipped for combat states
-		// since combat save/load is inherently lossy (restores to
-		// encounter start, not mid-turn state).
-
 		RunState? runState = RunManager.Instance.DebugOnlyGetState();
 		if (runState == null)
 		{
 			throw new FullRunSimulationRuntimeException("run_state_unavailable", "Could not resolve active run state.");
 		}
 
+		SavedRunSnapshot savedSnapshot = new SavedRunSnapshot
+		{
+			Kind = SavedSnapshotKind.FullRun,
+			RunSnapshot = CreateFullRunSnapshot(runState, state),
+			ExactSignature = BuildExactSnapshotSignature(runState, state),
+			StateType = state.StateType,
+			PendingSelection = FullRunSimulationChoiceBridge.Instance.CapturePendingSelection(),
+			CombatSnapshot = CaptureCombatSnapshot(runState, state),
+			ShopSnapshot = CaptureShopSnapshot(runState, state),
+			TreasureSnapshot = CaptureTreasureSnapshot(runState, state)
+		};
+		return StoreSavedSnapshot(savedSnapshot);
+	}
+
+	public string SaveSearchState(bool includeFullFallback = false)
+	{
+		// Fast snapshot is intentionally disabled.
+		//
+		// The combat-local snapshot path improved search latency, but it has proven too
+		// costly to keep semantically aligned with the full run restore path. MCTS now
+		// always falls back to the full SaveState/LoadState flow so correctness remains
+		// anchored to the original run-level serialization semantics.
+		return SaveState();
+	}
+
+	private string StoreSavedSnapshot(SavedRunSnapshot savedSnapshot)
+	{
+		string stateId = $"s{_nextStateId++}";
+		_stateCache[stateId] = savedSnapshot;
+		return stateId;
+	}
+
+	private Saves.SerializableRun CreateFullRunSnapshot(RunState runState, FullRunSimulationStateSnapshot state)
+	{
 		AbstractRoom? preFinishedRoom = state.StateType == "map" ? null : runState.CurrentRoom;
 		Dictionary<Player, List<Reward>>? originalExtraRewards = null;
 		if ((state.StateType == "combat_rewards" || state.StateType == "card_reward") && preFinishedRoom is CombatRoom combatRoom)
@@ -1580,10 +1645,10 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			originalExtraRewards = combatRoom.CloneExtraRewardsForSimulationSave();
 			combatRoom.ReplaceExtraRewardsForSimulationSave(new Dictionary<Player, List<Reward>>());
 		}
-		Saves.SerializableRun snapshot;
+
 		try
 		{
-			snapshot = RunManager.Instance.ToSave(preFinishedRoom: preFinishedRoom);
+			return RunManager.Instance.ToSave(preFinishedRoom: preFinishedRoom);
 		}
 		finally
 		{
@@ -1592,20 +1657,67 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 				restoredCombatRoom.ReplaceExtraRewardsForSimulationSave(originalExtraRewards);
 			}
 		}
-		string exactSignature = BuildExactSnapshotSignature(runState, state);
+	}
 
-		string stateId = $"s{_nextStateId++}";
-		_stateCache[stateId] = new SavedRunSnapshot
+	private static bool CanUseCombatSearchSnapshot(
+		RunState runState,
+		FullRunSimulationStateSnapshot state,
+		FullRunPendingSelectionRestoreSnapshot? pendingSelection)
+	{
+		if (pendingSelection != null)
 		{
-			RunSnapshot = snapshot,
-			ExactSignature = exactSignature,
-			StateType = state.StateType,
-			PendingSelection = FullRunSimulationChoiceBridge.Instance.CapturePendingSelection(),
-			CombatSnapshot = CaptureCombatSnapshot(runState, state),
-			ShopSnapshot = CaptureShopSnapshot(runState, state),
-			TreasureSnapshot = CaptureTreasureSnapshot(runState, state)
+			return false;
+		}
+
+		if (state.IsTerminal || state.LegalActions.Count == 0)
+		{
+			return false;
+		}
+
+		if (state.StateType != "monster" && state.StateType != "elite" && state.StateType != "boss")
+		{
+			return false;
+		}
+
+		return runState.CurrentRoom is CombatRoom;
+	}
+
+	private static SavedCombatRandomStateSnapshot CaptureCombatRandomState(RunState runState)
+	{
+		Dictionary<ulong, SavedCombatPlayerRandomStateSnapshot> players = new();
+		foreach (Player player in runState.Players)
+		{
+			players[player.NetId] = new SavedCombatPlayerRandomStateSnapshot
+			{
+				Rng = player.PlayerRng.ToSerializable(),
+				Odds = player.PlayerOdds.ToSerializable(),
+				RelicGrabBag = player.RelicGrabBag.ToSerializable()
+			};
+		}
+
+		return new SavedCombatRandomStateSnapshot
+		{
+			RunRng = runState.Rng.ToSerializable(),
+			SharedRelicGrabBag = runState.SharedRelicGrabBag.ToSerializable(),
+			Players = players
 		};
-		return stateId;
+	}
+
+	private static void RestoreCombatRandomState(RunState runState, SavedCombatRandomStateSnapshot snapshot)
+	{
+		runState.Rng.LoadFromSerializable(snapshot.RunRng);
+		runState.SharedRelicGrabBag.LoadFromSerializable(snapshot.SharedRelicGrabBag);
+		foreach (Player player in runState.Players)
+		{
+			if (!snapshot.Players.TryGetValue(player.NetId, out SavedCombatPlayerRandomStateSnapshot? savedPlayer))
+			{
+				continue;
+			}
+
+			player.PlayerRng.LoadFromSerializable(savedPlayer.Rng);
+			player.PlayerOdds.LoadFromSerializable(savedPlayer.Odds);
+			player.RelicGrabBag.LoadFromSerializable(savedPlayer.RelicGrabBag);
+		}
 	}
 
 	public string ExportStateToFile(string path, string? stateId = null)
@@ -1614,6 +1726,10 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		if (!_stateCache.TryGetValue(resolvedStateId, out SavedRunSnapshot? savedSnapshot))
 		{
 			throw new FullRunSimulationRuntimeException("state_not_found", $"State '{resolvedStateId}' not found in cache.");
+		}
+		if (savedSnapshot.RunSnapshot == null)
+		{
+			throw new FullRunSimulationRuntimeException("snapshot_export_unsupported", $"State '{resolvedStateId}' does not contain a full snapshot and cannot be exported.");
 		}
 
 		string fullPath = Path.GetFullPath(path);
@@ -1652,6 +1768,12 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		{
 		if (!_stateCache.TryGetValue(stateId, out SavedRunSnapshot? savedSnapshot))
 			throw new FullRunSimulationRuntimeException("state_not_found", $"State '{stateId}' not found in cache.");
+
+		return savedSnapshot.Kind switch
+		{
+			SavedSnapshotKind.CombatSearch => await LoadCombatSearchSnapshotAsync(stateId, savedSnapshot),
+			_ => await LoadFullSnapshotAsync(stateId, savedSnapshot)
+		};
 
 		Saves.SerializableRun snapshot = savedSnapshot.RunSnapshot;
 
@@ -1728,13 +1850,6 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			_forceMapView = true; // After load, show map so player can choose next node
 		}
 
-		if (savedSnapshot.PendingSelection != null)
-		{
-			Player localPlayer = ResolveSignaturePlayer(restored);
-			await RestorePendingSelectionFlowAsync(savedSnapshot.PendingSelection, localPlayer, restored.CurrentRoom);
-			_forceMapView = false;
-		}
-
 		bool hasCombatSnapshot = savedSnapshot.CombatSnapshot != null && RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is CombatRoom;
 		if (hasCombatSnapshot)
 		{
@@ -1772,6 +1887,169 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		{
 			throw new FullRunSimulationRuntimeException("load_state_failed", ex.ToString());
 		}
+	}
+
+	private async Task<FullRunSimulationStateSnapshot> LoadFullSnapshotAsync(string stateId, SavedRunSnapshot savedSnapshot)
+	{
+		Saves.SerializableRun snapshot = savedSnapshot.RunSnapshot
+			?? throw new FullRunSimulationRuntimeException("snapshot_missing_full_run", $"State '{stateId}' does not contain a full run snapshot.");
+
+		_forceMapView = false;
+		_rewardsTriggered = false;
+		_suppressTerminalRewardsTransitionOnce = false;
+		_lastObservedState = null;
+		FullRunSimulationChoiceBridge.Instance.Reset();
+		if (RunManager.Instance.IsInProgress)
+		{
+			RunManager.Instance.CleanUp();
+		}
+
+		RunState restored = RunState.FromSerializable(snapshot);
+		RunManager.Instance.SetUpSavedSinglePlayer(restored, snapshot);
+
+		await PreloadManager.LoadRunAssets(restored.Players.Select(static p => p.Character));
+		if (restored.CurrentActIndex < restored.Acts.Count)
+		{
+			await PreloadManager.LoadActAssets(restored.Acts[restored.CurrentActIndex]);
+		}
+
+		RunManager.Instance.Launch();
+		await RunManager.Instance.GenerateMap();
+
+		CurrentSeed = snapshot.SerializableRng?.Seed;
+		CurrentAscensionLevel = snapshot.Ascension;
+		CurrentCharacterId = restored.Players
+			.FirstOrDefault(static player => player.NetId == NetSingleplayerGameService.defaultNetId)
+			?.Character.Id.Entry
+			?? restored.Players.FirstOrDefault()?.Character.Id.Entry;
+
+		if (snapshot.PreFinishedRoom != null)
+		{
+			AbstractRoom preFinishedRoom = AbstractRoom.FromSerializable(snapshot.PreFinishedRoom, restored)!;
+			await RunManager.Instance.LoadIntoLatestMapCoord(preFinishedRoom);
+			_forceMapView = false;
+			RestoreRunAndPlayerRandomState(restored, snapshot);
+
+			switch (savedSnapshot.StateType)
+			{
+				case "shop":
+					if (RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is MerchantRoom restoredMerchantRoom && savedSnapshot.ShopSnapshot != null)
+					{
+						ApplyShopSnapshot(restoredMerchantRoom, savedSnapshot.ShopSnapshot);
+					}
+					break;
+				case "treasure":
+					if (savedSnapshot.TreasureSnapshot != null)
+					{
+						ApplyTreasureSnapshot(savedSnapshot.TreasureSnapshot, restored);
+					}
+					break;
+			}
+		}
+		else
+		{
+			RunManager.Instance.DebugOnlyGetState()?.PushRoom(new MapRoom());
+			_forceMapView = true;
+		}
+
+		bool hasCombatSnapshot = savedSnapshot.CombatSnapshot != null && RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is CombatRoom;
+		if (hasCombatSnapshot)
+		{
+			await WaitForCombatRoomBootstrapAsync();
+			if (RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is CombatRoom restoredCombatRoom)
+			{
+				ApplyCombatSnapshot(restoredCombatRoom, savedSnapshot.CombatSnapshot!);
+				_forceMapView = false;
+			}
+		}
+
+		if (savedSnapshot.PendingSelection != null)
+		{
+			Player localPlayer = ResolveSignaturePlayer(restored);
+			await RestorePendingSelectionFlowAsync(savedSnapshot.PendingSelection, localPlayer, restored.CurrentRoom);
+			_forceMapView = false;
+		}
+
+		if (savedSnapshot.PendingSelection != null)
+		{
+			Player localPlayer = ResolveSignaturePlayer(restored);
+			await RestorePendingSelectionFlowAsync(savedSnapshot.PendingSelection, localPlayer, restored.CurrentRoom);
+			_forceMapView = false;
+		}
+
+		FullRunSimulationStateSnapshot restoredState = hasCombatSnapshot
+			? GetState()
+			: await WaitForLoadedStateAsync(savedSnapshot.StateType);
+		if (SupportsExactSnapshot(savedSnapshot.StateType))
+		{
+			string restoredSignature = BuildExactSnapshotSignature(restored, restoredState);
+			if (!string.Equals(restoredSignature, savedSnapshot.ExactSignature, StringComparison.Ordinal))
+			{
+				throw new FullRunSimulationRuntimeException(
+					"restore_signature_mismatch",
+					$"Loaded state '{stateId}' did not match the saved snapshot signature (saved={savedSnapshot.StateType}, restored={restoredState.StateType}).");
+			}
+		}
+
+		return restoredState;
+	}
+
+	private async Task<FullRunSimulationStateSnapshot> LoadCombatSearchSnapshotAsync(string stateId, SavedRunSnapshot savedSnapshot)
+	{
+		if (savedSnapshot.CombatSnapshot == null || savedSnapshot.CombatRoomSnapshot == null || savedSnapshot.CombatRandomState == null)
+		{
+			return await LoadFullSnapshotAsync(stateId, savedSnapshot);
+		}
+
+		try
+		{
+			RunState? runState = RunManager.Instance.DebugOnlyGetState();
+			if (!RunManager.Instance.IsInProgress || runState == null || runState.IsGameOver)
+			{
+				return await LoadFullSnapshotAsync(stateId, savedSnapshot);
+			}
+
+			_forceMapView = false;
+			_rewardsTriggered = false;
+			_suppressTerminalRewardsTransitionOnce = false;
+			_lastObservedState = null;
+			FullRunSimulationChoiceBridge.Instance.Reset();
+
+			AbstractRoom restoredRoom = AbstractRoom.FromSerializable(savedSnapshot.CombatRoomSnapshot, runState)
+				?? throw new FullRunSimulationRuntimeException("combat_fast_room_restore_failed", $"State '{stateId}' could not restore its combat room snapshot.");
+			await RunManager.Instance.LoadIntoLatestMapCoord(restoredRoom);
+			await WaitForCombatRoomBootstrapAsync();
+			runState = RunManager.Instance.DebugOnlyGetState();
+
+			if (runState?.CurrentRoom is not CombatRoom restoredCombatRoom || !IsMatchingCombatRoom(restoredCombatRoom, savedSnapshot))
+			{
+				return await LoadFullSnapshotAsync(stateId, savedSnapshot);
+			}
+
+			RestoreCombatRandomState(runState, savedSnapshot.CombatRandomState);
+			ApplyCombatSnapshot(restoredCombatRoom, savedSnapshot.CombatSnapshot);
+			_forceMapView = false;
+			return GetState();
+		}
+		catch (FullRunSimulationRuntimeException) when (savedSnapshot.RunSnapshot != null)
+		{
+			return await LoadFullSnapshotAsync(stateId, savedSnapshot);
+		}
+		catch (Exception) when (savedSnapshot.RunSnapshot != null)
+		{
+			return await LoadFullSnapshotAsync(stateId, savedSnapshot);
+		}
+	}
+
+	private static bool IsMatchingCombatRoom(CombatRoom combatRoom, SavedRunSnapshot savedSnapshot)
+	{
+		if (!string.IsNullOrWhiteSpace(savedSnapshot.CombatEncounterId)
+			&& !string.Equals(combatRoom.Encounter.Id.Entry, savedSnapshot.CombatEncounterId, StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		return !combatRoom.IsPreFinished;
 	}
 
 	public Task<FullRunSimulationStateSnapshot> LoadStateFromFile(string path)
@@ -1853,8 +2131,18 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		Player localPlayer,
 		AbstractRoom? currentRoom)
 	{
-		if (snapshot.RewardSelection == null && snapshot.CardRewardSelection == null)
+		if (snapshot.RewardSelection == null
+			&& snapshot.CardRewardSelection == null
+			&& snapshot.HandSelection == null
+			&& snapshot.CardSelection == null
+			&& snapshot.CombatCardSelection == null)
 		{
+			return;
+		}
+
+		if (snapshot.HandSelection != null || snapshot.CardSelection != null || snapshot.CombatCardSelection != null)
+		{
+			FullRunSimulationChoiceBridge.Instance.RestorePendingSelection(snapshot, localPlayer);
 			return;
 		}
 
@@ -2355,7 +2643,12 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 					}).ToList()
 				},
 				PlayPile = pcs.PlayPile.Cards.Select(static card => card.ToSerializable()).ToList(),
-				Stars = pcs.Stars
+				Stars = pcs.Stars,
+				MaxPotionCount = player.MaxPotionCount,
+				Potions = player.PotionSlots
+					.Select(static (potion, index) => potion?.ToSerializable(index))
+					.OfType<SerializablePotion>()
+					.ToList()
 			};
 		}
 
@@ -2406,6 +2699,19 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		};
 	}
 
+	private static void RestorePlayerPotionState(Player player, SavedCombatPlayerSnapshot savedPlayer)
+	{
+		foreach (PotionModel existingPotion in player.PotionSlots.OfType<PotionModel>().ToList())
+		{
+			player.DiscardPotionInternal(existingPotion, silent: true);
+		}
+
+		foreach (SerializablePotion potion in savedPlayer.Potions.OrderBy(static potion => potion.SlotIndex))
+		{
+			player.AddPotionInternal(PotionModel.FromSerializable(potion), potion.SlotIndex, silent: true);
+		}
+	}
+
 	private void ApplyCombatSnapshot(CombatRoom combatRoom, SavedCombatSnapshot snapshot)
 	{
 		CombatState combatState = combatRoom.CombatState;
@@ -2437,6 +2743,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 				Block = savedPlayer.CombatState.Block,
 				Powers = savedPlayer.CombatState.Powers.ToList()
 			});
+			RestorePlayerPotionState(player, savedPlayer);
 		}
 
 		HashSet<uint> savedEnemyCombatIds = snapshot.Creatures

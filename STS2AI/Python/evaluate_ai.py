@@ -3318,6 +3318,18 @@ def main() -> int:
         help="Use teacher-trained continuation_value_head (win_prob) instead of PPO value_head for MCTS leaf evaluation",
     )
     parser.add_argument(
+        "--combat-mcts-backend",
+        choices=["python", "csharp"],
+        default="python",
+        help="Combat MCTS backend for evaluation. 'csharp' requires pipe-binary transport and an ORT model loaded in the simulator.",
+    )
+    parser.add_argument(
+        "--ort-model-path",
+        type=str,
+        default=None,
+        help="Optional ONNX model path to auto-load into a pipe-binary simulator before evaluation. Required for fresh hosts when --combat-mcts-backend=csharp.",
+    )
+    parser.add_argument(
         "--act1-route-mode",
         type=str,
         default=DEFAULT_ACT1_ROUTE_MODE,
@@ -3617,6 +3629,15 @@ def main() -> int:
                 json.dumps(asdict(combat_bc_override.patch_config), ensure_ascii=True, sort_keys=True),
             )
 
+        requested_combat_mcts_backend = str(getattr(args, "combat_mcts_backend", "python") or "python").strip().lower()
+        combat_mcts_backend = requested_combat_mcts_backend
+        if requested_combat_mcts_backend == "csharp" and args.transport != "pipe-binary":
+            logger.warning(
+                "combat_mcts_backend=csharp requires pipe-binary transport; falling back to python backend for transport=%s",
+                args.transport,
+            )
+            combat_mcts_backend = "python"
+
         if args.combat_mcts_sims > 0:
             combat_mcts_agent = CombatMCTSAgent(
                 network=combat_net,
@@ -3635,24 +3656,25 @@ def main() -> int:
                 training=False,
                 device=device,
                 ppo_net=ppo_net,
+                backend=combat_mcts_backend,
+                use_continuation_value=bool(getattr(args, "combat_mcts_continuation_value", False)),
             )
             combat_mcts_agent._max_step_budget = int(args.combat_mcts_step_budget)
             combat_mcts_agent._screen_mode = str(getattr(args, "combat_mcts_screen_mode", DEFAULT_COMBAT_MCTS_SCREEN_MODE))
             combat_mcts_agent._min_floor = max(0, int(getattr(args, "combat_mcts_min_floor", DEFAULT_COMBAT_MCTS_MIN_FLOOR)))
             if getattr(args, "combat_mcts_continuation_value", False):
-                from combat_nn import CombatNNEvaluator as _CombatNNEvaluator
-                combat_mcts_agent.evaluator = _CombatNNEvaluator(
-                    combat_net, vocab, device=device, use_continuation_value=True, ppo_net=ppo_net,
-                )
                 logger.info("MCTS evaluator: using continuation_value_head (win_prob)")
             tactical_weight = max(0.0, min(1.0, float(args.combat_mcts_tactical_weight)))
-            if tactical_weight > 0.0:
+            if tactical_weight > 0.0 and combat_mcts_backend != "csharp":
                 combat_mcts_agent.evaluator = CombatMctsTacticalBlendEvaluator(
                     combat_mcts_agent.evaluator,
                     CombatMctsTacticalBlendConfig(weight=tactical_weight),
                 )
+            elif tactical_weight > 0.0:
+                logger.info("Skipping Python tactical leaf blend because combat_mcts_backend=csharp")
             logger.info(
-                "Loaded combat MCTS eval override: sims=%d c_puct=%.2f step_budget=%d tactical_weight=%.2f",
+                "Loaded combat MCTS eval override: backend=%s sims=%d c_puct=%.2f step_budget=%d tactical_weight=%.2f",
+                combat_mcts_backend,
                 args.combat_mcts_sims,
                 args.combat_mcts_c_puct,
                 args.combat_mcts_step_budget,
@@ -3710,6 +3732,16 @@ def main() -> int:
                 ready_timeout_s=15.0,
             )
             local_client._ensure_connected()
+        if (
+            isinstance(local_client, PipeBackedFullRunClient)
+            and args.transport == "pipe-binary"
+            and args.ort_model_path
+        ):
+            try:
+                loaded = local_client.load_ort_model(str(Path(args.ort_model_path).resolve()))
+                logger.info("ORT model loaded on port %d: %s", args.port, "OK" if loaded else "FAILED")
+            except Exception as exc:
+                logger.warning("ORT model load failed on port %d: %s", args.port, exc)
         logger.info("Connected via %s", getattr(local_client, "transport_name", args.transport))
         return local_client, local_spawned
 

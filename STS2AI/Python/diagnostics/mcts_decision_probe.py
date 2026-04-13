@@ -214,6 +214,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         )
         assert isinstance(client, PipeBackedFullRunClient)
         client._ensure_connected()
+        if args.ort_model_path:
+            client.load_ort_model(str(Path(args.ort_model_path).resolve()))
 
         state = _replay_to_probe_state(
             client,
@@ -222,7 +224,13 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             combat_step_index=int(args.combat_step_index),
         )
         legal = state.get("legal_actions") or []
-        evaluator = CombatNNEvaluator(combat_net, vocab, device=device, ppo_net=ppo_net)
+        evaluator = CombatNNEvaluator(
+            combat_net,
+            vocab,
+            device=device,
+            ppo_net=ppo_net,
+            use_continuation_value=bool(getattr(args, "combat_mcts_continuation_value", False)),
+        )
         eval_policy, eval_value = evaluator.evaluate(state, legal)
         batch_result = evaluator.evaluate_batch([state], [legal])[0]
         batch_policy, batch_value = batch_result
@@ -253,6 +261,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
                 training=False,
                 device=device,
                 ppo_net=ppo_net,
+                backend=str(getattr(args, "combat_mcts_backend", "python")),
+                use_continuation_value=bool(getattr(args, "combat_mcts_continuation_value", False)),
             )
             fm = PipeCombatForwardModel.from_current_state(
                 client._pipe,
@@ -332,6 +342,9 @@ def main() -> int:
     parser.add_argument("--step-budget", type=int, default=200)
     parser.add_argument("--c-puct", type=float, default=1.5)
     parser.add_argument("--sims", default="1,50")
+    parser.add_argument("--combat-mcts-backend", choices=["python", "csharp"], default="python")
+    parser.add_argument("--combat-mcts-continuation-value", action="store_true", default=False)
+    parser.add_argument("--ort-model-path", default=None)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--output", default="")
     args = parser.parse_args()

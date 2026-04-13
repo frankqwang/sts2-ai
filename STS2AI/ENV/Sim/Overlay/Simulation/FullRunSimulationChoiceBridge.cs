@@ -68,11 +68,32 @@ public sealed class FullRunPendingCardRewardRestoreSnapshot
 	public IReadOnlyList<SerializableCard> Options { get; init; } = Array.Empty<SerializableCard>();
 }
 
+public sealed class FullRunPendingCombatCardSelectionRestoreSnapshot
+{
+	public string Mode { get; init; } = "";
+
+	public int MinSelect { get; init; }
+
+	public int MaxSelect { get; init; }
+
+	public bool Cancelable { get; init; }
+
+	public IReadOnlyList<SerializableCard> Options { get; init; } = Array.Empty<SerializableCard>();
+
+	public IReadOnlyList<int> SelectedIndices { get; init; } = Array.Empty<int>();
+}
+
 public sealed class FullRunPendingSelectionRestoreSnapshot
 {
 	public FullRunPendingRewardSelectionRestoreSnapshot? RewardSelection { get; init; }
 
 	public FullRunPendingCardRewardRestoreSnapshot? CardRewardSelection { get; init; }
+
+	public CombatTrainingHandSelectionSnapshot? HandSelection { get; init; }
+
+	public CombatTrainingCardSelectionSnapshot? CardSelection { get; init; }
+
+	public FullRunPendingCombatCardSelectionRestoreSnapshot? CombatCardSelection { get; init; }
 }
 
 internal sealed class FullRunChoiceBridgeSnapshotCache
@@ -350,6 +371,32 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 
 	public FullRunPendingSelectionRestoreSnapshot? CapturePendingSelection()
 	{
+		PendingCardSelection? cardSelection = _pendingCardSelection;
+		if (cardSelection != null)
+		{
+			CombatState? combatState = CombatManager.Instance.DebugOnlyGetState();
+			return new FullRunPendingSelectionRestoreSnapshot
+			{
+				HandSelection = cardSelection.IsHandSelection ? BuildHandSelectionSnapshot(combatState) : null,
+				CardSelection = cardSelection.IsHandSelection ? null : BuildCardSelectionSnapshot(combatState),
+				CombatCardSelection = cardSelection.IsHandSelection
+					? null
+					: new FullRunPendingCombatCardSelectionRestoreSnapshot
+					{
+						Mode = cardSelection.Mode,
+						MinSelect = cardSelection.Prefs.MinSelect,
+						MaxSelect = cardSelection.Prefs.MaxSelect,
+						Cancelable = cardSelection.Prefs.Cancelable,
+						Options = cardSelection.Options.Select(static option => option.ToSerializable()).ToList(),
+						SelectedIndices = cardSelection.Options
+							.Select((option, index) => new { Option = option, Index = index })
+							.Where((entry) => cardSelection.SelectedCards.Contains(entry.Option))
+							.Select(static entry => entry.Index)
+							.ToList()
+					}
+			};
+		}
+
 		PendingRewardSelection? rewardSelection = _pendingRewardSelection;
 		if (rewardSelection != null)
 		{
@@ -394,6 +441,20 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 				snapshot.CardRewardSelection.Options.Select((card) => new CardCreationResult(RestoreRewardCard(card, player))).ToList(),
 				Array.Empty<CardRewardAlternative>(),
 				snapshot.CardRewardSelection.CanSkip);
+		}
+
+		if (snapshot.HandSelection != null)
+		{
+			_pendingCardSelection = RestoreHandSelection(snapshot.HandSelection, player);
+		}
+
+		if (snapshot.CombatCardSelection != null)
+		{
+			_pendingCardSelection = RestoreExactCardSelection(snapshot.CombatCardSelection, player);
+		}
+		else if (snapshot.CardSelection != null)
+		{
+			_pendingCardSelection = RestoreCardSelection(snapshot.CardSelection, player);
 		}
 	}
 
@@ -757,5 +818,153 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		{
 			CanSkip = snapshot.CanSkip
 		};
+	}
+
+	private static PendingCardSelection RestoreHandSelection(CombatTrainingHandSelectionSnapshot snapshot, Player player)
+	{
+		IReadOnlyList<CardModel> currentHand = PileType.Hand.GetPile(player).Cards;
+		Dictionary<int, CardModel> cardsByHandIndex = currentHand
+			.Select((card, index) => (Card: card, HandIndex: index))
+			.ToDictionary(static entry => entry.HandIndex, static entry => entry.Card);
+		List<CardModel> options = snapshot.SelectableCards
+			.Concat(snapshot.SelectedCards)
+			.OrderBy(static card => card.HandIndex)
+			.Select((card) => ResolveHandCard(card, cardsByHandIndex))
+			.ToList();
+		PendingCardSelection selection = new PendingCardSelection(
+			options,
+			CreateRestorePrefs(snapshot.MinSelect, snapshot.MaxSelect, snapshot.Cancelable),
+			snapshot.Mode,
+			isHandSelection: true);
+		foreach (CombatTrainingHandCardSnapshot selected in snapshot.SelectedCards.OrderBy(static card => card.HandIndex))
+		{
+			selection.Select(ResolveHandCard(selected, cardsByHandIndex));
+		}
+
+		return selection;
+	}
+
+	private static PendingCardSelection RestoreCardSelection(CombatTrainingCardSelectionSnapshot snapshot, Player player)
+	{
+		List<CardModel> options = ResolveCardSelectionOptions(snapshot, player);
+		PendingCardSelection selection = new PendingCardSelection(
+			options,
+			CreateRestorePrefs(snapshot.MinSelect, snapshot.MaxSelect, snapshot.Cancelable),
+			snapshot.Mode,
+			isHandSelection: false);
+		foreach (CombatTrainingSelectableCardSnapshot selected in snapshot.SelectedCards.OrderBy(static card => card.ChoiceIndex))
+		{
+			if (selected.ChoiceIndex < 0 || selected.ChoiceIndex >= options.Count)
+			{
+				throw new InvalidOperationException($"Could not restore selected card choice {selected.ChoiceIndex}.");
+			}
+
+			CardModel card = options[selected.ChoiceIndex];
+			selection.Select(card);
+		}
+
+		return selection;
+	}
+
+	private static PendingCardSelection RestoreExactCardSelection(FullRunPendingCombatCardSelectionRestoreSnapshot snapshot, Player player)
+	{
+		List<CardModel> options = snapshot.Options.Select((card) => RestorePendingSelectionCard(card, player)).ToList();
+		PendingCardSelection selection = new PendingCardSelection(
+			options,
+			CreateRestorePrefs(snapshot.MinSelect, snapshot.MaxSelect, snapshot.Cancelable),
+			snapshot.Mode,
+			isHandSelection: false);
+		foreach (int selectedIndex in snapshot.SelectedIndices.OrderBy(static index => index))
+		{
+			if (selectedIndex < 0 || selectedIndex >= options.Count)
+			{
+				throw new InvalidOperationException($"Could not restore selected card choice {selectedIndex}.");
+			}
+
+			selection.Select(options[selectedIndex]);
+		}
+
+		return selection;
+	}
+
+	private static CardSelectorPrefs CreateRestorePrefs(int minSelect, int maxSelect, bool cancelable)
+	{
+		CardSelectorPrefs prefs = new CardSelectorPrefs(new MegaCrit.Sts2.Core.Localization.LocString("", ""), minSelect, maxSelect)
+		{
+			Cancelable = cancelable
+		};
+		return prefs;
+	}
+
+	private static CardModel ResolveHandCard(CombatTrainingHandCardSnapshot snapshot, IReadOnlyDictionary<int, CardModel> cardsByHandIndex)
+	{
+		if (!cardsByHandIndex.TryGetValue(snapshot.HandIndex, out CardModel? card))
+		{
+			throw new InvalidOperationException($"Could not restore hand selection card at hand index {snapshot.HandIndex}.");
+		}
+
+		return card;
+	}
+
+	private static List<CardModel> ResolveCardSelectionOptions(CombatTrainingCardSelectionSnapshot snapshot, Player player)
+	{
+		List<CardModel> availableCards = EnumerateOwnedCards(player).ToList();
+		List<CardModel> resolved = new List<CardModel>();
+		foreach (CombatTrainingSelectableCardSnapshot option in snapshot.SelectableCards.Concat(snapshot.SelectedCards).OrderBy(static card => card.ChoiceIndex))
+		{
+			CardModel card = availableCards.FirstOrDefault((candidate) => IsMatchingSelectableCard(candidate, option))
+				?? throw new InvalidOperationException($"Could not restore card selection choice {option.ChoiceIndex} ({option.Id}).");
+			availableCards.Remove(card);
+			resolved.Add(card);
+		}
+
+		return resolved;
+	}
+
+	private static IEnumerable<CardModel> EnumerateOwnedCards(Player player)
+	{
+		if (player.PlayerCombatState != null)
+		{
+			foreach (CardModel card in player.PlayerCombatState.Hand.Cards)
+			{
+				yield return card;
+			}
+
+			foreach (CardModel card in player.PlayerCombatState.DrawPile.Cards)
+			{
+				yield return card;
+			}
+
+			foreach (CardModel card in player.PlayerCombatState.DiscardPile.Cards)
+			{
+				yield return card;
+			}
+
+			foreach (CardModel card in player.PlayerCombatState.ExhaustPile.Cards)
+			{
+				yield return card;
+			}
+		}
+
+		foreach (CardModel card in player.Deck.Cards)
+		{
+			yield return card;
+		}
+	}
+
+	private static bool IsMatchingSelectableCard(CardModel candidate, CombatTrainingSelectableCardSnapshot snapshot)
+	{
+		return string.Equals(candidate.Id.Entry, snapshot.Id, StringComparison.Ordinal)
+			&& string.Equals(candidate.Title, snapshot.Title, StringComparison.Ordinal)
+			&& candidate.Type == snapshot.Type
+			&& candidate.IsUpgraded == snapshot.IsUpgraded
+			&& string.Equals(candidate.Pile?.Type.ToString() ?? PileType.None.ToString(), snapshot.SourcePile, StringComparison.Ordinal);
+	}
+
+	private static CardModel RestorePendingSelectionCard(SerializableCard snapshot, Player player)
+	{
+		CardModel card = CardModel.FromSerializable(snapshot);
+		player.RunState.AddCard(card, player);
+		return card;
 	}
 }

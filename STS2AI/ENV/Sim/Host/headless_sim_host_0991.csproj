@@ -128,7 +128,9 @@
     <Compile Include="..\Runtime\HeadlessSim\ManualNodeAugments.cs" Link="Host\ManualNodeAugments.cs" />
     <Compile Include="..\Runtime\HeadlessSim\ManualPlatformStubs.cs" Link="Host\ManualPlatformStubs.cs" />
     <Compile Include="..\Runtime\HeadlessSim\MigrationsCompat.cs" Link="Host\MigrationsCompat.cs" />
-    <Compile Include="..\Runtime\HeadlessSim\OrtActorPolicy.cs" Link="Host\OrtActorPolicy.cs" />
+    <Compile Include="..\Runtime\HeadlessSim\CombatFeatureEncoder.cs" Link="Host\CombatFeatureEncoder.cs" />
+    <Compile Include="..\Runtime\HeadlessSim\CombatMcts.cs" Link="Host\CombatMcts.cs" />
+    <Compile Include="..\Runtime\HeadlessSim\OrtCombatEvaluator.cs" Link="Host\OrtCombatEvaluator.cs" />
     <Compile Include="..\Runtime\HeadlessSim\Program.cs" Link="Host\Program.cs" />
     <Compile Include="..\Runtime\GodotSharpStub\src\**\*.cs" Link="GodotSharpStub\%(RecursiveDir)%(Filename)%(Extension)" />
 
@@ -137,6 +139,6 @@
     <PackageReference Include="Sentry" Version="5.0.0" />
     <PackageReference Include="SmartFormat" Version="3.3.0" />
     <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" Version="1.20.1" />
   </ItemGroup>
 </Project>
