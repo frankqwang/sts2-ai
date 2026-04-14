@@ -12,6 +12,8 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Runs;
@@ -55,6 +57,11 @@ internal static class Program
 
 		HostOptions options = HostOptions.Parse(args);
 		BootstrapStandaloneRuntime();
+		if (options.ExportCardRuntimeTextsPath != null)
+		{
+			await ExportCardRuntimeTextsAsync(options.ExportCardRuntimeTextsPath, options.ExportLocales);
+			return;
+		}
 		using IDisposable standaloneScope = FullRunTrainingEnvService.EnterStandaloneMode();
 		FullRunTrainingEnvService service = FullRunTrainingEnvService.Instance;
 
@@ -81,6 +88,61 @@ internal static class Program
 		saveManager.InitProfileId(profileId: 1);
 		saveManager.InitProgressData();
 		saveManager.InitPrefsDataForTest();
+	}
+
+	private static async Task ExportCardRuntimeTextsAsync(string outputPath, IReadOnlyList<string> locales)
+	{
+		if (LocManager.Instance == null)
+		{
+			LocManager.Initialize();
+		}
+
+		List<CardRuntimeTextRecord> rows = new List<CardRuntimeTextRecord>();
+		List<CardModel> cards = ModelDb.AllCards.OrderBy((CardModel c) => c.Id.Entry, StringComparer.OrdinalIgnoreCase).ToList();
+		foreach (string locale in locales)
+		{
+			LocManager.Instance.SetLanguage(locale);
+			foreach (CardModel card in cards)
+			{
+				rows.Add(new CardRuntimeTextRecord
+				{
+					Id = card.Id.Entry.ToLowerInvariant(),
+					ClassName = card.GetType().Name,
+					Locale = locale,
+					Title = card.Title,
+					DescriptionRuntime = card.GetDescriptionForPile(PileType.None),
+					UpgradePreviewRuntime = card.GetDescriptionForUpgradePreview()
+				});
+			}
+		}
+
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+		{
+			Directory.CreateDirectory(directory);
+		}
+
+		JsonSerializerOptions exportOptions = new JsonSerializerOptions(JsonOptions)
+		{
+			WriteIndented = true
+		};
+		await File.WriteAllTextAsync(outputPath, JsonSerializer.Serialize(rows, exportOptions), Encoding.UTF8);
+		Console.Error.WriteLine($"HeadlessSim: exported runtime card texts -> {outputPath} ({rows.Count} rows)");
+	}
+
+	private sealed class CardRuntimeTextRecord
+	{
+		public string Id { get; set; } = string.Empty;
+
+		public string ClassName { get; set; } = string.Empty;
+
+		public string Locale { get; set; } = string.Empty;
+
+		public string Title { get; set; } = string.Empty;
+
+		public string DescriptionRuntime { get; set; } = string.Empty;
+
+		public string UpgradePreviewRuntime { get; set; } = string.Empty;
 	}
 
 	private static async Task RunStdioAsync(FullRunTrainingEnvService service)
@@ -1592,6 +1654,10 @@ internal static class Program
 
 		public TimeSpan RequestTimeout { get; private set; } = TimeSpan.FromSeconds(45);
 
+		public string? ExportCardRuntimeTextsPath { get; private set; }
+
+		public IReadOnlyList<string> ExportLocales { get; private set; } = new[] { "eng", "zhs" };
+
 		public string PipeName => BinaryProtocol.PipeName(Port, Protocol);
 
 		public static HostOptions Parse(IEnumerable<string> args)
@@ -1625,6 +1691,17 @@ internal static class Program
 							"bin" or "binary" => HostProtocol.Binary,
 							_ => throw new InvalidOperationException($"Unknown protocol '{values[i + 1]}'. Expected 'json' or 'bin'.")
 						};
+						i++;
+						break;
+					case "--export-card-runtime-texts" when i + 1 < values.Length:
+						options.ExportCardRuntimeTextsPath = values[i + 1];
+						i++;
+						break;
+					case "--export-locales" when i + 1 < values.Length:
+						options.ExportLocales = values[i + 1]
+							.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+							.Select(static s => s.ToLowerInvariant())
+							.ToArray();
 						i++;
 						break;
 				}

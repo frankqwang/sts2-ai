@@ -1,0 +1,136 @@
+[
+  {
+    "entity_type": "card",
+    "id": "abrasive",
+    "class_name": "Abrasive",
+    "source_path": "src/Core/Models/Cards/Abrasive.cs",
+    "source_sha1": "25180346898f758a702c68ec6d0ed7cfa52e96c6",
+    "title_en": "Abrasive",
+    "title_zhs": "磨蚀",
+    "description_en": "Gain {DexterityPower:diff()} [gold]Dexterity[/gold].\nGain {ThornsPower:diff()} [gold]Thorns[/gold].",
+    "description_zhs": "获得{DexterityPower:diff()}点[gold]敏捷[/gold]。\n获得{ThornsPower:diff()}点[gold]荆棘[/gold]。",
+    "upgrade_preview_static_en": "Gain {DexterityPower:diff()} [gold]Dexterity[/gold].\nGain {ThornsPower:diff()} [gold]Thorns[/gold].",
+    "upgrade_preview_static_zhs": "获得{DexterityPower:diff()}点[gold]敏捷[/gold]。\n获得{ThornsPower:diff()}点[gold]荆棘[/gold]。",
+    "description_runtime_en": "[gold]Sly[/gold].\nGain 1 [gold]Dexterity[/gold].\nGain 4 [gold]Thorns[/gold].",
+    "description_runtime_zhs": "[gold]奇巧[/gold]。\n获得1点[gold]敏捷[/gold]。\n获得4点[gold]荆棘[/gold]。",
+    "upgrade_preview_runtime_en": "[gold]Sly[/gold].\nGain 1 [gold]Dexterity[/gold].\nGain 4 [gold]Thorns[/gold].",
+    "upgrade_preview_runtime_zhs": "[gold]奇巧[/gold]。\n获得1点[gold]敏捷[/gold]。\n获得4点[gold]荆棘[/gold]。",
+    "has_upgrade_tokens": false,
+    "cost": 3,
+    "card_type": "Power",
+    "rarity": "Rare",
+    "target_type": "Self",
+    "tags": [
+      "block_scaling",
+      "dexterity",
+      "power",
+      "rare",
+      "self_target",
+      "sly"
+    ],
+    "keywords": [
+      "Sly"
+    ],
+    "keyword_details": [
+      {
+        "id": "Sly",
+        "title_en": "Sly",
+        "title_zhs": "奇巧",
+        "description_en": "If this card is discarded from your [gold]Hand[/gold] before the end of your turn, play it for free.",
+        "description_zhs": "如果这张牌在你的回合结束前从你的[gold]手牌[/gold]中被丢弃，则免费将其打出。"
+      }
+    ],
+    "card_tags": [],
+    "powers": [
+      "DexterityPower",
+      "ThornsPower"
+    ],
+    "dynamic_vars": [
+      "DynamicVar",
+      "PowerVar"
+    ],
+    "commands": [
+      "Apply"
+    ]
+  },
+  {
+    "entity_type": "card",
+    "id": "accelerant",
+    "class_name": "Accelerant",
+    "source_path": "src/Core/Models/Cards/Accelerant.cs",
+    "source_sha1": "e1906d2f814c8752a762cadca2c0f45c38dfb139",
+    "title_en": "Accelerant",
+    "title_zhs": "触媒",
+    "description_en": "[gold]Poison[/gold] is triggered {Accelerant:diff()} additional {Accelerant:plural:time|times}.",
+    "description_zhs": "[gold]中毒[/gold]会额外触发{Accelerant:diff()}次。",
+    "upgrade_preview_static_en": "[gold]Poison[/gold] is triggered {Accelerant:diff()} additional {Accelerant:plural:time|times}.",
+    "upgrade_preview_static_zhs": "[gold]中毒[/gold]会额外触发{Accelerant:diff()}次。",
+    "description_runtime_en": "[gold]Poison[/gold] is triggered 1 additional time.",
+    "description_runtime_zhs": "[gold]中毒[/gold]会额外触发1次。",
+    "upgrade_preview_runtime_en": "[gold]Poison[/gold] is triggered 1 additional time.",
+    "upgrade_preview_runtime_zhs": "[gold]中毒[/gold]会额外触发1次。",
+    "has_upgrade_tokens": false,
+    "cost": 1,
+    "card_type": "Power",
+    "rarity": "Rare",
+    "target_type": "Self",
+    "tags": [
+      "poison",
+      "power",
+      "rare",
+      "self_target"
+    ],
+    "keywords": [],
+    "keyword_details": [],
+    "card_tags": [],
+    "powers": [
+      "AccelerantPower",
+      "PoisonPower"
+    ],
+    "dynamic_vars": [
+      "DynamicVar"
+    ],
+    "commands": [
+      "Apply"
+    ]
+  },
+  {
+    "entity_type": "card",
+    "id": "accuracy",
+    "class_name": "Accuracy",
+    "source_path": "src/Core/Models/Cards/Accuracy.cs",
+    "source_sha1": "9b83a60978ad929eb0cab76da0c3bc78491dfb07",
+    "title_en": "Accuracy",
+    "title_zhs": "精准",
+    "description_en": "[gold]Shivs[/gold] deal {AccuracyPower:diff()} additional damage.",
+    "description_zhs": "[gold]小刀[/gold]额外造成{AccuracyPower:diff()}点伤害。",
+    "upgrade_preview_static_en": "[gold]Shivs[/gold] deal {AccuracyPower:diff()} additional damage.",
+    "upgrade_preview_static_zhs": "[gold]小刀[/gold]额外造成{AccuracyPower:diff()}点伤害。",
+    "description_runtime_en": "[gold]Shivs[/gold] deal 4 additional damage.",
+    "description_runtime_zhs": "[gold]小刀[/gold]额外造成4点伤害。",
+    "upgrade_preview_runtime_en": "[gold]Shivs[/gold] deal 4 additional damage.",
+    "upgrade_preview_runtime_zhs": "[gold]小刀[/gold]额外造成4点伤害。",
+    "has_upgrade_tokens": false,
+    "cost": 1,
+    "card_type": "Power",
+    "rarity": "Uncommon",
+    "target_type": "Self",
+    "tags": [
+      "power",
+      "self_target",
+      "uncommon"
+    ],
+    "keywords": [],
+    "keyword_details": [],
+    "card_tags": [],
+    "powers": [
+      "AccuracyPower"
+    ],
+    "dynamic_vars": [
+      "PowerVar"
+    ],
+    "commands": [
+      "Apply"
+    ]
+  }
+]

@@ -1,0 +1,125 @@
+[
+  {
+    "entity_type": "monster",
+    "id": "architect",
+    "class_name": "Architect",
+    "source_path": "src/Core/Models/Monsters/Architect.cs",
+    "source_sha1": "cae0c01f69190c7022e00f1a18d345fd81520464",
+    "name_en": "The Architect",
+    "name_zhs": "建筑师",
+    "min_initial_hp_expr": "9999",
+    "max_initial_hp_expr": "9999",
+    "death_sfx_expr": null,
+    "intents": [
+      "HiddenIntent"
+    ],
+    "move_labels": [
+      "NOTHING"
+    ],
+    "moves": [
+      {
+        "order": 0,
+        "label": "NOTHING",
+        "intent": "HiddenIntent",
+        "title_en": "Nothing",
+        "title_zhs": "无"
+      }
+    ],
+    "powers": [],
+    "commands": []
+  },
+  {
+    "entity_type": "monster",
+    "id": "assassin_ruby_raider",
+    "class_name": "AssassinRubyRaider",
+    "source_path": "src/Core/Models/Monsters/AssassinRubyRaider.cs",
+    "source_sha1": "6760a3f38263b447f2324177fc7a4e9080634044",
+    "name_en": "Assassin Raider",
+    "name_zhs": "劫掠者刺客",
+    "min_initial_hp_expr": "AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 19, 18)",
+    "max_initial_hp_expr": "AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 24, 23)",
+    "death_sfx_expr": null,
+    "intents": [
+      "SingleAttackIntent"
+    ],
+    "move_labels": [
+      "KILLSHOT_MOVE"
+    ],
+    "moves": [
+      {
+        "order": 0,
+        "label": "KILLSHOT_MOVE",
+        "intent": "SingleAttackIntent",
+        "title_en": null,
+        "title_zhs": null
+      }
+    ],
+    "powers": [],
+    "commands": [
+      "Attack"
+    ]
+  },
+  {
+    "entity_type": "monster",
+    "id": "axe_ruby_raider",
+    "class_name": "AxeRubyRaider",
+    "source_path": "src/Core/Models/Monsters/AxeRubyRaider.cs",
+    "source_sha1": "033b8815274682fc85f8c9797575248268942467",
+    "name_en": "Axe Raider",
+    "name_zhs": "劫掠者斧手",
+    "min_initial_hp_expr": "AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 21, 20)",
+    "max_initial_hp_expr": "AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 23, 22)",
+    "death_sfx_expr": null,
+    "intents": [
+      "DefendIntent",
+      "SingleAttackIntent"
+    ],
+    "move_labels": [
+      "SWING_1",
+      "SWING_2",
+      "BIG_SWING"
+    ],
+    "moves": [
+      {
+        "order": 0,
+        "label": "SWING_1",
+        "intent": "SingleAttackIntent",
+        "title_en": null,
+        "title_zhs": null
+      },
+      {
+        "order": 1,
+        "label": "SWING_2",
+        "intent": "SingleAttackIntent",
+        "title_en": null,
+        "title_zhs": null
+      },
+      {
+        "order": 2,
+        "label": "BIG_SWING",
+        "intent": "SingleAttackIntent",
+        "title_en": "Big Swing",
+        "title_zhs": "大力挥舞"
+      },
+      {
+        "order": 3,
+        "label": null,
+        "intent": "DefendIntent",
+        "title_en": null,
+        "title_zhs": null
+      },
+      {
+        "order": 4,
+        "label": null,
+        "intent": "DefendIntent",
+        "title_en": null,
+        "title_zhs": null
+      }
+    ],
+    "powers": [],
+    "commands": [
+      "Attack",
+      "GainBlock"
+    ]
+  }
+]

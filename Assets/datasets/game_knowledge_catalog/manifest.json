@@ -1,0 +1,19 @@
+{
+  "db_source": "C:\\Users\\Administrator\\Desktop\\sts2Raw2\\STS2AI\\Python\\data\\source_knowledge.sqlite",
+  "output_dir": "C:\\Users\\Administrator\\Desktop\\sts2Raw2\\Assets\\datasets\\game_knowledge_catalog",
+  "runtime_card_text_path": "C:\\Users\\Administrator\\Desktop\\sts2Raw2\\STS2AI\\Python\\data\\raw\\card_runtime_texts.json",
+  "entity_counts": {
+    "cards": 577,
+    "relics": 290,
+    "potions": 64,
+    "monsters": 121
+  },
+  "locales": [
+    "eng",
+    "zhs"
+  ],
+  "notes": {
+    "cards": "卡牌记录同时包含本地化基础文本、静态升级预览文本，以及运行时精确描述/升级预览文本；payload_json 保留完整原始记录。",
+    "monsters": "怪物导出包含名字、HP 表达式、intent、move label，以及按本地化表补齐的 move title。"
+  }
+}

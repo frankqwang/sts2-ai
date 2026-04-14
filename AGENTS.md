@@ -33,3 +33,28 @@
   - `is_victory_outcome(...)`
   - `is_failure_outcome(...)`
 - 如果发现某条链路仍然直接比较原始 outcome 字符串，应优先修成共享 helper，而不是在调用点继续追加兼容分支。
+
+## STS2AI Directory Rules
+- `STS2AI/Python` 放可执行脚本、训练代码、分析代码、导出代码；不要把运行产物、手工数据和大文件直接堆在这里。
+- `STS2AI/docs` 放项目文档、问题记录、流程说明、评审摘要、参数说明；除 `README` 外，不要把说明文档散落到别的目录。
+- `STS2AI/Artifacts` 放运行产物：训练输出、日志、分析报告、teacher refresh 输出、临时实验目录等。凡是“跑一次就会再生成”的东西，优先放这里。
+- `Assets/datasets` 放可复用的数据资产与知识库成品，例如查询库、桥接后的离线数据集、静态导出目录。凡是“希望跨实验长期复用”的数据，优先放这里。
+- `STS2AI/Python/data` 放数据脚本、上游原始结构化底库、轻量元数据，以及导出流程依赖的源码侧输入；不要把面向消费的大型成品数据默认落在这里。
+- `STS2AI/Python/data/raw` 放导出流程的中间原始文件；如果中间文件后续会稳定复用、且不只是流水线临时缓存，再考虑提升到 `Assets/datasets`。
+
+## Data Classification Rules
+- 区分“原始底库”“中间文件”“运行产物”“长期数据资产”四类数据，不要混放。
+- 原始底库：例如 `STS2AI/Python/data/source_knowledge.sqlite`。它是上游生成输入，保留为可再生产底库，不作为默认查询成品目录。
+- 中间文件：例如运行时导出的 `STS2AI/Python/data/raw/card_runtime_texts.json`。它可以被下游消费，但默认视为导出中间态。
+- 运行产物：例如训练 run、日志、窗口分析、teacher refresh 比较报告，统一放 `STS2AI/Artifacts`。
+- 长期数据资产：例如 `Assets/datasets/game_knowledge_catalog`、桥接后的 `offline_noncombat_ranking` 数据集。它们应当可直接查询、复用、被后续训练/分析引用。
+- 新数据如果同时满足“可再生成”和“长期复用”，默认保留两层：
+  - 上游生成脚本和原始输入留在 `STS2AI/Python/data`
+  - 面向使用者的成品目录落到 `Assets/datasets`
+
+## Dataset Output Defaults
+- 新增导出脚本时，先明确默认输出属于哪一类数据；不要为了省事把所有输出都放在脚本同目录。
+- 查询导向、知识库导向、跨实验复用的数据集，默认输出到 `Assets/datasets/<name>`。
+- 单次实验、窗口分析、teacher loop 刷新、A/B 对照等任务产物，默认输出到 `STS2AI/Artifacts/...`。
+- 若某份数据已经在 `Assets/datasets` 有正式成品目录，后续文档、查询脚本、分析脚本默认引用成品目录，不再默认引用脚本目录下的旧副本。
+- 避免在数据本体里加入只为查询方便的混合语义字段；如果跨表统一展示有需求，优先在 SQL / 查询脚本里用 `AS` 或视图解决，而不是污染原始导出字段。
