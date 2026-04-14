@@ -724,7 +724,7 @@ def _write_markdown(report: dict[str, Any], output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="按 iteration 分析 hybrid 训练 replay。")
-    parser.add_argument("training_dir", help="训练输出目录，例如 STS2AI/Artifacts/.../hybrid_4env_*")
+    parser.add_argument("training_dir", help="训练输出目录，例如 STS2AI/Artifacts/.../20260414-110316_4env_acttransitionfix_resume2275")
     parser.add_argument("--iteration", type=int, required=True, help="要分析的 iteration")
     parser.add_argument("--top-k", type=int, default=10, help="报告里保留的 Top 数量")
     args = parser.parse_args()

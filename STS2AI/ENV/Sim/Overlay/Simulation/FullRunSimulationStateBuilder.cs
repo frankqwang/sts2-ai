@@ -155,10 +155,9 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 		{
 			return "run_bootstrap";
 		}
-		// If we're in a combat room but combat is no longer in progress,
-		// the fight has ended. Check if the player died (game_over) or
-		// if we're in a brief transition before rewards appear.
-		if (currentRoom is CombatRoom && !CombatManager.Instance.IsInProgress)
+		// If we're in a combat room but combat is not currently marked in progress,
+		// distinguish pre-start startup from post-end teardown explicitly.
+		if (currentRoom is CombatRoom combatRoomPending && !CombatManager.Instance.IsInProgress)
 		{
 			if (runState.IsGameOver
 				|| localPlayer.Creature.IsDead
@@ -167,10 +166,9 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			{
 				return "game_over";
 			}
-			// Combat ended but rewards haven't appeared yet — report as
-			// "combat_pending" so Python can send a "wait" action to let
-			// the game transition to rewards/map/game_over naturally.
-			return "combat_pending";
+			return combatRoomPending.IsPreFinished
+				? "combat_post_end_pending"
+				: "combat_start_pending";
 		}
 		return currentRoom.RoomType switch
 		{

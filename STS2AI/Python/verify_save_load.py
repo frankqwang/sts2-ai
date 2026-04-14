@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import random
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,10 @@ EXACT_STATE_CASES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("shop", "shop", ("SHOP_EXIT_005", "SHOP_EXIT_010", "SHOP_EXIT_011")),
     ("treasure", "treasure", ("SHOP_EXIT_000", "SHOP_EXIT_009", "SHOP_EXIT_010")),
     ("game_over", "game_over", ("SHOP_EXIT_000", "SHOP_EXIT_001", "SHOP_EXIT_002")),
+)
+REWARD_FLOW_EXACT_CASES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("combat_rewards", REWARD_SAVELOAD_SEEDS),
+    ("card_reward", CARD_REWARD_SAVELOAD_SEEDS),
 )
 DEFAULT_REPO_ROOT = REPO_ROOT
 DEFAULT_GODOT_EXE = Path(r"C:/dev/game/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe")
@@ -272,6 +277,36 @@ def exact_state_snapshot(state: dict[str, Any]) -> dict[str, Any]:
         snapshot["game_over"] = {
             "available_actions": exact_legal_actions({"legal_actions": (state.get("game_over") or {}).get("available_actions") or []})
         }
+    elif state_type == "combat_rewards":
+        rewards_state = state.get("rewards") or {}
+        snapshot["combat_rewards"] = {
+            "can_proceed": rewards_state.get("can_proceed"),
+            "items": [
+                (
+                    item.get("index"),
+                    item.get("type"),
+                    item.get("label"),
+                    item.get("claimed"),
+                    item.get("disabled"),
+                )
+                for item in rewards_state.get("items") or []
+            ],
+        }
+    elif state_type == "card_reward":
+        card_reward_state = state.get("card_reward") or {}
+        snapshot["card_reward"] = {
+            "can_skip": card_reward_state.get("can_skip"),
+            "cards": [
+                (
+                    item.get("index"),
+                    item.get("id"),
+                    item.get("name"),
+                    item.get("cost"),
+                    item.get("rarity"),
+                )
+                for item in card_reward_state.get("cards") or []
+            ],
+        }
     return snapshot
 
 
@@ -310,7 +345,7 @@ def choose_default_action(state: dict[str, Any]) -> dict[str, Any]:
             (action for action in legal if action.get("action") == "combat_confirm_selection"),
             legal[0],
         )
-    if state_type == "combat_pending":
+    if state_type in {"combat_pending", "combat_start_pending", "combat_post_end_pending"}:
         return {"action": "wait"}
     if state_type == "combat_rewards":
         return next((action for action in legal if action.get("action") == "claim_reward"), None) or next(
@@ -510,6 +545,48 @@ def verify_exact_state_save_load(
     return ("exact" if all_exact else "unsupported"), lines
 
 
+def verify_exact_state_export_import(
+    client: FullRunClientLike,
+    *,
+    title: str,
+    target_state: str,
+    seeds: tuple[str, ...],
+) -> tuple[str, list[str]]:
+    lines: list[str] = []
+    all_exact = True
+    for seed in seeds:
+        state = drive_to_state(client, seed, {target_state})
+        before = exact_state_snapshot(state)
+        with tempfile.TemporaryDirectory(prefix=f"verify_export_import_{target_state}_") as tmpdir:
+            snapshot_path = str(Path(tmpdir) / "snapshot.json")
+            exported = client.export_state(snapshot_path)
+            legal = state.get("legal_actions") or []
+            if state.get("terminal") or not legal:
+                mutated = client.get_state()
+            else:
+                mutated = client.act(choose_default_action(state))
+            restored = client.import_state(exported)
+        after = exact_state_snapshot(restored)
+        diffs = diff_dict(before, after)
+        lines.extend(
+            [
+                f"seed {seed}:",
+                f"  saved:   {summarize_state(state)}",
+                f"  mutated: {summarize_state(mutated)}",
+                f"  loaded:  {summarize_state(restored)}",
+            ]
+        )
+        if diffs:
+            all_exact = False
+            lines.append("  classification: unsupported")
+            lines.append(f"  {title} export/import snapshot mismatch:")
+            lines.extend(f"    {entry}" for entry in diffs[:10])
+        else:
+            lines.append("  classification: exact")
+            lines.append(f"  {title} export/import snapshot restored.")
+    return ("exact" if all_exact else "unsupported"), lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify save/load on Godot or standalone full-run simulators.")
     parser.add_argument("--backend", choices=["godot-http", "godot-pipe", "headless-pipe", "headless-binary"], default="headless-pipe")
@@ -552,6 +629,29 @@ def main() -> int:
                         client,
                         title=state_name,
                         target_state=target_state,
+                        seeds=seeds,
+                    ),
+                )
+            )
+        for state_name, seeds in REWARD_FLOW_EXACT_CASES:
+            checks.append(
+                (
+                    f"{state_name} exact save/load",
+                    lambda client, state_name=state_name, seeds=seeds: verify_exact_state_save_load(
+                        client,
+                        title=state_name,
+                        target_state=state_name,
+                        seeds=seeds,
+                    ),
+                )
+            )
+            checks.append(
+                (
+                    f"{state_name} exact export/import",
+                    lambda client, state_name=state_name, seeds=seeds: verify_exact_state_export_import(
+                        client,
+                        title=state_name,
+                        target_state=state_name,
                         seeds=seeds,
                     ),
                 )

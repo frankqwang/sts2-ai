@@ -5545,6 +5545,45 @@ class TestGenerateCardRanking:
         scores = compute_option_scores(outcomes, max_hp=80)
         assert scores[0] > scores[1]  # better HP + fewer turns
 
+    def test_compute_option_scores_breaks_ties_for_boss_losses(self):
+        from generate_card_ranking_data import CombatOutcome, compute_option_scores
+
+        outcomes = {
+            0: CombatOutcome(
+                won=False,
+                hp_after=0,
+                hp_lost=40,
+                turns=10,
+                terminal_state_type="game_over",
+                end_floor=18,
+                boss_reached=True,
+                run_outcome="defeat",
+            ),
+            1: CombatOutcome(
+                won=False,
+                hp_after=0,
+                hp_lost=90,
+                turns=10,
+                terminal_state_type="game_over",
+                end_floor=17,
+                boss_reached=True,
+                run_outcome="defeat",
+            ),
+            2: CombatOutcome(
+                won=False,
+                hp_after=0,
+                hp_lost=35,
+                turns=10,
+                terminal_state_type="game_over",
+                end_floor=15,
+                boss_reached=False,
+                run_outcome="defeat",
+            ),
+        }
+        scores = compute_option_scores(outcomes, max_hp=80)
+        assert scores[0] > scores[1]  # same terminal outcome, but less bleed + deeper floor should win
+        assert scores[1] > scores[2]  # boss-loss should still outrank pre-boss death
+
     def test_extract_card_reward_options_format(self):
         from generate_card_ranking_data import _extract_card_reward_options
 
@@ -6007,17 +6046,30 @@ class TestSymbolicFeaturesHead:
         assert qp_grad is not None and qp_grad.abs().max().item() > 0.0, \
             "After out_proj is nonzero, gradients should flow to query_proj " \
             "through cross-attention — the autograd chain is broken"
-def test_pipe_combat_forward_model_keeps_combat_pending_non_terminal():
+def test_pipe_combat_forward_model_keeps_combat_start_pending_non_terminal():
     from combat_mcts_agent import _check_terminal
 
     is_terminal, player_won = _check_terminal({
-        "state_type": "combat_pending",
+        "state_type": "combat_start_pending",
         "terminal": False,
         "legal_actions": [],
     })
 
     assert is_terminal is False
     assert player_won is False
+
+
+def test_pipe_combat_forward_model_treats_post_end_pending_as_terminal():
+    from combat_mcts_agent import _check_terminal
+
+    is_terminal, player_won = _check_terminal({
+        "state_type": "combat_post_end_pending",
+        "terminal": False,
+        "legal_actions": [],
+    })
+
+    assert is_terminal is True
+    assert player_won is True
 
 
 def test_mcts_puct_uses_prior_when_parent_has_zero_visits():

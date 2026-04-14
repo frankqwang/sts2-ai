@@ -94,6 +94,11 @@ public sealed class FullRunTrainingEnvService
 		}
 	}
 
+	internal void ResetCombatFollowupStateForExternalCombatResolution()
+	{
+		ExecuteSerialized(() => ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).ResetCombatFollowupStateForExternalCombatResolution());
+	}
+
 	/// <summary>
 	/// Whether this service wraps a pure simulator (always true for FullRunSimulatorRuntimeFacade).
 	/// Off-main-thread access is allowed, but operations are serialized so the runtime behaves

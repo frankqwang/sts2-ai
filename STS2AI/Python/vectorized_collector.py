@@ -47,7 +47,13 @@ AUTO_PROGRESS_SCREENS = {
 }
 
 # Transient states where game is still processing — re-poll with get_state
-WAIT_SCREENS = {"combat_pending", "pending", ""}
+WAIT_SCREENS = {
+    "combat_pending",
+    "combat_start_pending",
+    "combat_post_end_pending",
+    "pending",
+    "",
+}
 
 # Screens requiring non-combat NN inference
 NC_INFERENCE_SCREENS = {

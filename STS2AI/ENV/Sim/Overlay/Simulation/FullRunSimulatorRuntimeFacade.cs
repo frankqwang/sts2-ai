@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
@@ -40,6 +41,8 @@ namespace MegaCrit.Sts2.Core.Simulation;
 
 public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisposable
 {
+	private static readonly JsonSerializerOptions ExportedSnapshotJsonOptions = CreateExportedSnapshotJsonOptions();
+
 	private IDisposable? _runtimeScope;
 
 	private IDisposable? _selectorScope;
@@ -824,7 +827,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			case "wait":
 			{
 				FullRunSimulationStateSnapshot waitState = state;
-				if (waitState.StateType == "combat_pending" && RunManager.Instance.IsInProgress)
+				if (IsPostCombatPendingState(waitState.StateType))
 				{
 					RunState? runState = RunManager.Instance.DebugOnlyGetState();
 					if (runState != null && runState.IsGameOver)
@@ -940,6 +943,16 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 	}
 
+	private static JsonSerializerOptions CreateExportedSnapshotJsonOptions()
+	{
+		JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializationUtility.Options);
+		IJsonTypeInfoResolver baseResolver = options.TypeInfoResolver ?? JsonSerializationUtility.DefaultResolver;
+		options.TypeInfoResolver = JsonTypeInfoResolver.Combine(
+			FullRunSimulationSerializerContext.Default,
+			baseResolver);
+		return options;
+	}
+
 	private static bool ShouldAwaitActTransitionCompletion(RunState? runState, CombatRoom? combatRoom = null)
 	{
 		if (runState == null || runState.CurrentActIndex >= runState.Acts.Count - 1)
@@ -960,7 +973,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		string diagnosticsPrefix,
 		FullRunSimulationStateSnapshot snapshot)
 	{
-		if (snapshot.StateType != "combat_pending")
+		if (!IsPostCombatPendingState(snapshot.StateType))
 		{
 			return null;
 		}
@@ -1018,7 +1031,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 			ObservedState observed = ObserveState();
 			if (!string.Equals(observed.Signature, previousSignature, StringComparison.Ordinal)
-				&& observed.Snapshot.StateType != "combat_pending")
+				&& !IsPostCombatPendingState(observed.Snapshot.StateType))
 			{
 				bool actTransitionResolved = !shouldAwaitActTransition
 					|| observed.Snapshot.StateType == "relic_select"
@@ -1043,7 +1056,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 	private bool ShouldKeepCombatPendingInsteadOfForcingMap(FullRunSimulationStateSnapshot snapshot)
 	{
-		if (snapshot.StateType != "combat_pending")
+		if (!IsPostCombatPendingState(snapshot.StateType))
 		{
 			return false;
 		}
@@ -1271,8 +1284,19 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 				return current.Snapshot;
 			}
 		}
+		FullRunSimulationStateSnapshot fallback = GetState();
 		FullRunSimulationDiagnostics.Increment("settle.wait_state_change.fallback_get_state");
-		return GetState();
+		if (IsCombatStartPendingState(fallback.StateType))
+		{
+			FullRunSimulationStateSnapshot? advancedStartup = await TryAdvanceCombatStartupPendingAsync(
+				"settle.wait_state_change",
+				previousSignature);
+			if (advancedStartup != null)
+			{
+				return advancedStartup;
+			}
+		}
+		return fallback;
 	}
 
 	private async Task<FullRunSimulationStateSnapshot> WaitForCombatFollowupAsync(FullRunSimulationStateSnapshot previousState)
@@ -1444,7 +1468,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationStateSnapshot fallback = GetState();
 		FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.fallback_get_state");
 		TracePotentialWaitStall("headless_wait_combat_followup.fallback", fallback);
-		if (fallback.StateType == "combat_pending")
+		if (IsPostCombatPendingState(fallback.StateType))
 		{
 			FullRunSimulationStateSnapshot? advancedTerminal = await TryAdvancePostCombatTerminalTransitionAsync(
 				"settle.wait_combat_followup",
@@ -1612,7 +1636,17 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationStateSnapshot fallback = GetState();
 		FullRunSimulationDiagnostics.Increment("settle.wait_explicit.fallback_get_state");
 		TracePotentialWaitStall("headless_wait_explicit.fallback", fallback);
-		if (fallback.StateType == "combat_pending")
+		if (IsCombatStartPendingState(fallback.StateType))
+		{
+			FullRunSimulationStateSnapshot? advancedStartup = await TryAdvanceCombatStartupPendingAsync(
+				"settle.wait_explicit",
+				previousSignature);
+			if (advancedStartup != null)
+			{
+				return advancedStartup;
+			}
+		}
+		if (IsPostCombatPendingState(fallback.StateType))
 		{
 			FullRunSimulationStateSnapshot? advancedTerminal = await TryAdvancePostCombatTerminalTransitionAsync(
 				"settle.wait_explicit",
@@ -1807,7 +1841,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			ShopSnapshot = savedSnapshot.ShopSnapshot,
 			TreasureSnapshot = savedSnapshot.TreasureSnapshot
 		};
-		string json = JsonSerializer.Serialize(exported, JsonSerializationUtility.Options);
+		string json = JsonSerializer.Serialize(exported, ExportedSnapshotJsonOptions);
 		File.WriteAllText(fullPath, json);
 		return fullPath;
 	}
@@ -1929,7 +1963,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			{
 				throw new FullRunSimulationRuntimeException(
 					"restore_signature_mismatch",
-					$"Loaded state '{stateId}' did not match the saved snapshot signature (saved={savedSnapshot.StateType}, restored={restoredState.StateType}).");
+					$"Loaded state '{stateId}' did not match the saved snapshot signature (saved={savedSnapshot.StateType}, restored={restoredState.StateType}, saved_sig={TruncateForRestoreError(savedSnapshot.ExactSignature)}, restored_sig={TruncateForRestoreError(restoredSignature)}).");
 			}
 		}
 
@@ -2043,7 +2077,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			{
 				throw new FullRunSimulationRuntimeException(
 					"restore_signature_mismatch",
-					$"Loaded state '{stateId}' did not match the saved snapshot signature (saved={savedSnapshot.StateType}, restored={restoredState.StateType}).");
+					$"Loaded state '{stateId}' did not match the saved snapshot signature (saved={savedSnapshot.StateType}, restored={restoredState.StateType}, saved_sig={TruncateForRestoreError(savedSnapshot.ExactSignature)}, restored_sig={TruncateForRestoreError(restoredSignature)}).");
 			}
 		}
 
@@ -2117,7 +2151,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 
 		string json = File.ReadAllText(fullPath);
-		FullRunExportedRunSnapshot? exported = JsonSerializer.Deserialize<FullRunExportedRunSnapshot>(json, JsonSerializationUtility.Options);
+		FullRunExportedRunSnapshot? exported = JsonSerializer.Deserialize<FullRunExportedRunSnapshot>(json, ExportedSnapshotJsonOptions);
 		if (exported == null || exported.RunSnapshot == null)
 		{
 			throw new FullRunSimulationRuntimeException("snapshot_file_invalid", $"Snapshot file '{fullPath}' could not be parsed.");
@@ -2156,7 +2190,11 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			try
 			{
 				FullRunSimulationStateSnapshot state = GetState();
-				if (MatchesLoadedTargetState(state, expectedStateType) || IsReadySnapshot(state) || attempt > 0)
+				if (ShouldWaitForRewardFlowTarget(state, expectedStateType))
+				{
+					TryAdvanceRewardFlowAfterRestore(state, expectedStateType);
+				}
+				if (ShouldAcceptLoadedStateAfterRestore(state, expectedStateType, attempt))
 				{
 					return state;
 				}
@@ -2180,6 +2218,65 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 
 		return GetState();
+	}
+
+	private void TryAdvanceRewardFlowAfterRestore(FullRunSimulationStateSnapshot state, string expectedStateType)
+	{
+		if (!ShouldWaitForRewardFlowTarget(state, expectedStateType))
+		{
+			return;
+		}
+
+		RunState? runState = RunManager.Instance.DebugOnlyGetState();
+		if (runState == null || runState.IsGameOver)
+		{
+			return;
+		}
+
+		CombatRoom? pendingCombatRoom = runState.CurrentRoom as CombatRoom;
+		if (TryTriggerPostCombatRewards(runState, pendingCombatRoom))
+		{
+			_forceMapView = false;
+		}
+	}
+
+	private static bool ShouldAcceptLoadedStateAfterRestore(
+		FullRunSimulationStateSnapshot state,
+		string expectedStateType,
+		int attempt)
+	{
+		if (MatchesLoadedTargetState(state, expectedStateType))
+		{
+			return true;
+		}
+
+		if (ShouldWaitForRewardFlowTarget(state, expectedStateType))
+		{
+			return false;
+		}
+
+		if (IsReadySnapshot(state))
+		{
+			return true;
+		}
+
+		return attempt > 0;
+	}
+
+	private static bool ShouldWaitForRewardFlowTarget(FullRunSimulationStateSnapshot state, string expectedStateType)
+	{
+		if (string.Equals(expectedStateType, "combat_rewards", StringComparison.Ordinal))
+		{
+			return IsPostCombatPendingState(state.StateType);
+		}
+
+		if (string.Equals(expectedStateType, "card_reward", StringComparison.Ordinal))
+		{
+			return IsPostCombatPendingState(state.StateType)
+				|| string.Equals(state.StateType, "combat_rewards", StringComparison.Ordinal);
+		}
+
+		return false;
 	}
 
 	private async Task RestorePendingSelectionFlowAsync(
@@ -2229,20 +2326,21 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		else if (snapshot.CardRewardSelection != null)
 		{
 			CardReward reward = FullRunSimulationChoiceBridge.RestoreCardRewardForOffer(snapshot.CardRewardSelection, localPlayer);
-			LinkedRewardSet rewardSet = new LinkedRewardSet(new List<Reward> { reward }, localPlayer);
-			reward.ParentRewardSet = rewardSet;
-			_suppressTerminalRewardsTransitionOnce = true;
 			reward.MarkContentAsSeen();
-			Task rewardTask = reward.OnSelectWrapper();
+			Task<bool> rewardTask = ResolveCardRewardAsync(reward);
 			for (int waitIter = 0; waitIter < 8; waitIter++)
 			{
-				if (FullRunSimulationChoiceBridge.Instance.IsSelectionActive)
+				if (FullRunSimulationChoiceBridge.Instance.IsCardRewardSelectionActive)
+				{
+					break;
+				}
+				if (rewardTask.IsCompleted)
 				{
 					break;
 				}
 				await CombatSimulationRuntime.Clock.YieldAsync();
 			}
-			if (!rewardTask.IsCompleted && FullRunSimulationChoiceBridge.Instance.IsSelectionActive)
+			if (!rewardTask.IsCompleted && FullRunSimulationChoiceBridge.Instance.IsCardRewardSelectionActive)
 			{
 				return;
 			}
@@ -2393,12 +2491,50 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			return false;
 		}
 
-		if (string.Equals(state.StateType, expectedStateType, StringComparison.Ordinal))
+		string observedStateType = state.StateType ?? string.Empty;
+		if (string.Equals(observedStateType, expectedStateType, StringComparison.Ordinal))
+		{
+			return true;
+		}
+
+		if (string.Equals(expectedStateType, "combat_pending", StringComparison.Ordinal)
+			&& string.Equals(observedStateType, "combat_post_end_pending", StringComparison.Ordinal))
 		{
 			return true;
 		}
 
 		return false;
+	}
+
+	private static string NormalizeRestoreComparableStateType(string? stateType)
+	{
+		if (string.IsNullOrWhiteSpace(stateType))
+		{
+			return string.Empty;
+		}
+
+		if (string.Equals(stateType, "combat_rewards", StringComparison.Ordinal)
+			|| string.Equals(stateType, "combat_post_end_pending", StringComparison.Ordinal))
+		{
+			return "combat_reward_flow";
+		}
+
+		return stateType;
+	}
+
+	private static string TruncateForRestoreError(string? text, int maxLength = 320)
+	{
+		if (string.IsNullOrEmpty(text))
+		{
+			return string.Empty;
+		}
+
+		if (text.Length <= maxLength)
+		{
+			return text;
+		}
+
+		return text.Substring(0, maxLength) + "...";
 	}
 
 	/// <summary>
@@ -2422,6 +2558,13 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	/// Get the number of cached state snapshots.
 	/// </summary>
 	public int StateCacheCount => _stateCache.Count;
+
+	internal void ResetCombatFollowupStateForExternalCombatResolution()
+	{
+		_forceMapView = false;
+		_rewardsTriggered = false;
+		_suppressTerminalRewardsTransitionOnce = false;
+	}
 
 	private void CleanUpPreviousEpisode()
 	{
@@ -3139,7 +3282,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		Player localPlayer = ResolveSignaturePlayer(runState);
 		FullRunApiState apiState = FullRunApiStateBuilder.Build(runState, snapshot, FullRunSimulationChoiceBridge.Instance, _forceMapView);
 		var signature = new System.Text.StringBuilder(256);
-		signature.Append("state=").Append(snapshot.StateType);
+		signature.Append("state=").Append(NormalizeRestoreComparableStateType(snapshot.StateType));
 		signature.Append("|act=").Append(snapshot.CurrentActIndex);
 		signature.Append("|floor=").Append(snapshot.TotalFloor);
 		signature.Append("|seed=").Append(snapshot.Seed ?? string.Empty);
@@ -3237,6 +3380,35 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 					signature.Append(',').Append(item.label ?? string.Empty).Append(';');
 				}
 				return;
+			case "combat_post_end_pending":
+				if (apiState.rewards != null)
+				{
+					signature.Append("rewards_pending:");
+					signature.Append(apiState.rewards.can_proceed ? '1' : '0').Append(';');
+					foreach (FullRunApiRewardItem item in apiState.rewards.items ?? Enumerable.Empty<FullRunApiRewardItem>())
+					{
+						signature.Append(item.index).Append(',').Append(item.type ?? string.Empty);
+						signature.Append(',').Append(item.label ?? string.Empty).Append(';');
+					}
+					return;
+				}
+				if (apiState.card_reward != null)
+				{
+					signature.Append("card_reward_pending:");
+					signature.Append(apiState.card_reward.can_skip ? '1' : '0').Append(';');
+					foreach (FullRunApiCardOption card in apiState.card_reward.cards ?? Enumerable.Empty<FullRunApiCardOption>())
+					{
+						signature.Append(card.index).Append(',').Append(card.id ?? string.Empty);
+						signature.Append(',').Append(card.name ?? string.Empty);
+						signature.Append(',').Append(card.type ?? string.Empty);
+						signature.Append(',').Append(card.rarity ?? string.Empty);
+						signature.Append(',').Append(card.cost ?? -1);
+						signature.Append(',').Append(card.is_upgraded ? '1' : '0').Append(';');
+					}
+					return;
+				}
+				signature.Append("reward_flow_pending");
+				return;
 			case "card_reward":
 				signature.Append("card_reward:");
 				signature.Append(apiState.card_reward?.can_skip == true ? '1' : '0').Append(';');
@@ -3286,9 +3458,24 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 	}
 
+	private static bool IsCombatStartPendingState(string? stateType)
+	{
+		return string.Equals(stateType, "combat_start_pending", StringComparison.Ordinal);
+	}
+
+	private static bool IsPostCombatPendingState(string? stateType)
+	{
+		return string.Equals(stateType, "combat_post_end_pending", StringComparison.Ordinal)
+			|| string.Equals(stateType, "combat_pending", StringComparison.Ordinal);
+	}
+
 	private static bool IsReadySnapshot(FullRunSimulationStateSnapshot snapshot)
 	{
 		if (!snapshot.IsRunActive || snapshot.StateType == "menu" || snapshot.StateType == "run_bootstrap")
+		{
+			return false;
+		}
+		if (IsCombatStartPendingState(snapshot.StateType))
 		{
 			return false;
 		}
@@ -3405,11 +3592,11 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		if (!string.Equals(observedState.Signature, previousSignature, StringComparison.Ordinal))
 		{
 			return snapshot.StateType == "map"
-				|| snapshot.StateType == "combat_pending"
+				|| IsPostCombatPendingState(snapshot.StateType)
 				|| snapshot.LegalActions.Count > 0;
 		}
 
-		return snapshot.LegalActions.Count > 0 && snapshot.StateType != "combat_pending";
+		return snapshot.LegalActions.Count > 0 && !IsPostCombatPendingState(snapshot.StateType);
 	}
 
 	private bool HasPendingPureCombatContinuation()
@@ -3440,6 +3627,52 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			|| CombatManager.Instance.EndingPlayerTurnPhaseTwo
 			|| (!CombatManager.Instance.IsPlayPhase
 				&& (CombatManager.Instance.IsEnemyTurnStarted || combatState.CurrentSide == CombatSide.Enemy));
+	}
+
+	private async Task<FullRunSimulationStateSnapshot?> TryAdvanceCombatStartupPendingAsync(
+		string diagnosticsPrefix,
+		string? previousSignature)
+	{
+		string baselineSignature = previousSignature ?? string.Empty;
+		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 8 : 32;
+		for (int attempt = 0; attempt < maxAttempts; attempt++)
+		{
+			FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.combat_start_pending_yield_iterations");
+			if (CombatSimulationRuntime.IsPureCombatSimulator)
+			{
+				await CombatSimulationRuntime.Clock.YieldAsync();
+				await Task.Yield();
+			}
+			else
+			{
+				await Task.Yield();
+			}
+
+			if (RunManager.Instance.IsInProgress)
+			{
+				Task execTask = RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+				if (execTask.IsCompleted)
+				{
+					await execTask;
+				}
+			}
+
+			ObservedState observed = ObserveState();
+			bool signatureChanged = previousSignature == null
+				|| !string.Equals(observed.Signature, baselineSignature, StringComparison.Ordinal);
+			if (signatureChanged && IsReadySnapshot(observed.Snapshot))
+			{
+				FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.combat_start_pending_yield_hits");
+				return observed.Snapshot;
+			}
+			if (!IsCombatStartPendingState(observed.Snapshot.StateType))
+			{
+				break;
+			}
+		}
+
+		FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.combat_start_pending_yield_exhausted");
+		return null;
 	}
 
 	private async Task<FullRunSimulationStateSnapshot?> TryAdvancePendingCombatContinuationAsync(

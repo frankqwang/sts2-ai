@@ -7,6 +7,8 @@
 当前主线已经切到 `main_attention + multi_process + no-MCTS` 路线，训练/诊断/日志链路都围绕这条线展开。最新接手说明放在：
 
 - [STS2AI/docs/当前训练主线与接手说明_2026-04-14.md](STS2AI/docs/当前训练主线与接手说明_2026-04-14.md)
+- [STS2AI/docs/review_summary_2026-04-14_teacherloop_phase1.md](STS2AI/docs/review_summary_2026-04-14_teacherloop_phase1.md)
+- [STS2AI/docs/training_process_and_params_2026-04-14.md](STS2AI/docs/training_process_and_params_2026-04-14.md)
 
 如果只需要一个可直接复现的恢复点，优先使用：
 
@@ -68,6 +70,8 @@ python -m pytest STS2AI/Python/test_training_smoke.py -q
 ```powershell
 python STS2AI/Python/train_hybrid.py `
   --config STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml `
+  --output-dir STS2AI/Artifacts/hybrid_training_main_attention `
+  --run-tag acttransitionfix_resume2275 `
   --resume STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt `
   --max-iterations 5 `
   --save-interval 5 `
@@ -82,6 +86,9 @@ python STS2AI/Python/train_hybrid.py `
 - 默认环境参数仍来自 `STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml`
 - 目前实验节奏用 `--max-iterations 5 --save-interval 5` 做短窗口复盘
 - `--act1-no-elite-routes`、boss 条件化选卡、combat safety rerank 是当前主线的一部分
+- `--output-dir` 现在只表示实验族根目录，例如 `STS2AI/Artifacts/hybrid_training_main_attention`
+- `--run-tag` 用来放这次改造标签，例如 `acttransitionfix_resume2275`
+- 每次实际 run 子目录统一为 `时间_环境数_标签`，例如 `20260414-110316_4env_acttransitionfix_resume2275`
 
 训练产物默认输出到 `STS2AI/Artifacts/` 下对应 run 目录。当前主线的详细参数、输出目录和分析脚本请看接手说明。
 

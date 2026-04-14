@@ -42,8 +42,8 @@ OP_EXPORT_STATE = 0x0D
 OP_IMPORT_STATE = 0x0E
 OP_SKIP_COMBAT = 0x0F
 OP_SEARCH_COMBAT_MCTS = 0x10
-PROTOCOL_VERSION = 10
-BINARY_SCHEMA_HASH = "sts2-binary-schema-2026-04-13c"
+PROTOCOL_VERSION = 11
+BINARY_SCHEMA_HASH = "sts2-binary-schema-2026-04-14-pending-split"
 
 STATE_TYPES = {
     0: "other",
@@ -56,7 +56,7 @@ STATE_TYPES = {
     7: "monster",
     8: "elite",
     9: "boss",
-    10: "combat_pending",
+    10: "combat_post_end_pending",
     11: "combat_rewards",
     12: "card_reward",
     13: "card_select",
@@ -64,6 +64,7 @@ STATE_TYPES = {
     15: "hand_select",
     16: "game_over",
     17: "rewards",
+    18: "combat_start_pending",
 }
 
 RUN_OUTCOMES = {0: None, 1: "victory", 2: "defeat"}

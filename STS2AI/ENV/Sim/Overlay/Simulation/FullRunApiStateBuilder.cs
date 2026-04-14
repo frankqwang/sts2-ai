@@ -95,6 +95,16 @@ public static class FullRunApiStateBuilder
 			case "combat_rewards":
 				state.rewards = BuildRewardsState(bridgeSnapshots.RewardSelection, GetPlayerState());
 				break;
+			case "combat_post_end_pending":
+				if (bridgeSnapshots.RewardSelection != null)
+				{
+					state.rewards = BuildRewardsState(bridgeSnapshots.RewardSelection, GetPlayerState());
+				}
+				else if (bridgeSnapshots.CardRewardSelection != null)
+				{
+					state.card_reward = BuildCardRewardState(bridgeSnapshots.CardRewardSelection, GetPlayerState());
+				}
+				break;
 			case "card_reward":
 				state.card_reward = BuildCardRewardState(bridgeSnapshots.CardRewardSelection, GetPlayerState());
 				break;

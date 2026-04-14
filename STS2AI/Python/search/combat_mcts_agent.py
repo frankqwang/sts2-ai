@@ -415,10 +415,8 @@ class HttpCombatForwardModel:
 # Pipe-based forward model (FAST — production MCTS)
 # ---------------------------------------------------------------------------
 
-# Screen types where combat is still active.
-# `combat_pending` is an async transition state inside the combat lifecycle, not
-# a post-combat victory screen. Treating it as terminal causes MCTS to
-# hallucinate immediate wins after ordinary actions.
+# Screen types where combat is still active for tree search purposes.
+# Startup pending is still inside the combat lifecycle; post-end pending is not.
 _COMBAT_ACTIVE_STATES = {
     "combat",
     "monster",
@@ -427,6 +425,7 @@ _COMBAT_ACTIVE_STATES = {
     "hand_select",
     "card_select",
     "combat_pending",
+    "combat_start_pending",
 }
 
 

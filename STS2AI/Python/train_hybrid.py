@@ -28,6 +28,7 @@ import atexit
 import json
 import logging
 import random
+import re
 import signal
 import sqlite3
 import sys
@@ -86,10 +87,16 @@ from core.combat_nn import (
 from search.mcts_core import MCTSConfig, action_key, mcts_search
 from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
 from full_run_env import ApiBackedFullRunClient, PipeBackedFullRunClient, create_full_run_client
-from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from headless_sim_runner import DEFAULT_DLL_PATH, stop_process
+from ipc.sim_host_lifecycle import SimHostLifecycleManager, transport_launch_protocol
 from sts2ai_paths import ARTIFACTS_ROOT, DATASETS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
 from training_health import TrainingHealthMonitor
 from episode_data_saver import EpisodeDataSaver
+from runtime.run_outcome_vocab import (
+    RUN_OUTCOME_DEATH,
+    RUN_OUTCOME_VICTORY,
+    normalize_run_outcome,
+)
 from runtime.full_run_action_semantics import (
     legal_action_name_set as _shared_legal_action_name_set,
     is_selection_screen as _shared_is_selection_screen,
@@ -109,12 +116,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+COMBAT_PENDING_STATE_TYPES = {
+    "combat_pending",
+    "combat_start_pending",
+    "combat_post_end_pending",
+}
+
 _shutdown_requested = False
 _TRACE_NAME_MAPS: dict[str, dict[str, str]] | None = None
 _RUNTIME_SKADA_PRIORS: Any | bool | None = None
 DEFAULT_REPO_ROOT = REPO_ROOT
 DEFAULT_OUTPUT_DIR = ARTIFACTS_ROOT / "hybrid_training"
-DEFAULT_MATCHUP_DATA_DIR = DATASETS_ROOT / "card_ranking_post_wizardly"
+DEFAULT_OFFLINE_NONCOMBAT_RANKING_DATA_DIR = DATASETS_ROOT / "offline_noncombat_ranking_post_wizardly"
+DEFAULT_MATCHUP_DATA_DIR = DEFAULT_OFFLINE_NONCOMBAT_RANKING_DATA_DIR
 DEFAULT_COMBAT_TEACHER_DATA = DATASETS_ROOT / "combat_teacher_post_wizardly" / "teacher.jsonl"
 
 # Backward-compatible config aliases for older opaque names. The right-hand side
@@ -238,8 +252,30 @@ def _lower_text(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def _is_combat_pending_state(state_type: Any) -> bool:
+    return _lower_text(state_type) in COMBAT_PENDING_STATE_TYPES
+
+
 def _optional_lock(lock: threading.Lock | None):
     return lock if lock is not None else nullcontext()
+
+
+def _sanitize_run_tag(tag: Any) -> str:
+    text = str(tag or "").strip().lower()
+    if not text:
+        return ""
+    text = text.replace("\\", "_").replace("/", "_").replace(" ", "_")
+    text = re.sub(r"[^a-z0-9._-]+", "_", text)
+    text = re.sub(r"_+", "_", text)
+    return text.strip("._-")
+
+
+def _build_run_output_dir_name(*, num_envs: int, timestamp: str, run_tag: str | None) -> str:
+    parts = [timestamp, f"{num_envs}env"]
+    sanitized_tag = _sanitize_run_tag(run_tag)
+    if sanitized_tag:
+        parts.append(sanitized_tag)
+    return "_".join(parts)
 
 
 def _advance_combat_pending_transition(
@@ -371,7 +407,7 @@ def _extract_terminal_outcome(state: dict[str, Any]) -> str:
         state.get("run_outcome"),
         state.get("outcome"),
     ):
-        text = _lower_text(value)
+        text = normalize_run_outcome(value, default="")
         if text:
             return text
     return ""
@@ -379,7 +415,7 @@ def _extract_terminal_outcome(state: dict[str, Any]) -> str:
 
 def _terminal_value_from_outcome(state: dict[str, Any], *, default_on_unknown: float = -1.0) -> float:
     outcome_text = _extract_terminal_outcome(state)
-    if "victory" in outcome_text or outcome_text == "win":
+    if outcome_text == RUN_OUTCOME_VICTORY:
         return 1.0
     if outcome_text:
         return -1.0
@@ -3079,6 +3115,9 @@ def collect_unified_episode(
             return ppo_buffer, [], stats
 
     prev_state = state
+    _resolved_seed = str(seed or ((state.get("run") or {}).get("seed") or "")).strip()
+    if _resolved_seed:
+        _episode_summary["seed"] = _resolved_seed
     in_combat = False
     _prev_combat_state = state  # init; updated when entering/during combat
     _hp_at_combat_start = 80  # init; updated when entering combat
@@ -3102,7 +3141,7 @@ def collect_unified_episode(
         current_floor = _safe_int(run.get("floor", 0), 0)
         if st != "menu":
             _has_entered_run = True
-        if st == "combat_pending":
+        if _is_combat_pending_state(st):
             stats["combat_pending_steps"] = _safe_int(stats.get("combat_pending_steps", 0), 0) + 1
             _episode_summary["counters"]["combat_pending_steps"] += 1
             if _combat_pending_streak == 0:
@@ -3130,7 +3169,7 @@ def collect_unified_episode(
         # Terminal
         if _is_episode_terminal_state(state, has_entered_run=_has_entered_run):
             terminal_value = _terminal_value_from_outcome(state, default_on_unknown=-1.0)
-            stats["outcome"] = "victory" if terminal_value > 0 else "death"
+            stats["outcome"] = RUN_OUTCOME_VICTORY if terminal_value > 0 else RUN_OUTCOME_DEATH
             stats["end_reason"] = "terminal"
             _p = (state.get("player") or {})
             # Track death info
@@ -3283,7 +3322,7 @@ def collect_unified_episode(
                     continue
 
         if not legal:
-            if st == "combat_pending":
+            if _is_combat_pending_state(st):
                 try:
                     if _current_reward_claim_count is not None:
                         _last_reward_claim_count = _current_reward_claim_count
@@ -3403,7 +3442,7 @@ def collect_unified_episode(
                     _last_reward_claim_count = _current_reward_claim_count
                 stats["wait_steps"] = _safe_int(stats.get("wait_steps", 0), 0) + 1
                 _episode_summary["counters"]["wait_steps"] += 1
-                if st == "combat_pending":
+                if _is_combat_pending_state(st):
                     stats["combat_pending_wait_steps"] = _safe_int(stats.get("combat_pending_wait_steps", 0), 0) + 1
                     _episode_summary["counters"]["combat_pending_wait_steps"] += 1
                     if _episode_summary["counters"]["combat_pending_wait_steps"] in (1, 5, 20, 100):
@@ -5013,6 +5052,16 @@ def main() -> int:
                         help="Resume MCTS only (standalone MCTS checkpoint)")
     parser.add_argument("--save-interval", type=int, default=25)
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument(
+        "--run-tag",
+        type=str,
+        default=None,
+        help=(
+            "Optional run label appended after the timestamp in the per-run output folder name. "
+            "Keep --output-dir as a stable experiment root; put short experiment notes such as "
+            "'acttransitionfix_resume2275' in --run-tag."
+        ),
+    )
     parser.add_argument("--multi-process", action="store_true",
                         help="Use multi-process workers + batch inference (bypasses GIL)")
     parser.add_argument("--deterministic-policy", action="store_true", default=False,
@@ -5071,9 +5120,9 @@ def main() -> int:
                         help="Add small immediate screen-local delta reward on legacy PPO path (default: True)")
     parser.add_argument("--no-screen-local-delta", dest="screen_local_delta", action="store_false")
 
-    # --- Matchup ranking data ---
+    # --- Offline non-combat ranking data (legacy internal name: matchup) ---
     parser.add_argument("--matchup-data-dir", "--offline-noncombat-ranking-data-dir",
-                        type=str, default=str(DEFAULT_MATCHUP_DATA_DIR),
+                        type=str, default=str(DEFAULT_OFFLINE_NONCOMBAT_RANKING_DATA_DIR),
                         help="Offline non-combat ranking dataset path (legacy name: matchup-data-dir)")
     parser.add_argument("--matchup-batch-size", "--offline-noncombat-ranking-batch-size",
                         type=int, default=32,
@@ -5213,12 +5262,21 @@ def main() -> int:
 
     # Output
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_dir = Path(args.output_dir) / f"hybrid_{args.num_envs}env_{timestamp}"
+    output_root = Path(args.output_dir)
+    run_dir_name = _build_run_output_dir_name(
+        num_envs=args.num_envs,
+        timestamp=timestamp,
+        run_tag=args.run_tag,
+    )
+    output_dir = output_root / run_dir_name
     output_dir.mkdir(parents=True, exist_ok=True)
     config_payload = vars(args).copy()
     for _key, _value in list(config_payload.items()):
         if isinstance(_value, Path):
             config_payload[_key] = str(_value)
+    config_payload["output_root"] = str(output_root)
+    config_payload["run_dir_name"] = run_dir_name
+    config_payload["run_tag_sanitized"] = _sanitize_run_tag(args.run_tag)
     config_payload["effective_counterfactual_scoring"] = effective_counterfactual_scoring
     config_payload["effective_counterfactual_weight"] = effective_counterfactual_weight
     if args.config:
@@ -5623,10 +5681,10 @@ def main() -> int:
             stop_process(spawned_env_procs.pop())
 
     if args.auto_launch:
-        if not use_pipe_transport:
+        launch_protocol = transport_launch_protocol(transport)
+        if launch_protocol is None:
             logger.warning("--auto-launch is only supported for pipe transports; ignoring for transport=%s", transport)
         else:
-            launch_protocol = "bin" if transport == "pipe-binary" else "json"
             atexit.register(_cleanup_spawned_envs)
             logger.info(
                 "Auto-launching %d fresh Sim hosts from %s on ports %s (%s)",
@@ -5635,15 +5693,14 @@ def main() -> int:
                 ",".join(str(port) for port in env_ports),
                 launch_protocol,
             )
-            for port in env_ports:
-                spawned_env_procs.append(
-                    start_headless_sim(
-                        port=port,
-                        repo_root=args.repo_root,
-                        dll_path=args.headless_dll,
-                        protocol=launch_protocol,
-                    )
-                )
+            host_manager = SimHostLifecycleManager(
+                ports=list(env_ports),
+                transport=transport,
+                auto_launch=True,
+                repo_root=args.repo_root,
+                dll_path=args.headless_dll,
+            )
+            spawned_env_procs.extend(host_manager.start())
 
     # Create persistent clients (one per env). PipeBackedFullRunClient
     # owns the pipe connection; MCTS reuses it via client._pipe.
@@ -6580,14 +6637,14 @@ def main() -> int:
                 combat_buffer.clear()  # discard combat data when frozen
 
             # --- Train matchup ranking (offline card ranking data) ---
-            matchup_rank_loss_val = 0.0
+            offline_noncombat_ranking_loss_val = 0.0
             if (matchup_dataset is not None
                     and iteration >= args.matchup_warmup_iters
                     and len(matchup_dataset) > 0
                     and not getattr(args, "freeze_ppo", False)):
                 ppo_net.train()
                 matchup_updates = max(1, int(getattr(args, "matchup_updates_per_iter", 1)))
-                matchup_rank_losses: list[float] = []
+                offline_noncombat_ranking_losses: list[float] = []
                 for _ in range(matchup_updates):
                     mb = matchup_dataset.sample_batch(args.matchup_batch_size, device=device)
                     if mb is None or "state_tensors" not in mb or "action_tensors" not in mb:
@@ -6611,9 +6668,11 @@ def main() -> int:
                     ppo_trainer.optimizer.zero_grad()
                     total_rloss.backward()
                     ppo_trainer.optimizer.step()
-                    matchup_rank_losses.append(rank_loss.item())
-                if matchup_rank_losses:
-                    matchup_rank_loss_val = float(sum(matchup_rank_losses) / len(matchup_rank_losses))
+                    offline_noncombat_ranking_losses.append(rank_loss.item())
+                if offline_noncombat_ranking_losses:
+                    offline_noncombat_ranking_loss_val = float(
+                        sum(offline_noncombat_ranking_losses) / len(offline_noncombat_ranking_losses)
+                    )
 
             # --- Train combat teacher (offline turn-solver teacher data) ---
             ct_loss_val = 0.0
@@ -6747,7 +6806,7 @@ def main() -> int:
                 "combat_ppo_clip_fraction": combat_ppo_metrics.get("combat_ppo_clip_fraction", 0),
                 "combat_ppo_approx_kl": combat_ppo_metrics.get("combat_ppo_approx_kl", 0),
                 "combat_ppo_early_stop": combat_ppo_metrics.get("combat_ppo_early_stop", 0),
-                "matchup_rank_loss": round(matchup_rank_loss_val, 6),
+                "offline_noncombat_ranking_loss": round(offline_noncombat_ranking_loss_val, 6),
                 "combat_teacher_loss": round(ct_loss_val, 6),
                 "combat_teacher_ce": round(ct_ce_val, 6),
                 "combat_teacher_rank": round(ct_rank_val, 6),
@@ -6840,7 +6899,7 @@ def main() -> int:
                 "Iter %3d | floor %.1f | vic %d/%d | boss %.0f%% act1 %.0f%% boss_hp %.2f deck@boss %.1f skip %.0f%% | ppo %d combat %d cppo %d | "
                 "pend r/w/stl %d/%d/%d | "
                 "ppo_pl %.4f ppo_vl %.4f ppo_ent %.3f ppo_clip %.2f ratio %.3f boss_r %.4f (w %.5f) | "
-                "search_pl %.4f search_vl %.4f | cppo_pl %.4f cppo_vl %.4f cbt_ent %.3f cppo_clip %.2f | "
+                "search_pl %.4f search_vl %.4f offr %.4f | cppo_pl %.4f cppo_vl %.4f cbt_ent %.3f cppo_clip %.2f | "
                 "rank[%s] a_gate %.4f s_gate %.4f | combat[%s] a_gate %.4f s_gate %.4f t_gate %.4f | %.0fs",
                 iteration, avg_floor, victories, args.episodes_per_iter,
                 boss_reach_rate * 100.0, act1_clear_rate * 100.0,
@@ -6853,6 +6912,7 @@ def main() -> int:
                 entry.get("ppo_clip_fraction", 0), entry.get("ppo_ratio_mean", 0),
                 entry["boss_readiness_loss"], entry.get("boss_readiness_weighted", 0),
                 entry["mcts_ploss"], entry["mcts_vloss"],
+                entry.get("offline_noncombat_ranking_loss", 0.0),
                 entry["combat_ppo_ploss"], entry["combat_ppo_vloss"],
                 entry["combat_entropy"], entry.get("combat_ppo_clip_fraction", 0),
                 entry.get("offline_noncombat_ranking_head_mode", "mlp"),

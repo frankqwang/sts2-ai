@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline dataset generator for card ranking via combat simulation.
+"""Offline dataset generator for non-combat ranking via branch rollout.
 
 At each card_reward screen during an episode, saves state, evaluates each
 option (take card A/B/C or skip) by playing forward through the next combat
@@ -10,14 +10,14 @@ the same built-in RNG state, so variance comes only from the card difference.
 
 Examples:
     # Generate dataset from 100 episodes
-    python generate_card_ranking_data.py \\
+    python generate_offline_noncombat_ranking_data.py \\
         --pipe --port 15527 --episodes 100 \\
-        --output STS2AI/Artifacts/card_ranking_v1/
+        --output STS2AI/Artifacts/offline_noncombat_ranking_v1/
 
     # With multiple parallel envs
-    python generate_card_ranking_data.py \\
+    python generate_offline_noncombat_ranking_data.py \\
         --pipe --start-port 15527 --num-envs 4 --episodes 200 \\
-        --output STS2AI/Artifacts/card_ranking_v1/
+        --output STS2AI/Artifacts/offline_noncombat_ranking_v1/
 """
 from __future__ import annotations
 
@@ -41,6 +41,7 @@ import random
 import threading
 import time
 import tempfile
+import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -53,6 +54,8 @@ from full_run_env import FullRunClientLike, create_full_run_client
 from test_simulator_consistency import COMBAT_TYPES
 from verify_save_load import choose_default_action
 from backends.full_run_backend import apply_backend_action
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH
+from ipc.sim_host_lifecycle import SimHostLifecycleManager
 from runtime.full_run_action_semantics import (
     RolloutDecision,
     choose_auto_progress_action,
@@ -60,6 +63,7 @@ from runtime.full_run_action_semantics import (
     claim_reward_action_count,
     next_reward_claim_signature,
 )
+from runtime.run_outcome_vocab import RUN_OUTCOME_DEATH, RUN_OUTCOME_TIMEOUT, RUN_OUTCOME_VICTORY, is_failure_outcome, normalize_run_outcome
 from card_reward_tree import RewardTreeConfig, evaluate_card_reward_tree
 from map_route_tree import MapRouteConfig, evaluate_map_route_tree
 from noncombat_deterministic import (
@@ -73,6 +77,83 @@ from data.derived.build_rl_views import build_ranking_view
 from data.derived.build_llm_views import build_preference_pair_view
 from sts2ai_paths import ARTIFACTS_ROOT
 
+
+def _peek_config_path(argv: list[str]) -> str | None:
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", type=str, default=None)
+    known, _unknown = pre_parser.parse_known_args(argv)
+    return known.config
+
+
+def _flatten_config_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+    flat: dict[str, Any] = {}
+
+    def _visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if isinstance(value, dict):
+                _visit(value)
+            else:
+                flat[str(key).replace("-", "_")] = value
+
+    _visit(payload)
+    return flat
+
+
+def _load_generator_config(path: str | Path | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    config_path = Path(path)
+    payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Config root must be a TOML table: {config_path}")
+    return _flatten_config_mapping(payload)
+
+
+def _load_seed_list(path_like: str | Path, *, limit: int = 0) -> list[str]:
+    path = Path(path_like)
+    if not path.exists():
+        raise FileNotFoundError(f"Seed file not found: {path}")
+    text = path.read_text(encoding="utf-8-sig").strip()
+    if not text:
+        return []
+    seeds: list[str] = []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        for key in ("seeds", "items", "entries", "queue"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                payload = value
+                break
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                seed = str(item.get("seed") or "").strip()
+                if seed:
+                    seeds.append(seed)
+            else:
+                seed = str(item).strip()
+                if seed:
+                    seeds.append(seed)
+    else:
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                seeds.append(stripped)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for seed in seeds:
+        if seed and seed not in seen:
+            seen.add(seed)
+            ordered.append(seed)
+    if limit > 0:
+        ordered = ordered[:limit]
+    return ordered
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -84,6 +165,9 @@ class CombatOutcome:
     hp_lost: int
     turns: int
     terminal_state_type: str
+    end_floor: int = 0
+    boss_reached: bool = False
+    run_outcome: str | None = None
 
 
 @dataclass
@@ -115,6 +199,7 @@ class EpisodeGenerationSummary:
     sample_count: int
     end_floor: int
     boss_reached: bool
+    act1_cleared: bool
     outcome: str
     map_decisions_seen: int = 0
     map_samples_recorded: int = 0
@@ -141,6 +226,13 @@ def _sha256_file(path_like: str | Path | None) -> str | None:
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
 
 
 def _build_stats(
@@ -233,6 +325,7 @@ def _build_stats(
             for k, v in sorted(outcome_counts.items(), key=lambda kv: kv[0])
         }
         stats["episodes_boss_reached"] = int(sum(1 for log in episode_logs if log.get("boss_reached")))
+        stats["episodes_act1_cleared"] = int(sum(1 for log in episode_logs if log.get("act1_cleared")))
         stats["map_decisions_seen"] = int(map_decisions_seen)
         stats["map_samples_recorded"] = int(map_samples_recorded)
         stats["card_reward_decisions_seen"] = int(card_reward_decisions_seen)
@@ -594,6 +687,13 @@ def _did_reach_boss(state: dict[str, Any]) -> bool:
     return st == "boss" or _extract_floor(state) >= 16
 
 
+def _did_clear_act1(state: dict[str, Any]) -> bool:
+    run = state.get("run") if isinstance(state.get("run"), dict) else {}
+    act = _safe_int(run.get("act", 0), 0)
+    floor = _extract_floor(state)
+    return act > 1 or floor >= 18
+
+
 def _build_raw_branch_record(
     *,
     seed: str,
@@ -777,6 +877,7 @@ def _resolve_best_card_reward_choice(
     rerun_low_spread_threshold: float,
     rerun_max_combats: int,
     rerun_max_steps: int,
+    rollout_goal: str,
     label_mode: str,
     reward_tree_config: RewardTreeConfig | None,
     use_local_ort_rollout: bool,
@@ -838,6 +939,7 @@ def _resolve_best_card_reward_choice(
                 combat_evaluator=combat_evaluator,
                 ppo_policy=ppo_policy,
                 debug_rollout_trace_dir=None,
+                rollout_goal=rollout_goal,
                 max_combats=rollout_max_combats,
                 max_steps=rollout_max_steps,
                 use_local_ort_rollout=use_local_ort_rollout,
@@ -862,6 +964,7 @@ def _resolve_best_card_reward_choice(
                     combat_evaluator=combat_evaluator,
                     ppo_policy=ppo_policy,
                     debug_rollout_trace_dir=None,
+                    rollout_goal=rollout_goal,
                     max_combats=rerun_max_combats,
                     max_steps=rerun_max_steps,
                     use_local_ort_rollout=use_local_ort_rollout,
@@ -869,6 +972,12 @@ def _resolve_best_card_reward_choice(
                     trace_store=None,
                 )
                 scores = compute_option_scores(outcomes, max_hp=max(hp_before, 1))
+        restored_state = client.import_state(snapshot_path)
+        restored_state_type = str(restored_state.get("state_type") or "").strip().lower()
+        if restored_state_type != "card_reward":
+            raise RuntimeError(
+                f"_resolve_best_card_reward_choice expected restore to card_reward, got {restored_state_type or 'unknown'}"
+            )
     best_idx = int(max(range(len(scores)), key=lambda i: scores[i]))
     return options[best_idx]["action"], float(scores[best_idx])
 
@@ -1145,6 +1254,7 @@ def play_forward_multi_combat(
     client: FullRunClientLike,
     hp_at_start: int,
     rng: random.Random | None = None,
+    rollout_goal: str = "terminal",
     max_combats: int = 3,
     max_steps: int = 500,
     combat_evaluator: Any | None = None,
@@ -1153,19 +1263,12 @@ def play_forward_multi_combat(
     use_local_ort_rollout: bool = False,
     local_ort_max_combat_steps: int = 600,
 ) -> CombatOutcome:
-    """Play forward through up to N combats, accumulating HP loss.
-
-    Evaluates the card's impact across multiple fights, not just one.
-    More combats = more signal, less noise from single-fight variance.
-
-    Returns a single CombatOutcome summarizing the multi-combat run:
-      - won: survived all combats within max_steps
-      - hp_after: HP at end of evaluation
-      - hp_lost: total HP lost across all combats
-      - turns: total turns across all combats
-    """
+    """Play forward until the configured rollout goal is reached."""
     if rng is None:
         rng = random.Random(42)
+    normalized_goal = str(rollout_goal or "combat_horizon").strip().lower()
+    if normalized_goal not in {"combat_horizon", "boss_reached_or_terminal", "terminal"}:
+        raise ValueError(f"Unsupported rollout_goal: {rollout_goal}")
 
     state = client.get_state()
     in_combat = False
@@ -1178,6 +1281,9 @@ def play_forward_multi_combat(
     for step_idx in range(max_steps):
         st = str(state.get("state_type") or "")
         terminal = state.get("terminal", False)
+        current_floor = _extract_floor(state)
+        current_run_outcome = state.get("run_outcome")
+        current_boss_reached = _did_reach_boss(state)
 
         if trace_sink is not None:
             trace_sink.append(
@@ -1203,12 +1309,41 @@ def play_forward_multi_combat(
                 hp_lost=total_hp_lost,
                 turns=total_turns,
                 terminal_state_type=st,
+                end_floor=current_floor,
+                boss_reached=current_boss_reached,
+                run_outcome=(str(current_run_outcome) if current_run_outcome is not None else None),
             )
             if trace_sink is not None:
                 trace_sink.append(
                     {
                         "kind": "terminal",
                         "step_index": int(step_idx),
+                        "outcome": asdict(outcome),
+                    }
+                )
+            return outcome
+
+        if normalized_goal == "boss_reached_or_terminal" and current_boss_reached:
+            hp_now = _extract_player_hp(state)
+            if in_combat:
+                total_hp_lost += max(0, combat_entry_hp - hp_now)
+                total_turns += current_turns
+            outcome = CombatOutcome(
+                won=False,
+                hp_after=hp_now,
+                hp_lost=total_hp_lost,
+                turns=total_turns,
+                terminal_state_type="boss_reached",
+                end_floor=current_floor,
+                boss_reached=True,
+                run_outcome=(str(current_run_outcome) if current_run_outcome is not None else None),
+            )
+            if trace_sink is not None:
+                trace_sink.append(
+                    {
+                        "kind": "goal_reached",
+                        "step_index": int(step_idx),
+                        "goal": normalized_goal,
                         "outcome": asdict(outcome),
                     }
                 )
@@ -1249,6 +1384,9 @@ def play_forward_multi_combat(
                         hp_lost=total_hp_lost,
                         turns=total_turns,
                         terminal_state_type=str(state.get("state_type") or "game_over"),
+                        end_floor=_extract_floor(state),
+                        boss_reached=_did_reach_boss(state),
+                        run_outcome=(str(state.get("run_outcome")) if state.get("run_outcome") is not None else None),
                     )
                     if trace_sink is not None:
                         trace_sink.append(
@@ -1259,13 +1397,16 @@ def play_forward_multi_combat(
                             }
                         )
                     return outcome
-                if combats_completed >= max_combats:
+                if normalized_goal == "combat_horizon" and combats_completed >= max_combats:
                     outcome = CombatOutcome(
                         won=True,
                         hp_after=hp_now,
                         hp_lost=total_hp_lost,
                         turns=total_turns,
                         terminal_state_type=f"completed_{combats_completed}_combats",
+                        end_floor=_extract_floor(state),
+                        boss_reached=_did_reach_boss(state),
+                        run_outcome=(str(state.get("run_outcome")) if state.get("run_outcome") is not None else None),
                     )
                     if trace_sink is not None:
                         trace_sink.append(
@@ -1291,13 +1432,16 @@ def play_forward_multi_combat(
             combats_completed += 1
             in_combat = False
 
-            if combats_completed >= max_combats:
+            if normalized_goal == "combat_horizon" and combats_completed >= max_combats:
                 outcome = CombatOutcome(
                     won=True,
                     hp_after=hp_now,
                     hp_lost=total_hp_lost,
                     turns=total_turns,
                     terminal_state_type=f"completed_{combats_completed}_combats",
+                    end_floor=_extract_floor(state),
+                    boss_reached=_did_reach_boss(state),
+                    run_outcome=(str(state.get("run_outcome")) if state.get("run_outcome") is not None else None),
                 )
                 if trace_sink is not None:
                     trace_sink.append(
@@ -1347,11 +1491,14 @@ def play_forward_multi_combat(
         total_hp_lost += max(0, combat_entry_hp - hp_now)
         total_turns += current_turns
     outcome = CombatOutcome(
-        won=(combats_completed > 0),
+        won=(str(state.get("run_outcome") or "").lower() == "victory"),
         hp_after=hp_now,
         hp_lost=total_hp_lost,
         turns=total_turns,
         terminal_state_type=f"timeout_after_{combats_completed}_combats",
+        end_floor=_extract_floor(state),
+        boss_reached=_did_reach_boss(state),
+        run_outcome=(str(state.get("run_outcome")) if state.get("run_outcome") is not None else None),
     )
     if trace_sink is not None:
         trace_sink.append(
@@ -1369,17 +1516,13 @@ def compute_option_scores(
     outcomes: dict[int, CombatOutcome],
     max_hp: int = 80,
 ) -> list[float]:
-    """Compute ranking scores from multi-combat outcomes.
+    """Compute boss-oriented ranking scores from branch outcomes.
 
-    Three-component scoring that captures both survival and efficiency:
-      - survival (40%): did you survive + how much HP preserved
-      - hp_efficiency (40%): HP after / max_hp (continuous, always differentiating)
-      - speed (20%): fewer total turns is better
-
-    This scoring ensures:
-      - Dying is always worse than surviving
-      - Among survivors, less HP lost is better
-      - Among equal HP, faster is better
+    Goal order:
+    1. Win the act / run.
+    2. If not winning, prefer branches that at least reach the boss.
+    3. Among boss-loss branches, prefer deeper progress with less cumulative HP bleed.
+    4. Only use speed as a weak tie-breaker.
     """
     scores = []
     max_idx = max(outcomes.keys()) + 1
@@ -1390,18 +1533,27 @@ def compute_option_scores(
             scores.append(0.0)
             continue
 
-        # Survival: 1.0 if won at least some combats, 0.0 if died immediately
-        survival = 1.0 if outcome.won else 0.0
-
-        # HP efficiency: continuous signal even when all options survive
-        # Uses hp_after directly for fine-grained differentiation
+        run_outcome = normalize_run_outcome(outcome.run_outcome, default="")
+        victory = 1.0 if run_outcome == RUN_OUTCOME_VICTORY else 0.0
+        boss_reached = 1.0 if outcome.boss_reached else 0.0
+        floor_progress = min(max(int(outcome.end_floor), 0), 18) / 18.0
         hp_ratio = max(0, outcome.hp_after) / max(1, max_hp)
-
-        # Speed: fewer turns = better (normalize by ~30 turns for multi-combat)
+        hp_loss_efficiency = max(0.0, 1.0 - (max(0, outcome.hp_lost) / max(1.0, float(max_hp) * 3.0)))
         max_expected_turns = 30.0
-        speed = max(0, 1.0 - outcome.turns / max_expected_turns) if outcome.won else 0.0
+        speed = max(0.0, 1.0 - outcome.turns / max_expected_turns)
+        boss_loss_bonus = boss_reached * (1.0 - victory)
+        preboss_defeat_penalty = 1.0 if is_failure_outcome(run_outcome) and boss_reached <= 0.0 else 0.0
 
-        score = 0.4 * survival + 0.4 * hp_ratio + 0.2 * speed
+        score = (
+            1.6 * victory
+            + 0.7 * boss_reached
+            + 0.45 * floor_progress
+            + 0.15 * hp_ratio
+            + 0.30 * hp_loss_efficiency
+            + 0.10 * boss_loss_bonus * hp_loss_efficiency
+            + 0.03 * speed
+            - 0.15 * preboss_defeat_penalty
+        )
         scores.append(round(score, 4))
 
     return scores
@@ -1426,6 +1578,7 @@ def _evaluate_branch_outcomes(
     combat_evaluator: Any | None,
     ppo_policy: Any | None,
     debug_rollout_trace_dir: str | None,
+    rollout_goal: str,
     max_combats: int,
     max_steps: int,
     use_local_ort_rollout: bool,
@@ -1442,6 +1595,7 @@ def _evaluate_branch_outcomes(
                 client,
                 hp_before,
                 rng=combat_rng,
+                rollout_goal=rollout_goal,
                 max_combats=max_combats,
                 max_steps=max_steps,
                 combat_evaluator=combat_evaluator,
@@ -1472,6 +1626,9 @@ def _evaluate_branch_outcomes(
                 hp_lost=hp_before,
                 turns=0,
                 terminal_state_type=f"error:{exc}",
+                end_floor=int(floor),
+                boss_reached=False,
+                run_outcome="error",
             )
     return combat_outcomes
 
@@ -1500,12 +1657,14 @@ def generate_from_episode(
     rerun_low_spread_threshold: float = 0.0,
     rerun_max_combats: int = 5,
     rerun_max_steps: int = 900,
+    rollout_goal: str = "terminal",
     label_mode: str = "single_step",
     reward_tree_config: RewardTreeConfig | None = None,
     map_route_config: MapRouteConfig | None = None,
     use_local_ort_rollout: bool = False,
     local_ort_max_combat_steps: int = 600,
     stop_floor: int | None = None,
+    sample_types: set[str] | None = None,
 ) -> tuple[list[CardRankingSample], EpisodeGenerationSummary, list[dict[str, Any]]]:
     """Run one episode, intercept card_reward screens, evaluate each option."""
     samples: list[CardRankingSample] = []
@@ -1521,6 +1680,8 @@ def generate_from_episode(
     card_reward_samples_recorded = 0
     sampling_skip_reasons: Counter[str] = Counter()
 
+    enabled_sample_types = {str(sample_type).strip().lower() for sample_type in (sample_types or {"map", "card_reward"})}
+
     for step_i in range(max_steps):
         st = str(state.get("state_type") or "")
         if state.get("terminal"):
@@ -1530,7 +1691,7 @@ def generate_from_episode(
             break
         boss_reached = boss_reached or _did_reach_boss(state)
 
-        if st == "map" and map_route_config is not None:
+        if st == "map" and "map" in enabled_sample_types and map_route_config is not None:
             map_options = _extract_map_options(state)
             if len(map_options) >= 2:
                 map_decisions_seen += 1
@@ -1568,6 +1729,7 @@ def generate_from_episode(
                             rerun_low_spread_threshold=rerun_low_spread_threshold,
                             rerun_max_combats=rerun_max_combats,
                             rerun_max_steps=rerun_max_steps,
+                            rollout_goal=rollout_goal,
                             label_mode=label_mode,
                             reward_tree_config=reward_tree_config,
                             use_local_ort_rollout=use_local_ort_rollout,
@@ -1660,7 +1822,7 @@ def generate_from_episode(
                 )
                 continue
 
-        if st == "card_reward":
+        if st == "card_reward" and "card_reward" in enabled_sample_types:
             options = _extract_card_reward_options(state)
             if len(options) >= 2:
                 card_reward_decisions_seen += 1
@@ -1679,9 +1841,11 @@ def generate_from_episode(
                 card_reward_handled = False
                 tree_result = None
                 option_traces: dict[int, list[dict[str, Any]]] = {}
+                continuation_state_id: str | None = None
                 with tempfile.TemporaryDirectory(prefix=f"sts2_card_reward_f{int(floor):02d}_") as tmpdir:
                     snapshot_path = str(Path(tmpdir) / "branch_snapshot.json")
                     try:
+                        continuation_state_id = client.save_state()
                         client.export_state(snapshot_path)
                         if label_mode == "reward_tree" and reward_tree_config is not None:
                             tree_result = evaluate_card_reward_tree(
@@ -1728,6 +1892,7 @@ def generate_from_episode(
                                 combat_evaluator=combat_evaluator,
                                 ppo_policy=ppo_policy,
                                 debug_rollout_trace_dir=debug_rollout_trace_dir,
+                                rollout_goal=rollout_goal,
                                 max_combats=rollout_max_combats,
                                 max_steps=rollout_max_steps,
                                 use_local_ort_rollout=use_local_ort_rollout,
@@ -1752,6 +1917,7 @@ def generate_from_episode(
                                     combat_evaluator=combat_evaluator,
                                     ppo_policy=ppo_policy,
                                     debug_rollout_trace_dir=debug_rollout_trace_dir,
+                                    rollout_goal=rollout_goal,
                                     max_combats=rerun_max_combats,
                                     max_steps=rerun_max_steps,
                                     use_local_ort_rollout=use_local_ort_rollout,
@@ -1759,10 +1925,15 @@ def generate_from_episode(
                                     trace_store=option_traces,
                                 )
 
-                        state = client.import_state(snapshot_path)
-                        card_reward_handled = True
+                        if continuation_state_id:
+                            restored_state = client.load_state(continuation_state_id)
+                            if str(restored_state.get("state_type") or "").strip().lower() == "card_reward":
+                                state = restored_state
+                                card_reward_handled = True
                     except Exception:
                         card_reward_handled = False
+                    finally:
+                        pass
 
                 if card_reward_handled:
                     scores = tree_result.scores if tree_result is not None else compute_option_scores(combat_outcomes, max_hp=max(hp_before, 1))
@@ -1815,6 +1986,11 @@ def generate_from_episode(
                     )
 
                     best_action = options[best_idx]["action"]
+                    live_state = client.get_state()
+                    if str(live_state.get("state_type") or "").strip().lower() != "card_reward":
+                        final_status = "post_card_reward_restore_failed"
+                        state = live_state
+                        break
                     card_reward_samples_recorded += 1
                     state = _apply_action_and_advance(
                         client,
@@ -1827,6 +2003,11 @@ def generate_from_episode(
                         local_ort_max_combat_steps=local_ort_max_combat_steps,
                         stop_floor=stop_floor,
                     )
+                    if continuation_state_id:
+                        try:
+                            client.delete_state(continuation_state_id)
+                        except Exception:
+                            pass
                     continue
 
                 # Save one snapshot PER option so each state_id is loaded
@@ -1835,6 +2016,13 @@ def generate_from_episode(
                 # state has drifted triggers a signature mismatch error.
                 num_saves = len(options) + 1  # +1 for the restore-to-continue save
                 state_ids: list[str] = []
+                if continuation_state_id:
+                    try:
+                        restored_state = client.load_state(continuation_state_id)
+                        if isinstance(restored_state, dict):
+                            state = restored_state
+                    except Exception:
+                        pass
                 try:
                     for _ in range(num_saves):
                         state_ids.append(client.save_state())
@@ -1888,6 +2076,7 @@ def generate_from_episode(
                     combat_evaluator=combat_evaluator,
                     ppo_policy=ppo_policy,
                     debug_rollout_trace_dir=debug_rollout_trace_dir,
+                    rollout_goal=rollout_goal,
                     max_combats=rollout_max_combats,
                     max_steps=rollout_max_steps,
                     use_local_ort_rollout=use_local_ort_rollout,
@@ -1912,6 +2101,7 @@ def generate_from_episode(
                         combat_evaluator=combat_evaluator,
                         ppo_policy=ppo_policy,
                         debug_rollout_trace_dir=debug_rollout_trace_dir,
+                        rollout_goal=rollout_goal,
                         max_combats=rerun_max_combats,
                         max_steps=rerun_max_steps,
                         use_local_ort_rollout=use_local_ort_rollout,
@@ -1919,13 +2109,19 @@ def generate_from_episode(
                         trace_store=option_traces,
                     )
 
-                # Restore to original state using the last (unused) save
+                # Restore to original state using the last (unused) save.
+                # Keep that continuation snapshot alive until after we apply the
+                # chosen card; deleting the active loaded state before stepping
+                # leaves the backend out of sync with the local `state` dict.
+                continuation_sid = state_ids[-1] if state_ids else None
                 try:
-                    client.load_state(state_ids[-1])
+                    if continuation_sid:
+                        state = client.load_state(continuation_sid)
                 except Exception:
                     pass
-                # Clean up all snapshots
-                for sid in state_ids:
+                # Clean up branch-only snapshots, but keep the continuation one
+                # until the selected reward action has been applied.
+                for sid in state_ids[:-1]:
                     try:
                         client.delete_state(sid)
                     except Exception:
@@ -1978,6 +2174,11 @@ def generate_from_episode(
 
                 # Continue episode: select best option
                 best_action = options[best_idx]["action"]
+                live_state = client.get_state()
+                if str(live_state.get("state_type") or "").strip().lower() != "card_reward":
+                    final_status = "post_card_reward_restore_failed"
+                    state = live_state
+                    break
                 card_reward_samples_recorded += 1
                 state = _apply_action_and_advance(
                     client,
@@ -1990,6 +2191,16 @@ def generate_from_episode(
                     local_ort_max_combat_steps=local_ort_max_combat_steps,
                     stop_floor=stop_floor,
                 )
+                if continuation_sid:
+                    try:
+                        client.delete_state(continuation_sid)
+                    except Exception:
+                        pass
+                if continuation_state_id:
+                    try:
+                        client.delete_state(continuation_state_id)
+                    except Exception:
+                        pass
                 continue
             sampling_skip_reasons["invalid_card_reward_options"] += 1
             legal = state.get("legal_actions") or []
@@ -2076,13 +2287,16 @@ def generate_from_episode(
     if final_status == "floor_cap":
         final_outcome = "floor_cap"
     else:
-        final_outcome = str(state.get("run_outcome") or ("timeout" if final_status == "timeout" else "death")).lower()
+        final_outcome = normalize_run_outcome(
+            state.get("run_outcome") or (RUN_OUTCOME_TIMEOUT if final_status == "timeout" else RUN_OUTCOME_DEATH)
+        )
     summary = EpisodeGenerationSummary(
         seed=seed,
         status=final_status,
         sample_count=len(samples),
         end_floor=_extract_floor(state),
         boss_reached=boss_reached or _did_reach_boss(state),
+        act1_cleared=_did_clear_act1(state),
         outcome=final_outcome,
         map_decisions_seen=int(map_decisions_seen),
         map_samples_recorded=int(map_samples_recorded),
@@ -2333,12 +2547,14 @@ def _generate_episode_batch(
     rerun_low_spread_threshold: float = 0.0,
     rerun_max_combats: int = 5,
     rerun_max_steps: int = 900,
+    rollout_goal: str = "terminal",
     label_mode: str = "single_step",
     reward_tree_config: RewardTreeConfig | None = None,
     map_route_config: MapRouteConfig | None = None,
     use_local_ort_rollout: bool = False,
     local_ort_model_path: str | None = None,
     local_ort_max_combat_steps: int = 600,
+    sample_types: set[str] | None = None,
 ) -> tuple[list[CardRankingSample], list[dict[str, Any]], list[dict[str, Any]]]:
     generator_config = {
         "transport": str(transport),
@@ -2352,6 +2568,7 @@ def _generate_episode_batch(
         "rerun_low_spread_threshold": float(rerun_low_spread_threshold),
         "rerun_max_combats": int(rerun_max_combats),
         "rerun_max_steps": int(rerun_max_steps),
+        "rollout_goal": str(rollout_goal),
         "label_mode": str(label_mode),
         "map_max_depth": int(map_route_config.max_map_depth) if map_route_config is not None else 0,
         "map_beam_width": int(map_route_config.beam_width) if map_route_config is not None else 0,
@@ -2363,6 +2580,7 @@ def _generate_episode_batch(
         "episode_stop_floor": int(map_route_config.stop_floor) if map_route_config is not None and map_route_config.stop_floor is not None else None,
         "tree_max_reward_depth": int(reward_tree_config.max_reward_depth) if reward_tree_config is not None else 0,
         "tree_beam_width": int(reward_tree_config.beam_width) if reward_tree_config is not None else 0,
+        "tree_route_search": bool(reward_tree_config.enable_route_search) if reward_tree_config is not None else False,
         "tree_advance_max_steps": int(reward_tree_config.advance_max_steps) if reward_tree_config is not None else 0,
         "tree_local_weight": float(reward_tree_config.blend_local_weight) if reward_tree_config is not None else None,
         "tree_max_option_seconds": (
@@ -2376,6 +2594,7 @@ def _generate_episode_batch(
         "local_ort_rollout": bool(use_local_ort_rollout),
         "local_ort_model_path": local_ort_model_path,
         "local_ort_max_combat_steps": int(local_ort_max_combat_steps),
+        "sample_types": sorted(str(sample_type).strip().lower() for sample_type in (sample_types or {"map", "card_reward"})),
     }
     client = _build_client(port, transport)
     combat_evaluator = _load_combat_evaluator(checkpoint_path, combat_checkpoint_path)
@@ -2408,12 +2627,14 @@ def _generate_episode_batch(
                 rerun_low_spread_threshold=rerun_low_spread_threshold,
                 rerun_max_combats=rerun_max_combats,
                 rerun_max_steps=rerun_max_steps,
+                rollout_goal=rollout_goal,
                 label_mode=label_mode,
                 reward_tree_config=reward_tree_config,
                 map_route_config=map_route_config,
                 use_local_ort_rollout=use_local_ort_rollout,
                 local_ort_max_combat_steps=local_ort_max_combat_steps,
                 stop_floor=(map_route_config.stop_floor if map_route_config is not None else None),
+                sample_types=sample_types,
             )
             log_entry = {
                 "episode_index": idx,
@@ -2457,14 +2678,45 @@ def _generate_episode_batch(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate card ranking dataset")
+    config_path = _peek_config_path(sys.argv[1:])
+    parser = argparse.ArgumentParser(description="Generate offline non-combat ranking dataset")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=config_path,
+        help="Optional TOML config file. Leaf keys should match argparse dest names.",
+    )
     parser.add_argument("--pipe", action="store_true")
     parser.add_argument("--port", type=int, default=15527)
     parser.add_argument("--start-port", type=int, default=None)
     parser.add_argument("--num-envs", type=int, default=1)
+    parser.add_argument(
+        "--auto-launch",
+        action="store_true",
+        default=False,
+        help="Auto-launch local headless simulator hosts for pipe/pipe-binary transports.",
+    )
+    parser.add_argument(
+        "--headless-dll",
+        type=str,
+        default=str(DEFAULT_DLL_PATH),
+        help="HeadlessSim host binary path used when --auto-launch is enabled.",
+    )
     parser.add_argument("--episodes", type=int, default=100)
-    parser.add_argument("--output", type=str, default=str(ARTIFACTS_ROOT / "card_ranking_v1"))
+    parser.add_argument("--output", type=str, default=str(ARTIFACTS_ROOT / "offline_noncombat_ranking_v1"))
     parser.add_argument("--seed-prefix", type=str, default="RANK")
+    parser.add_argument("--seed-file", type=str, default="",
+                        help="Optional JSON/TXT seed list. If set, explicit seeds replace generated seed_prefix episodes.")
+    parser.add_argument("--seed", action="append", default=[],
+                        help="Explicit seed(s). Can be repeated. Combined with --seed-file and deduplicated.")
+    parser.add_argument("--num-seeds", type=int, default=0,
+                        help="Optional cap when using --seed/--seed-file. <=0 keeps all explicit seeds.")
+    parser.add_argument(
+        "--sample-types",
+        type=str,
+        default="map,card_reward",
+        help="Comma-separated sampled decision types. Supported: map,card_reward (default: map,card_reward)",
+    )
     parser.add_argument("--checkpoint", type=str, default=None,
                         help="Hybrid checkpoint for NN combat policy (improves data quality)")
     parser.add_argument("--combat-checkpoint", type=str, default=None,
@@ -2491,6 +2743,17 @@ def main() -> None:
                         help="Primary branch rollout horizon in combats (default: 3)")
     parser.add_argument("--rollout-max-steps", type=int, default=500,
                         help="Primary branch rollout step cap (default: 500)")
+    parser.add_argument(
+        "--rollout-goal",
+        choices=["combat_horizon", "boss_reached_or_terminal", "terminal"],
+        default="terminal",
+        help=(
+            "Card reward branch rollout stopping rule. "
+            "'terminal' runs to game_over/victory, "
+            "'boss_reached_or_terminal' stops once boss is reached, "
+            "'combat_horizon' preserves the old fixed-combat horizon behavior."
+        ),
+    )
     parser.add_argument("--rerun-low-spread-threshold", type=float, default=0.0,
                         help="If primary rollout spread is below this threshold, rerun card_reward branches with a longer horizon (default: off)")
     parser.add_argument("--rerun-max-combats", type=int, default=5,
@@ -2503,6 +2766,16 @@ def main() -> None:
                         help="Max recursive card_reward depth for reward_tree mode (default: 3)")
     parser.add_argument("--tree-beam-width", type=int, default=2,
                         help="Beam width for reward_tree mode (default: 2)")
+    parser.add_argument(
+        "--tree-route-search",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable short-horizon card_reward route search. When combined with "
+            "--label-mode reward_tree and terminal rollout, recursively plans "
+            "across future card_reward screens instead of greedily scoring only the current one."
+        ),
+    )
     parser.add_argument("--tree-advance-max-steps", type=int, default=900,
                         help="Step cap while advancing to the next card_reward in reward_tree mode (default: 900)")
     parser.add_argument("--tree-local-weight", type=float, default=0.6,
@@ -2527,6 +2800,9 @@ def main() -> None:
                         help="Run combat rollout continuation in C# via local ORT actor when using pipe-binary transport")
     parser.add_argument("--local-ort-max-combat-steps", type=int, default=600,
                         help="Step cap passed to C# run_combat_local during local ORT rollout (default: 600)")
+    loaded_config = _load_generator_config(config_path)
+    if loaded_config:
+        parser.set_defaults(**loaded_config)
     args = parser.parse_args()
 
     if args.local_ort_rollout and str(args.transport).strip().lower() != "pipe-binary":
@@ -2537,13 +2813,46 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     progress_path = out_dir / "progress.json"
 
+    explicit_seeds = [str(seed).strip() for seed in (args.seed or []) if str(seed).strip()]
+    if args.seed_file:
+        explicit_seeds.extend(_load_seed_list(args.seed_file, limit=max(0, int(args.num_seeds))))
+    seeds: list[str]
+    if explicit_seeds:
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for seed in explicit_seeds:
+            if seed and seed not in seen:
+                seen.add(seed)
+                ordered.append(seed)
+        if int(args.num_seeds) > 0:
+            ordered = ordered[: int(args.num_seeds)]
+        seeds = ordered
+    else:
+        seeds = [f"{args.seed_prefix}_{ep:05d}" for ep in range(args.episodes)]
+    if not seeds:
+        raise ValueError("No seeds resolved. Provide --episodes > 0 or pass --seed/--seed-file.")
+    args.episodes = len(seeds)
+
     num_envs = max(1, int(args.num_envs))
     base_port = args.start_port or args.port
     progress_every_episodes = 16
     flush_every_episodes = max(0, int(args.flush_every_episodes))
+    sample_types = {
+        token.strip().lower()
+        for token in str(args.sample_types or "").split(",")
+        if token.strip()
+    } or {"map", "card_reward"}
+    unsupported_sample_types = sorted(sample_types - {"map", "card_reward"})
+    if unsupported_sample_types:
+        raise ValueError(
+            f"Unsupported --sample-types values: {', '.join(unsupported_sample_types)}. "
+            "Supported values are: map, card_reward."
+        )
     reward_tree_config = RewardTreeConfig(
         max_reward_depth=int(args.tree_max_reward_depth),
         beam_width=int(args.tree_beam_width),
+        rollout_goal=str(args.rollout_goal),
+        enable_route_search=bool(args.tree_route_search),
         rollout_max_combats=int(args.rollout_max_combats),
         rollout_max_steps=int(args.rollout_max_steps),
         rerun_low_spread_threshold=float(args.rerun_low_spread_threshold),
@@ -2586,7 +2895,6 @@ def main() -> None:
     episode_logs: list[dict[str, Any]] = []
     t0 = time.time()
     progress_lock = threading.Lock()
-    seeds = [f"{args.seed_prefix}_{ep:05d}" for ep in range(args.episodes)]
     seed_batches: list[list[str]] = [[] for _ in range(num_envs)]
     for idx, seed in enumerate(seeds):
         seed_batches[idx % num_envs].append(seed)
@@ -2637,44 +2945,54 @@ def main() -> None:
                     partial=(completed_episodes < args.episodes),
                 )
 
-    with ThreadPoolExecutor(max_workers=num_envs) as pool:
-        futures = [
-            pool.submit(
-                _generate_episode_batch,
-                port=base_port + env_idx,
-                transport=args.transport,
-                seeds=batch,
-                checkpoint_path=args.checkpoint,
-                combat_checkpoint_path=args.combat_checkpoint,
-                debug_rollout_trace_dir=(args.debug_rollout_trace_dir or None),
-                progress_callback=_on_episode_complete,
-                rollout_max_combats=int(args.rollout_max_combats),
-                rollout_max_steps=int(args.rollout_max_steps),
-                rerun_low_spread_threshold=float(args.rerun_low_spread_threshold),
-                rerun_max_combats=int(args.rerun_max_combats),
-                rerun_max_steps=int(args.rerun_max_steps),
-                label_mode=str(args.label_mode),
-                reward_tree_config=reward_tree_config,
-                map_route_config=map_route_config,
-                use_local_ort_rollout=bool(local_ort_model_path),
-                local_ort_model_path=local_ort_model_path,
-                local_ort_max_combat_steps=int(args.local_ort_max_combat_steps),
-            )
-            for env_idx, batch in enumerate(seed_batches)
-            if batch
-        ]
-        for future in as_completed(futures):
-            _, batch_logs, _ = future.result()
-            completed = len(episode_logs)
-            elapsed = time.time() - t0
-            rate = completed / max(elapsed, 1e-6)
-            last = batch_logs[-1] if batch_logs else {}
-            print(
-                f"[{completed}/{args.episodes}] port={last.get('port')} "
-                f"seed={last.get('seed')} status={last.get('status')} "
-                f"samples={last.get('samples', 0)} total={len(all_samples)} "
-                f"({rate:.2f} ep/s)"
-            )
+    host_ports = [base_port + env_idx for env_idx, batch in enumerate(seed_batches) if batch]
+    with SimHostLifecycleManager(
+        ports=host_ports,
+        transport=args.transport,
+        auto_launch=bool(args.auto_launch),
+        repo_root=Path.cwd(),
+        dll_path=args.headless_dll,
+    ):
+        with ThreadPoolExecutor(max_workers=num_envs) as pool:
+            futures = [
+                pool.submit(
+                    _generate_episode_batch,
+                    port=base_port + env_idx,
+                    transport=args.transport,
+                    seeds=batch,
+                    checkpoint_path=args.checkpoint,
+                    combat_checkpoint_path=args.combat_checkpoint,
+                    debug_rollout_trace_dir=(args.debug_rollout_trace_dir or None),
+                    progress_callback=_on_episode_complete,
+                    rollout_max_combats=int(args.rollout_max_combats),
+                    rollout_max_steps=int(args.rollout_max_steps),
+                    rerun_low_spread_threshold=float(args.rerun_low_spread_threshold),
+                    rerun_max_combats=int(args.rerun_max_combats),
+                    rerun_max_steps=int(args.rerun_max_steps),
+                    rollout_goal=str(args.rollout_goal),
+                    label_mode=str(args.label_mode),
+                    reward_tree_config=reward_tree_config,
+                    map_route_config=map_route_config,
+                    use_local_ort_rollout=bool(local_ort_model_path),
+                    local_ort_model_path=local_ort_model_path,
+                    local_ort_max_combat_steps=int(args.local_ort_max_combat_steps),
+                    sample_types=sample_types,
+                )
+                for env_idx, batch in enumerate(seed_batches)
+                if batch
+            ]
+            for future in as_completed(futures):
+                _, batch_logs, _ = future.result()
+                completed = len(episode_logs)
+                elapsed = time.time() - t0
+                rate = completed / max(elapsed, 1e-6)
+                last = batch_logs[-1] if batch_logs else {}
+                print(
+                    f"[{completed}/{args.episodes}] port={last.get('port')} "
+                    f"seed={last.get('seed')} status={last.get('status')} "
+                    f"samples={last.get('samples', 0)} total={len(all_samples)} "
+                    f"({rate:.2f} ep/s)"
+                )
 
     jsonl_path, stats_path, episode_logs_path, manifest_path = _materialize_dataset_snapshot(
         out_dir=out_dir,

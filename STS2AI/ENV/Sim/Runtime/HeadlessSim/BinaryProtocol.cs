@@ -177,8 +177,8 @@ internal sealed class BinarySearchCombatMctsRequest
 
 internal static class BinaryProtocol
 {
-	private const ushort ProtocolVersion = 10;
-	internal const string BinarySchemaHash = "sts2-binary-schema-2026-04-13c";
+	private const ushort ProtocolVersion = 11;
+	internal const string BinarySchemaHash = "sts2-binary-schema-2026-04-14-pending-split";
 	private static readonly string BuildGitSha = ResolveBuildGitSha();
 
 	private static readonly Dictionary<string, byte> ActionTypeToCode = new(StringComparer.OrdinalIgnoreCase)
@@ -815,7 +815,7 @@ internal static class BinaryProtocol
 	{
 		return stateType switch
 		{
-			"monster" or "elite" or "boss" or "hand_select" or "combat_pending" => true,
+			"monster" or "elite" or "boss" or "hand_select" => true,
 			_ => false
 		};
 	}
@@ -1243,6 +1243,7 @@ internal static class BinaryProtocol
 			"elite" => 8,
 			"boss" => 9,
 			"combatpending" => 10,
+			"combatpostendpending" => 10,
 			"combatrewards" => 11,
 			"cardreward" => 12,
 			"cardselect" => 13,
@@ -1250,6 +1251,7 @@ internal static class BinaryProtocol
 			"handselect" => 15,
 			"gameover" => 16,
 			"rewards" => 17,
+			"combatstartpending" => 18,
 			_ => 0
 		};
 	}

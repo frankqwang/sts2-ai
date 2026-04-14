@@ -98,6 +98,7 @@ def build_ranking_view(
                 "schema_version": RANKING_SAMPLE_SCHEMA_VERSION,
                 "source_schema_version": raw.get("schema_version"),
                 "source_raw_id": raw.get("root_decision_id"),
+                "seed": raw.get("seed"),
                 "deck_ids": [c.get("id") or c.get("label") or "?" for c in ((root_state.get("player") or {}).get("deck") or [])],
                 "relic_ids": [r.get("id") or r.get("name") or "?" for r in ((root_state.get("player") or {}).get("relics") or [])],
                 "floor": int(raw.get("floor") or 0),

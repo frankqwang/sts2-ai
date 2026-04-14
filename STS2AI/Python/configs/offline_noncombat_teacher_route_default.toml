@@ -1,0 +1,24 @@
+# Default generator config for windowed offline non-combat teacher refresh.
+# 保守口径：只做 card_reward，短路线搜索，终局打分，适合异步后台慢 teacher。
+
+transport = "pipe-binary"
+num_envs = 2
+auto_launch = true
+
+sample_types = "card_reward"
+label_mode = "reward_tree"
+tree_route_search = true
+
+rollout_goal = "terminal"
+rollout_max_steps = 5000
+rollout_max_combats = 64
+rerun_low_spread_threshold = 0.0
+
+tree_max_reward_depth = 2
+tree_beam_width = 2
+tree_advance_max_steps = 2400
+tree_local_weight = 0.6
+tree_max_option_seconds = 12.0
+tree_recurse_only_when_spread_below = 0.35
+
+flush_every_episodes = 1

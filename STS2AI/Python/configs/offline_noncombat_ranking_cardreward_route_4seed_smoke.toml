@@ -1,0 +1,43 @@
+# 4-seed short route-search smoke for card_reward only.
+# Purpose: verify that short-horizon card_reward route search beats or at least
+# tracks the natural rollout across multiple seeds before larger-scale use.
+
+[environment]
+transport = "pipe-binary"
+auto_launch = true
+num_envs = 4
+start_port = 16660
+
+[dataset]
+episodes = 4
+seed_prefix = "ONCRROUTE4"
+output = "STS2AI/Artifacts/offline_noncombat_ranking/cardreward_route_4seed_smoke"
+sample_types = "card_reward"
+flush_every_episodes = 1
+
+[model]
+checkpoint = "STS2AI/Artifacts/hybrid_training_main_attention/20260414-112921_4env_acttransitionfix_resume2285/hybrid_02290.pt"
+combat_checkpoint = ""
+
+[labeling]
+label_mode = "reward_tree"
+rollout_goal = "terminal"
+rollout_max_combats = 2
+rollout_max_steps = 5000
+rerun_low_spread_threshold = 0.0
+rerun_max_combats = 3
+rerun_max_steps = 5000
+
+[reward_tree]
+tree_max_reward_depth = 3
+tree_beam_width = 2
+tree_route_search = true
+tree_advance_max_steps = 5000
+tree_local_weight = 0.0
+tree_max_option_seconds = 8.0
+tree_recurse_only_when_spread_below = 999.0
+
+[limits]
+episode_stop_floor = 0
+local_ort_rollout = false
+local_ort_max_combat_steps = 600

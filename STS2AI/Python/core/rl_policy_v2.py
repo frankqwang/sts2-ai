@@ -254,9 +254,10 @@ class FullRunPolicyNetworkV2(nn.Module):
             nn.Linear(screen_head_dim, 1),
         )
 
-        # --- Matchup-grounded option scorer ---
-        # Trained by offline ranking data (combat simulation outcomes), NOT by PPO returns.
-        # Used for card_reward and shop screens to learn simulation-grounded card values.
+        # --- Offline non-combat ranking scorer ---
+        # Historic internal module name: matchup_score_head.
+        # Trained by offline ranking data, NOT by PPO returns.
+        # Used for card_reward and shop screens to learn simulation-grounded option values.
         # Zero-init final layer: new head starts at 0, preserving old checkpoint behavior.
         self.matchup_score_head = nn.Sequential(
             nn.Linear(screen_head_dim * 2, screen_head_dim),  # concat(ctx, action_repr)

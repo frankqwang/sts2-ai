@@ -32,9 +32,10 @@ DISCOVERED_COVERAGE_SEEDS = ["COVERAGE_SCAN_0040", "COVERAGE_SCAN_0210"]
 COVERAGE_SEEDS = DEFAULT_PARITY_SEEDS + DISCOVERED_COVERAGE_SEEDS
 STRESS_SEEDS = ["BENCH_A", "BENCH_B", "BENCH_C"]
 EXACT_SAVELOAD_STATES = {"monster", "elite", "boss", "combat_rewards", "card_reward", "map", "event", "rest_site", "shop", "treasure", "game_over"}
-AUDIT_STATES = ["map", "event", "rest_site", "shop", "treasure", "monster", "elite", "boss", "combat_pending", "combat_rewards", "card_reward", "card_select", "relic_select", "game_over"]
-TRACKED_TRANSITIONS = [("event", "card_select"), ("event", "relic_select"), ("event", "monster"), ("event", "elite"), ("event", "boss"), ("combat_pending", "combat_rewards"), ("combat_pending", "map"), ("combat_pending", "game_over"), ("combat_rewards", "card_reward"), ("combat_rewards", "map"), ("combat_rewards", "event"), ("combat_rewards", "game_over"), ("treasure", "relic_select")]
-REQUIRED_AUDIT_TRANSITIONS = [("event", "card_select"), ("event", "monster"), ("combat_pending", "map"), ("combat_rewards", "card_reward")]
+PENDING_STATE_TYPES = {"combat_pending", "combat_start_pending", "combat_post_end_pending"}
+AUDIT_STATES = ["map", "event", "rest_site", "shop", "treasure", "monster", "elite", "boss", "combat_start_pending", "combat_post_end_pending", "combat_rewards", "card_reward", "card_select", "relic_select", "game_over"]
+TRACKED_TRANSITIONS = [("event", "card_select"), ("event", "relic_select"), ("event", "monster"), ("event", "elite"), ("event", "boss"), ("combat_start_pending", "monster"), ("combat_start_pending", "elite"), ("combat_start_pending", "boss"), ("combat_post_end_pending", "combat_rewards"), ("combat_post_end_pending", "map"), ("combat_post_end_pending", "game_over"), ("combat_rewards", "card_reward"), ("combat_rewards", "map"), ("combat_rewards", "event"), ("combat_rewards", "game_over"), ("treasure", "relic_select")]
+REQUIRED_AUDIT_TRANSITIONS = [("event", "card_select"), ("event", "monster"), ("combat_start_pending", "boss"), ("combat_post_end_pending", "map"), ("combat_rewards", "card_reward")]
 STATIC_AUDIT_NOTES = {
 	"relic_select": "No non-simulation call sites for RelicSelectCmd.FromChooseARelicScreen/GetSelectedRelicAsync found in src/Core.",
 	("event", "relic_select"): "Current event paths use direct relic obtain/reward flows; they do not route through RelicSelectCmd or NChooseARelicSelection.",
@@ -51,19 +52,21 @@ DISCOVERY_SEED_PREFIX = "COVERAGE_SCAN"
 MAX_STEPS_PER_RUN = 800
 COMBAT_TYPES = {"monster", "elite", "boss"}
 COMBAT_DETAIL_TYPES = COMBAT_TYPES | {"hand_select"}
-VALID_STATE_TYPES = {"menu", "map", "monster", "elite", "boss", "event", "rest_site", "shop", "treasure", "combat_rewards", "card_reward", "card_select", "relic_select", "hand_select", "combat_pending", "game_over", "run_bootstrap"}
+VALID_STATE_TYPES = {"menu", "map", "monster", "elite", "boss", "event", "rest_site", "shop", "treasure", "combat_rewards", "card_reward", "card_select", "relic_select", "hand_select", "combat_pending", "combat_start_pending", "combat_post_end_pending", "game_over", "run_bootstrap"}
 VALID_TRANSITIONS = {
 	"menu": {"map", "run_bootstrap"},
 	"run_bootstrap": {"map"},
-	"map": COMBAT_TYPES | {"event", "rest_site", "shop", "treasure"},
-	"monster": {"monster", "combat_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
-	"elite": {"elite", "combat_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
-	"boss": {"boss", "combat_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
-	"hand_select": COMBAT_TYPES | {"combat_pending", "combat_rewards", "game_over"},
-	"card_select": COMBAT_TYPES | {"combat_pending", "combat_rewards", "game_over", "card_select", "map"},
-	"combat_pending": {"combat_rewards", "map", "game_over"} | COMBAT_TYPES,
+	"map": COMBAT_TYPES | {"combat_start_pending", "event", "rest_site", "shop", "treasure"},
+	"monster": {"monster", "combat_pending", "combat_post_end_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
+	"elite": {"elite", "combat_pending", "combat_post_end_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
+	"boss": {"boss", "combat_pending", "combat_post_end_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
+	"hand_select": COMBAT_TYPES | PENDING_STATE_TYPES | {"combat_rewards", "game_over"},
+	"card_select": COMBAT_TYPES | PENDING_STATE_TYPES | {"combat_rewards", "game_over", "card_select", "map"},
+	"combat_pending": {"combat_rewards", "map", "event", "game_over"} | COMBAT_TYPES,
+	"combat_start_pending": COMBAT_TYPES | {"game_over"},
+	"combat_post_end_pending": {"combat_rewards", "map", "event", "game_over"},
 	"combat_rewards": {"combat_rewards", "card_reward", "card_select", "relic_select", "map", "game_over", "event"},
-	"card_reward": {"combat_rewards", "map", "card_select", "combat_pending"},
+	"card_reward": {"combat_rewards", "map", "card_select", "combat_pending", "combat_post_end_pending"},
 	"relic_select": {"combat_rewards", "map", "relic_select"},
 	"event": {"event", "map", "combat_rewards", "card_reward", "card_select", "relic_select", "game_over", "rest_site", "shop", "treasure"} | COMBAT_TYPES,
 	"rest_site": {"map", "card_select", "rest_site"},
@@ -1096,7 +1099,7 @@ def check_state_invariants(step: int, state: dict[str, Any], prev_state: dict[st
 		violations.append(Violation(step, "STATE_TYPE", f"Unknown state_type: {state_type}", state_type))
 	if terminal and state.get("run_outcome") not in {"victory", "defeat"}:
 		violations.append(Violation(step, "OUTCOME", f"Terminal but run_outcome={state.get('run_outcome')!r}", state_type))
-	if not terminal and state_type not in {"game_over", "combat_pending"} and len(legal) == 0 and state_type not in COMBAT_TYPES | {"hand_select"}:
+	if not terminal and state_type not in {"game_over"} | PENDING_STATE_TYPES and len(legal) == 0 and state_type not in COMBAT_TYPES | {"hand_select"}:
 		violations.append(Violation(step, "NO_ACTIONS", f"Non-terminal {state_type} with 0 legal actions", state_type))
 	player = extract_player(state)
 	hp = player.get("current_hp", player.get("hp"))

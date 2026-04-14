@@ -828,6 +828,7 @@ internal static class Program
 			// (replay writer, music, achievements, save, map screen, etc.)
 			// This makes it safe to call EndCombatInternal from both headless sim
 			// AND visible Godot client — same logic path.
+			service.ResetCombatFollowupStateForExternalCombatResolution();
 			using (CombatSimulationRuntime.EnterPureCombatSimulator())
 			{
 				await CombatManager.Instance.EndCombatInternal();
@@ -883,7 +884,7 @@ internal static class Program
 		{
 			BinarySearchCombatMctsRequest request = BinaryProtocol.ParseSearchCombatMctsRequest(requestBytes);
 			FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
-			bool isCombat = snapshot.StateType is "monster" or "elite" or "boss" or "combat" or "hand_select" or "card_select" or "combat_pending";
+			bool isCombat = snapshot.StateType is "monster" or "elite" or "boss" or "combat" or "hand_select" or "card_select" or "combat_pending" or "combat_start_pending";
 			if (!isCombat)
 			{
 				return BinaryProtocol.BuildErrorResponse(

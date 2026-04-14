@@ -1,0 +1,47 @@
+# 离线非战斗排序数据默认配置。
+# 目标：先稳定产出 card_reward 样本，不混入 map，避免首轮数据生成过重。
+
+[environment]
+transport = "pipe-binary"
+auto_launch = true
+num_envs = 4
+start_port = 16620
+
+[dataset]
+episodes = 24
+seed_prefix = "ONCR"
+output = "STS2AI/Artifacts/offline_noncombat_ranking/cardreward_default"
+sample_types = "card_reward"
+flush_every_episodes = 1
+
+[model]
+checkpoint = ""
+combat_checkpoint = ""
+
+[labeling]
+label_mode = "single_step"
+rollout_goal = "terminal"
+rollout_max_combats = 2
+rollout_max_steps = 5000
+rerun_low_spread_threshold = 0.0
+rerun_max_combats = 3
+rerun_max_steps = 5000
+
+[reward_tree]
+tree_max_reward_depth = 2
+tree_beam_width = 2
+tree_advance_max_steps = 5000
+tree_local_weight = 0.7
+tree_max_option_seconds = 2.0
+tree_recurse_only_when_spread_below = 0.2
+
+[map_tree]
+map_max_depth = 4
+map_beam_width = 2
+map_advance_max_steps = 1000
+map_max_option_seconds = 2.0
+
+[limits]
+episode_stop_floor = 0
+local_ort_rollout = false
+local_ort_max_combat_steps = 600

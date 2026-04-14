@@ -31,7 +31,7 @@ from test_simulator_consistency import (
 
 
 REWARD_STATE_TYPES = {"combat_rewards", "card_reward"}
-COMBAT_STATE_TYPES = {"monster", "elite", "boss", "hand_select", "combat_pending"}
+COMBAT_STATE_TYPES = {"monster", "elite", "boss", "hand_select", "combat_pending", "combat_start_pending"}
 DEFAULT_REPO_ROOT = REPO_ROOT
 
 

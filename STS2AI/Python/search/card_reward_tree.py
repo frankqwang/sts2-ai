@@ -12,6 +12,8 @@ from typing import Any, Callable
 class RewardTreeConfig:
     max_reward_depth: int = 3
     beam_width: int = 2
+    rollout_goal: str = "terminal"
+    enable_route_search: bool = False
     rollout_max_combats: int = 3
     rollout_max_steps: int = 500
     rerun_low_spread_threshold: float = 0.0
@@ -98,6 +100,7 @@ def evaluate_card_reward_tree(
             combat_evaluator=combat_evaluator,
             ppo_policy=ppo_policy,
             debug_rollout_trace_dir=debug_rollout_trace_dir,
+            rollout_goal=config.rollout_goal,
             max_combats=config.rollout_max_combats,
             max_steps=config.rollout_max_steps,
             use_local_ort_rollout=config.use_local_ort_rollout,
@@ -116,6 +119,9 @@ def evaluate_card_reward_tree(
             truncated_reason: str | None = None
             nodes_visited = 0
             should_recurse = max(0, config.max_reward_depth - 1) > 0
+            if config.rollout_goal != "combat_horizon" and not config.enable_route_search:
+                should_recurse = False
+                truncated_reason = "goal_rollout"
             gate = config.recurse_only_when_spread_below
             if should_recurse and gate is not None and local_spread >= float(gate):
                 should_recurse = False
@@ -173,6 +179,7 @@ def evaluate_card_reward_tree(
                 "label_source": "reward_tree",
                 "max_reward_depth": int(config.max_reward_depth),
                 "beam_width": int(config.beam_width),
+                "enable_route_search": bool(config.enable_route_search),
                 "total_reward_nodes": int(total_nodes),
             },
         )
@@ -259,6 +266,7 @@ def _explore_reward_children(
             combat_evaluator=combat_evaluator,
             ppo_policy=ppo_policy,
             debug_rollout_trace_dir=debug_rollout_trace_dir,
+            rollout_goal=config.rollout_goal,
             max_combats=config.rollout_max_combats,
             max_steps=config.rollout_max_steps,
             use_local_ort_rollout=config.use_local_ort_rollout,
@@ -283,6 +291,7 @@ def _explore_reward_children(
                 combat_evaluator=combat_evaluator,
                 ppo_policy=ppo_policy,
                 debug_rollout_trace_dir=debug_rollout_trace_dir,
+                rollout_goal=config.rollout_goal,
                 max_combats=config.rerun_max_combats,
                 max_steps=config.rerun_max_steps,
                 use_local_ort_rollout=config.use_local_ort_rollout,

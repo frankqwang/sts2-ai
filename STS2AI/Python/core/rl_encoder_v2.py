@@ -553,7 +553,11 @@ def build_structured_state(state: dict, vocab: Vocab) -> StructuredState:
             enemy_mask[i] = True
 
     # --- Screen type ---
-    screen_key = state_type if state_type in SCREEN_TYPE_TO_IDX else "other"
+    screen_key = state_type
+    if screen_key in {"combat_start_pending", "combat_post_end_pending"}:
+        screen_key = "combat_pending"
+    if screen_key not in SCREEN_TYPE_TO_IDX:
+        screen_key = "other"
     screen_type_idx = SCREEN_TYPE_TO_IDX.get(screen_key, SCREEN_TYPE_TO_IDX["other"])
     next_boss_idx = _text_token_id(extract_next_boss_token(state))
 

@@ -220,6 +220,28 @@ def choose_reward_progress_action(
     return None
 
 
+def _action_compatible_with_state(state: dict[str, Any], action: dict[str, Any] | None) -> bool:
+    if not isinstance(action, dict):
+        return False
+    st = str(state.get("state_type") or "").strip().lower()
+    action_name = str(action.get("action") or "").strip().lower()
+    if not action_name:
+        return False
+    if action_name in POST_CARD_REWARD_ACTIONS:
+        return st == "card_reward"
+    if action_name == "claim_reward":
+        return st == "combat_rewards"
+    if action_name == "choose_map_node":
+        return st == "map"
+    if action_name in {"choose_rest_option"}:
+        return st == "rest_site"
+    if action_name in {"shop_purchase", "remove_card"}:
+        return st == "shop"
+    if action_name in SELECTION_ACTION_NAMES:
+        return is_selection_screen(st, state.get("legal_actions") or [])
+    return True
+
+
 def choose_auto_progress_action(
     state: dict[str, Any],
     legal: list[dict[str, Any]],
@@ -345,7 +367,7 @@ def choose_rollout_decision(
     if ppo_policy is not None:
         try:
             action = ppo_policy.choose_action(state, legal)
-            if action:
+            if action and _action_compatible_with_state(state, action):
                 return RolloutDecision(action=action, source="ppo_policy")
         except Exception:
             pass

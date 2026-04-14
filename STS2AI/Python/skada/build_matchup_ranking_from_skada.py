@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Bridge cleaned Skada card_reward JSONL into MatchupRankingDataset format.
+"""Bridge cleaned Skada card_reward JSONL into offline non-combat ranking format.
 
-This is the simplest useful bridge for hybrid non-combat ranking experiments:
+This is the simplest useful bridge for hybrid non-combat ranking experiments.
+The historical artifact name used "matchup_bridge"; keep that path readable for
+older experiments, but prefer `offline_noncombat_ranking` in new outputs/docs.
 
 - Input:
   - cleaned Skada `card_reward` JSONL rows (for example
@@ -15,7 +17,7 @@ The generated dataset is intentionally narrow:
 - only `card_reward`
 - only offered cards (no synthetic skip target yet)
 - state/action tensors are built from a synthetic card_reward state so
-  `train_hybrid.py` can consume them through `MatchupRankingDataset`
+  `train_hybrid.py` can consume them through the offline non-combat ranking loader
 
 This lets us A/B the non-combat ranking head structure without waiting for a
 full regenerated branch-search dataset.
@@ -271,7 +273,7 @@ def build_dataset(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Bridge Skada card_reward JSONL into MatchupRankingDataset format")
+    parser = argparse.ArgumentParser(description="Bridge Skada card_reward JSONL into offline non-combat ranking format")
     parser.add_argument("--input", required=True, help="Skada card_reward JSONL path")
     parser.add_argument("--output", required=True, help="Output dataset directory")
     parser.add_argument("--character", default=None, help="Optional character filter (for example IRONCLAD)")

@@ -191,6 +191,7 @@ internal sealed class CombatMctsSearchEngine
 		"hand_select",
 		"card_select",
 		"combat_pending",
+		"combat_start_pending",
 	};
 
 	private sealed class PendingLeaf
