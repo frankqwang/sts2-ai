@@ -15,6 +15,7 @@ from sts2_singleplayer_env import (
     SingleplayerTimeoutError,
 )
 from binary_pipe_client import BinaryPipeClient
+from headless_sim_runner import start_headless_sim, stop_process
 from pipe_client import PipeClient
 from simulator_api_error import SimulatorApiError
 
@@ -146,7 +147,7 @@ class ApiBackedFullRunClient:
         """Execute multiple actions in a single HTTP request.
 
         All actions are executed sequentially on the game side within one
-        main-thread call — no per-action HTTP or frame overhead.
+        main-thread call, with no per-action HTTP or frame overhead.
 
         Returns the state after all actions (or after the first rejection/terminal).
         Raises SingleplayerApiError if the batch was rejected.
@@ -417,7 +418,7 @@ class PipeBackedFullRunClient:
     """Full-run client using named pipe IPC (~0.5ms/call vs ~24ms HTTP).
 
     Requires the Godot simulator to be running with pipe server enabled.
-    In pure-sim mode all game logic is synchronous — no polling needed.
+    In pure-sim mode all game logic is synchronous, with no polling needed.
 
     If pipe connection fails, temporarily falls back to HTTP and periodically
     retries pipe reconnection (every ``_PIPE_RETRY_INTERVAL`` calls).
@@ -426,16 +427,21 @@ class PipeBackedFullRunClient:
     protocol: str = "json"
     poll_interval_s: float = 0.0  # not used, kept for FullRunClientLike compat
     connect_timeout_s: float = 10.0
+    auto_launch: bool = False
+    repo_root: str | None = None
+    dll_path: str | None = None
     _pipe: PipeClient | BinaryPipeClient = field(init=False, repr=False)
     _connected: bool = field(default=False, init=False, repr=False)
     _last_step_info: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _http_fallback: ApiBackedFullRunClient | None = field(default=None, init=False, repr=False)
     _call_count_since_fallback: int = field(default=0, init=False, repr=False)
+    _owned_host_proc: Any | None = field(default=None, init=False, repr=False)
 
     _PIPE_RETRY_INTERVAL: int = 50  # retry pipe every N calls while on HTTP
     _consecutive_failures: int = field(default=0, init=False, repr=False)
     _dead: bool = field(default=False, init=False, repr=False)
     _DEAD_THRESHOLD: int = 3  # mark dead after N consecutive total failures
+    _RECONNECT_ATTEMPTS_PER_CYCLE: int = 3
 
     def __post_init__(self) -> None:
         self._pipe = self._new_pipe_client()
@@ -452,9 +458,60 @@ class PipeBackedFullRunClient:
         return self._dead
 
     def _ensure_connected(self) -> None:
-        if not self._connected:
-            self._pipe.connect(timeout_s=self.connect_timeout_s)
-            self._connected = True
+        if self._connected:
+            return
+        try:
+            self._connect_fresh_pipe(timeout_s=self.connect_timeout_s)
+            self._consecutive_failures = 0
+            self._dead = False
+        except Exception:
+            self._reconnect()
+
+    def _close_pipe_quietly(self) -> None:
+        try:
+            self._pipe.close()
+        except Exception:
+            pass
+        self._connected = False
+
+    def _connect_fresh_pipe(self, *, timeout_s: float) -> None:
+        new_pipe = self._new_pipe_client()
+        try:
+            new_pipe.connect(timeout_s=timeout_s)
+        except Exception:
+            try:
+                new_pipe.close()
+            except Exception:
+                pass
+            raise
+        self._pipe = new_pipe
+        self._connected = True
+
+    def _restart_host_process(self) -> None:
+        if not self.auto_launch or not self.repo_root or not self.dll_path:
+            raise RuntimeError("auto-launch host recovery is not configured")
+        stop_process(self._owned_host_proc)
+        self._owned_host_proc = start_headless_sim(
+            port=self.port,
+            repo_root=self.repo_root,
+            dll_path=self.dll_path,
+            connect_timeout_s=max(15.0, float(self.connect_timeout_s)),
+            protocol=self._normalized_protocol(),
+        )
+
+    def _try_pipe_reconnect_cycle(self, *, timeouts: list[float]) -> None:
+        last_error: Exception | None = None
+        for attempt, timeout_s in enumerate(timeouts[: self._RECONNECT_ATTEMPTS_PER_CYCLE], start=1):
+            try:
+                self._connect_fresh_pipe(timeout_s=timeout_s)
+                return
+            except Exception as exc:
+                last_error = exc
+                if attempt < len(timeouts):
+                    time.sleep(min(0.25 * attempt, 1.0))
+        if last_error is None:
+            raise ConnectionError(f"Pipe reconnect cycle failed on port {self.port}")
+        raise last_error
 
     def _maybe_retry_pipe(self) -> None:
         """Periodically try to recover pipe connection while on HTTP fallback."""
@@ -467,10 +524,12 @@ class PipeBackedFullRunClient:
         try:
             new_pipe = self._new_pipe_client()
             new_pipe.connect(timeout_s=3.0)
-            # Success — switch back to pipe
+            # Success: switch back to pipe
             self._pipe = new_pipe
             self._http_fallback = None
             self._connected = True
+            self._consecutive_failures = 0
+            self._dead = False
             import logging
             logging.getLogger(__name__).info(
                 "Pipe recovered on port %d, switching back from HTTP", self.port)
@@ -478,38 +537,53 @@ class PipeBackedFullRunClient:
             pass  # stay on HTTP, will retry later
 
     def _reconnect(self) -> None:
-        """Force reconnect after pipe error (timeout, broken pipe, etc).
-
-        Tries pipe first (fast, 2 attempts); if that fails, tries HTTP.
-        If both fail repeatedly, marks this env as dead to avoid blocking.
-        """
-        try:
-            self._pipe.close()
-        except Exception:
-            pass
-        import time, logging
+        """Force reconnect after pipe error (timeout, broken pipe, etc)."""
         log = logging.getLogger(__name__)
-
-        # Try pipe reconnect — one shot, 1s timeout (normal connect <50ms)
+        self._close_pipe_quietly()
+        last_error: Exception | None = None
+        quick_timeouts = [1.0, 2.0, min(max(float(self.connect_timeout_s), 3.0), 5.0)]
         try:
-            time.sleep(0.3)
-            self._pipe = self._new_pipe_client()
-            self._pipe.connect(timeout_s=1.0)
-            self._connected = True
+            self._try_pipe_reconnect_cycle(timeouts=quick_timeouts)
             self._consecutive_failures = 0
+            self._dead = False
+            self._http_fallback = None
             return
-        except Exception:
-            try:
-                self._pipe.close()
-            except Exception:
-                pass
+        except Exception as exc:
+            last_error = exc
+            log.warning("Pipe reconnect attempt failed on port %d: %s", self.port, exc)
 
-        # Pipe failed — mark dead immediately, no HTTP fallback
+        if self.auto_launch and self.repo_root and self.dll_path:
+            try:
+                log.warning("Restarting HeadlessSim host on port %d after reconnect failures", self.port)
+                self._restart_host_process()
+                self._try_pipe_reconnect_cycle(timeouts=[2.0, 3.0, 5.0])
+                self._consecutive_failures = 0
+                self._dead = False
+                self._http_fallback = None
+                log.info("Pipe recovered on port %d after host restart", self.port)
+                return
+            except Exception as exc:
+                last_error = exc
+                log.error("Host restart recovery failed on port %d: %s", self.port, exc)
+
         self._consecutive_failures += 1
-        self._dead = True
-        log.error("Port %d marked DEAD (pipe reconnect failed, attempt %d)",
-                  self.port, self._consecutive_failures)
-        raise ConnectionError(f"Port {self.port} is dead")
+        self._dead = self._consecutive_failures >= self._DEAD_THRESHOLD
+        if self._dead:
+            log.error(
+                "Port %d marked DEAD after %d failed recovery cycles: %s",
+                self.port,
+                self._consecutive_failures,
+                last_error,
+            )
+            raise ConnectionError(f"Port {self.port} is dead")
+        log.warning(
+            "Port %d recovery cycle failed (%d/%d); env remains retryable: %s",
+            self.port,
+            self._consecutive_failures,
+            self._DEAD_THRESHOLD,
+            last_error,
+        )
+        raise ConnectionError(f"Port {self.port} reconnect failed")
 
     def get_state(self) -> dict[str, Any]:
         self._ensure_connected()
@@ -703,10 +777,10 @@ class PipeBackedFullRunClient:
         return result if isinstance(result, dict) else {}
 
     def close(self) -> None:
-        if self._connected:
-            self._pipe.close()
-            self._http_fallback = None
-            self._connected = False
+        self._close_pipe_quietly()
+        self._http_fallback = None
+        stop_process(self._owned_host_proc)
+        self._owned_host_proc = None
 
     @property
     def transport_name(self) -> str:
@@ -734,6 +808,9 @@ def create_full_run_client(
     request_timeout_s: float = 10.0,
     ready_timeout_s: float = 20.0,
     prefer_v2: bool = True,
+    auto_launch: bool = False,
+    repo_root: str | None = None,
+    dll_path: str | None = None,
 ) -> FullRunClientLike:
     if use_pipe:
         pipe_port = port if port is not None else int(base_url.rsplit(":", 1)[-1].split("/")[0])
@@ -741,6 +818,9 @@ def create_full_run_client(
             port=pipe_port,
             connect_timeout_s=ready_timeout_s,
             protocol="bin" if str(transport or "").strip().lower() == "pipe-binary" else "json",
+            auto_launch=auto_launch,
+            repo_root=repo_root,
+            dll_path=dll_path,
         )
     return ApiBackedFullRunClient(
         base_url=base_url,

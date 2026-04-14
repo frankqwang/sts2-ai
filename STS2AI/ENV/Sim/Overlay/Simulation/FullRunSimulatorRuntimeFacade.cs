@@ -871,6 +871,8 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 				}
 				break;
 			case "combat_rewards":
+				RunState? preProceedRunState = RunManager.Instance.DebugOnlyGetState();
+				bool shouldAwaitActTransition = ShouldAwaitActTransitionCompletion(preProceedRunState);
 				if (!FullRunSimulationChoiceBridge.Instance.TryProceedRewards(out string rewardsError))
 				{
 					return BuildRejected(rewardsError, "full_run_rewards_proceed_unavailable");
@@ -881,7 +883,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 				}
 				await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
 				await TriggerTerminalRewardsTransitionIfNeededAsync();
-				if (RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is not EventRoom)
+				if (!shouldAwaitActTransition && RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is not EventRoom)
 				{
 					_forceMapView = true;
 				}
@@ -938,6 +940,22 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 	}
 
+	private static bool ShouldAwaitActTransitionCompletion(RunState? runState, CombatRoom? combatRoom = null)
+	{
+		if (runState == null || runState.CurrentActIndex >= runState.Acts.Count - 1)
+		{
+			return false;
+		}
+
+		combatRoom ??= runState.CurrentRoom as CombatRoom;
+		if (combatRoom == null)
+		{
+			return false;
+		}
+
+		return combatRoom.RoomType == RoomType.Boss || combatRoom.IsVictoryRoom;
+	}
+
 	private async Task<FullRunSimulationStateSnapshot?> TryAdvancePostCombatTerminalTransitionAsync(
 		string diagnosticsPrefix,
 		FullRunSimulationStateSnapshot snapshot)
@@ -981,6 +999,8 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationTrace.Write(
 			$"{diagnosticsPrefix}.terminal_transition.begin room={combatRoom.RoomType} hp={localPlayer.Creature.CurrentHp} max_hp={localPlayer.Creature.MaxHp}");
 		string previousSignature = BuildStateChangeSignature(snapshot);
+		bool shouldAwaitActTransition = ShouldAwaitActTransitionCompletion(runState, combatRoom);
+		int previousActIndex = snapshot.CurrentActIndex;
 		await TriggerTerminalRewardsTransitionIfNeededAsync();
 
 		int maxAttempts = CombatSimulationRuntime.IsPureCombatSimulator ? 16 : 64;
@@ -1000,15 +1020,51 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			if (!string.Equals(observed.Signature, previousSignature, StringComparison.Ordinal)
 				&& observed.Snapshot.StateType != "combat_pending")
 			{
+				bool actTransitionResolved = !shouldAwaitActTransition
+					|| observed.Snapshot.StateType == "relic_select"
+					|| observed.Snapshot.CurrentActIndex > previousActIndex;
+				if (!actTransitionResolved)
+				{
+					FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.terminal_transition_intermediate");
+					FullRunSimulationTrace.Write(
+						$"{diagnosticsPrefix}.terminal_transition.intermediate state={observed.Snapshot.StateType} act={observed.Snapshot.CurrentActIndex} floor={observed.Snapshot.TotalFloor}");
+					continue;
+				}
 				FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.terminal_transition_hits");
 				FullRunSimulationTrace.Write(
-					$"{diagnosticsPrefix}.terminal_transition.done state={observed.Snapshot.StateType} floor={observed.Snapshot.TotalFloor}");
+					$"{diagnosticsPrefix}.terminal_transition.done state={observed.Snapshot.StateType} act={observed.Snapshot.CurrentActIndex} floor={observed.Snapshot.TotalFloor}");
 				return observed.Snapshot;
 			}
 		}
 
 		FullRunSimulationDiagnostics.Increment($"{diagnosticsPrefix}.terminal_transition_exhausted");
 		return null;
+	}
+
+	private bool ShouldKeepCombatPendingInsteadOfForcingMap(FullRunSimulationStateSnapshot snapshot)
+	{
+		if (snapshot.StateType != "combat_pending")
+		{
+			return false;
+		}
+
+		RunState? runState = RunManager.Instance.DebugOnlyGetState();
+		if (runState?.CurrentRoom is not CombatRoom combatRoom)
+		{
+			return false;
+		}
+
+		if (CombatManager.Instance.IsInProgress || runState.IsGameOver)
+		{
+			return false;
+		}
+
+		if (FullRunSimulationChoiceBridge.Instance.IsSelectionActive)
+		{
+			return false;
+		}
+
+		return ShouldAwaitActTransitionCompletion(runState, combatRoom);
 	}
 
 	private async Task<FullRunSimulationStepResult> StepCombatAsync(FullRunSimulationStateSnapshot state, string actionType, FullRunSimulationActionRequest action)
@@ -1397,6 +1453,12 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			{
 				return advancedTerminal;
 			}
+			if (ShouldKeepCombatPendingInsteadOfForcingMap(fallback))
+			{
+				FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.keep_pending_for_act_transition");
+				FullRunSimulationTrace.Write("settle.wait_combat_followup.keep_pending_for_act_transition");
+				return fallback;
+			}
 			FullRunSimulationDiagnostics.Increment("settle.wait_combat_followup.force_map_view");
 			_forceMapView = true;
 			FullRunSimulationStateSnapshot forced = GetState();
@@ -1558,6 +1620,12 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			if (advancedTerminal != null)
 			{
 				return advancedTerminal;
+			}
+			if (ShouldKeepCombatPendingInsteadOfForcingMap(fallback))
+			{
+				FullRunSimulationDiagnostics.Increment("settle.wait_explicit.keep_pending_for_act_transition");
+				FullRunSimulationTrace.Write("settle.wait_explicit.keep_pending_for_act_transition");
+				return fallback;
 			}
 			FullRunSimulationDiagnostics.Increment("settle.wait_explicit.force_map_view");
 			_forceMapView = true;

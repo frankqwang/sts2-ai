@@ -24,6 +24,8 @@ import torch.nn as nn
 
 from combat_nn import (
     CARD_AUX_DIM,
+    COMBAT_ACTION_AUX_DIM,
+    COMBAT_ROOM_TYPE_DIM,
     CombatPolicyValueNetwork,
     build_combat_action_features,
     build_combat_features,
@@ -38,13 +40,15 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-# Combat feature constants — keep in sync with rl_encoder_v2.py / combat_nn.py
+# Combat feature constants - keep in sync with rl_encoder_v2.py / combat_nn.py
 MAX_HAND_SIZE = 12
 MAX_ENEMIES = 5
 MAX_ACTIONS = 30
 COMBAT_SCALAR_DIM = 18
 COMBAT_EXTRA_SCALAR_DIM = 14  # v2 player powers (appended at END of state_input)
-# 2026-04-08 PM (wizardly merge): bumped 32 → 40 for the P0+QG union
+COMBAT_TURN_PREFIX_LEN = 4
+COMBAT_TURN_PREFIX_SCALAR_DIM = 32
+# 2026-04-08 PM (wizardly merge): bumped 32 -> 40 for the P0+QG union
 # slot table. See `rl_encoder_v2.ENEMY_AUX_DIM` slot reservation table.
 ENEMY_AUX_DIM = 40
 
@@ -161,8 +165,15 @@ class CombatActorONNXWrapper(nn.Module):
         action_type_ids: torch.Tensor,   # (B, 30) int64
         target_card_ids: torch.Tensor,   # (B, 30) int64
         target_enemy_ids: torch.Tensor,  # (B, 30) int64
+        action_family_ids: torch.Tensor,  # (B, 30) int64
+        action_aux: torch.Tensor,         # (B, 30, 13) float32
         action_mask: torch.Tensor,       # (B, 30) float32 (1/0)
         extra_scalars: torch.Tensor | None = None,  # (B, 14) float32 (v2 player powers)
+        room_type_onehot: torch.Tensor | None = None,  # (B, 3) float32
+        turn_prefix_ids: torch.Tensor | None = None,      # (B, 4) int64
+        turn_prefix_aux: torch.Tensor | None = None,      # (B, 4, 51) float32
+        turn_prefix_mask: torch.Tensor | None = None,     # (B, 4) float32 (1/0)
+        turn_prefix_scalars: torch.Tensor | None = None,  # (B, 32) float32
         deck_ids: torch.Tensor | None = None,     # (B, 50) int64
         deck_aux: torch.Tensor | None = None,     # (B, 50, 51) float32
         deck_mask: torch.Tensor | None = None,    # (B, 50) float32 (1/0)
@@ -192,6 +203,20 @@ class CombatActorONNXWrapper(nn.Module):
                 scalars.shape[0], COMBAT_EXTRA_SCALAR_DIM,
                 dtype=scalars.dtype, device=scalars.device,
             )
+        if room_type_onehot is not None:
+            state_features["room_type_onehot"] = room_type_onehot
+        else:
+            fallback_room = torch.zeros(
+                scalars.shape[0], COMBAT_ROOM_TYPE_DIM,
+                dtype=scalars.dtype, device=scalars.device,
+            )
+            fallback_room[:, 0] = 1.0
+            state_features["room_type_onehot"] = fallback_room
+        if turn_prefix_ids is not None:
+            state_features["turn_prefix_ids"] = turn_prefix_ids
+            state_features["turn_prefix_aux"] = turn_prefix_aux
+            state_features["turn_prefix_mask"] = turn_prefix_mask.bool()
+            state_features["turn_prefix_scalars"] = turn_prefix_scalars
         if self.has_deck and deck_ids is not None:
             state_features["deck_ids"] = deck_ids
             state_features["deck_aux"] = deck_aux
@@ -210,6 +235,8 @@ class CombatActorONNXWrapper(nn.Module):
             "action_type_ids": action_type_ids,
             "target_card_ids": target_card_ids,
             "target_enemy_ids": target_enemy_ids,
+            "action_family_ids": action_family_ids,
+            "action_aux": action_aux,
             "action_mask": action_mask.bool(),
         }
         if self.include_continuation:
@@ -250,7 +277,7 @@ def load_combat_network(checkpoint_path: str, vocab: Vocab, device: str = "cpu")
 
     has_adapter = any("delta_logits_head" in k for k in state_dict)
 
-    # Check if pile encoders exist in checkpoint — if not, don't enable deck_repr_dim
+    # Check if pile encoders exist in checkpoint; if not, don't enable deck_repr_dim
     # because current code auto-creates pile encoders when deck_repr_dim > 0,
     # which changes state_encoder input dim
     has_pile_encoders = any("draw_pile_encoder" in k for k in state_dict)
@@ -314,14 +341,23 @@ def make_dummy_inputs(
         torch.zeros(batch, MAX_ACTIONS, dtype=torch.int64, device=device),
         torch.zeros(batch, MAX_ACTIONS, dtype=torch.int64, device=device),
         torch.zeros(batch, MAX_ACTIONS, dtype=torch.int64, device=device),
+        torch.zeros(batch, MAX_ACTIONS, dtype=torch.int64, device=device),
+        torch.zeros(batch, MAX_ACTIONS, COMBAT_ACTION_AUX_DIM, dtype=torch.float32, device=device),
         torch.ones(batch, MAX_ACTIONS, dtype=torch.float32, device=device),
         torch.zeros(batch, COMBAT_EXTRA_SCALAR_DIM, dtype=torch.float32, device=device),
+        torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32, device=device).expand(batch, -1).clone(),
+        torch.zeros(batch, COMBAT_TURN_PREFIX_LEN, dtype=torch.int64, device=device),
+        torch.zeros(batch, COMBAT_TURN_PREFIX_LEN, CARD_AUX_DIM, dtype=torch.float32, device=device),
+        torch.zeros(batch, COMBAT_TURN_PREFIX_LEN, dtype=torch.float32, device=device),
+        torch.zeros(batch, COMBAT_TURN_PREFIX_SCALAR_DIM, dtype=torch.float32, device=device),
     ]
     names = [
         "scalars", "hand_ids", "hand_aux", "hand_mask",
         "enemy_ids", "enemy_aux", "enemy_mask",
-        "action_type_ids", "target_card_ids", "target_enemy_ids", "action_mask",
+        "action_type_ids", "target_card_ids", "target_enemy_ids", "action_family_ids", "action_aux", "action_mask",
         "extra_scalars",
+        "room_type_onehot",
+        "turn_prefix_ids", "turn_prefix_aux", "turn_prefix_mask", "turn_prefix_scalars",
     ]
     if has_deck:
         inputs.extend([

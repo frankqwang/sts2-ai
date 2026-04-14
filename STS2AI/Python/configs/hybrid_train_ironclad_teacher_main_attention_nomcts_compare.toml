@@ -1,50 +1,43 @@
-# Hybrid training config for IRONCLAD with main combat rollout attention enabled.
-#
-# This is intentionally close to `STS2AI/docs/configs/hybrid_train_ironclad_teacher.toml`.
-# The only structural difference is:
-# - `combat_main_path_mode = "light_attention"`
-#
-# Use this for proper hybrid/PPO A/B against the base config.
+# IRONCLAD 对照训练配置：保持当前训练入口和路线约束，仅关闭在线 combat MCTS
 
 [environment]
 pipe = true
 transport = "pipe-binary"
 auto_launch = true
-multi_process = true
 num_envs = 4
-start_port = 15527
+start_port = 15547
 character_id = "IRONCLAD"
 
 [training]
-max_iterations = 500
-episodes_per_iter = 160
-episode_timeout = 90.0
+max_iterations = 10
+episodes_per_iter = 0
+episode_timeout = 300.0
 max_episode_steps = 600
-output_dir = "STS2AI/Artifacts/hybrid_training_main_attention"
+output_dir = "STS2AI/Artifacts/hybrid_training_main_attention_nomcts_compare"
 
 [ppo]
 ppo_lr = 1e-4
 ppo_epochs = 4
-ppo_minibatch = 512
-target_kl = 0.01
+ppo_minibatch = 32
 ppo_entropy_coeff = 0.1
 ppo_clip = 0.2
 boss_readiness_coeff = 0.05
 
 [mcts]
 mcts = false
-mcts_sims = 50
+mcts_sims = 100
 mcts_lr = 1e-3
 mcts_batch_size = 128
 mcts_train_steps = 10
-mcts_warmup_iters = 50
+mcts_warmup_iters = 0
 mcts_replay_size = 50000
+mcts_first_n_actions_per_turn = 2
+mcts_full_search_on_elite_boss = true
 
 [combat_ppo]
 combat_ppo_lr = 3e-4
 combat_ppo_epochs = 4
-combat_ppo_minibatch = 512
-combat_target_kl = 0.01
+combat_ppo_minibatch = 64
 combat_ppo_entropy_coeff = 0.05
 combat_ppo_clip = 0.2
 combat_monster_reward_weight = 0.7
@@ -83,6 +76,9 @@ counterfactual_scoring = false
 counterfactual_weight = 0.0
 skada_prior_weight = 0.15
 skada_boss_weights = false
+
+[routing]
+act1_no_elite_routes = true
 
 [kl]
 kl_warmstart = false

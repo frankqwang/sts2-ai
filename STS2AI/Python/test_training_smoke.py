@@ -22,6 +22,7 @@ import _path_init  # noqa: F401  (adds STS2AI/Python library dirs to sys.path)
 import copy
 import sys
 import json
+import tomllib
 from pathlib import Path
 
 import numpy as np
@@ -1400,6 +1401,57 @@ class TestFeatureNonZero:
         feat = _enemy_aux_features(enemy)
         assert feat[10] > 0, "Enemy strength not encoded (index 10)"
 
+    def test_combat_turn_prefix_features_nonzero(self, vocab):
+        """Current-turn card prefix should be visible to the combat encoder."""
+        from combat_nn import build_combat_features
+
+        state = _make_synthetic_state("combat")
+        state["_combat_turn_prefix"] = {
+            "action_count": 3,
+            "cards_played": 2,
+            "attack_count": 1,
+            "skill_count": 1,
+            "power_count": 0,
+            "targeted_count": 1,
+            "non_card_count": 0,
+            "energy_spent": 2.0,
+            "recent_cards": [
+                {"id": "BASH", "name": "Bash", "cost": 2, "type": "Attack"},
+                {"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "type": "Skill"},
+            ],
+        }
+        sf = build_combat_features(state, vocab)
+        assert sf["turn_prefix_mask"][:2].tolist() == [True, True]
+        assert sf["turn_prefix_ids"][0] > 0
+        assert sf["turn_prefix_scalars"][0] > 0
+        assert sf["turn_prefix_scalars"][7] > 0
+
+    def test_update_combat_turn_prefix_tracks_card_sequence(self):
+        """Training-side prefix tracker should keep ordered recent cards and counts."""
+        from train_hybrid import _new_combat_turn_prefix, _update_combat_turn_prefix
+
+        state = _make_synthetic_state("combat")
+        state["battle"]["hand"] = [
+            {"id": "BASH", "name": "Bash", "cost": 2, "type": "Attack"},
+            {"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "type": "Skill"},
+        ]
+        prefix = _new_combat_turn_prefix()
+        prefix = _update_combat_turn_prefix(
+            prefix,
+            state=state,
+            action={"action": "play_card", "card_index": 0, "label": "Bash"},
+        )
+        prefix = _update_combat_turn_prefix(
+            prefix,
+            state=state,
+            action={"action": "play_card", "card_index": 1, "label": "Defend"},
+        )
+        assert prefix["cards_played"] == 2
+        assert prefix["attack_count"] == 1
+        assert prefix["skill_count"] == 1
+        assert prefix["energy_spent"] == pytest.approx(3.0)
+        assert [card["id"] for card in prefix["recent_cards"]] == ["BASH", "DEFEND_IRONCLAD"]
+
     def test_ppo_scalars_nonzero_for_typical_state(self, vocab):
         """A mid-run state should have non-zero scalar features."""
         from rl_encoder_v2 import build_structured_state
@@ -1820,6 +1872,221 @@ class TestTrainingConfig:
         assert effective_scoring is False
         assert effective_weight == 0.0
         assert any("requires --use-segment-collector" in msg for msg in warnings)
+
+    def test_mcts_and_nomcts_configs_do_not_invert_search_switch(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        mcts_cfg = repo_root / "STS2AI" / "Python" / "configs" / "hybrid_train_ironclad_teacher_main_attention_mcts.toml"
+        nomcts_cfg = repo_root / "STS2AI" / "Python" / "configs" / "hybrid_train_ironclad_teacher_main_attention_nomcts_compare.toml"
+
+        mcts_data = tomllib.loads(mcts_cfg.read_text(encoding="utf-8"))
+        nomcts_data = tomllib.loads(nomcts_cfg.read_text(encoding="utf-8"))
+
+        assert bool(mcts_data["mcts"]["mcts"]) is True
+        assert bool(nomcts_data["mcts"]["mcts"]) is False
+
+    def test_mp_worker_refresh_reloads_latest_weights_and_ort_sessions(self, vocab, monkeypatch):
+        import train_hybrid
+        from core.rl_policy_v2 import FullRunPolicyNetworkV2
+        from combat_nn import CombatPolicyValueNetwork
+
+        ppo_net = FullRunPolicyNetworkV2(vocab=vocab, embed_dim=32)
+        mcts_net = CombatPolicyValueNetwork(
+            vocab=vocab,
+            embed_dim=32,
+            hidden_dim=128,
+            entity_embeddings=ppo_net.entity_emb,
+            symbolic_head=ppo_net.symbolic_head,
+        )
+        fresh_ppo = copy.deepcopy(ppo_net)
+        fresh_mcts = copy.deepcopy(mcts_net)
+
+        with torch.no_grad():
+            next(iter(fresh_ppo.parameters())).fill_(0.1234)
+            next(iter(fresh_mcts.parameters())).fill_(-0.4321)
+
+        rebuilt_sessions: list[tuple[str, str]] = []
+
+        def _fake_create_ort_session(model_path, *, worker_id, label, log):
+            rebuilt_sessions.append((label, model_path))
+            return f"{label}:{model_path}:worker{worker_id}"
+
+        monkeypatch.setattr(train_hybrid, "_mp_worker_create_ort_session", _fake_create_ort_session)
+
+        ppo_session, combat_session = train_hybrid._apply_mp_worker_refresh_message(
+            worker_id=2,
+            log=type("Log", (), {"warning": lambda *args, **kwargs: None})(),
+            worker_config={"ppo_onnx_path": "old_ppo.onnx", "combat_onnx_path": "old_combat.onnx"},
+            ppo_net=ppo_net,
+            mcts_net=mcts_net,
+            refresh_task={
+                "ppo_state_dict": fresh_ppo.state_dict(),
+                "mcts_state_dict": fresh_mcts.state_dict(),
+                "ppo_onnx_path": "new_ppo.onnx",
+                "combat_onnx_path": "new_combat.onnx",
+                "reload_ort": True,
+            },
+            ppo_ort_session="stale-ppo",
+            combat_ort_session="stale-combat",
+        )
+
+        assert torch.allclose(next(iter(ppo_net.parameters())), next(iter(fresh_ppo.parameters())))
+        assert torch.allclose(next(iter(mcts_net.parameters())), next(iter(fresh_mcts.parameters())))
+        assert ppo_session == "PPO:new_ppo.onnx:worker2"
+        assert combat_session == "combat:new_combat.onnx:worker2"
+        assert rebuilt_sessions == [("PPO", "new_ppo.onnx"), ("combat", "new_combat.onnx")]
+
+    def test_combat_pending_transition_prefers_refresh_then_wait(self):
+        import train_hybrid
+
+        class _Client:
+            def __init__(self):
+                self.calls: list[str] = []
+
+            def get_state(self):
+                self.calls.append("refresh")
+                return {"state_type": "combat_pending", "legal_actions": []}
+
+            def act(self, action):
+                self.calls.append(str(action.get("action")))
+                return {"state_type": "combat_pending", "legal_actions": []}
+
+        client = _Client()
+
+        state, method = train_hybrid._advance_combat_pending_transition(
+            client,
+            current_streak=1,
+            poll_sleep_s=0.0,
+            wait_every=5,
+        )
+
+        assert method == "refresh"
+        assert state["state_type"] == "combat_pending"
+        assert client.calls == ["refresh"]
+
+        state, method = train_hybrid._advance_combat_pending_transition(
+            client,
+            current_streak=5,
+            poll_sleep_s=0.0,
+            wait_every=5,
+        )
+
+        assert method == "wait"
+        assert state["state_type"] == "combat_pending"
+        assert client.calls[-1] == "wait"
+
+    def test_shop_force_remove_purchase_action(self):
+        import train_hybrid
+
+        state = {"state_type": "shop"}
+        legal = [
+            {"action": "shop_purchase", "label": "ANGER"},
+            {"action": "remove_card", "label": "remove_card"},
+            {"action": "proceed", "label": "proceed"},
+        ]
+
+        override = train_hybrid._choose_shop_remove_purchase_action(state, legal)
+
+        assert override is not None
+        idx, action, source = override
+        assert idx == 1
+        assert action["action"] == "remove_card"
+        assert source == "shop_force_remove"
+
+    def test_shop_remove_target_prefers_basic_cards(self):
+        import train_hybrid
+
+        legal = [
+            {"action": "select_card", "card_id": "POMMEL_STRIKE", "label": "POMMEL_STRIKE"},
+            {"action": "select_card", "card_id": "DEFEND_IRONCLAD", "label": "DEFEND_IRONCLAD"},
+            {"action": "select_card", "card_id": "STRIKE_IRONCLAD", "label": "STRIKE_IRONCLAD"},
+        ]
+
+        override = train_hybrid._choose_shop_remove_target_action(legal)
+
+        assert override is not None
+        idx, action, source = override
+        assert idx == 2
+        assert action["card_id"] == "STRIKE_IRONCLAD"
+        assert source == "shop_remove_basic"
+
+    def test_boss_conditioned_card_reward_prefers_waterfall_block_card(self):
+        import train_hybrid
+
+        state = _make_synthetic_state("card_reward")
+        state["run"]["next_boss_id"] = "WATERFALL_GIANT_BOSS"
+        state["run"]["next_boss_name"] = "Waterfall Giant"
+        state["run"]["next_boss_archetype"] = "waterfall_giant_boss"
+        legal = [
+            {"action": "select_card_reward", "card_id": "THUNDERCLAP", "label": "THUNDERCLAP"},
+            {"action": "select_card_reward", "card_id": "FLAME_BARRIER", "label": "FLAME_BARRIER"},
+            {"action": "skip", "label": "skip"},
+        ]
+        logits = np.asarray([1.3, 0.2, 0.1], dtype=np.float32)
+
+        override = train_hybrid._choose_boss_conditioned_card_reward_action(
+            state,
+            legal,
+            action_logits=logits,
+            fallback_idx=0,
+            guidance_weight=1.0,
+        )
+
+        assert override is not None
+        idx, action, source = override
+        assert idx == 1
+        assert action["card_id"] == "FLAME_BARRIER"
+        assert source == "boss_card_guidance_waterfall_giant"
+
+    def test_card_reward_decision_debug_includes_boss_bonus(self):
+        import train_hybrid
+
+        state = _make_synthetic_state("card_reward")
+        state["run"]["next_boss_id"] = "WATERFALL_GIANT_BOSS"
+        state["run"]["next_boss_name"] = "Waterfall Giant"
+        state["run"]["next_boss_archetype"] = "waterfall_giant_boss"
+        legal = [
+            {"action": "select_card_reward", "card_id": "THUNDERCLAP", "label": "THUNDERCLAP"},
+            {"action": "select_card_reward", "card_id": "FLAME_BARRIER", "label": "FLAME_BARRIER"},
+            {"action": "skip", "label": "skip"},
+        ]
+
+        debug = train_hybrid._build_card_reward_decision_details(
+            state,
+            legal,
+            action_logits=np.asarray([1.3, 0.2, 0.1], dtype=np.float32),
+            guidance_weight=1.0,
+            selected_idx=1,
+            source="boss_card_guidance_waterfall_giant",
+        )
+
+        assert debug["boss_token"] == "waterfall_giant"
+        assert debug["source"] == "boss_card_guidance_waterfall_giant"
+        flame = next(choice for choice in debug["choices"] if choice["label"] == "FLAME_BARRIER")
+        thunder = next(choice for choice in debug["choices"] if choice["label"] == "THUNDERCLAP")
+        assert flame["boss_bonus"] > thunder["boss_bonus"]
+        assert flame["selected"] is True
+
+    def test_shop_offer_affordable_distinguishes_can_buy_vs_no_money(self):
+        diag_dir = Path(__file__).resolve().parent / "diagnostics"
+        if str(diag_dir) not in sys.path:
+            sys.path.append(str(diag_dir))
+        from analyze_training_window import _shop_offer_affordable
+
+        affordable = {
+            "enter_gold": 120,
+            "offers": [
+                {"name": "ANGER", "cost": 75, "is_stocked": True},
+            ],
+        }
+        unaffordable = {
+            "enter_gold": 35,
+            "offers": [
+                {"name": "FLAME_BARRIER", "cost": 120, "is_stocked": True},
+            ],
+        }
+
+        assert _shop_offer_affordable(affordable) is True
+        assert _shop_offer_affordable(unaffordable) is False
 
 
 class TestCombatCurriculum:
@@ -3622,6 +3889,34 @@ class TestCombatTeacherStackV1:
         assert report["schema_version"] == "combat_microbench.v1"
         assert report["sample_count"] == 1
         assert report["source_sample_count"] == 1
+
+    def test_build_combat_features_exposes_room_type_onehot(self, vocab):
+        from combat_nn import build_combat_features
+
+        boss_state = _make_v1_combat_state("boss", floor=16)
+        elite_state = _make_v1_combat_state("elite", floor=12)
+        monster_state = _make_v1_combat_state("monster", floor=3)
+
+        boss_feat = build_combat_features(boss_state, vocab)
+        elite_feat = build_combat_features(elite_state, vocab)
+        monster_feat = build_combat_features(monster_state, vocab)
+
+        assert boss_feat["room_type_onehot"].tolist() == pytest.approx([0.0, 0.0, 1.0])
+        assert elite_feat["room_type_onehot"].tolist() == pytest.approx([0.0, 1.0, 0.0])
+        assert monster_feat["room_type_onehot"].tolist() == pytest.approx([1.0, 0.0, 0.0])
+
+    def test_room_conditioned_value_prefers_boss_survival_over_hp_preservation(self):
+        from combat_nn import compose_room_conditioned_value
+
+        base = torch.tensor([0.0], dtype=torch.float32)
+        continuation = torch.tensor([[0.80, 12.0, 0.0]], dtype=torch.float32)
+        hallway = torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32)
+        boss = torch.tensor([[0.0, 0.0, 1.0]], dtype=torch.float32)
+
+        hallway_value = compose_room_conditioned_value(base, continuation, hallway)
+        boss_value = compose_room_conditioned_value(base, continuation, boss)
+
+        assert boss_value.item() > hallway_value.item()
 
     def test_microbench_dedupes_duplicate_sample_ids(self):
         from combat_microbench import build_microbench_report
@@ -5897,6 +6192,116 @@ def test_pipe_client_rejected_step_with_state_raises_api_error():
     assert getattr(exc, "latest_state", None) == {"state_type": "monster"}
 
 
+def test_pipe_reconnect_uses_dead_threshold_before_marking_dead(monkeypatch):
+    from full_run_env import PipeBackedFullRunClient
+
+    class DummyPipe:
+        def close(self) -> None:
+            return None
+
+    client = object.__new__(PipeBackedFullRunClient)
+    client.port = 15527
+    client.protocol = "json"
+    client.poll_interval_s = 0.0
+    client.connect_timeout_s = 1.0
+    client.auto_launch = False
+    client.repo_root = None
+    client.dll_path = None
+    client._pipe = DummyPipe()
+    client._connected = True
+    client._last_step_info = None
+    client._http_fallback = None
+    client._call_count_since_fallback = 0
+    client._owned_host_proc = None
+    client._consecutive_failures = 0
+    client._dead = False
+    client._DEAD_THRESHOLD = 3
+
+    def _always_fail(self, *, timeouts):
+        raise ConnectionError("pipe down")
+
+    monkeypatch.setattr(PipeBackedFullRunClient, "_try_pipe_reconnect_cycle", _always_fail)
+
+    with pytest.raises(ConnectionError):
+        client._reconnect()
+    assert client._consecutive_failures == 1
+    assert client._dead is False
+
+    with pytest.raises(ConnectionError):
+        client._reconnect()
+    assert client._consecutive_failures == 2
+    assert client._dead is False
+
+    with pytest.raises(ConnectionError):
+        client._reconnect()
+    assert client._consecutive_failures == 3
+    assert client._dead is True
+
+
+def test_pipe_reconnect_restarts_host_before_marking_dead(monkeypatch):
+    from full_run_env import PipeBackedFullRunClient
+
+    class DummyPipe:
+        def close(self) -> None:
+            return None
+
+    client = object.__new__(PipeBackedFullRunClient)
+    client.port = 15527
+    client.protocol = "json"
+    client.poll_interval_s = 0.0
+    client.connect_timeout_s = 1.0
+    client.auto_launch = True
+    client.repo_root = "repo"
+    client.dll_path = "host.exe"
+    client._pipe = DummyPipe()
+    client._connected = True
+    client._last_step_info = None
+    client._http_fallback = None
+    client._call_count_since_fallback = 0
+    client._owned_host_proc = None
+    client._consecutive_failures = 0
+    client._dead = False
+    client._DEAD_THRESHOLD = 3
+
+    calls: list[list[float]] = []
+    restarts: list[int] = []
+
+    def _fail_then_succeed(self, *, timeouts):
+        calls.append(list(timeouts))
+        if len(calls) == 1:
+            raise ConnectionError("first cycle failed")
+        self._connected = True
+
+    def _restart(self):
+        restarts.append(self.port)
+
+    monkeypatch.setattr(PipeBackedFullRunClient, "_try_pipe_reconnect_cycle", _fail_then_succeed)
+    monkeypatch.setattr(PipeBackedFullRunClient, "_restart_host_process", _restart)
+
+    client._reconnect()
+
+    assert restarts == [15527]
+    assert len(calls) == 2
+    assert client._consecutive_failures == 0
+    assert client._dead is False
+
+
+def test_episode_terminal_state_treats_post_run_menu_as_terminal():
+    from train_hybrid import _is_episode_terminal_state
+
+    menu_state = {"state_type": "menu"}
+
+    assert not _is_episode_terminal_state(menu_state, has_entered_run=False)
+    assert _is_episode_terminal_state(menu_state, has_entered_run=True)
+
+
+def test_terminal_value_from_outcome_defaults_menu_to_death():
+    from train_hybrid import _terminal_value_from_outcome
+
+    assert _terminal_value_from_outcome({"state_type": "game_over", "game_over": {"outcome": "victory"}}) == 1.0
+    assert _terminal_value_from_outcome({"state_type": "menu"}, default_on_unknown=-1.0) == -1.0
+
+
 def test_choose_act1_safe_map_action_avoids_elite_when_possible():
     from evaluate_ai import _choose_act1_safe_map_action
 
@@ -6026,3 +6431,74 @@ def test_choose_act1_safe_map_action_avoids_forced_elite_funnel():
     assert idx == 1
     assert action["label"] == "restsite"
     assert source == "nn_map_plan"
+
+
+def test_train_hybrid_act1_no_elite_route_override():
+    from train_hybrid import _choose_act1_no_elite_map_action
+
+    state = _make_synthetic_state("map")
+    state["map"] = {
+        "boss": {"row": 4},
+        "next_options": [
+            {"index": 0, "col": 0, "row": 1, "type": "monster"},
+            {"index": 1, "col": 1, "row": 1, "type": "monster"},
+        ],
+        "nodes": [
+            {"col": 0, "row": 1, "type": "monster", "children": [(0, 2)]},
+            {"col": 0, "row": 2, "type": "elite", "children": [(0, 3)]},
+            {"col": 0, "row": 3, "type": "monster", "children": []},
+            {"col": 1, "row": 1, "type": "monster", "children": [(1, 2)]},
+            {"col": 1, "row": 2, "type": "restsite", "children": [(1, 3)]},
+            {"col": 1, "row": 3, "type": "shop", "children": []},
+        ],
+    }
+    legal = [
+        {"action": "choose_map_node", "index": 0, "label": "monster", "col": 0, "row": 1},
+        {"action": "choose_map_node", "index": 1, "label": "monster", "col": 1, "row": 1},
+    ]
+    logits = np.asarray([5.0, 0.1], dtype=np.float32)
+
+    choice = _choose_act1_no_elite_map_action(state, legal, action_logits=logits, fallback_idx=0)
+
+    assert choice is not None
+    idx, action, source = choice
+    assert idx == 1
+    assert action["col"] == 1
+    assert source == "act1_route_plan"
+
+
+def test_combat_should_use_mcts_respects_turn_cap_and_elite_override():
+    from train_hybrid import _combat_should_use_mcts
+
+    assert _combat_should_use_mcts(
+        use_mcts_combat=True,
+        mcts_warmup_active=False,
+        combat_room_type="monster",
+        turn_action_index=0,
+        mcts_first_n_actions_per_turn=2,
+        mcts_full_search_on_elite_boss=True,
+    )
+    assert _combat_should_use_mcts(
+        use_mcts_combat=True,
+        mcts_warmup_active=False,
+        combat_room_type="monster",
+        turn_action_index=1,
+        mcts_first_n_actions_per_turn=2,
+        mcts_full_search_on_elite_boss=True,
+    )
+    assert not _combat_should_use_mcts(
+        use_mcts_combat=True,
+        mcts_warmup_active=False,
+        combat_room_type="monster",
+        turn_action_index=2,
+        mcts_first_n_actions_per_turn=2,
+        mcts_full_search_on_elite_boss=True,
+    )
+    assert _combat_should_use_mcts(
+        use_mcts_combat=True,
+        mcts_warmup_active=False,
+        combat_room_type="elite",
+        turn_action_index=5,
+        mcts_first_n_actions_per_turn=2,
+        mcts_full_search_on_elite_boss=True,
+    )

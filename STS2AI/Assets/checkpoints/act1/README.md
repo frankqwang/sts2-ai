@@ -1,50 +1,52 @@
 # STS2AI Stable Checkpoints (Act 1)
 
-This directory contains the self-contained mainline checkpoint package used by
-the `STS2AI` training and evaluation entrypoints.
+这个目录保存可以直接复现当前主线工作的稳定 checkpoint 包。
 
-## Current Champion
+## 当前可复现恢复点
+
+- `mainline_iter2270_carddebug.pt`
+  - role: 当前主线恢复点
+  - frozen_at: `2026-04-14`
+  - source_run: `STS2AI/Artifacts/hybrid_training_main_attention_iter5_carddebug_cont/hybrid_4env_20260414-094343`
+  - note:
+    - 已包含多进程 worker 权重同步修复
+    - 已包含 Act1 路线规划、boss 条件化卡奖引导、combat safety rerank
+    - 当前仓库代码还额外修了 Act1 boss -> Act2 过渡 bug；该修复会在下一次启动 host 后生效
+
+## 历史 Champion
 
 - `retrieval_final_iter2175.pt`
-  - role: production champion
+  - role: 历史 champion / 检索头阶段基线
   - frozen_at: `2026-04-09`
-  - note: contains both the non-combat PPO brain and the combat head used by
-    the current mainline.
 
-## Policy
-
-- Mainline only keeps one promoted Act 1 checkpoint in-tree.
-- Older milestones, challengers, and deprecated combat-only baselines are not
-  part of the active `STS2AI` package.
-- Historical recovery should use git history or archived docs instead of
-  treating superseded checkpoints as active assets.
-
-## Evaluate
-
-```powershell
-python STS2AI/Python/evaluate_ai.py `
-  --checkpoint STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt `
-  --transport pipe-binary `
-  --seeds-file STS2AI/Assets/seeds/full_run_benchmark_seeds_200.json `
-  --seed-suite benchmark `
-  --num-games 50
-```
-
-## Resume Training
+## 推荐恢复命令
 
 ```powershell
 python STS2AI/Python/train_hybrid.py `
-  --resume STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt `
-  --retrieval-head `
-  --retrieval-proj-dim 16
+  --config STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml `
+  --resume STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt `
+  --max-iterations 5 `
+  --save-interval 5 `
+  --act1-no-elite-routes `
+  --combat-pending-stall-threshold 30 `
+  --boss-entry-quality-weight 0.15 `
+  --boss-conditioned-card-guidance-weight 0.8 `
+  --combat-safety-rerank-weight 1.0
 ```
 
-`train_hybrid.py` will auto-enable the checkpoint's retrieval-head settings when
-resuming from the mainline champion, so the command above is the intended
-copy-and-run entrypoint.
+## 推荐评估命令
 
-The previously documented default auxiliary datasets
-`STS2AI/Assets/datasets/card_ranking_post_wizardly` and
-`STS2AI/Assets/datasets/combat_teacher_post_wizardly/teacher.jsonl` were
-removed because they contained invalid data. If you need those inputs for a new
-training run, provide regenerated and validated replacements explicitly.
+```powershell
+python STS2AI/Python/evaluate_ai.py `
+  --checkpoint STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt `
+  --transport pipe-binary `
+  --auto-launch `
+  --headless-dll STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe `
+  --num-games 50
+```
+
+## 说明
+
+- `manifest.json` 里保存了 checkpoint 的 SHA256、来源和推荐命令。
+- 当前主线的详细交接、训练参数、分析脚本和下一步计划请看：
+  - `STS2AI/docs/当前训练主线与接手说明_2026-04-14.md`

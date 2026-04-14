@@ -1105,6 +1105,7 @@ class PPOTrainerV2:
         max_grad_norm: float = 0.5,
         ppo_epochs: int = 4,
         minibatch_size: int = 64,
+        target_kl: float = 0.0,
     ):
         self.network = network
         self.optimizer = torch.optim.Adam(network.parameters(), lr=lr)
@@ -1116,6 +1117,7 @@ class PPOTrainerV2:
         self.max_grad_norm = max_grad_norm
         self.ppo_epochs = ppo_epochs
         self.minibatch_size = minibatch_size
+        self.target_kl = target_kl
 
     def update(
         self,
@@ -1172,7 +1174,9 @@ class PPOTrainerV2:
         total_boss_readiness_loss = 0.0
         total_ratio_mean = 0.0
         total_clip_fraction = 0.0
+        total_approx_kl = 0.0
         update_count = 0
+        early_stop = False
 
         for _epoch in range(self.ppo_epochs):
             # Phase 1C: weighted sampling by screen frequency
@@ -1259,7 +1263,15 @@ class PPOTrainerV2:
                 total_boss_readiness_loss += boss_readiness_loss.item()
                 total_ratio_mean += ratio.mean().item()
                 total_clip_fraction += clip_fraction.item()
+                approx_kl = (mb_old_lp - new_lp).mean().abs()
+                total_approx_kl += approx_kl.item()
                 update_count += 1
+
+                if self.target_kl > 0 and approx_kl.item() > self.target_kl:
+                    early_stop = True
+                    break
+            if early_stop:
+                break
 
         return {
             "policy_loss": total_policy_loss / max(1, update_count),
@@ -1269,6 +1281,8 @@ class PPOTrainerV2:
             "boss_readiness_loss": total_boss_readiness_loss / max(1, update_count),
             "ratio_mean": total_ratio_mean / max(1, update_count),
             "clip_fraction": total_clip_fraction / max(1, update_count),
+            "approx_kl": total_approx_kl / max(1, update_count),
+            "early_stop": float(early_stop),
             "buffer_size": n,
         }
 

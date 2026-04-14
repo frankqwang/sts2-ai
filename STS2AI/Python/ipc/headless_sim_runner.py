@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 import subprocess
 import sys
@@ -149,6 +150,28 @@ def _build_launch_command(host_path: Path, protocol: str, port: int) -> list[str
     return [str(host_path), *host_args]
 
 
+def _pipe_name_for_port(*, port: int, protocol: str) -> str:
+    normalized_protocol = "bin" if protocol in {"bin", "binary"} else "json"
+    pipe_suffix = f"sts2_mcts_bin_{port}" if normalized_protocol == "bin" else f"sts2_mcts_{port}"
+    return rf"\\.\pipe\{pipe_suffix}"
+
+
+def _wait_for_pipe_slot_windows(*, port: int, timeout_s: float, protocol: str) -> None:
+    pipe_name = _pipe_name_for_port(port=port, protocol=protocol)
+    kernel32 = ctypes.windll.kernel32
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+        ok = kernel32.WaitNamedPipeW(pipe_name, remaining_ms)
+        if ok:
+            # Avoid handing the same single-owner session from the probe to the
+            # training client in the same scheduler tick.
+            time.sleep(0.15)
+            return
+        time.sleep(0.05)
+    raise RuntimeError(f"HeadlessSim pipe {pipe_name} did not become ready within {timeout_s:.1f}s")
+
+
 def start_headless_sim(
     *,
     port: int,
@@ -185,8 +208,18 @@ def stop_process(proc: subprocess.Popen | None) -> None:
 
 
 def _wait_until_ready(*, port: int, timeout_s: float, protocol: str = "json") -> None:
+    if sys.platform == "win32":
+        try:
+            _wait_for_pipe_slot_windows(port=port, timeout_s=timeout_s, protocol=protocol)
+            return
+        except Exception as exc:
+            last_error = exc
+        else:
+            last_error = None
+    else:
+        last_error = None
+
     deadline = time.monotonic() + timeout_s
-    last_error: Exception | None = None
     protocol = str(protocol).strip().lower()
     while time.monotonic() < deadline:
         try:

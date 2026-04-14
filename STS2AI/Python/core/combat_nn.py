@@ -56,6 +56,15 @@ from core.symbolic_features_head import SymbolicFeaturesHead
 COMBAT_SCALAR_DIM = 18  # FROZEN: 10 base + 8 player power features (legacy v1 layout)
 COMBAT_EXTRA_SCALAR_DIM = 14  # NEW v2 player powers, appended at END of state_input
 COMBAT_TOTAL_SCALAR_DIM = COMBAT_SCALAR_DIM + COMBAT_EXTRA_SCALAR_DIM  # 32
+COMBAT_TURN_PREFIX_LEN = 4
+COMBAT_TURN_PREFIX_SCALAR_DIM = 32
+COMBAT_ACTION_AUX_DIM = 13
+COMBAT_ROOM_TYPE_DIM = 3
+COMBAT_ACTION_FAMILY_PLAY_CARD = 0
+COMBAT_ACTION_FAMILY_POTION = 1
+COMBAT_ACTION_FAMILY_END_TURN = 2
+COMBAT_ACTION_FAMILY_SELECTION = 3
+NUM_COMBAT_ACTION_FAMILIES = 4
 
 
 def _get_power_amount(powers: list, power_id: str) -> float:
@@ -75,6 +84,79 @@ def _player_power_list(player: dict) -> list:
         if isinstance(v, list) and v:
             return v
     return []
+
+
+def _combat_turn_prefix_payload(state: dict[str, Any]) -> dict[str, Any]:
+    payload = state.get("_combat_turn_prefix")
+    if isinstance(payload, dict):
+        return payload
+    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
+    payload = battle.get("turn_prefix")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _combat_room_type_onehot(state: dict[str, Any]) -> np.ndarray:
+    st = _lower(state.get("state_type") or "")
+    room_idx = 0  # hallway/monster
+    if st == "elite":
+        room_idx = 1
+    elif st == "boss":
+        room_idx = 2
+    else:
+        battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
+        enemies = battle.get("enemies") or state.get("enemies") or []
+        for enemy in enemies:
+            if not isinstance(enemy, dict):
+                continue
+            etype = _lower(enemy.get("type") or enemy.get("enemy_type") or "")
+            if etype.startswith("boss"):
+                room_idx = 2
+                break
+            if etype.startswith("elite"):
+                room_idx = 1
+    out = np.zeros(COMBAT_ROOM_TYPE_DIM, dtype=np.float32)
+    out[room_idx] = 1.0
+    return out
+
+
+def compose_room_conditioned_value(
+    base_value: torch.Tensor,
+    continuation: torch.Tensor,
+    room_type_onehot: torch.Tensor | None,
+) -> torch.Tensor:
+    """Aggregate scalar combat value from win/cost continuation targets.
+
+    hallway: low-cost win is preferred
+    elite: survival and cost are balanced
+    boss: survival dominates; HP-loss after victory matters far less
+    """
+    if room_type_onehot is None:
+        room_type_onehot = torch.zeros(
+            base_value.shape[0], COMBAT_ROOM_TYPE_DIM,
+            dtype=base_value.dtype, device=base_value.device,
+        )
+        room_type_onehot[:, 0] = 1.0
+
+    win_prob = continuation[:, 0]
+    expected_hp_loss = continuation[:, 1]
+    expected_potion_cost = continuation[:, 2]
+
+    survival_value = win_prob * 2.0 - 1.0
+    hp_cost = torch.tanh(expected_hp_loss / 15.0)
+    potion_cost = torch.tanh(expected_potion_cost)
+
+    hallway_mask = room_type_onehot[:, 0]
+    elite_mask = room_type_onehot[:, 1]
+    boss_mask = room_type_onehot[:, 2]
+
+    hp_weight = hallway_mask * 0.35 + elite_mask * 0.20 + boss_mask * 0.00
+    potion_weight = hallway_mask * 0.30 + elite_mask * 0.18 + boss_mask * 0.05
+
+    conditioned_value = survival_value - hp_weight * hp_cost - potion_weight * potion_cost
+    conditioned_value = conditioned_value.clamp(-1.0, 1.0)
+    # base_value already comes from a Tanh head; keep the final blend linear in
+    # range instead of applying a second squashing nonlinearity.
+    return (0.5 * base_value + 0.5 * conditioned_value).clamp(-1.0, 1.0)
 
 
 def build_combat_features(
@@ -175,6 +257,7 @@ def build_combat_features(
     features = {
         "scalars": scalars,
         "extra_scalars": extra_scalars,
+        "room_type_onehot": _combat_room_type_onehot(state),
         "hand_ids": hand_ids,
         "hand_aux": hand_aux,
         "hand_mask": hand_mask,
@@ -182,6 +265,88 @@ def build_combat_features(
         "enemy_aux": enemy_aux,
         "enemy_mask": enemy_mask,
     }
+
+    prefix_payload = _combat_turn_prefix_payload(state)
+    prefix_cards = prefix_payload.get("recent_cards") if isinstance(prefix_payload.get("recent_cards"), list) else []
+    prefix_ids = np.zeros(COMBAT_TURN_PREFIX_LEN, dtype=np.int64)
+    prefix_aux = np.zeros((COMBAT_TURN_PREFIX_LEN, CARD_AUX_DIM), dtype=np.float32)
+    prefix_mask = np.zeros(COMBAT_TURN_PREFIX_LEN, dtype=bool)
+    for i, card in enumerate(prefix_cards[-COMBAT_TURN_PREFIX_LEN:]):
+        if not isinstance(card, dict):
+            continue
+        card_idx, card_aux = _cached_card_encoding(card, vocab)
+        prefix_ids[i] = card_idx
+        prefix_aux[i] = card_aux
+        prefix_mask[i] = True
+
+    prefix_scalars = np.zeros(COMBAT_TURN_PREFIX_SCALAR_DIM, dtype=np.float32)
+    prefix_scalars[0] = min(_safe_float(prefix_payload.get("action_count"), 0.0) / 8.0, 1.0)
+    prefix_scalars[1] = min(_safe_float(prefix_payload.get("cards_played"), 0.0) / 8.0, 1.0)
+    prefix_scalars[2] = min(_safe_float(prefix_payload.get("attack_count"), 0.0) / 6.0, 1.0)
+    prefix_scalars[3] = min(_safe_float(prefix_payload.get("skill_count"), 0.0) / 6.0, 1.0)
+    prefix_scalars[4] = min(_safe_float(prefix_payload.get("power_count"), 0.0) / 4.0, 1.0)
+    prefix_scalars[5] = min(_safe_float(prefix_payload.get("targeted_count"), 0.0) / 6.0, 1.0)
+    prefix_scalars[6] = min(_safe_float(prefix_payload.get("non_card_count"), 0.0) / 4.0, 1.0)
+    prefix_scalars[7] = min(_safe_float(prefix_payload.get("energy_spent"), 0.0) / 8.0, 1.0)
+    prefix_scalars[8] = min(_safe_float(prefix_payload.get("potion_count"), 0.0) / 2.0, 1.0)
+    prefix_scalars[9] = min(_safe_float(prefix_payload.get("selection_count"), 0.0) / 4.0, 1.0)
+    prefix_scalars[10] = min(_safe_float(prefix_payload.get("damage_est"), 0.0) / 80.0, 1.0)
+    prefix_scalars[11] = min(_safe_float(prefix_payload.get("block_est"), 0.0) / 60.0, 1.0)
+    prefix_scalars[12] = min(_safe_float(prefix_payload.get("draw_est"), 0.0) / 8.0, 1.0)
+    prefix_scalars[13] = min(_safe_float(prefix_payload.get("discard_count"), 0.0) / 5.0, 1.0)
+    prefix_scalars[14] = min(_safe_float(prefix_payload.get("exhaust_count"), 0.0) / 5.0, 1.0)
+    prefix_scalars[15] = min(_safe_float(prefix_payload.get("create_count"), 0.0) / 5.0, 1.0)
+    prefix_scalars[16] = min(_safe_float(prefix_payload.get("last_action_attack"), 0.0), 1.0)
+    prefix_scalars[17] = min(_safe_float(prefix_payload.get("last_action_skill"), 0.0), 1.0)
+    prefix_scalars[18] = min(_safe_float(prefix_payload.get("last_action_power"), 0.0), 1.0)
+    prefix_scalars[19] = min(_safe_float(prefix_payload.get("last_action_non_card"), 0.0), 1.0)
+    # Richer chain-state summary: the model should know what kind of turn it
+    # is currently executing, not only which cards were recently played.
+    cards_played = _safe_float(prefix_payload.get("cards_played"), 0.0)
+    attacks = _safe_float(prefix_payload.get("attack_count"), 0.0)
+    skills = _safe_float(prefix_payload.get("skill_count"), 0.0)
+    powers = _safe_float(prefix_payload.get("power_count"), 0.0)
+    damage_est = _safe_float(prefix_payload.get("damage_est"), 0.0)
+    block_est = _safe_float(prefix_payload.get("block_est"), 0.0)
+    draw_est = _safe_float(prefix_payload.get("draw_est"), 0.0)
+    energy_spent = _safe_float(prefix_payload.get("energy_spent"), 0.0)
+    potion_count = _safe_float(prefix_payload.get("potion_count"), 0.0)
+    targeted_count = _safe_float(prefix_payload.get("targeted_count"), 0.0)
+    remaining_energy = max(0.0, _safe_float(battle.get("energy") or player.get("energy")) )
+    hand_count = float(np.count_nonzero(hand_mask))
+    alive_enemy_hp = 0.0
+    for enemy in alive[:MAX_ENEMIES]:
+        if not isinstance(enemy, dict):
+            continue
+        alive_enemy_hp += max(
+            0.0,
+            _safe_float(enemy.get("hp", enemy.get("current_hp", 0.0)))
+            + _safe_float(enemy.get("block", 0.0)),
+        )
+    offense_score = damage_est + attacks * 4.0 + targeted_count * 2.0
+    defense_score = block_est + skills * 2.0
+    draw_score = draw_est * 3.0
+    setup_score = powers * 4.0 + _safe_float(prefix_payload.get("create_count"), 0.0) * 2.0
+    lethal_score = damage_est - alive_enemy_hp
+    mode_scores = [offense_score, defense_score, draw_score, setup_score, lethal_score]
+    mode_idx = int(np.argmax(mode_scores)) if any(score > 0 for score in mode_scores) else -1
+    prefix_scalars[20] = min(damage_est / 120.0, 1.0)
+    prefix_scalars[21] = min(block_est / 120.0, 1.0)
+    prefix_scalars[22] = min(cards_played / 12.0, 1.0)
+    prefix_scalars[23] = min(energy_spent / 10.0, 1.0)
+    prefix_scalars[24] = min(draw_est / 12.0, 1.0)
+    prefix_scalars[25] = min(1.0, potion_count)
+    prefix_scalars[26] = 1.0 if mode_idx == 0 else 0.0  # offense
+    prefix_scalars[27] = 1.0 if mode_idx == 1 else 0.0  # defense
+    prefix_scalars[28] = 1.0 if mode_idx == 2 else 0.0  # draw
+    prefix_scalars[29] = 1.0 if mode_idx == 3 else 0.0  # setup
+    prefix_scalars[30] = 1.0 if mode_idx == 4 else 0.0  # lethal
+    keeps_playing_possible = 1.0 if remaining_energy > 0 and hand_count > 0 else 0.0
+    prefix_scalars[31] = keeps_playing_possible
+    features["turn_prefix_ids"] = prefix_ids
+    features["turn_prefix_aux"] = prefix_aux
+    features["turn_prefix_mask"] = prefix_mask
+    features["turn_prefix_scalars"] = prefix_scalars
 
     # Optional: include full deck for build_plan_z bridge
     deck = player.get("deck") or player.get("cards") or state.get("deck") or []
@@ -268,6 +433,8 @@ def build_combat_action_features(
     action_type_ids = np.zeros(MAX_ACTIONS, dtype=np.int64)
     target_card_ids = np.zeros(MAX_ACTIONS, dtype=np.int64)
     target_enemy_ids = np.zeros(MAX_ACTIONS, dtype=np.int64)
+    action_family_ids = np.zeros(MAX_ACTIONS, dtype=np.int64)
+    action_aux = np.zeros((MAX_ACTIONS, COMBAT_ACTION_AUX_DIM), dtype=np.float32)
     action_mask = np.zeros(MAX_ACTIONS, dtype=bool)
 
     # Pre-extract enemies and hand for target resolution
@@ -276,11 +443,70 @@ def build_combat_action_features(
     hand = battle.get("hand") or player.get("hand") or []
     enemies = state.get("enemies") or battle.get("enemies") or []
     alive_enemies = [e for e in enemies if isinstance(e, dict) and e.get("is_alive", True)]
+    current_energy = _safe_float(battle.get("energy") or player.get("energy"))
+    player_hp = _safe_float(player.get("hp", player.get("current_hp")))
+    player_block = _safe_float(player.get("block"))
+
+    def _enemy_intent_damage(enemy: dict[str, Any]) -> float:
+        intents = enemy.get("intents") or []
+        if isinstance(intents, list) and intents:
+            total = 0.0
+            for it in intents:
+                if not isinstance(it, dict):
+                    continue
+                dmg = _safe_float(it.get("damage", it.get("total_damage", 0)))
+                repeats = max(1.0, _safe_float(it.get("repeats", it.get("hits", 1)), 1.0))
+                if "total_damage" in it:
+                    total += dmg
+                else:
+                    total += dmg * repeats
+            return total
+        dmg = _safe_float(enemy.get("intent_damage", enemy.get("total_damage", 0)))
+        hits = max(1.0, _safe_float(enemy.get("intent_hits", enemy.get("repeats", 1)), 1.0))
+        return dmg if enemy.get("total_damage") is not None else dmg * hits
+
+    total_enemy_intent_damage = sum(_enemy_intent_damage(enemy) for enemy in alive_enemies)
+
+    def _card_effect_summary(card: dict[str, Any] | None) -> tuple[float, float, float, float, float, float, float]:
+        if not isinstance(card, dict):
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        cost = _safe_float(card.get("cost_for_turn", card.get("cost", card.get("energy_cost", 0))))
+        damage = _safe_float(card.get("damage", card.get("base_damage", card.get("attack_damage", 0))))
+        block = _safe_float(card.get("block", card.get("base_block", 0)))
+        draw = _safe_float(card.get("draw", card.get("cards_to_draw", card.get("draw_amount", 0))))
+        magic = _safe_float(card.get("magic_number", card.get("magic", 0)))
+        text = _lower(card.get("description") or card.get("raw_description") or card.get("text") or "")
+        exhaust_flag = 1.0 if card.get("exhaust") or "exhaust" in text else 0.0
+        discard_flag = 1.0 if any(tok in text for tok in ("discard", "put a card from your hand")) else 0.0
+        create_flag = 1.0 if any(tok in text for tok in ("add ", "create ", "shuffle")) else 0.0
+        if draw <= 0 and "draw" in text:
+            draw = max(draw, magic)
+        return cost, damage, block, draw, discard_flag, exhaust_flag, create_flag
+
+    def _still_has_playable_followup(card_index: int | None, spent_energy: float) -> float:
+        remaining_energy = max(0.0, current_energy - spent_energy)
+        for h_idx, card in enumerate(hand):
+            if card_index is not None and h_idx == card_index:
+                continue
+            if not isinstance(card, dict):
+                continue
+            card_cost = _safe_float(card.get("cost_for_turn", card.get("cost", card.get("energy_cost", 0))))
+            if card_cost <= remaining_energy + 1e-6:
+                return 1.0
+        return 0.0
 
     for i, action in enumerate(actions[:MAX_ACTIONS]):
         action_mask[i] = True
         aname = _lower(action.get("action") or action.get("type", ""))
         action_type_ids[i] = atype_map.get(aname, atype_map["other"])
+        if aname == "play_card":
+            action_family_ids[i] = COMBAT_ACTION_FAMILY_PLAY_CARD
+        elif aname == "use_potion":
+            action_family_ids[i] = COMBAT_ACTION_FAMILY_POTION
+        elif aname == "end_turn":
+            action_family_ids[i] = COMBAT_ACTION_FAMILY_END_TURN
+        else:
+            action_family_ids[i] = COMBAT_ACTION_FAMILY_SELECTION
 
         idx = _safe_int(action.get("index") or action.get("card_index") or
                         action.get("hand_index"))
@@ -289,22 +515,55 @@ def build_combat_action_features(
         if aname == "play_card":
             cidx = _safe_int(action.get("card_index") or action.get("hand_index") or
                              action.get("index"))
+            played_card = hand[cidx] if 0 <= cidx < len(hand) and isinstance(hand[cidx], dict) else None
+            spent_energy, est_damage, block_gain, draw_delta, discard_flag, exhaust_flag, create_flag = _card_effect_summary(played_card)
             if 0 <= cidx < len(hand) and isinstance(hand[cidx], dict):
                 target_card_ids[i] = _cached_card_idx(vocab, hand[cidx].get("id"))
 
             # Enemy target
             target = action.get("target") or action.get("target_id")
+            target_enemy: dict[str, Any] | None = None
             if target is not None:
                 for e_idx, enemy in enumerate(alive_enemies):
                     eid = enemy.get("entity_id", enemy.get("combat_id", e_idx))
                     if eid == target or e_idx == _safe_int(target):
                         target_enemy_ids[i] = _cached_monster_idx(vocab, enemy.get("entity_id") or enemy.get("id") or enemy.get("monster_id", ""))
+                        target_enemy = enemy
                         break
+            target_hp_eff = _safe_float(target_enemy.get("hp", target_enemy.get("current_hp"))) + _safe_float(target_enemy.get("block")) if isinstance(target_enemy, dict) else 0.0
+            kills_target = 1.0 if target_hp_eff > 0 and est_damage >= target_hp_eff - 1e-6 else 0.0
+            target_intent_damage = _enemy_intent_damage(target_enemy) if isinstance(target_enemy, dict) else 0.0
+            prevented_lethal = 1.0 if (player_hp + player_block) < total_enemy_intent_damage and (block_gain + target_intent_damage * kills_target) >= (total_enemy_intent_damage - (player_hp + player_block)) else 0.0
+            intent_pressure_delta = min(1.0, (target_intent_damage * kills_target) / max(1.0, total_enemy_intent_damage))
+            action_aux[i, 0] = max(0.0, current_energy - spent_energy) / 5.0
+            action_aux[i, 1] = est_damage / 50.0
+            action_aux[i, 2] = block_gain / 40.0
+            action_aux[i, 3] = draw_delta / 5.0
+            action_aux[i, 4] = discard_flag
+            action_aux[i, 5] = exhaust_flag
+            action_aux[i, 6] = create_flag
+            action_aux[i, 7] = 0.0  # consumes_potion
+            action_aux[i, 8] = kills_target
+            action_aux[i, 9] = prevented_lethal
+            action_aux[i, 10] = intent_pressure_delta
+            action_aux[i, 12] = _still_has_playable_followup(cidx, spent_energy)
+        elif aname == "use_potion":
+            action_aux[i, 0] = current_energy / 5.0
+            action_aux[i, 7] = 1.0  # consumes_potion
+            action_aux[i, 12] = 1.0 if current_energy > 0 else 0.0
+        elif aname == "end_turn":
+            action_aux[i, 0] = current_energy / 5.0
+            action_aux[i, 11] = 1.0  # ends_turn_immediately
+        else:
+            action_aux[i, 0] = current_energy / 5.0
+            action_aux[i, 12] = 1.0 if current_energy > 0 else 0.0
 
     return {
         "action_type_ids": action_type_ids,
         "target_card_ids": target_card_ids,
         "target_enemy_ids": target_enemy_ids,
+        "action_family_ids": action_family_ids,
+        "action_aux": action_aux,
         "action_mask": action_mask,
     }
 
@@ -362,6 +621,19 @@ class CombatPolicyValueNetwork(nn.Module):
 
         # Combat action type embedding
         self.combat_action_type_embed = nn.Embedding(NUM_COMBAT_ACTION_TYPES, embed_dim)
+        self.register_buffer(
+            "action_type_to_family",
+            torch.tensor([
+                COMBAT_ACTION_FAMILY_PLAY_CARD,
+                COMBAT_ACTION_FAMILY_END_TURN,
+                COMBAT_ACTION_FAMILY_POTION,
+                COMBAT_ACTION_FAMILY_SELECTION,
+                COMBAT_ACTION_FAMILY_SELECTION,
+                COMBAT_ACTION_FAMILY_SELECTION,
+                COMBAT_ACTION_FAMILY_SELECTION,
+                COMBAT_ACTION_FAMILY_SELECTION,
+            ], dtype=torch.long),
+        )
 
         # Set encoders
         # force_linear=True when retrieval is enabled so that any coincidental
@@ -406,6 +678,19 @@ class CombatPolicyValueNetwork(nn.Module):
         # Action encoder: action_type + card + enemy → hidden_dim
         action_repr_dim = embed_dim * 3  # type + card + enemy
         self.action_proj = nn.Linear(action_repr_dim, hidden_dim)
+        self.action_aux_proj = nn.Sequential(
+            nn.Linear(COMBAT_ACTION_AUX_DIM, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.action_aux_gate = nn.Parameter(torch.tensor(0.1))
+        self.action_family_head = nn.Linear(hidden_dim, NUM_COMBAT_ACTION_FAMILIES)
+        self.action_family_gate = nn.Parameter(torch.tensor(0.1))
+        self.stop_continue_head = nn.Linear(hidden_dim, 2)
+        self.stop_continue_gate = nn.Parameter(torch.tensor(0.1))
+        self.resource_gate_head = nn.Linear(hidden_dim, 2)
+        self.resource_gate = nn.Parameter(torch.tensor(0.1))
 
         # Deck-conditioned action delta (GPT Pro #7: deck directly influences action scoring)
         # delta_logit(a) = f(deck_z, action_emb) — zero-init for safe start
@@ -444,6 +729,16 @@ class CombatPolicyValueNetwork(nn.Module):
         self.main_action_context_ffn_norm = nn.LayerNorm(hidden_dim)
         self.main_action_context_gate = nn.Parameter(torch.tensor(0.0))
         self.main_state_context_gate = nn.Parameter(torch.tensor(0.0))
+        self.turn_prefix_pos_embed = nn.Embedding(COMBAT_TURN_PREFIX_LEN, embed_dim)
+        self.turn_prefix_token_proj = nn.Linear(embed_dim + CARD_AUX_DIM + embed_dim, hidden_dim)
+        self.turn_prefix_encoder = nn.Sequential(
+            nn.Linear(hidden_dim * COMBAT_TURN_PREFIX_LEN + COMBAT_TURN_PREFIX_SCALAR_DIM, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+        )
+        self.turn_prefix_gate = nn.Parameter(torch.tensor(0.0))
 
         # Residual adapter: deck-conditioned delta heads (GPT Pro recommendation)
         # Frozen backbone computes base logits/value; adapter adds deck-aware residuals.
@@ -543,13 +838,14 @@ class CombatPolicyValueNetwork(nn.Module):
         self,
         state_features: dict[str, torch.Tensor],
         action_features: dict[str, torch.Tensor],
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
         """Encode combat state and legal actions into hidden representations.
 
         Returns:
             state_repr: (B, hidden_dim)
             action_repr: (B, A, hidden_dim)
             deck_repr: (B, deck_repr_dim) or None if no deck encoder
+            turn_prefix_repr: (B, hidden_dim)
         """
         # Hand encoding ([card_embed | card_aux | (optional) symbolic])
         hand_base = self.entity_emb.card_embed(state_features["hand_ids"])
@@ -638,14 +934,99 @@ class CombatPolicyValueNetwork(nn.Module):
         state_input = torch.cat(state_parts, dim=-1)
         state_repr = self.state_encoder(state_input)
 
+        batch_size = state_features["scalars"].shape[0]
+        dev = state_features["scalars"].device
+        dtype = state_features["scalars"].dtype
+        prefix_ids = state_features.get("turn_prefix_ids")
+        prefix_aux = state_features.get("turn_prefix_aux")
+        prefix_mask = state_features.get("turn_prefix_mask")
+        prefix_scalars = state_features.get("turn_prefix_scalars")
+        if prefix_ids is None:
+            prefix_ids = torch.zeros(batch_size, COMBAT_TURN_PREFIX_LEN, dtype=torch.long, device=dev)
+        if prefix_aux is None:
+            prefix_aux = torch.zeros(
+                batch_size, COMBAT_TURN_PREFIX_LEN, CARD_AUX_DIM, dtype=dtype, device=dev
+            )
+        if prefix_mask is None:
+            prefix_mask = torch.zeros(batch_size, COMBAT_TURN_PREFIX_LEN, dtype=torch.bool, device=dev)
+        if prefix_scalars is None:
+            prefix_scalars = torch.zeros(
+                batch_size, COMBAT_TURN_PREFIX_SCALAR_DIM, dtype=dtype, device=dev
+            )
+        prefix_card_emb = self.entity_emb.card_embed(prefix_ids)
+        prefix_pos = self.turn_prefix_pos_embed(
+            torch.arange(COMBAT_TURN_PREFIX_LEN, device=dev).unsqueeze(0).expand(batch_size, -1)
+        )
+        prefix_tokens = torch.cat([prefix_card_emb, prefix_aux, prefix_pos], dim=-1)
+        prefix_tokens = self.turn_prefix_token_proj(prefix_tokens)
+        prefix_tokens = prefix_tokens * prefix_mask.unsqueeze(-1).to(prefix_tokens.dtype)
+        prefix_input = torch.cat([prefix_tokens.reshape(batch_size, -1), prefix_scalars], dim=-1)
+        turn_prefix_repr = self.turn_prefix_encoder(prefix_input)
+
         # Action encoding
         atype_emb = self.combat_action_type_embed(action_features["action_type_ids"])
         card_emb = self.entity_emb.card_embed(action_features["target_card_ids"])
         enemy_emb_act = self.entity_emb.monster_embed(action_features["target_enemy_ids"])
         action_repr = torch.cat([atype_emb, card_emb, enemy_emb_act], dim=-1)
         action_repr = self.action_proj(action_repr)
+        action_aux = action_features.get("action_aux")
+        if action_aux is None:
+            action_aux = torch.zeros(
+                batch_size, MAX_ACTIONS, COMBAT_ACTION_AUX_DIM,
+                dtype=dtype, device=dev,
+            )
+        action_repr = action_repr + self.action_aux_gate * self.action_aux_proj(action_aux)
 
-        return state_repr, action_repr, deck_repr
+        return state_repr, action_repr, deck_repr, turn_prefix_repr
+
+    def _structured_action_logits(
+        self,
+        state_repr: torch.Tensor,
+        base_logits: torch.Tensor,
+        action_features: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Compose flatter per-action scores into a more STS-like hierarchy.
+
+        Decision flow:
+        1. stop/continue gate
+        2. continue-family gate (play_card / use_potion / selection)
+        3. within-family action score
+
+        We still emit a flat categorical over legal actions for PPO, but
+        end_turn and use_potion no longer compete on exactly the same plane as
+        ordinary card plays.
+        """
+        family_ids = action_features.get("action_family_ids")
+        if family_ids is None:
+            action_type_ids = action_features["action_type_ids"].clamp(
+                min=0, max=self.action_type_to_family.shape[0] - 1,
+            )
+            family_ids = self.action_type_to_family[action_type_ids]
+        action_mask = action_features["action_mask"]
+
+        family_logits = self.action_family_gate * self.action_family_head(state_repr)
+        stop_logits = self.stop_continue_gate * self.stop_continue_head(state_repr)
+        resource_logits = self.resource_gate * self.resource_gate_head(state_repr)
+        continue_bias = stop_logits[:, 0:1]
+        end_bias = stop_logits[:, 1:2]
+
+        gathered_family = torch.gather(family_logits, 1, family_ids.long())
+        non_potion_bias = resource_logits[:, 0:1]
+        potion_bias = resource_logits[:, 1:2]
+
+        family_is_end = family_ids == COMBAT_ACTION_FAMILY_END_TURN
+        family_is_potion = family_ids == COMBAT_ACTION_FAMILY_POTION
+
+        resource_bias = torch.where(family_is_potion, potion_bias, non_potion_bias)
+        continue_family_bias = continue_bias + gathered_family + resource_bias
+
+        # Keep a small amount of per-action base score on end_turn so the model
+        # can still rank multiple end-turn-like legal variants if they exist,
+        # but make the stop head the dominant signal.
+        end_logits = end_bias + 0.25 * base_logits
+        continue_logits = continue_family_bias + base_logits
+        structured_logits = torch.where(family_is_end, end_logits, continue_logits)
+        return structured_logits.masked_fill(~action_mask, -1e9)
 
     def _apply_residual_action_context(
         self,
@@ -681,9 +1062,11 @@ class CombatPolicyValueNetwork(nn.Module):
             key_padding_mask=joint_padding_mask,
             need_weights=False,
         )
-        joint_delta = norm(attn_out)
-        joint_delta = ffn(joint_delta)
-        joint_delta = ffn_norm(joint_delta)
+        original_tokens = joint_tokens
+        joint_tokens = norm(joint_tokens + attn_out)
+        ffn_out = ffn(joint_tokens)
+        joint_tokens = ffn_norm(joint_tokens + ffn_out)
+        joint_delta = joint_tokens - original_tokens
         state_delta = joint_delta[:, 0, :]
         action_delta = joint_delta[:, 1:, :]
         contextual_state_repr = state_repr + state_gate * state_delta
@@ -708,7 +1091,8 @@ class CombatPolicyValueNetwork(nn.Module):
             (policy_logits, value, state_repr, action_repr) if return_hidden=True
               where state_repr: (B, hidden_dim), action_repr: (B, A, hidden_dim)
         """
-        state_repr, action_repr, deck_repr = self._encode_state_and_actions(state_features, action_features)
+        state_repr, action_repr, deck_repr, turn_prefix_repr = self._encode_state_and_actions(state_features, action_features)
+        state_repr = state_repr + self.turn_prefix_gate * turn_prefix_repr
         policy_state_repr, policy_action_repr = self._apply_residual_action_context(
             state_repr=state_repr,
             action_repr=action_repr,
@@ -722,8 +1106,27 @@ class CombatPolicyValueNetwork(nn.Module):
         )
 
         # Base policy + value (from backbone)
-        logits = self.policy_scorer(policy_state_repr, policy_action_repr, action_features["action_mask"])
-        value = self.value_head(policy_state_repr).squeeze(-1)
+        base_logits = self.policy_scorer(policy_state_repr, policy_action_repr, action_features["action_mask"])
+        logits = self._structured_action_logits(
+            policy_state_repr,
+            base_logits,
+            action_features,
+        )
+        base_value = self.value_head(policy_state_repr).squeeze(-1)
+        continuation_raw = self.continuation_value_head(policy_state_repr)
+        continuation = torch.cat(
+            [
+                torch.sigmoid(continuation_raw[:, 0:1]),
+                F.softplus(continuation_raw[:, 1:2]),
+                F.softplus(continuation_raw[:, 2:3]),
+            ],
+            dim=-1,
+        )
+        value = compose_room_conditioned_value(
+            base_value,
+            continuation,
+            state_features.get("room_type_onehot"),
+        )
 
         # Deck-conditioned action delta: deck info directly influences per-action scoring
         if deck_repr is not None and hasattr(self, "deck_action_delta"):
@@ -746,7 +1149,7 @@ class CombatPolicyValueNetwork(nn.Module):
 
             dv_input = torch.cat([deck_repr, policy_state_repr], dim=-1)
             delta_value = self.delta_value_head(dv_input).squeeze(-1)  # (B,)
-            value = value + self.adapter_beta * delta_value
+            value = torch.tanh(value + self.adapter_beta * delta_value)
 
         if return_hidden:
             return logits, value, policy_state_repr, policy_action_repr
@@ -758,7 +1161,8 @@ class CombatPolicyValueNetwork(nn.Module):
         action_features: dict[str, torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Extended forward for the offline combat teacher stack."""
-        state_repr, action_repr, deck_repr = self._encode_state_and_actions(state_features, action_features)
+        state_repr, action_repr, deck_repr, turn_prefix_repr = self._encode_state_and_actions(state_features, action_features)
+        state_repr = state_repr + self.turn_prefix_gate * turn_prefix_repr
         policy_state_repr, policy_action_repr = self._apply_residual_action_context(
             state_repr=state_repr,
             action_repr=action_repr,
@@ -770,8 +1174,13 @@ class CombatPolicyValueNetwork(nn.Module):
             state_gate=self.main_state_context_gate,
             action_gate=self.main_action_context_gate,
         )
-        logits = self.policy_scorer(policy_state_repr, policy_action_repr, action_features["action_mask"])
-        value = self.value_head(policy_state_repr).squeeze(-1)
+        base_logits = self.policy_scorer(policy_state_repr, policy_action_repr, action_features["action_mask"])
+        logits = self._structured_action_logits(
+            policy_state_repr,
+            base_logits,
+            action_features,
+        )
+        base_value = self.value_head(policy_state_repr).squeeze(-1)
 
         action_mask = action_features["action_mask"]
         _, contextual_action_repr = self._apply_residual_action_context(
@@ -796,6 +1205,11 @@ class CombatPolicyValueNetwork(nn.Module):
         expected_hp_loss = F.softplus(continuation_raw[:, 1:2])
         expected_potion_cost = F.softplus(continuation_raw[:, 2:3])
         continuation = torch.cat([win_prob, expected_hp_loss, expected_potion_cost], dim=-1)
+        value = compose_room_conditioned_value(
+            base_value,
+            continuation,
+            state_features.get("room_type_onehot"),
+        )
         return logits, value, action_scores, continuation
 
     def param_count(self) -> int:
@@ -876,15 +1290,22 @@ class CombatNNEvaluator:
                 with torch.amp.autocast("cuda", dtype=torch.float16):
                     if self._use_continuation_value:
                         logits, _value, _scores, continuation = self.network.forward_teacher(state_t, action_t)
-                        # Use win_prob (first column) as value, scaled to [-1, 1]
-                        value_scalar = continuation[0, 0].cpu().float().item() * 2.0 - 1.0
+                        value_scalar = compose_room_conditioned_value(
+                            torch.zeros_like(_value),
+                            continuation,
+                            state_t.get("room_type_onehot"),
+                        )[0].cpu().float().item()
                     else:
                         logits, value = self.network.forward(state_t, action_t)
                         value_scalar = value[0].cpu().float().item()
             else:
                 if self._use_continuation_value:
                     logits, _value, _scores, continuation = self.network.forward_teacher(state_t, action_t)
-                    value_scalar = continuation[0, 0].cpu().float().item() * 2.0 - 1.0
+                    value_scalar = compose_room_conditioned_value(
+                        torch.zeros_like(_value),
+                        continuation,
+                        state_t.get("room_type_onehot"),
+                    )[0].cpu().float().item()
                 else:
                     logits, value = self.network.forward(state_t, action_t)
                     value_scalar = value[0].cpu().float().item()

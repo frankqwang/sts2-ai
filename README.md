@@ -2,6 +2,18 @@
 
 杀戮尖塔 2 AI 训练项目。作为子目录放到反编译的游戏工程根目录下使用。
 
+## 当前主线状态（2026-04-14）
+
+当前主线已经切到 `main_attention + multi_process + no-MCTS` 路线，训练/诊断/日志链路都围绕这条线展开。最新接手说明放在：
+
+- [STS2AI/docs/当前训练主线与接手说明_2026-04-14.md](STS2AI/docs/当前训练主线与接手说明_2026-04-14.md)
+
+如果只需要一个可直接复现的恢复点，优先使用：
+
+- `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
+
+当前推荐恢复命令见上面的接手说明文档；`README` 这里只保留入口和基础环境说明。
+
 ## 前置准备
 所有环境、ai相关代码都在STS2AI里。
 src下面以及最外层，都是反编译的源码，本项目中反编译部分只包含了游戏逻辑，sim模式只依赖这部分游戏逻辑源码,剔除了godot相关游戏资源。
@@ -51,33 +63,33 @@ python -m pytest STS2AI/Python/test_training_smoke.py -q
 
 ## 训练
 
-从当前 champion checkpoint 继续训练：
+从当前工作 checkpoint 继续训练：
 
 ```powershell
 python STS2AI/Python/train_hybrid.py `
-  --pipe --auto-launch `
-  --headless-dll STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe `
-  --num-envs 4 `
-  --start-port 15527 `
-  --max-iterations 500 `
-  --skada-prior-weight 0.15 `
-  --skada-boss-weights
+  --config STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml `
+  --resume STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt `
+  --max-iterations 5 `
+  --save-interval 5 `
+  --act1-no-elite-routes `
+  --combat-pending-stall-threshold 30 `
+  --boss-entry-quality-weight 0.15 `
+  --boss-conditioned-card-guidance-weight 0.8 `
+  --combat-safety-rerank-weight 1.0
 ```
 
 参数说明：
-- `--num-envs` 并行模拟器数量（推荐 4-8）
-- `--max-iterations` 本次训练跑多少轮
-- `--skada-prior-weight` Skada 社区数据混合权重（0=关闭，0.15=推荐）
-- `--skada-boss-weights` 用 Skada Boss 团灭率缩放奖励
+- 默认环境参数仍来自 `STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml`
+- 目前实验节奏用 `--max-iterations 5 --save-interval 5` 做短窗口复盘
+- `--act1-no-elite-routes`、boss 条件化选卡、combat safety rerank 是当前主线的一部分
 
-checkpoint 自动从 `STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt` 加载。
-训练产物输出到 `STS2AI/Artifacts/hybrid_training/`。
+训练产物默认输出到 `STS2AI/Artifacts/` 下对应 run 目录。当前主线的详细参数、输出目录和分析脚本请看接手说明。
 
 ## 评估
 
 ```powershell
 python STS2AI/Python/evaluate_ai.py `
-  --checkpoint STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt `
+  --checkpoint STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt `
   --transport pipe-binary `
   --auto-launch `
   --headless-dll STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe `
@@ -142,9 +154,20 @@ STS2AI/
 
 ## 当前 Checkpoint
 
-`STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt`
+当前推荐恢复点：
+
+- `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
+
+历史 champion 仍保留在：
+
+- `STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt`
 
 包含：
 - PPO 非战斗脑（选卡/商店/路径/休息）
 - 战斗脑（出牌/药水/目标）
 - SymbolicFeaturesHead（符号特征交叉注意力）
+- main combat rollout `light_attention`
+
+checkpoint 说明和 SHA256 见：
+
+- `STS2AI/Assets/checkpoints/act1/manifest.json`

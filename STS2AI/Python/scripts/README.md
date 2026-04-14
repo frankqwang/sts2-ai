@@ -7,6 +7,8 @@ These wrappers are the self-contained entrypoints intended to travel with the
 
 - `start-hybrid-training.ps1`
   - launches `STS2AI/Python/train_hybrid.py`
+- `start-hybrid-training-mcts.ps1`
+  - launches `STS2AI/Python/train_hybrid.py` with the formal MCTS hybrid config
 - `canonical-eval.ps1`
   - launches `STS2AI/Python/evaluate_ai.py`
 - `run-ironclad-teacher-eval.ps1`

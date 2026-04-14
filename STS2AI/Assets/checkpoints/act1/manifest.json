@@ -1,11 +1,36 @@
 {
   "group": "act1",
-  "updated_at": "2026-04-10",
+  "updated_at": "2026-04-14",
   "self_contained_root": "STS2AI",
   "policy": {
-    "mainline_checkpoint_count": 1,
-    "mainline_checkpoint_only": true,
+    "tracked_checkpoint_count": 2,
+    "current_working_resume_checkpoint": "mainline_iter2270_carddebug",
     "history_policy": "Use git history or archived docs for superseded milestones."
+  },
+  "working_resume": {
+    "name": "mainline_iter2270_carddebug",
+    "checkpoint_path": "STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt",
+    "checkpoint_sha256": "810c110f530c40362fe290170edc1175e9aab6176fd09ec2c95180c633a2c712",
+    "iteration": 2270,
+    "frozen_at": "2026-04-14",
+    "contains": [
+      "ppo_model",
+      "mcts_model",
+      "symbolic_features_head",
+      "light_attention_main_path"
+    ],
+    "training_entrypoint": "STS2AI/Python/train_hybrid.py",
+    "eval_entrypoint": "STS2AI/Python/evaluate_ai.py",
+    "source_run_dir": "STS2AI/Artifacts/hybrid_training_main_attention_iter5_carddebug_cont/hybrid_4env_20260414-094343",
+    "source_checkpoint_path": "STS2AI/Artifacts/hybrid_training_main_attention_iter5_carddebug_cont/hybrid_4env_20260414-094343/hybrid_02270.pt",
+    "usage": {
+      "training_resume": "python STS2AI/Python/train_hybrid.py --config STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml --resume STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt --max-iterations 5 --save-interval 5 --act1-no-elite-routes --combat-pending-stall-threshold 30 --boss-entry-quality-weight 0.15 --boss-conditioned-card-guidance-weight 0.8 --combat-safety-rerank-weight 1.0",
+      "evaluation": "python STS2AI/Python/evaluate_ai.py --checkpoint STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt"
+    },
+    "notes": [
+      "这是当前主线工作 checkpoint，不是历史 champion。",
+      "当前仓库代码还包含 Act1 boss -> Act2 过渡修复；该修复需要下一次重启 host 后才会体现在训练结果里。"
+    ]
   },
   "production_champion": {
     "name": "retrieval_final_iter2175",
