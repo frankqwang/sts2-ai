@@ -158,10 +158,6 @@ STS2AI/
 
 - `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
 
-历史 champion 仍保留在：
-
-- `STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt`
-
 包含：
 - PPO 非战斗脑（选卡/商店/路径/休息）
 - 战斗脑（出牌/药水/目标）
