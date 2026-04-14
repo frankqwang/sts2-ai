@@ -11,4 +11,5 @@
 - New handoff notes, protocols, working notes, and similar docs should not be added at repo root.
 
 不要修改src下的任务源码，如果一定要改，请告知我。这是反编译出来的，我们的代码在sts2ai下面；
-避免中文编码问题，各种工具里能用尽量用utf-8
+避免中文编码问题，各种工具里能用尽量用utf-8.
+耗时任务放到后台去执行
