@@ -25,6 +25,7 @@ from evaluate_ai import (
     _safe_load_state_dict,
 )
 from rl_policy_v2 import FullRunPolicyNetworkV2
+from checkpoint_compat import get_combat_model_state
 from sim_semantic_audit_common import (
     DEFAULT_GODOT_EXE,
     DEFAULT_HEADLESS_DLL,
@@ -204,10 +205,10 @@ def _load_models(
     ppo_net = FullRunPolicyNetworkV2(vocab=vocab, embed_dim=ppo_embed_dim)
     _safe_load_state_dict(ppo_net, ppo_state, "PPO")
 
-    combat_state = ckpt.get("mcts_model") or ckpt.get("combat_model") or ckpt.get("model_state_dict")
+    combat_state = get_combat_model_state(ckpt, allow_standalone=True)
     if combat_checkpoint:
         override_ckpt = torch.load(combat_checkpoint, map_location="cpu", weights_only=False)
-        combat_state = override_ckpt.get("mcts_model") or override_ckpt.get("model_state_dict")
+        combat_state = get_combat_model_state(override_ckpt, allow_standalone=True)
     if not isinstance(combat_state, dict):
         raise ValueError(f"Checkpoint has no combat weights: {combat_checkpoint or checkpoint}")
     combat_embed_dim, combat_hidden_dim = _infer_combat_dims(

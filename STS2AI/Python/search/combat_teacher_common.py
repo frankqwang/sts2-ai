@@ -21,6 +21,7 @@ from core.combat_nn import (
 )
 from core.rl_encoder_v2 import _lower, _safe_float, _safe_int
 from core.vocab import Vocab, _slugify, load_vocab
+from checkpoint_compat import get_combat_model_state
 
 COMBAT_TEACHER_SCHEMA_VERSION = "combat_teacher_dataset.v1"
 COMBAT_TURN_SOLUTION_SCHEMA_VERSION = "combat_turn_solution.v1"
@@ -128,9 +129,9 @@ def load_baseline_combat_policy(
     vocab = vocab or load_vocab()
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    combat_state = checkpoint.get("mcts_model") or checkpoint.get("model_state_dict")
+    combat_state = get_combat_model_state(checkpoint, allow_standalone=True)
     if not isinstance(combat_state, dict):
-        raise ValueError(f"Combat checkpoint has no mcts_model/model_state_dict: {checkpoint_path}")
+        raise ValueError(f"Combat checkpoint has no combat_model/model_state_dict: {checkpoint_path}")
 
     embed_weight = combat_state.get("entity_emb.card_embed.weight")
     action_proj = combat_state.get("action_proj.weight")

@@ -49,6 +49,7 @@ from combat_nn import (
     MAX_ACTIONS,
 )
 from rl_policy_v2 import FullRunPolicyNetworkV2
+from checkpoint_compat import get_combat_model_config, get_combat_model_state
 from rl_encoder_v2 import (
     build_structured_state,
     build_structured_actions,
@@ -3489,29 +3490,29 @@ def main() -> int:
             logger.warning("No PPO model found in checkpoint!")
 
         # Combat NN
-        combat_state = ckpt.get("mcts_model")
-        mcts_config = ckpt.get("mcts_config", {})
+        combat_state = get_combat_model_state(ckpt, allow_standalone=False)
+        combat_model_config = get_combat_model_config(ckpt)
         combat_embed_dim, combat_hidden_dim = _infer_combat_dims(
             combat_state,
-            mcts_config.get("embed_dim", ppo_embed_dim),
-            mcts_config.get("hidden_dim", 128),
+            combat_model_config.get("embed_dim", ppo_embed_dim),
+            combat_model_config.get("hidden_dim", 128),
         )
-        if mcts_config.get("embed_dim") not in (None, combat_embed_dim) or (
-            mcts_config.get("hidden_dim") not in (None, combat_hidden_dim)
+        if combat_model_config.get("embed_dim") not in (None, combat_embed_dim) or (
+            combat_model_config.get("hidden_dim") not in (None, combat_hidden_dim)
         ):
             logger.warning(
                 "Checkpoint combat config embed=%s hidden=%s disagrees with weights; using inferred embed=%d hidden=%d",
-                mcts_config.get("embed_dim"),
-                mcts_config.get("hidden_dim"),
+                combat_model_config.get("embed_dim"),
+                combat_model_config.get("hidden_dim"),
                 combat_embed_dim,
                 combat_hidden_dim,
             )
         # Auto-detect deck_repr_dim from checkpoint keys
-        mcts_sd = ckpt.get("mcts_model", {})
+        combat_sd = combat_state or {}
         _deck_repr_dim = 0
-        if any("deck_encoder" in k for k in mcts_sd):
+        if any("deck_encoder" in k for k in combat_sd):
             # Infer from deck_encoder output dim
-            for k, v in mcts_sd.items():
+            for k, v in combat_sd.items():
                 if k == "deck_encoder.norm.weight":
                     _deck_repr_dim = v.shape[0]
                     break
@@ -3523,8 +3524,8 @@ def main() -> int:
             deck_repr_dim=_deck_repr_dim,
             symbolic_head=ppo_net.symbolic_head,  # shared retrieval head (may be None)
         )
-        if "mcts_model" in ckpt:
-            _safe_load_state_dict(combat_net, ckpt["mcts_model"], "combat")
+        if combat_state is not None:
+            _safe_load_state_dict(combat_net, combat_state, "combat")
             logger.info("Loaded combat NN (embed=%d, hidden=%d)",
                         combat_embed_dim, combat_hidden_dim)
         else:
@@ -3539,11 +3540,11 @@ def main() -> int:
             combat_ckpt = torch.load(combat_path, map_location="cpu", weights_only=False)
             combat_state_override = (
                 combat_ckpt.get("model_state_dict")
-                or combat_ckpt.get("mcts_model")
+                or get_combat_model_state(combat_ckpt, allow_standalone=False)
             )
             if not isinstance(combat_state_override, dict):
                 logger.error(
-                    "Combat checkpoint has no model_state_dict or mcts_model: %s",
+                    "Combat checkpoint has no combat_model or model_state_dict: %s",
                     combat_path,
                 )
                 return 1
@@ -3572,10 +3573,10 @@ def main() -> int:
                 return 1
             logger.info("Loading combat teacher override checkpoint: %s", teacher_path)
             teacher_ckpt = torch.load(teacher_path, map_location="cpu", weights_only=False)
-            teacher_state = teacher_ckpt.get("model_state_dict") or teacher_ckpt.get("mcts_model")
+            teacher_state = teacher_ckpt.get("model_state_dict") or get_combat_model_state(teacher_ckpt, allow_standalone=False)
             if not isinstance(teacher_state, dict):
                 logger.error(
-                    "Combat teacher checkpoint has no model_state_dict or mcts_model: %s",
+                    "Combat teacher checkpoint has no combat_model or model_state_dict: %s",
                     teacher_path,
                 )
                 return 1

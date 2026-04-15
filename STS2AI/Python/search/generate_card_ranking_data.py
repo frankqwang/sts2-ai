@@ -31,6 +31,7 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(python_root))
 
 import _path_init  # noqa: F401  (adds STS2AI/Python library dirs to sys.path)
+from checkpoint_compat import get_combat_model_state
 
 import argparse
 from collections import Counter
@@ -2473,7 +2474,7 @@ def _load_combat_evaluator(
         if checkpoint_path:
             ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         ppo_state = ckpt.get("ppo_model") or ckpt.get("ppo_state_dict") or ckpt.get("model_state_dict")
-        combat_state = ckpt.get("mcts_model") or ckpt.get("mcts_state_dict")
+        combat_state = get_combat_model_state(ckpt, allow_standalone=False)
         ppo_embed_dim = _infer_ppo_embed_dim(ppo_state, 32)
         retrieval_proj_dim = _infer_retrieval_proj_dim(ppo_state)
         use_retrieval = retrieval_proj_dim > 0
@@ -2503,10 +2504,9 @@ def _load_combat_evaluator(
             _safe_load_state_dict(combat_net, combat_state)
         if combat_checkpoint_path:
             combat_ckpt = torch.load(combat_checkpoint_path, map_location="cpu", weights_only=False)
-            _safe_load_state_dict(
-                combat_net,
-                combat_ckpt.get("mcts_model") or combat_ckpt.get("model_state_dict"),
-            )
+            combat_override_state = get_combat_model_state(combat_ckpt, allow_standalone=True)
+            if combat_override_state:
+                _safe_load_state_dict(combat_net, combat_override_state)
 
         evaluator = CombatNNEvaluator(combat_net, vocab, device=device)
         print(
@@ -2571,10 +2571,10 @@ def _prepare_local_ort_rollout_model(
         if checkpoint_path:
             hybrid_ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         ppo_state = hybrid_ckpt.get("ppo_model") or hybrid_ckpt.get("ppo_state_dict") or hybrid_ckpt.get("model_state_dict") or {}
-        combat_state = hybrid_ckpt.get("mcts_model") or hybrid_ckpt.get("mcts_state_dict") or {}
+        combat_state = get_combat_model_state(hybrid_ckpt, allow_standalone=False) or {}
         if combat_checkpoint_path:
             combat_ckpt = torch.load(combat_checkpoint_path, map_location="cpu", weights_only=False)
-            combat_state = combat_ckpt.get("mcts_model") or combat_ckpt.get("model_state_dict") or combat_state
+            combat_state = get_combat_model_state(combat_ckpt, allow_standalone=True) or combat_state
         if not isinstance(combat_state, dict) or not combat_state:
             return None
 

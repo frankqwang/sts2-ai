@@ -32,6 +32,7 @@ from combat_nn import (
 )
 from symbolic_features_head import SymbolicFeaturesHead
 from vocab import Vocab, load_vocab
+from checkpoint_compat import get_combat_model_state
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -251,7 +252,7 @@ def load_combat_network(checkpoint_path: str, vocab: Vocab, device: str = "cpu")
     """Load combat network from checkpoint."""
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     ppo_state = ckpt.get("ppo_model")
-    state_dict = ckpt.get("mcts_model") or ckpt.get("model_state_dict")
+    state_dict = get_combat_model_state(ckpt, allow_standalone=True)
     if not isinstance(state_dict, dict):
         raise ValueError(f"No combat model found in {checkpoint_path}")
     return _build_export_network(

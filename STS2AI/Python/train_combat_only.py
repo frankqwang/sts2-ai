@@ -16,6 +16,7 @@ import numpy as np
 import torch
 
 from core.combat_nn import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
+from checkpoint_compat import get_combat_model_state
 from core.rl_reward_shaping import combat_local_tactical_reward, combat_step_reward
 from core.vocab import Vocab, load_vocab
 from ipc.combat_training_env import PipeBackedCombatTrainingClient, sample_weighted_room_type
@@ -160,7 +161,7 @@ def _load_or_init_network(
         return network.to(device), metadata
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    combat_state = checkpoint.get("model_state_dict") or checkpoint.get("mcts_model") or checkpoint.get("combat_model")
+    combat_state = get_combat_model_state(checkpoint, allow_standalone=True)
     if not isinstance(combat_state, dict):
         raise ValueError(f"Checkpoint has no combat state dict: {checkpoint_path}")
 

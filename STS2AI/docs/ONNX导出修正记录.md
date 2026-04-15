@@ -17,7 +17,7 @@
 
 修正内容：
 
-- 导出前会合并 `ppo_model` 和 `mcts_model` 中的共享权重。
+- 导出前会合并 `ppo_model` 和 `combat_model` 中的共享权重；旧 checkpoint 的 `mcts_model` 仅作为兼容读取。
 - 如果 checkpoint 中存在 `symbolic_head.out_proj.weight`，会按实际 `proj_dim` 构造 `SymbolicFeaturesHead`，再把 `symbolic_head.*` 权重完整加载到 combat 网络。
 - 新增 `--exporter auto|dynamo|legacy`。
 - `auto` 的策略调整为：

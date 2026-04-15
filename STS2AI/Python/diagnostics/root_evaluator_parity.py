@@ -38,6 +38,7 @@ from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_p
 from rl_policy_v2 import FullRunPolicyNetworkV2
 from verify_save_load import COMBAT_TYPES, drive_to_state
 from vocab import load_vocab
+from checkpoint_compat import get_combat_model_config, get_combat_model_state
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -94,12 +95,12 @@ def _load_models(checkpoint_path: Path, device: torch.device):
         _safe_load_state_dict(ppo_net, ppo_state, "PPO")
     ppo_net.to(device).eval()
 
-    combat_state = ckpt.get("mcts_model") or {}
-    mcts_config = ckpt.get("mcts_config", {})
+    combat_state = get_combat_model_state(ckpt, allow_standalone=False) or {}
+    combat_model_config = get_combat_model_config(ckpt)
     combat_embed_dim, combat_hidden_dim = _infer_combat_dims(
         combat_state,
-        mcts_config.get("embed_dim", ppo_embed_dim),
-        mcts_config.get("hidden_dim", 128),
+        combat_model_config.get("embed_dim", ppo_embed_dim),
+        combat_model_config.get("hidden_dim", 128),
     )
     deck_repr_dim = 0
     for key, value in combat_state.items():

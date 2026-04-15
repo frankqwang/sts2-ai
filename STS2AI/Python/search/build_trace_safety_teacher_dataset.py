@@ -223,7 +223,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--combat-checkpoint",
-        default="STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt",
+        default="STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt",
         help="Combat checkpoint used to score baseline logits.",
     )
     parser.add_argument(

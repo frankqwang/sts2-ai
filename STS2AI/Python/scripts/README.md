@@ -17,12 +17,16 @@ These wrappers are the self-contained entrypoints intended to travel with the
   - exposes `hard_override` / `full_replace` teacher modes
 - `run_full_run_recording.ps1`
   - visible demo / recording wrapper
-  - defaults to `STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt`
+  - defaults to `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
   - writes output to `STS2AI/Artifacts/recording`
 - `run_sim_vs_godot_audit.ps1`
   - unified sim-vs-Godot audit wrapper
-  - defaults to `STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt`
+  - defaults to `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
   - writes output to `STS2AI/Artifacts/verification`
+- `merge_hybrid_checkpoints.py`
+  - merges a separately trained `ppo_model` checkpoint and `combat_model` checkpoint
+  - writes canonical hybrid v2 checkpoints using `combat_model` / `combat_model_config`
+  - keeps PPO-owned shared weights such as `entity_emb.*` and `symbolic_head.*`
 
 Both PowerShell wrappers still resolve the real game project root one level
 above `STS2AI`, so they work after copying `STS2AI` into a new upstream

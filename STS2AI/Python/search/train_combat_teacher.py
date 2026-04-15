@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from core.combat_nn import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
 from search.combat_teacher_dataset import CombatTeacherSample, load_combat_teacher_samples, sample_metric_applicable
 from core.vocab import load_vocab
+from checkpoint_compat import get_combat_model_state
 
 
 def _safe_load_state_dict(model: torch.nn.Module, state_dict: dict[str, Any]) -> None:
@@ -37,9 +38,9 @@ def _load_teacher_init_network(
     device: torch.device,
 ) -> CombatPolicyValueNetwork:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state_dict = checkpoint.get("mcts_model") or checkpoint.get("model_state_dict")
+    state_dict = get_combat_model_state(checkpoint, allow_standalone=True)
     if not isinstance(state_dict, dict):
-        raise ValueError(f"Combat checkpoint has no mcts_model/model_state_dict: {checkpoint_path}")
+        raise ValueError(f"Combat checkpoint has no combat_model/model_state_dict: {checkpoint_path}")
     card_weight = state_dict.get("entity_emb.card_embed.weight")
     action_proj = state_dict.get("action_proj.weight")
     embed_dim = int(card_weight.shape[1]) if isinstance(card_weight, torch.Tensor) and card_weight.ndim == 2 else 32

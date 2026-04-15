@@ -34,6 +34,7 @@ from rl_encoder_v2 import build_structured_actions, build_structured_state, load
 from rl_policy_v2 import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
 from turn_solver_planner import _PipeEnvAdapter, _action_matches_legal
 from vocab import Vocab
+from checkpoint_compat import get_combat_model_state
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,7 +90,7 @@ def _load_combat_policy(checkpoint_path: str | Path, *, vocab: Vocab) -> Baselin
     from combat_nn import CombatPolicyValueNetwork
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    combat_state = checkpoint.get("mcts_model") or checkpoint.get("combat_model")
+    combat_state = get_combat_model_state(checkpoint, allow_standalone=False)
     if not isinstance(combat_state, dict):
         raise ValueError(f"Missing combat state dict in checkpoint: {checkpoint_path}")
     embed_dim, hidden_dim, deck_repr_dim = _infer_combat_dims(combat_state)

@@ -8,7 +8,7 @@ on the expert's action choices.
 Usage:
     python train_bc_noncombat.py \
         --data STS2AI/Artifacts/expert_trajectories/champion_high_floor/derived/rl/rl_transition.jsonl \
-        --resume STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt \
+        --resume STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt \
         --epochs 30 --lr 3e-4 --batch-size 64
 """
 

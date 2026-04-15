@@ -14,7 +14,7 @@ CHECKPOINTS_ROOT = ASSETS_ROOT / "checkpoints"
 DATASETS_ROOT = ASSETS_ROOT / "datasets"
 SEEDS_ROOT = ASSETS_ROOT / "seeds"
 
-MAINLINE_CHECKPOINT = CHECKPOINTS_ROOT / "act1" / "retrieval_final_iter2175.pt"
+MAINLINE_CHECKPOINT = CHECKPOINTS_ROOT / "act1" / "mainline_iter2270_carddebug.pt"
 
 SIM_HOST_EXE = ENV_ROOT / "Sim" / "Host" / "bin" / "Debug" / "net9.0" / "headless_sim_host_0991.exe"
 SIM_LEGACY_DLL = ENV_ROOT / "Sim" / "Runtime" / "HeadlessSim" / "bin" / "Debug" / "net9.0" / "HeadlessSim.dll"

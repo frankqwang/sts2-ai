@@ -21,6 +21,7 @@ from combat_teacher_dataset import (
     load_combat_teacher_samples,
     sample_metric_applicable,
 )
+from checkpoint_compat import get_combat_model_state
 
 
 class SamplePolicy(Protocol):
@@ -105,9 +106,9 @@ def _load_teacher_policy(
     from vocab import load_vocab
 
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    model_state = checkpoint.get("model_state_dict") or checkpoint.get("mcts_model")
+    model_state = get_combat_model_state(checkpoint, allow_standalone=True)
     if not isinstance(model_state, dict):
-        raise ValueError(f"Teacher checkpoint missing model_state_dict/mcts_model: {path}")
+        raise ValueError(f"Teacher checkpoint missing combat_model/model_state_dict: {path}")
     card_weight = model_state.get("entity_emb.card_embed.weight")
     action_proj = model_state.get("action_proj.weight")
     embed_dim = int(card_weight.shape[1]) if isinstance(card_weight, torch.Tensor) and card_weight.ndim == 2 else 32

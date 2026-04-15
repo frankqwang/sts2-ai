@@ -7,7 +7,7 @@ Supports two runtime modes:
 Recommended for recording:
     Godot.exe --path . -- --mcp-port 15600 --mcp-decision-overlay-file STS2AI/Artifacts/demo_overlay/live_overlay.json
 
-    python STS2AI/Python/demo_play.py --checkpoint STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt \\
+    python STS2AI/Python/demo_play.py --checkpoint STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt \\
                                       --transport http --port 15600 \\
                                       --decision-overlay-file STS2AI/Artifacts/demo_overlay/live_overlay.json
 """
@@ -61,6 +61,7 @@ from training_monitor import TrainingMetricsMonitor
 from full_run_env import create_full_run_client
 from sts2_singleplayer_env import adapt_v1_state_for_combat_policy
 from demo_action_candidates import _combat_candidate_actions, _non_combat_candidate_actions
+from checkpoint_compat import get_combat_model_state
 
 import io
 
@@ -1865,20 +1866,19 @@ def main():
                                            hidden_dim=args.hidden_dim)
     if "ppo_model" in ckpt:
         _safe_load_state_dict(ppo_net, ckpt["ppo_model"], "PPO")
-        if "mcts_model" in ckpt:
-            _safe_load_state_dict(combat_net, ckpt["mcts_model"], "combat")
+        combat_state = get_combat_model_state(ckpt, allow_standalone=False)
+        if combat_state is not None:
+            _safe_load_state_dict(combat_net, combat_state, "combat")
         logger.info("Loaded hybrid checkpoint")
     else:
         raise ValueError("--checkpoint must be a hybrid checkpoint containing ppo_model")
 
     if combat_checkpoint_path:
         combat_ckpt = torch.load(combat_checkpoint_path, map_location="cpu", weights_only=False)
-        if "mcts_model" in combat_ckpt:
-            _safe_load_state_dict(combat_net, combat_ckpt["mcts_model"], "combat_override")
-        elif "model_state_dict" in combat_ckpt:
-            _safe_load_state_dict(combat_net, combat_ckpt["model_state_dict"], "combat_override")
-        else:
-            raise ValueError("--combat-checkpoint must contain mcts_model or model_state_dict")
+        combat_state = get_combat_model_state(combat_ckpt, allow_standalone=True)
+        if combat_state is None:
+            raise ValueError("--combat-checkpoint must contain combat_model or model_state_dict")
+        _safe_load_state_dict(combat_net, combat_state, "combat_override")
         logger.info("Loaded combat override from %s", combat_checkpoint_path)
     ppo_net.to(device).eval()
     combat_net.to(device).eval()
@@ -2370,20 +2370,19 @@ def main():
     combat_net = CombatPolicyValueNetwork(vocab=vocab, embed_dim=args.embed_dim, hidden_dim=args.hidden_dim)
     if "ppo_model" in ckpt:
         _safe_load_state_dict(ppo_net, ckpt["ppo_model"], "PPO")
-        if "mcts_model" in ckpt:
-            _safe_load_state_dict(combat_net, ckpt["mcts_model"], "combat")
+        combat_state = get_combat_model_state(ckpt, allow_standalone=False)
+        if combat_state is not None:
+            _safe_load_state_dict(combat_net, combat_state, "combat")
         logger.info("Loaded hybrid checkpoint")
     else:
         raise ValueError("--checkpoint must be a hybrid checkpoint containing ppo_model")
 
     if combat_checkpoint_path:
         combat_ckpt = torch.load(combat_checkpoint_path, map_location="cpu", weights_only=False)
-        if "mcts_model" in combat_ckpt:
-            _safe_load_state_dict(combat_net, combat_ckpt["mcts_model"], "combat_override")
-        elif "model_state_dict" in combat_ckpt:
-            _safe_load_state_dict(combat_net, combat_ckpt["model_state_dict"], "combat_override")
-        else:
-            raise ValueError("--combat-checkpoint must contain mcts_model or model_state_dict")
+        combat_state = get_combat_model_state(combat_ckpt, allow_standalone=True)
+        if combat_state is None:
+            raise ValueError("--combat-checkpoint must contain combat_model or model_state_dict")
+        _safe_load_state_dict(combat_net, combat_state, "combat_override")
         logger.info("Loaded combat override from %s", combat_checkpoint_path)
 
     ppo_net.to(device).eval()

@@ -13,7 +13,7 @@ Usage:
     python train_hybrid.py --pipe --num-envs 8 --start-port 15527 --max-iterations 500
 
     # Resume from checkpoints:
-    python train_hybrid.py --pipe --num-envs 8 --resume-ppo ppo_best.pt --resume-mcts mcts_best.pt
+    python train_hybrid.py --pipe --num-envs 8 --resume-ppo ppo_best.pt --resume-combat combat_best.pt
 
     # Or use the launch script:
     .\\scripts\\start-mcts-training.ps1  (update to call train_hybrid.py)
@@ -63,6 +63,11 @@ from core.rl_policy_v2 import (
     StructuredRolloutBuffer,
     _structured_state_to_numpy_dict,
     _structured_actions_to_numpy_dict,
+)
+from checkpoint_compat import (
+    COMBAT_MODEL_KEY,
+    get_combat_model_state,
+    make_hybrid_checkpoint_payload,
 )
 from core.rl_reward_shaping import (
     extract_next_boss_token,
@@ -152,6 +157,7 @@ _CONFIG_ALIASES = {
     "offline_combat_teacher_batch_size": "combat_teacher_batch_size",
     "offline_combat_teacher_updates_per_iter": "combat_teacher_updates_per_iter",
     "offline_combat_teacher_warmup_iters": "combat_teacher_warmup_iters",
+    "resume_combat": "resume_mcts",
 }
 
 
@@ -2314,7 +2320,7 @@ def _checkpoint_retrieval_proj_dim(ckpt: dict[str, Any]) -> int:
     """Infer retrieval proj dim from any supported checkpoint payload layout."""
     if not isinstance(ckpt, dict):
         return 0
-    for key in ("ppo_model", "model_state_dict", "mcts_model"):
+    for key in ("ppo_model", "model_state_dict", COMBAT_MODEL_KEY, "mcts_model"):
         proj_dim = _infer_retrieval_proj_dim(ckpt.get(key, {}))
         if proj_dim > 0:
             return proj_dim
@@ -5090,7 +5096,7 @@ def main() -> int:
                         help="Output projection dim of SymbolicFeaturesHead "
                              "(default: 16). Only used when --retrieval-head is set.")
     parser.add_argument("--freeze-combat", action="store_true", default=False,
-                        help="Freeze entire combat brain (mcts_net). Only train PPO/non-combat side.")
+                        help="Freeze entire combat policy/value network. Only train PPO/non-combat side.")
     parser.add_argument("--freeze-ppo", action="store_true", default=False,
                         help="Freeze entire PPO brain (ppo_net). Only train combat side.")
     parser.add_argument("--combat-boss-only", action="store_true", default=False,
@@ -5108,8 +5114,8 @@ def main() -> int:
                         help="Resume both networks from a hybrid checkpoint (hybrid_XXXXX.pt)")
     parser.add_argument("--resume-ppo", type=str, default=None,
                         help="Resume PPO only (standalone PPO checkpoint)")
-    parser.add_argument("--resume-mcts", type=str, default=None,
-                        help="Resume MCTS only (standalone MCTS checkpoint)")
+    parser.add_argument("--resume-combat", "--resume-mcts", dest="resume_mcts", metavar="RESUME_COMBAT", type=str, default=None,
+                        help="Resume combat policy only. --resume-mcts is kept as a deprecated alias.")
     parser.add_argument("--save-interval", type=int, default=25)
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument(
@@ -5422,7 +5428,7 @@ def main() -> int:
     _resume_sources = [
         ("--resume", args.resume),
         ("--resume-ppo", args.resume_ppo),
-        ("--resume-mcts", args.resume_mcts),
+        ("--resume-combat", args.resume_mcts),
     ]
     for _arg_name, _ckpt_path in _resume_sources:
         if not _ckpt_path:
@@ -5470,7 +5476,7 @@ def main() -> int:
     if args.resume and deck_repr_dim == 0:
         try:
             _peek_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
-            _peek_state = _peek_ckpt.get("mcts_model", {})
+            _peek_state = get_combat_model_state(_peek_ckpt, allow_standalone=False) or {}
             if isinstance(_peek_state, dict):
                 for _k, _v in _peek_state.items():
                     if "deck_encoder" in _k and "attn.in_proj_weight" in _k:
@@ -5545,12 +5551,13 @@ def main() -> int:
         if "ppo_model" in ckpt:
             _safe_load_state_dict(ppo_net, ckpt["ppo_model"], "PPO")
             logger.info("Loaded PPO from hybrid checkpoint")
-        if "mcts_model" in ckpt:
-            _safe_load_state_dict(mcts_net, ckpt["mcts_model"], "combat")
+        combat_state = get_combat_model_state(ckpt, allow_standalone=False)
+        if combat_state is not None:
+            _safe_load_state_dict(mcts_net, combat_state, "combat")
             logger.info("Loaded combat policy from hybrid checkpoint")
         start_iter = ckpt.get("iteration", 0) + 1
 
-    # --resume-ppo / --resume-mcts: load standalone checkpoints (override)
+    # --resume-ppo / --resume-combat: load standalone checkpoints (override)
     if args.resume_ppo:
         ckpt = torch.load(args.resume_ppo, map_location="cpu", weights_only=False)
         if "ppo_model" in ckpt:
@@ -5570,10 +5577,9 @@ def main() -> int:
 
     if args.resume_mcts:
         ckpt = torch.load(args.resume_mcts, map_location="cpu", weights_only=False)
-        if "mcts_model" in ckpt:
-            _safe_load_state_dict(mcts_net, ckpt["mcts_model"], "combat")
-        elif "model_state_dict" in ckpt:
-            _safe_load_state_dict(mcts_net, ckpt["model_state_dict"], "combat")
+        combat_state = get_combat_model_state(ckpt, allow_standalone=True)
+        if combat_state is not None:
+            _safe_load_state_dict(mcts_net, combat_state, "combat")
         logger.info("Loaded combat policy from %s", args.resume_mcts)
 
     combat_main_path_mode = _configure_main_combat_path_mode(
@@ -7092,37 +7098,37 @@ def main() -> int:
 
             # Save
             if iteration % args.save_interval == 0:
-                torch.save({
-                    "ppo_model": ppo_net.state_dict(),
-                    "mcts_model": mcts_net.state_dict(),
-                    "iteration": iteration,
-                    "ppo_config": {
+                torch.save(make_hybrid_checkpoint_payload(
+                    ppo_model=ppo_net.state_dict(),
+                    combat_model=mcts_net.state_dict(),
+                    iteration=iteration,
+                    ppo_config={
                         "embed_dim": args.embed_dim,
                         "offline_noncombat_ranking_head_mode": offline_noncombat_ranking_head_mode,
                     },
-                    "mcts_config": {
+                    combat_model_config={
                         "embed_dim": args.embed_dim,
                         "hidden_dim": args.combat_hidden_dim,
                         "combat_main_path_mode": combat_main_path_mode,
                     },
-                }, output_dir / f"hybrid_{iteration:05d}.pt")
+                ), output_dir / f"hybrid_{iteration:05d}.pt")
 
     except BaseException as e:
         logger.error("Crash: %s\n%s", e, traceback.format_exc())
-        torch.save({
-            "ppo_model": ppo_net.state_dict(),
-            "mcts_model": mcts_net.state_dict(),
-            "crash": str(e),
-            "ppo_config": {
+        torch.save(make_hybrid_checkpoint_payload(
+            ppo_model=ppo_net.state_dict(),
+            combat_model=mcts_net.state_dict(),
+            crash=str(e),
+            ppo_config={
                 "embed_dim": args.embed_dim,
                 "offline_noncombat_ranking_head_mode": offline_noncombat_ranking_head_mode,
             },
-            "mcts_config": {
+            combat_model_config={
                 "embed_dim": args.embed_dim,
                 "hidden_dim": args.combat_hidden_dim,
                 "combat_main_path_mode": combat_main_path_mode,
             },
-        }, output_dir / "hybrid_crash.pt")
+        ), output_dir / "hybrid_crash.pt")
         raise
     finally:
         if inf_server is not None:
@@ -7162,20 +7168,20 @@ def main() -> int:
     # warning. The previous version hardcoded embed_dim=32 / hidden_dim=128
     # (legacy defaults from a much earlier training era) which is now wrong
     # because the current defaults are embed_dim=48 / hidden_dim=192.
-    torch.save({
-        "ppo_model": ppo_net.state_dict(),
-        "mcts_model": mcts_net.state_dict(),
-        "iteration": end_iter - 1,
-        "ppo_config": {
+    torch.save(make_hybrid_checkpoint_payload(
+        ppo_model=ppo_net.state_dict(),
+        combat_model=mcts_net.state_dict(),
+        iteration=end_iter - 1,
+        ppo_config={
             "embed_dim": args.embed_dim,
             "offline_noncombat_ranking_head_mode": offline_noncombat_ranking_head_mode,
         },
-        "mcts_config": {
+        combat_model_config={
             "embed_dim": args.embed_dim,
             "hidden_dim": args.combat_hidden_dim,
             "combat_main_path_mode": combat_main_path_mode,
         },
-    }, output_dir / "hybrid_final.pt")
+    ), output_dir / "hybrid_final.pt")
 
     logger.info("Training complete.")
     return 0
