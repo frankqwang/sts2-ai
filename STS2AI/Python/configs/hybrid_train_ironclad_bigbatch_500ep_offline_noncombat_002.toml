@@ -1,0 +1,107 @@
+# Hybrid training - 500 ep + offline_noncombat_ranking 第一档
+#
+# 派生自 hybrid_train_ironclad_bigbatch_2000ep.toml，目的：
+# - 用 hybrid_02293.pt 派生的 offline_noncombat_ranking 数据训 build 选卡
+# - 按 reuse_rules + 主交接文档 line 464-475 推荐：第一档 loss_weight = 0.02
+# - 不动 matchup_blend_beta / counterfactual_scoring（按文档建议）
+# - epoch 回到 1（之前 epoch=3 + force_remove 双补丁导致 KL=0.87 退化）
+# - ep=500（小批快跑验证，不再 2000 大批）
+# - force_remove 补丁已落 train_hybrid.py（无 toml 开关，自动在）
+#
+# 数据源路径需要 generator 跑完后填入 offline_noncombat_ranking_data_dir
+# 当前生成路径占位：STS2AI/Artifacts/offline_noncombat_ranking/from_hybrid_02293_20260415-031531
+
+[environment]
+pipe = true
+transport = "pipe-binary"
+auto_launch = true
+multi_process = true
+num_envs = 4
+start_port = 15527
+character_id = "IRONCLAD"
+
+[training]
+max_iterations = 10
+episodes_per_iter = 500
+episode_timeout = 90.0
+max_episode_steps = 600
+output_dir = "STS2AI/Artifacts/hybrid_training_main_attention"
+save_interval = 1
+
+[ppo]
+ppo_lr = 1e-4
+ppo_epochs = 1
+ppo_minibatch = 512
+target_kl = 0.02
+ppo_entropy_coeff = 0.1
+ppo_clip = 0.2
+boss_readiness_coeff = 0.05
+
+[mcts]
+mcts = false
+mcts_sims = 50
+mcts_lr = 1e-3
+mcts_batch_size = 128
+mcts_train_steps = 10
+mcts_warmup_iters = 50
+mcts_replay_size = 50000
+
+[combat_ppo]
+combat_ppo_lr = 3e-4
+combat_ppo_epochs = 1
+combat_ppo_minibatch = 512
+combat_target_kl = 0.02
+combat_ppo_entropy_coeff = 0.05
+combat_ppo_clip = 0.2
+combat_monster_reward_weight = 0.7
+
+[architecture]
+embed_dim = 48
+combat_hidden_dim = 192
+combat_main_path_mode = "light_attention"
+deck_repr_dim = 0
+
+[saved_offline_episodes]
+saved_offline_episodes_enabled = true
+saved_offline_episodes_min_floor = 14
+saved_offline_replay_traces_enabled = true
+saved_offline_metrics_log_enabled = true
+
+[offline_noncombat_ranking]
+# 关键：指向 hybrid_02293 派生的新数据
+offline_noncombat_ranking_data_dir = "STS2AI/Artifacts/offline_noncombat_ranking/from_hybrid_02293_20260415-031531"
+offline_noncombat_ranking_batch_size = 32
+offline_noncombat_ranking_loss_weight = 0.02
+offline_noncombat_ranking_updates_per_iter = 1
+offline_noncombat_ranking_warmup_iters = 0
+offline_noncombat_ranking_loss_decay_tau = 0.0
+offline_noncombat_ranking_blend_beta = 0.0
+offline_noncombat_ranking_min_spread = 0.001
+
+[offline_combat_teacher]
+offline_combat_teacher_data_dir = "STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_320.jsonl"
+offline_combat_teacher_loss_weight = 0.2
+offline_combat_teacher_batch_size = 64
+offline_combat_teacher_updates_per_iter = 4
+offline_combat_teacher_warmup_iters = 0
+
+[counterfactual]
+counterfactual_scoring = false
+counterfactual_weight = 0.0
+skada_prior_weight = 0.15
+skada_boss_weights = false
+
+[kl]
+kl_warmstart = false
+kl_beta_start = 0.5
+kl_beta_decay = 2000
+
+[milestones]
+boss_entry_quality_weight = 0.15
+early_damage_potion_penalty_weight = 0.0
+
+[runtime_flags]
+act1_no_elite_routes = true
+combat_pending_stall_threshold = 30
+boss_conditioned_card_guidance_weight = 0.8
+combat_safety_rerank_weight = 1.0
