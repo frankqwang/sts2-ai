@@ -666,6 +666,7 @@ def _rollout_and_collect(
     emit_prefix_samples: bool,
     rerun_solver_per_prefix: bool,
     progress_combat_with_solver: bool,
+    agent=None,  # FullRunAgent; if None we fall back to the old naive argmax path
 ) -> tuple[list[CombatTeacherSample], dict[str, Any]]:
     samples: list[CombatTeacherSample] = []
     sampled_reason_counts: Counter[str] = Counter()
@@ -683,6 +684,8 @@ def _rollout_and_collect(
             break
         seed_sample_count = 0
         state = client.reset(character_id="IRONCLAD", ascension_level=0, seed=seed, timeout_s=30.0)
+        if agent is not None:
+            agent.reset()
         combat_step = 0
         for _ in range(max_episode_steps):
             state_type = _lower(state.get("state_type"))
@@ -799,9 +802,27 @@ def _rollout_and_collect(
                 )
                 combat_step += 1
             else:
-                action = _select_noncombat_action(state, legal_actions, noncombat_policy, vocab=vocab, device=device)
+                # Non-combat action: prefer FullRunAgent (auto_progress + loop_escape
+                # + PPO argmax), fall back to the legacy naive argmax if no agent
+                # is configured. The shared agent is the reason the builder
+                # finally marches past floor 2-6 on most seeds (the old path
+                # got stuck on UI prompts / argmax loops).
+                if agent is not None:
+                    pick = agent.select_action(state, legal_actions)
+                    action = pick["action"]
+                else:
+                    action = _select_noncombat_action(state, legal_actions, noncombat_policy, vocab=vocab, device=device)
 
+            before_state = state
+            before_legal = legal_actions
             state = client.act(action)
+            if agent is not None:
+                agent.after_step(
+                    before_state=before_state,
+                    before_legal=before_legal,
+                    action=action,
+                    next_state=state,
+                )
 
             next_floor = _safe_int((state.get("run") or {}).get("floor") or state.get("floor"), 0)
             next_act = _safe_int((state.get("run") or {}).get("act") or state.get("act"), 0)
@@ -977,6 +998,8 @@ def _write_teacher_eval_report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build IRONCLAD Act1 combat teacher v2 dataset from live solver rollouts.")
+    parser.add_argument("--inference-config", default="STS2AI/Python/configs/inference_config.toml",
+                        help="Canonical inference config TOML. Empty to disable (use AgentConfig defaults).")
     parser.add_argument("--hybrid-checkpoint", default=str(MAINLINE_CHECKPOINT), help="Hybrid checkpoint for non-combat progression.")
     parser.add_argument("--combat-checkpoint", default=str(MAINLINE_CHECKPOINT), help="Combat checkpoint used for baseline policy and teacher init.")
     parser.add_argument("--seed-file", default="", help="Optional JSON seed file.")
@@ -1042,6 +1065,20 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     noncombat_policy = load_noncombat_policy(args.hybrid_checkpoint, vocab=vocab, device=device)
     baseline_policy = load_baseline_combat_policy(args.combat_checkpoint, vocab=vocab, device=device)
+
+    # Shared inference agent: same auto_progress + loop_escape + NN pipeline
+    # as evaluate_ai.py. Fixes the builder-stalls-on-noncombat-screens bug
+    # that previously kept most seeds from getting past floor 2-6.
+    from full_run_agent import FullRunAgent, load_agent_config
+    agent_cfg = load_agent_config(args.inference_config)
+    agent = FullRunAgent(
+        ppo_net=noncombat_policy,
+        combat_net=baseline_policy.network,
+        vocab=vocab,
+        device=device,
+        cfg=agent_cfg,
+    )
+
     solver = None
     client = None
     try:
@@ -1082,6 +1119,7 @@ def main() -> None:
             emit_prefix_samples=bool(teacher_config.emit_prefix_samples),
             rerun_solver_per_prefix=bool(teacher_config.rerun_solver_per_prefix),
             progress_combat_with_solver=bool(args.progress_combat_with_solver),
+            agent=agent,
         )
     finally:
         if solver is not None:

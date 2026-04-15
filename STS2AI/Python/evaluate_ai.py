@@ -100,6 +100,85 @@ logger = logging.getLogger(__name__)
 DEFAULT_REPO_ROOT = REPO_ROOT
 DEFAULT_OUTPUT_DIR = ARTIFACTS_ROOT / "eval"
 
+
+def _apply_inference_config(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Override argparse defaults with values from the inference_config.toml.
+
+    Rule: if the user passed an explicit --flag on the command line, keep that
+    value. If they didn't (i.e. args.flag == parser default), replace with the
+    config file's value. This makes `inference_config.toml` the single source
+    of truth while letting A/B runs override per-flag from the CLI.
+
+    The config maps (flat argparse dest names) are:
+      combat.combat_safety_rerank        -> args.combat_safety_rerank
+      combat.lethal_probe                -> args.lethal_probe
+      combat.combat_turn_solver          -> args.combat_turn_solver
+      combat.combat_turn_planner         -> args.combat_turn_planner
+      combat.turn_solver_mode            -> args.turn_solver_mode
+      combat.turn_planner_mode           -> args.planner_mode
+      combat.beam_search                 -> args.beam_search
+      seeds.num_games                    -> args.num_games
+      seeds.seed_suite                   -> args.seed_suite
+
+    Unknown config keys are ignored (warn only). Unknown dests also ignored.
+    """
+    cfg_path = getattr(args, "inference_config", "") or ""
+    if not cfg_path:
+        return
+    p = Path(cfg_path)
+    if not p.exists():
+        logger.warning("inference_config not found at %s; using argparse defaults only.", p)
+        return
+    try:
+        import tomllib  # type: ignore[attr-defined]
+    except ModuleNotFoundError:  # pragma: no cover
+        import tomli as tomllib  # type: ignore
+    try:
+        cfg = tomllib.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("failed to parse %s: %s; ignoring.", p, exc)
+        return
+
+    # Flat mapping: (section, key_in_toml) -> argparse dest
+    dest_map = {
+        ("combat", "combat_safety_rerank"): "combat_safety_rerank",
+        ("combat", "lethal_probe"): "lethal_probe",
+        ("combat", "combat_turn_solver"): "combat_turn_solver",
+        ("combat", "combat_turn_planner"): "combat_turn_planner",
+        ("combat", "turn_solver_mode"): "turn_solver_mode",
+        ("combat", "turn_planner_mode"): "planner_mode",
+        ("combat", "beam_search"): "beam_search",
+        ("seeds", "num_games"): "num_games",
+        ("seeds", "seed_suite"): "seed_suite",
+    }
+
+    # Compute argparse-only defaults (so we know what "user didn't set" looks like)
+    defaults = {a.dest: a.default for a in parser._actions if hasattr(a, "dest")}
+
+    applied: list[str] = []
+    for (section, key), dest in dest_map.items():
+        if not hasattr(args, dest):
+            continue
+        sec = cfg.get(section)
+        if not isinstance(sec, dict) or key not in sec:
+            continue
+        cfg_val = sec[key]
+        current_val = getattr(args, dest)
+        default_val = defaults.get(dest)
+        # Only override if user didn't explicitly pass something different from
+        # the argparse default.
+        if current_val == default_val and current_val != cfg_val:
+            setattr(args, dest, cfg_val)
+            applied.append(f"{section}.{key}={cfg_val!r} -> args.{dest}")
+
+    if applied:
+        logger.info("inference_config applied (%s):", p)
+        for line in applied:
+            logger.info("  %s", line)
+    else:
+        logger.info("inference_config loaded from %s (no overrides needed — CLI/defaults already match).", p)
+
+
 # State types considered combat
 COMBAT_SCREENS = {"combat", "monster", "elite", "boss"}
 SELECTION_SCREENS = {"card_select", "hand_select", "relic_select"}
@@ -3140,6 +3219,13 @@ def main() -> int:
         description="Evaluate STS2 AI agent on fixed-seed games",
     )
     parser.add_argument(
+        "--inference-config",
+        type=str,
+        default="STS2AI/Python/configs/inference_config.toml",
+        help="Path to canonical inference TOML. Values here override argparse "
+             "defaults; explicit CLI flags still win over config. Pass empty string to disable.",
+    )
+    parser.add_argument(
         "--checkpoint", type=str, default=str(MAINLINE_CHECKPOINT),
         help="Path to hybrid checkpoint (hybrid_XXXXX.pt). "
              "Required unless only running baselines.",
@@ -3179,10 +3265,23 @@ def main() -> int:
         help="Enable standalone lethal probe for combat: check if any play_card "
              "directly kills all enemies and force that action (no teacher required)",
     )
+    # combat_safety_rerank: default flipped to True (2026-04-16) so evaluation
+    # matches training rollout (train_hybrid runs with combat_safety_rerank_weight=1.0).
+    # Pre-2026-04-16 eval runs had this OFF by default, silently creating a
+    # train-vs-eval gap that made every cross-ckpt comparison unfair.
     parser.add_argument(
-        "--combat-safety-rerank", action="store_true", default=False,
-        help="Apply a lightweight safety rerank on combat logits to favor blocking,"
-             " finishing low-HP attackers, and avoiding greedy setup in danger turns.",
+        "--combat-safety-rerank",
+        dest="combat_safety_rerank",
+        action="store_true",
+        default=True,
+        help="Apply a lightweight safety rerank on combat logits (matches training "
+             "rollout). ON by default; use --no-combat-safety-rerank to disable.",
+    )
+    parser.add_argument(
+        "--no-combat-safety-rerank",
+        dest="combat_safety_rerank",
+        action="store_false",
+        help="A/B override: disable combat_safety_rerank at eval.",
     )
     # NOTE 2026-04-08 (wizardly cleanup): --beam-search and its lazy import of
     # `beam_search_combat.py` were removed. It was a legacy research planner
@@ -3429,6 +3528,11 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+
+    # Canonical inference config: apply AFTER parse_args so explicit CLI flags
+    # still win. We only override a flag if the user DIDN'T pass it on the
+    # command line (detected by comparing to the argparse default).
+    _apply_inference_config(parser, args)
 
     # Determine strategies to run
     strategies: list[str] = []
@@ -3697,6 +3801,23 @@ def main() -> int:
 
         ppo_net.to(device).eval()
         combat_net.to(device).eval()
+
+        # Deploy-time teacher-head fusion. When inference_config.toml enables
+        # combat_teacher_rerank, the trained action_score_head (and its attention
+        # residual) participate in the final argmax logits. Before this hook the
+        # teacher head was trained but never consulted at deploy, so all teacher
+        # loss impact on inference was indirect (via shared encoder only).
+        try:
+            from full_run_agent import load_agent_config as _lac
+            _ag_cfg = _lac(getattr(args, "inference_config", "") or "")
+            if _ag_cfg.combat_teacher_rerank:
+                combat_net.teacher_rerank_weight = float(_ag_cfg.combat_teacher_rerank_weight)
+                logger.info(
+                    "combat_teacher_rerank ON: combat_net.teacher_rerank_weight=%.3f",
+                    combat_net.teacher_rerank_weight,
+                )
+        except Exception as _exc:
+            logger.warning("failed to apply teacher_rerank from config: %s", _exc)
 
         logger.info("Models loaded on %s", device)
 

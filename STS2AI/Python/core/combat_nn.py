@@ -684,13 +684,20 @@ class CombatPolicyValueNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
-        self.action_aux_gate = nn.Parameter(torch.tensor(0.1))
+        # Gate init is parameterised via env vars so we can sweep without
+        # editing source / re-running git diff. Unset → legacy default (0.1).
+        import os as _os
+        _g_aux = float(_os.getenv("COMBAT_ACTION_AUX_GATE_INIT", "0.1"))
+        _g_fam = float(_os.getenv("COMBAT_ACTION_FAMILY_GATE_INIT", "0.1"))
+        _g_stop = float(_os.getenv("COMBAT_STOP_CONTINUE_GATE_INIT", "0.1"))
+        _g_res = float(_os.getenv("COMBAT_RESOURCE_GATE_INIT", "0.1"))
+        self.action_aux_gate = nn.Parameter(torch.tensor(_g_aux))
         self.action_family_head = nn.Linear(hidden_dim, NUM_COMBAT_ACTION_FAMILIES)
-        self.action_family_gate = nn.Parameter(torch.tensor(0.1))
+        self.action_family_gate = nn.Parameter(torch.tensor(_g_fam))
         self.stop_continue_head = nn.Linear(hidden_dim, 2)
-        self.stop_continue_gate = nn.Parameter(torch.tensor(0.1))
+        self.stop_continue_gate = nn.Parameter(torch.tensor(_g_stop))
         self.resource_gate_head = nn.Linear(hidden_dim, 2)
-        self.resource_gate = nn.Parameter(torch.tensor(0.1))
+        self.resource_gate = nn.Parameter(torch.tensor(_g_res))
 
         # Deck-conditioned action delta (GPT Pro #7: deck directly influences action scoring)
         # delta_logit(a) = f(deck_z, action_emb) — zero-init for safe start
@@ -780,6 +787,15 @@ class CombatPolicyValueNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, 1),
         )
+        # Deploy-time teacher fusion: when > 0, forward() additionally computes
+        # forward_teacher's action_score_head output and blends it into the
+        # policy logits. Before this, teacher training only affected online
+        # inference via the shared encoder (indirect); action_score_head was
+        # trained to convergence on solver answers but never consulted at deploy.
+        # Typical usable range: 0.3 (light rerank) ~ 1.0 (teacher dominates).
+        # Set via `combat_net.teacher_rerank_weight = x` from the calling script
+        # (FullRunAgent / evaluate_ai flips this from AgentConfig).
+        self.teacher_rerank_weight: float = 0.0
         self.teacher_action_context_attn = nn.MultiheadAttention(
             hidden_dim,
             num_heads=num_attn_heads,
@@ -1150,6 +1166,31 @@ class CombatPolicyValueNetwork(nn.Module):
             dv_input = torch.cat([deck_repr, policy_state_repr], dim=-1)
             delta_value = self.delta_value_head(dv_input).squeeze(-1)  # (B,)
             value = torch.tanh(value + self.adapter_beta * delta_value)
+
+        # Deploy-time teacher fusion (teacher_rerank_weight > 0 activates).
+        # The teacher path (action_score_head + teacher_action_context_attn) is
+        # trained to match solver answers under the combat_teacher loss but is
+        # normally unused at inference. When the caller flips the weight, we
+        # add the teacher action_scores into the policy logits so the trained
+        # teacher weights actually influence the deploy argmax.
+        if self.teacher_rerank_weight > 0:
+            action_mask = action_features["action_mask"]
+            _, contextual_action_repr_t = self._apply_residual_action_context(
+                state_repr=policy_state_repr,
+                action_repr=policy_action_repr,
+                action_mask=action_mask,
+                attn=self.teacher_action_context_attn,
+                norm=self.teacher_action_context_norm,
+                ffn=self.teacher_action_context_ffn,
+                ffn_norm=self.teacher_action_context_ffn_norm,
+                state_gate=policy_state_repr.new_tensor(0.0),
+                action_gate=self.teacher_action_context_gate,
+            )
+            state_exp = policy_state_repr.unsqueeze(1).expand(-1, policy_action_repr.shape[1], -1)
+            score_input = torch.cat([state_exp, contextual_action_repr_t], dim=-1)
+            teacher_scores = self.action_score_head(score_input).squeeze(-1)
+            teacher_scores = teacher_scores.masked_fill(~action_mask, 0.0)  # invalid actions contribute 0
+            logits = logits + float(self.teacher_rerank_weight) * teacher_scores
 
         if return_hidden:
             return logits, value, policy_state_repr, policy_action_repr
