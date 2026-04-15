@@ -73,23 +73,58 @@ def _load_rows(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _normalize_scores(options: list[dict[str, Any]], chosen_index: int) -> list[float]:
-    """Build a stable ranking target from cleaned Skada row options.
+def _normalize_scores(
+    options: list[dict[str, Any]],
+    chosen_index: int,
+    is_victory: int = 1,
+    soft_mode: bool = False,
+) -> list[float]:
+    """Build a ranking target from cleaned Skada row options.
 
-    We use `context_score` as the base order signal, then ensure the chosen
-    option remains best by adding a small margin if needed. This keeps the
-    target grounded in the cleaned Skada features without throwing away the
-    actual demonstrated choice.
+    Two modes:
+
+    * Legacy (``soft_mode=False``, default for backward compat): use
+      ``context_score`` as the base signal and force the chosen option to be
+      best with a ``+0.05`` margin. Produces ``chosen_is_best_rate = 1.0`` but
+      relies on the strong "human player was always right" assumption. Audits
+      of raw Skada data show this assumption fails ~53% of the time (chosen
+      differs from both context-first and win_rate_delta-first). Baking that
+      fiction into teacher labels actively teaches the policy to imitate
+      sub-optimal human decisions.
+
+    * Softened (``soft_mode=True``): let ``context_score`` rank the options
+      honestly. When the player won the run, give ``chosen`` a small nudge so
+      its score stays within ``0.05`` of the current max (soft bias toward the
+      demonstrated choice without overriding stronger context signal). When
+      the player lost, no nudge — the teacher label is whatever ``context_score``
+      says, even if that disagrees with the human pick.
+
+    Softened mode produces noisier but more honest labels and lets the
+    downstream ranking head recover "this pick was actually bad" signal from
+    losing runs (~50% of the dataset).
     """
     base_scores = [_safe_float(opt.get("context_score"), 0.0) for opt in options]
     if not base_scores:
         return []
-    max_other = max(
-        (score for idx, score in enumerate(base_scores) if idx != chosen_index),
-        default=base_scores[chosen_index],
-    )
-    if 0 <= chosen_index < len(base_scores) and base_scores[chosen_index] <= max_other:
-        base_scores[chosen_index] = max_other + 0.05
+
+    if not soft_mode:
+        # Legacy behavior — force chosen to be the strict best.
+        max_other = max(
+            (score for idx, score in enumerate(base_scores) if idx != chosen_index),
+            default=base_scores[chosen_index],
+        )
+        if 0 <= chosen_index < len(base_scores) and base_scores[chosen_index] <= max_other:
+            base_scores[chosen_index] = max_other + 0.05
+    elif is_victory and 0 <= chosen_index < len(base_scores):
+        # Soft nudge when the player won — keep chosen within 0.05 of max_other
+        # but never strictly above unless context_score already says so.
+        max_other = max(
+            (score for idx, score in enumerate(base_scores) if idx != chosen_index),
+            default=base_scores[chosen_index],
+        )
+        base_scores[chosen_index] = max(base_scores[chosen_index], max_other - 0.05)
+    # is_victory=0 + soft_mode=True: no modification; context_score ranks raw.
+
     return [round(float(score), 6) for score in base_scores]
 
 
@@ -183,6 +218,7 @@ def build_dataset(
     output_dir: Path,
     character: str | None,
     max_samples: int | None,
+    soft_mode: bool = False,
 ) -> dict[str, Any]:
     vocab = load_vocab()
     rows = _load_rows(input_path)
@@ -216,7 +252,12 @@ def build_dataset(
             structured_state = build_structured_state(state, vocab)
             structured_actions = build_structured_actions(state, legal_actions, vocab)
 
-            scores = _normalize_scores(options, chosen_index)
+            scores = _normalize_scores(
+                options,
+                chosen_index,
+                is_victory=_safe_int(row.get("is_victory"), 0),
+                soft_mode=soft_mode,
+            )
             if len(scores) < 2:
                 continue
             best_idx = int(max(range(len(scores)), key=lambda idx: scores[idx]))
@@ -233,7 +274,9 @@ def build_dataset(
             sample = {
                 "dataset_schema_version": "skada_matchup_bridge.v1",
                 "sample_type": "card_reward",
-                "label_source": "skada_context_plus_choice",
+                "label_source": (
+                    "skada_context_softened" if soft_mode else "skada_context_plus_choice"
+                ),
                 "offer_id": row.get("offer_id"),
                 "run_id": row.get("run_id"),
                 "floor": row.get("floor"),
@@ -264,6 +307,7 @@ def build_dataset(
         "avg_score_spread": round(float(sum(score_spreads) / max(1, len(score_spreads))), 6),
         "chosen_is_best_rate": round(float(chosen_is_best) / max(1, sample_count), 6),
         "ranking_path": str(ranking_path.resolve()),
+        "soft_mode": bool(soft_mode),
     }
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False),
@@ -278,6 +322,17 @@ def main() -> int:
     parser.add_argument("--output", required=True, help="Output dataset directory")
     parser.add_argument("--character", default=None, help="Optional character filter (for example IRONCLAD)")
     parser.add_argument("--max-samples", type=int, default=None, help="Optional max sample count")
+    parser.add_argument(
+        "--soft-mode",
+        action="store_true",
+        default=False,
+        help=(
+            "Drop the 'chosen = always best' hard assumption. Use context_score "
+            "as the honest ranking signal, with a small nudge toward chosen "
+            "only when is_victory=1. Produces noisier but more faithful teacher "
+            "labels — recovers 'this human pick was bad' signal from losing runs."
+        ),
+    )
     args = parser.parse_args()
 
     manifest = build_dataset(
@@ -285,6 +340,7 @@ def main() -> int:
         output_dir=Path(args.output),
         character=args.character,
         max_samples=args.max_samples,
+        soft_mode=bool(args.soft_mode),
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
