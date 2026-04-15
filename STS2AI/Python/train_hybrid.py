@@ -4077,13 +4077,29 @@ def collect_unified_episode(
                         f"w={_hard_weight:.2f}{' tags=' + ','.join(_hard_tags) if _hard_tags else ''}) "
                         f"{_combat_ctx} top=[{_top_actions}]"
                     )
+                    # Room-type weighting for combat PPO gradient balance
+                    # (2026-04-15). A typical Act 1 run has ~85% monster combat
+                    # transitions, ~5% boss transitions. Without weighting, the
+                    # PPO gradient is dominated by "fast hallway attack" plays
+                    # and the policy never properly learns "stack block for
+                    # boss" regimes. Multiply per-room weight into the existing
+                    # _hard_weight (which carries combat_safety_rerank etc.).
+                    # PPOTrainer normalizes sample_weights per minibatch
+                    # (mb_sample_weights /= mb_sample_weights.mean()) so the
+                    # absolute scale doesn't break update dynamics — relative
+                    # scale of boss vs monster is what matters.
+                    _room_type_weight = {
+                        "monster": 1.0,
+                        "elite": 2.5,
+                        "boss": 5.0,
+                    }.get(str(_combat_room_type or "monster").lower(), 1.0)
                     _combat_ppo_pending = {
                         "sf": sf, "af": af,
                         "action_idx": action_idx,
                         "log_prob": log_prob,
                         "value": value,
                         "screen_type": st,
-                        "sample_weight": _hard_weight,
+                        "sample_weight": _hard_weight * _room_type_weight,
                         "hard_state_tags": _hard_tags,
                     }
                     _combat_trace_payload = {

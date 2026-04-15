@@ -121,7 +121,13 @@ CARD_AUX_DIM = 19 + NUM_FUNCTIONAL_TAGS  # 51
 # --- intent stats (P0 additions) ---
 # 37     num_intents / 4               (multi-intent boss support)
 # 38     total_intent_dmg / 30         (sum of all intent damage, multi-hit aware)
-# 39     reserved                      (future expansion)
+# 39     boss_critical_state            (combined sentinel: max_hp>10000 implying
+#                                       ShowsInfiniteHp / DeathBlowIntent /
+#                                       is_hittable=False — helps AI detect
+#                                       Waterfall-style Phase 2 "no point
+#                                       attacking, stack block instead" states
+#                                       that are invisible under hp/max_hp ratio
+#                                       encoding alone). 2026-04-15 PoC.
 ENEMY_AUX_DIM = 40
 
 # Map node types
@@ -986,7 +992,12 @@ def _enemy_aux_features(enemy: dict) -> np.ndarray:
     hp = _safe_float(enemy.get("current_hp", enemy.get("hp")))
     max_hp = max(1.0, _safe_float(enemy.get("max_hp"), 1))
     feat[0] = hp / max_hp  # HP ratio
-    feat[1] = max_hp / 200.0  # Max HP normalized
+    # Clip max_hp normalization to keep values finite when WaterfallGiant enters
+    # `TriggerAboutToBlowState` and sets max_hp = 999999999m (Phase 2 sentinel).
+    # Without the clip max_hp/200.0 = ~5e6 and blows up the encoder's
+    # downstream norms / gradients. Cap at 10x so the NN can still tell
+    # "clipped-out huge" apart from "huge but finite" via saturation.
+    feat[1] = min(max_hp / 200.0, 10.0)
     feat[2] = _safe_float(enemy.get("block")) / 50.0
 
     # Intent — C# sends nested intents[] with `damage` (per-hit) + `repeats`
@@ -1085,7 +1096,23 @@ def _enemy_aux_features(enemy: dict) -> np.ndarray:
     # --- intent stats (P0 additions) ---
     feat[37] = min(num_intents / 4.0, 1.0)
     feat[38] = min(total_intent_dmg / 30.0, 2.0)
-    # feat[39] reserved
+    # feat[39] boss_critical_state sentinel (2026-04-15 PoC).
+    # Fires when the combat state is in a "stop attacking, start defending"
+    # regime that vanilla hp/max_hp ratio cannot express:
+    #   * max_hp > 10000     — WaterfallGiant TriggerAboutToBlowState sets
+    #                          max_hp = 999999999m; no real boss is >500 HP,
+    #                          so >10000 is an unambiguous Phase 2 marker.
+    #   * intent contains "deathblow" — DeathBlowIntent (IntentType.DeathBlow)
+    #                          signals a one-shot lethal attack (Waterfall's
+    #                          ExplodeMove, certain Act 2/3 finishers).
+    #   * is_hittable == False — boss is untargetable (attacks wasted).
+    # All three are unified into one flag so the slot stays cheap; if we ever
+    # need to disambiguate them we can split them into separate slots at the
+    # cost of bumping ENEMY_AUX_DIM (which breaks checkpoint load).
+    shows_infinite_hp = max_hp > 10000.0
+    is_death_blow = "deathblow" in intent
+    not_hittable = (is_hittable is not None) and (not bool(is_hittable))
+    feat[39] = 1.0 if (shows_infinite_hp or is_death_blow or not_hittable) else 0.0
 
     return feat
 
