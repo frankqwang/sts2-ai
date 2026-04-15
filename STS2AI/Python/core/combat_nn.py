@@ -468,6 +468,16 @@ def build_combat_action_features(
     total_enemy_intent_damage = sum(_enemy_intent_damage(enemy) for enemy in alive_enemies)
 
     def _card_effect_summary(card: dict[str, Any] | None) -> tuple[float, float, float, float, float, float, float]:
+        """Per-card summary used to build action_aux features.
+
+        IMPORTANT: the STS2 sim does NOT expose `damage` / `block` / `draw`
+        fields on the card dict. Before this fallback was wired, damage/block
+        always evaluated to 0, silently killing 5 of 13 action_aux dims
+        (damage, block, kills_target, prevented_lethal, intent_pressure_delta).
+        We now fall back to `card_base_stats.base_damage` / `base_block` /
+        hits keyed on the card id; state modifiers (strength/weak/vulnerable)
+        are applied later in the target-aware damage loop.
+        """
         if not isinstance(card, dict):
             return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         cost = _safe_float(card.get("cost_for_turn", card.get("cost", card.get("energy_cost", 0))))
@@ -481,6 +491,26 @@ def build_combat_action_features(
         create_flag = 1.0 if any(tok in text for tok in ("add ", "create ", "shuffle")) else 0.0
         if draw <= 0 and "draw" in text:
             draw = max(draw, magic)
+
+        # Fallback damage/block from card_base_stats when sim didn't expose
+        # them. This is the main path in STS2: sim only gives id/cost/type,
+        # so we reconstruct per-hit damage × hits, and base block, from
+        # curated card knowledge.
+        if damage <= 0.0 or block <= 0.0:
+            try:
+                from card_base_stats import base_damage as _bd, base_hits as _bh, base_block as _bb
+                cid = (card.get("id") or card.get("name") or card.get("label") or "").upper().replace(" ", "_").replace(".TITLE", "")
+                if damage <= 0.0:
+                    dv = _bd(cid)
+                    if dv > 0:
+                        damage = float(dv * max(1, _bh(cid)))
+                if block <= 0.0:
+                    bv = _bb(cid)
+                    if bv > 0:
+                        block = float(bv)
+            except Exception:
+                pass
+
         return cost, damage, block, draw, discard_flag, exhaust_flag, create_flag
 
     def _still_has_playable_followup(card_index: int | None, spent_energy: float) -> float:

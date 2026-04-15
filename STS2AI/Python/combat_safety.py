@@ -164,11 +164,62 @@ def _estimate_block_for_action(state: dict[str, Any], action: dict[str, Any]) ->
 
 
 def _estimate_damage_for_action(state: dict[str, Any], action: dict[str, Any]) -> int:
+    """Estimate damage of a play_card action, including strength/vulnerable/weak modifiers.
+
+    Source priority:
+      1. BODY_SLAM → current player block (special card)
+      2. card.damage / base_damage / attack_damage exposed by sim (usually absent in STS2)
+      3. card_base_stats.total_damage_vs_target → base * hits * modifiers
+         (the main working path — sim doesn't expose damage so we rebuild it)
+      4. hardcoded DAMAGE_CARD_VALUES (legacy)
+      5. type/label heuristic → 6
+    """
     if _lower(action.get("action")) != "play_card":
         return 0
     card_id = _card_id_for_action(state, action)
     if card_id == "BODY_SLAM":
         return _safe_int(_player(state).get("block"), 0)
+
+    # Path 2: sim-exposed damage field (rare in STS2, but respect if present)
+    card = _card_for_action(state, action)
+    if isinstance(card, dict):
+        raw_dmg = card.get("damage")
+        if raw_dmg is None:
+            raw_dmg = card.get("base_damage")
+        if raw_dmg is None:
+            raw_dmg = card.get("attack_damage")
+        if raw_dmg is not None:
+            dmg = _safe_int(raw_dmg, 0)
+            hits = max(1, _safe_int(card.get("hits", card.get("repeats", 1)), 1))
+            if hits > 1 and (_lower(card.get("description") or "").find("time") >= 0
+                             or card.get("multi_hit")):
+                dmg = dmg * hits
+            if dmg > 0:
+                return dmg
+
+    # Path 3: derive from card_base_stats + live state modifiers. This is the
+    # main working path in STS2 since the sim doesn't expose damage fields.
+    try:
+        from card_base_stats import total_damage_vs_target, base_damage as _base_damage
+    except Exception:
+        _base_damage = None
+        total_damage_vs_target = None
+    if total_damage_vs_target is not None and isinstance(card, dict):
+        target = _target_enemy(state, action)
+        computed = total_damage_vs_target(card, target, _player(state))
+        if computed > 0:
+            return computed
+        # AoE / target-less attacks: use base damage without a target (only strength matters)
+        if _base_damage is not None and _base_damage(card) > 0:
+            raw = _base_damage(card)
+            # apply strength if any
+            strength = 0
+            for p in (_player(state).get("powers") or []):
+                if isinstance(p, dict) and "strength" in _lower(p.get("id") or p.get("power_id") or ""):
+                    strength += _safe_int(p.get("amount") or p.get("stacks"), 0)
+            return max(0, (raw + strength))
+
+    # Path 4/5: legacy fallback
     if card_id in DAMAGE_CARD_VALUES:
         return DAMAGE_CARD_VALUES[card_id]
     label = _label_for_action(action)
@@ -192,6 +243,120 @@ def _is_self_damage_action(state: dict[str, Any], action: dict[str, Any]) -> boo
     return _card_id_for_action(state, action) in SELF_DAMAGE_CARD_IDS
 
 
+def _enemy_effective_hp(enemy: dict[str, Any]) -> int:
+    hp = _safe_int(enemy.get("hp", enemy.get("current_hp", 0)), 0)
+    blk = _safe_int(enemy.get("block"), 0)
+    return max(0, hp) + max(0, blk)
+
+
+def _card_cost_for_action(state: dict[str, Any], action: dict[str, Any]) -> int:
+    card = _card_for_action(state, action)
+    if not isinstance(card, dict):
+        return 0
+    # cost_for_turn reflects post-discount (e.g. Blood For Blood after damage)
+    return max(0, _safe_int(card.get("cost_for_turn", card.get("cost", 0)), 0))
+
+
+def turn_lethal_projection(
+    state: dict[str, Any],
+    legal: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Can the player kill all alive enemies THIS turn with the cards in hand?
+
+    Greedy damage packing:
+      1. Unique play_card actions by card_index (the same card appears N times
+         in `legal` if it can target N enemies; still only one "use" of that card).
+      2. Sort by (damage descending, cost ascending), pick until cost sum > energy.
+      3. Lethal if total picked damage >= sum(enemy hp + block).
+
+    Returns:
+      {
+        "lethal": bool,
+        "total_enemy_eff_hp": int,
+        "max_reachable_damage": int,
+        "used_energy": int,
+        "lethal_card_indices": set[int],
+      }
+
+    Callers use this to rerank: when lethal, end_turn / block-only / setup
+    actions get a heavy penalty, and damage-dealing play_cards get a bonus.
+    """
+    enemies = _alive_enemies(state)
+    if not enemies:
+        return {
+            "lethal": False,
+            "total_enemy_eff_hp": 0,
+            "max_reachable_damage": 0,
+            "used_energy": 0,
+            "lethal_card_indices": set(),
+        }
+
+    total_enemy_hp = sum(_enemy_effective_hp(e) for e in enemies)
+
+    player = _player(state)
+    energy = _safe_int(player.get("energy", player.get("max_energy", 0)), 0)
+
+    # Collect unique plays by card_index (one "card" can have multiple target-
+    # variants in legal list).
+    by_card: dict[int, tuple[int, int]] = {}  # card_index -> (damage, cost)
+    for action in legal:
+        if _lower(action.get("action")) != "play_card":
+            continue
+        ci = _safe_int(action.get("card_index"), -1)
+        if ci < 0:
+            continue
+        dmg = _estimate_damage_for_action(state, action)
+        if dmg <= 0:
+            continue
+        cost = _card_cost_for_action(state, action)
+        prev = by_card.get(ci)
+        # Keep the highest-damage variant for this card (different targets can
+        # have different effective damage due to vulnerable / weak / etc).
+        if prev is None or dmg > prev[0]:
+            by_card[ci] = (dmg, cost)
+
+    if not by_card:
+        return {
+            "lethal": False,
+            "total_enemy_eff_hp": total_enemy_hp,
+            "max_reachable_damage": 0,
+            "used_energy": 0,
+            "lethal_card_indices": set(),
+        }
+
+    # Greedy pack
+    ordered = sorted(
+        ((ci, dmg, cost) for ci, (dmg, cost) in by_card.items()),
+        key=lambda row: (-row[1], row[2]),
+    )
+
+    total_dmg = 0
+    used_energy = 0
+    lethal_cards: set[int] = set()
+    for ci, dmg, cost in ordered:
+        if used_energy + cost > energy:
+            continue
+        used_energy += cost
+        total_dmg += dmg
+        lethal_cards.add(ci)
+        if total_dmg >= total_enemy_hp:
+            return {
+                "lethal": True,
+                "total_enemy_eff_hp": total_enemy_hp,
+                "max_reachable_damage": total_dmg,
+                "used_energy": used_energy,
+                "lethal_card_indices": lethal_cards,
+            }
+
+    return {
+        "lethal": False,
+        "total_enemy_eff_hp": total_enemy_hp,
+        "max_reachable_damage": total_dmg,
+        "used_energy": used_energy,
+        "lethal_card_indices": lethal_cards,
+    }
+
+
 def _target_enemy(state: dict[str, Any], action: dict[str, Any]) -> dict[str, Any] | None:
     target_id = action.get("target_id", action.get("target"))
     if target_id is None:
@@ -206,7 +371,22 @@ def _target_enemy(state: dict[str, Any], action: dict[str, Any]) -> dict[str, An
 def score_combat_action_safety(state: dict[str, Any], legal: list[dict[str, Any]], action: dict[str, Any]) -> float:
     action_name = _lower(action.get("action"))
     play_actions = [candidate for candidate in legal if _lower(candidate.get("action")) == "play_card"]
+
+    # Turn-lethal detection: if we can kill every alive enemy this turn with
+    # the cards/energy in hand, the correct play is to go all-in on damage.
+    # end_turn / block / setup should be heavily discouraged in that state.
+    # This is the fix for the "boss left at 1-4 HP, AI played DEFEND" failure
+    # seen in EVAL_005 / EVAL_001 / EVAL_017 close-loss boss fights.
+    lethal = turn_lethal_projection(state, legal)
+    lethal_turn = bool(lethal.get("lethal"))
+    lethal_card_indices: set[int] = lethal.get("lethal_card_indices") or set()
+
     if action_name == "end_turn":
+        if lethal_turn:
+            # Much stronger than the old -1.5: NN logits can be very
+            # confident about end_turn in late-game boss states, a small
+            # nudge doesn't flip the argmax.
+            return -6.0
         return -1.5 if play_actions else 0.0
     if action_name != "play_card":
         return 0.0
@@ -272,6 +452,42 @@ def score_combat_action_safety(state: dict[str, Any], legal: list[dict[str, Any]
 
     if _is_self_damage_action(state, action) and severe_danger:
         score -= 2.2
+
+    # --- Turn-lethal rerank overrides ---
+    # When we can kill all enemies this turn, flip the scoring toward damage:
+    #   * if this action is in the lethal pack → big reward
+    #   * if this action is block-only / setup / self-damage → big penalty
+    # "play_card with damage>0" that's NOT in the greedy-best lethal pack is
+    # also OK (maybe another packing works) so we only lightly bias those.
+    if lethal_turn and action_name == "play_card":
+        card_index = _safe_int(action.get("card_index"), -1)
+        in_lethal_pack = card_index in lethal_card_indices
+        has_damage = damage > 0
+        is_block_only = block_gain > 0 and damage == 0
+        is_setup = _is_setup_action(state, action)
+        is_self_dmg = _is_self_damage_action(state, action)
+
+        if in_lethal_pack and has_damage:
+            # Dominant bonus: make sure this beats DEFEND/INFLAME even when
+            # NN's logits strongly prefer those (e.g. logit gap of ~5 seen in
+            # EVAL_005 where AI picked DEFEND over STRIKE on lethal turn).
+            score += 6.0
+        elif has_damage:
+            # Off-pack damage card is still useful (alternative packing) but
+            # less certain than greedy-picked ones.
+            score += 1.5
+        if is_block_only:
+            # Block on a lethal turn is pure waste — incoming damage won't
+            # land if all enemies are dead.
+            score -= 4.0
+        if is_setup:
+            # Power / setup cards don't contribute damage this turn, so on
+            # a lethal-is-available turn they're also wasted energy.
+            score -= 3.0
+        if is_self_dmg:
+            # Self-damage / self-exhaust cards for draw/energy don't help us
+            # close the game out faster than the already-lethal pack.
+            score -= 3.0
 
     return score
 
