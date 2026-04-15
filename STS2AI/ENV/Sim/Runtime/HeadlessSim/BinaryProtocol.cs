@@ -177,8 +177,8 @@ internal sealed class BinarySearchCombatMctsRequest
 
 internal static class BinaryProtocol
 {
-	private const ushort ProtocolVersion = 11;
-	internal const string BinarySchemaHash = "sts2-binary-schema-2026-04-14-pending-split";
+	private const ushort ProtocolVersion = 12;
+	internal const string BinarySchemaHash = "sts2-binary-schema-2026-04-14-build-reset";
 	private static readonly string BuildGitSha = ResolveBuildGitSha();
 
 	private static readonly Dictionary<string, byte> ActionTypeToCode = new(StringComparer.OrdinalIgnoreCase)
@@ -372,6 +372,10 @@ internal static class BinaryProtocol
 			Seed = reader.ReadOptionalString(),
 			AscensionLevel = reader.ReadInt32()
 		};
+		if (reader.HasRemaining)
+		{
+			reset.Build = SimulationBuildSupport.ParseJson(reader.ReadOptionalString());
+		}
 		reader.ThrowIfRemaining();
 		return reset;
 	}

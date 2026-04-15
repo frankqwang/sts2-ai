@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using Godot;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Localization;
@@ -19,8 +20,10 @@ using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.TestSupport;
+using MegaCrit.Sts2.Core.Training;
 
 namespace HeadlessSim;
 
@@ -320,6 +323,7 @@ internal static class Program
 						}
 						catch (Exception ex)
 						{
+							Console.Error.WriteLine($"HeadlessSim: json request error request={requestJson}: {ex}");
 							responseJson = SerializePipeError(GetStructuredErrorCode(ex) ?? "internal_error", ex.Message);
 						}
 
@@ -1165,6 +1169,10 @@ internal static class Program
 				["legal_actions"] = BuildApiState(service, cache).legal_actions
 			},
 			"reset" => BuildApiState(await ResetAsync(service, paramsElement), cache),
+			"combat_state" => BuildCombatApiState(),
+			"combat_reset" => BuildCombatApiState(await CombatResetAsync(paramsElement)),
+			"combat_step" => await CombatStepAsync(paramsElement),
+			"combat_catalog" => BuildCombatCatalog(),
 			"step" => await StepAsync(service, paramsElement, cache),
 			"batch_step" => await BatchStepAsync(service, paramsElement, cache),
 			"save_state" => new Dictionary<string, object?>
@@ -1228,10 +1236,62 @@ internal static class Program
 			{
 				request.Ascension = ascension.GetInt32();
 			}
+
+			if (paramsElement.TryGetProperty("build", out JsonElement build))
+			{
+				request.Build = SimulationBuildSupport.ParseJsonElement(build);
+			}
 		}
 
 		using IDisposable _ = FullRunSimulationDiagnostics.Measure("request.reset.runtime_ms");
 		return await service.ResetAsync(request);
+	}
+
+	private static async Task<CombatTrainingStateSnapshot> CombatResetAsync(JsonElement paramsElement)
+	{
+		CombatTrainingResetRequest request = new CombatTrainingResetRequest();
+		if (paramsElement.ValueKind == JsonValueKind.Object)
+		{
+			if (paramsElement.TryGetProperty("character_id", out JsonElement characterId) && characterId.ValueKind == JsonValueKind.String)
+			{
+				request.CharacterId = characterId.GetString();
+			}
+			else if (paramsElement.TryGetProperty("character", out JsonElement character) && character.ValueKind == JsonValueKind.String)
+			{
+				request.CharacterId = character.GetString();
+			}
+
+			if (paramsElement.TryGetProperty("encounter_id", out JsonElement encounterId) && encounterId.ValueKind == JsonValueKind.String)
+			{
+				request.EncounterId = encounterId.GetString();
+			}
+			else if (paramsElement.TryGetProperty("encounter", out JsonElement encounter) && encounter.ValueKind == JsonValueKind.String)
+			{
+				request.EncounterId = encounter.GetString();
+			}
+
+			if (paramsElement.TryGetProperty("seed", out JsonElement seed) && seed.ValueKind == JsonValueKind.String)
+			{
+				request.Seed = seed.GetString();
+			}
+
+			if (paramsElement.TryGetProperty("ascension_level", out JsonElement ascensionLevel) && ascensionLevel.ValueKind == JsonValueKind.Number)
+			{
+				request.AscensionLevel = ascensionLevel.GetInt32();
+			}
+			else if (paramsElement.TryGetProperty("ascension", out JsonElement ascension) && ascension.ValueKind == JsonValueKind.Number)
+			{
+				request.AscensionLevel = ascension.GetInt32();
+			}
+
+			if (paramsElement.TryGetProperty("build", out JsonElement build))
+			{
+				request.Build = SimulationBuildSupport.ParseJsonElement(build);
+			}
+		}
+
+		using IDisposable _ = FullRunSimulationDiagnostics.Measure("request.combat_reset.runtime_ms");
+		return await CombatTrainingEnvService.Instance.ResetAsync(request);
 	}
 
 	private static async Task<FullRunSimulationStateSnapshot> LoadStateAsync(FullRunTrainingEnvService service, JsonElement paramsElement)
@@ -1321,6 +1381,23 @@ internal static class Program
 		}
 	}
 
+	private static async Task<Dictionary<string, object?>> CombatStepAsync(JsonElement paramsElement)
+	{
+		CombatTrainingActionRequest action = ParseCombatActionRequest(paramsElement);
+		CombatTrainingStepResult result;
+		using (FullRunSimulationDiagnostics.Measure("request.combat_step.runtime_ms"))
+		{
+			result = await CombatTrainingEnvService.Instance.StepAsync(action);
+		}
+
+		return new Dictionary<string, object?>
+		{
+			["accepted"] = result.Accepted,
+			["error"] = result.Error,
+			["state"] = BuildCombatApiState(result.State ?? CombatTrainingEnvService.Instance.GetState()),
+		};
+	}
+
 	private static async Task<Dictionary<string, object?>> BatchStepAsync(FullRunTrainingEnvService service, JsonElement paramsElement, RequestStateCache cache)
 	{
 		if (!paramsElement.TryGetProperty("actions", out JsonElement actionsElement) || actionsElement.ValueKind != JsonValueKind.Array)
@@ -1363,6 +1440,137 @@ internal static class Program
 			FullRunSimulationTrace.Write($"headless_pipe.batch_step.exception count={actions.Count} exception={ex}");
 			throw;
 		}
+	}
+
+	private static CombatTrainingActionRequest ParseCombatActionRequest(JsonElement paramsElement)
+	{
+		CombatTrainingActionRequest request = new CombatTrainingActionRequest
+		{
+			Type = ParseCombatActionType(paramsElement)
+		};
+		if (paramsElement.ValueKind != JsonValueKind.Object)
+		{
+			return request;
+		}
+		if (paramsElement.TryGetProperty("hand_index", out JsonElement handIndex) && handIndex.ValueKind == JsonValueKind.Number)
+		{
+			request.HandIndex = handIndex.GetInt32();
+		}
+		else if (paramsElement.TryGetProperty("card_index", out JsonElement cardIndex) && cardIndex.ValueKind == JsonValueKind.Number)
+		{
+			request.HandIndex = cardIndex.GetInt32();
+		}
+		else if (paramsElement.TryGetProperty("index", out JsonElement index) && index.ValueKind == JsonValueKind.Number)
+		{
+			request.HandIndex = index.GetInt32();
+		}
+
+		if (paramsElement.TryGetProperty("choice_index", out JsonElement choiceIndex) && choiceIndex.ValueKind == JsonValueKind.Number)
+		{
+			request.ChoiceIndex = choiceIndex.GetInt32();
+		}
+
+		if (paramsElement.TryGetProperty("slot", out JsonElement slot) && slot.ValueKind == JsonValueKind.Number)
+		{
+			request.Slot = slot.GetInt32();
+		}
+
+		if (paramsElement.TryGetProperty("target_id", out JsonElement targetId))
+		{
+			if (targetId.ValueKind == JsonValueKind.Number)
+			{
+				request.TargetId = targetId.GetUInt32();
+			}
+			else if (targetId.ValueKind == JsonValueKind.String && uint.TryParse(targetId.GetString(), out uint parsedTargetId))
+			{
+				request.TargetId = parsedTargetId;
+			}
+		}
+
+		return request;
+	}
+
+	private static CombatTrainingActionType ParseCombatActionType(JsonElement paramsElement)
+	{
+		string? raw = null;
+		if (paramsElement.ValueKind == JsonValueKind.Object)
+		{
+			if (paramsElement.TryGetProperty("action", out JsonElement action) && action.ValueKind == JsonValueKind.String)
+			{
+				raw = action.GetString();
+			}
+			else if (paramsElement.TryGetProperty("type", out JsonElement type) && type.ValueKind == JsonValueKind.String)
+			{
+				raw = type.GetString();
+			}
+		}
+
+		return (raw ?? string.Empty).Trim().ToLowerInvariant() switch
+		{
+			"play_card" => CombatTrainingActionType.PlayCard,
+			"end_turn" => CombatTrainingActionType.EndTurn,
+			"select_hand_card" => CombatTrainingActionType.SelectHandCard,
+			"select_card_option" => CombatTrainingActionType.SelectCardChoice,
+			"confirm_selection" => CombatTrainingActionType.ConfirmSelection,
+			"cancel_selection" => CombatTrainingActionType.CancelSelection,
+			"use_potion" => CombatTrainingActionType.UsePotion,
+			_ => throw new InvalidOperationException($"Unsupported combat action type: {raw}")
+		};
+	}
+
+	private static object BuildCombatCatalog()
+	{
+		List<Dictionary<string, object?>> encounters = ModelDb.AllEncounters
+			.Where(static encounter => encounter.RoomType is RoomType.Monster or RoomType.Elite or RoomType.Boss)
+			.OrderBy(static encounter => encounter.RoomType)
+			.ThenBy(static encounter => encounter.Id.Entry, StringComparer.Ordinal)
+			.Select(static encounter => new Dictionary<string, object?>
+			{
+				["encounter_id"] = encounter.Id.Entry,
+				["room_type"] = encounter.RoomType.ToString().ToLowerInvariant(),
+			})
+			.ToList();
+		return new Dictionary<string, object?>
+		{
+			["encounters"] = encounters,
+		};
+	}
+
+	private static object BuildCombatApiState()
+	{
+		return BuildCombatApiState(CombatTrainingEnvService.Instance.GetState());
+	}
+
+	private static object BuildCombatApiState(CombatTrainingStateSnapshot snapshot)
+	{
+		return new Dictionary<string, object?>
+		{
+			["trainer_active"] = snapshot.IsTrainerActive,
+			["pure_simulator"] = snapshot.IsPureSimulator,
+			["choice_adapter_kind"] = snapshot.ChoiceAdapterKind,
+			["combat_active"] = snapshot.IsCombatActive,
+			["episode_done"] = snapshot.IsEpisodeDone,
+			["victory"] = snapshot.Victory,
+			["episode_number"] = snapshot.EpisodeNumber,
+			["seed"] = snapshot.Seed,
+			["character_id"] = snapshot.CharacterId,
+			["encounter_id"] = snapshot.EncounterId,
+			["ascension_level"] = snapshot.AscensionLevel,
+			["round_number"] = snapshot.RoundNumber,
+			["current_side"] = snapshot.CurrentSide.ToString().ToLowerInvariant(),
+			["is_play_phase"] = snapshot.IsPlayPhase,
+			["player_actions_disabled"] = snapshot.PlayerActionsDisabled,
+			["is_action_queue_running"] = snapshot.IsActionQueueRunning,
+			["is_hand_selection_active"] = snapshot.IsHandSelectionActive,
+			["is_card_selection_active"] = snapshot.IsCardSelectionActive,
+			["can_end_turn"] = snapshot.CanEndTurn,
+			["player"] = snapshot.Player,
+			["enemies"] = snapshot.Enemies,
+			["hand"] = snapshot.Hand,
+			["piles"] = snapshot.Piles,
+			["hand_selection"] = snapshot.HandSelection,
+			["card_selection"] = snapshot.CardSelection,
+		};
 	}
 
 	private static object DeleteState(FullRunTrainingEnvService service, JsonElement paramsElement)

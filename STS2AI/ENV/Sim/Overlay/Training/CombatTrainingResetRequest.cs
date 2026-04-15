@@ -1,3 +1,5 @@
+using MegaCrit.Sts2.Core.Simulation;
+
 namespace MegaCrit.Sts2.Core.Training;
 
 public sealed class CombatTrainingResetRequest
@@ -9,4 +11,6 @@ public sealed class CombatTrainingResetRequest
 	public string? Seed { get; set; }
 
 	public int? AscensionLevel { get; set; }
+
+	public SimulationBuildSpec? Build { get; set; }
 }

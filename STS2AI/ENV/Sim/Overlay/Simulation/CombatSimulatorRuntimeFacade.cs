@@ -70,6 +70,7 @@ public sealed class CombatSimulatorRuntimeFacade : ICombatRuntimeFacade, IDispos
 		List<ActModel> acts = ActModel.GetDefaultList().Select(static act => act.ToMutable()).ToList();
 		Player player = Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId);
 		RunState runState = RunState.CreateForNewRun(new List<Player> { player }, acts, Array.Empty<ModifierModel>(), ascensionLevel, seed);
+		SimulationBuildSupport.ApplyToPlayerIfRequested(player, request?.Build);
 		RunManager.Instance.SetUpTest(runState, new NetSingleplayerGameService(), shouldSave: false);
 		CombatSimulationTrace.Write("runtime.reset.run_setup_test");
 		CombatState combatState = new CombatState(encounter, runState, runState.Modifiers, runState.MultiplayerScalingModel);

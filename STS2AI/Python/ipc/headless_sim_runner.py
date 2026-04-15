@@ -179,6 +179,7 @@ def start_headless_sim(
     dll_path: str | Path = DEFAULT_DLL_PATH,
     connect_timeout_s: float = 15.0,
     protocol: str = "json",
+    extra_host_args: Iterable[str] | None = None,
 ) -> subprocess.Popen:
     repo_root = Path(repo_root)
     dll_path = Path(dll_path)
@@ -186,6 +187,8 @@ def start_headless_sim(
     ensure_host_binary_is_fresh(repo_root=repo_root, dll_path=dll_path)
     _kill_stale_headless_processes(port=port, dll_path=dll_path)
     launch_cmd = _build_launch_command(dll_path, protocol, port)
+    if extra_host_args:
+        launch_cmd.extend(str(arg) for arg in extra_host_args)
     proc = subprocess.Popen(
         launch_cmd,
         cwd=str(repo_root),

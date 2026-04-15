@@ -34,6 +34,7 @@ class FullRunEnv(ABC):
         character_id: str = "IRONCLAD",
         ascension_level: int = 0,
         seed: str | None = None,
+        build: dict[str, Any] | None = None,
         auto_start_from_menu: bool | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
@@ -96,6 +97,84 @@ def _looks_like_missing_endpoint(exc: Exception) -> bool:
             "unknown api",
         )
     )
+
+
+def _normalize_build_spec(build: dict[str, Any] | None) -> dict[str, Any] | None:
+    if build is None:
+        return None
+    if not isinstance(build, dict):
+        raise TypeError("build must be a dict when provided")
+
+    def _normalize_card_entry(entry: Any) -> dict[str, Any]:
+        if isinstance(entry, str):
+            card_id = entry.strip()
+            if not card_id:
+                raise ValueError("build.deck contains an empty card id")
+            return {"id": card_id}
+        if not isinstance(entry, dict):
+            raise TypeError("build.deck entries must be strings or dicts")
+        card_id = str(entry.get("id") or entry.get("card_id") or entry.get("name") or "").strip()
+        if not card_id:
+            raise ValueError("build.deck entry is missing id")
+        normalized: dict[str, Any] = {"id": card_id}
+        upgrade_level = entry.get("upgrade_level", entry.get("upgrades", entry.get("current_upgrade_level")))
+        if upgrade_level is None and bool(entry.get("is_upgraded")):
+            upgrade_level = 1
+        if upgrade_level is not None:
+            normalized["upgrade_level"] = max(0, int(upgrade_level))
+        floor_added = entry.get("floor_added_to_deck")
+        if floor_added is not None:
+            normalized["floor_added_to_deck"] = int(floor_added)
+        props = entry.get("props")
+        if props is not None:
+            if not isinstance(props, dict):
+                raise TypeError("build.deck entry props must be a dict")
+            normalized["props"] = props
+        return normalized
+
+    def _normalize_relic_entry(entry: Any) -> dict[str, Any]:
+        if isinstance(entry, str):
+            relic_id = entry.strip()
+            if not relic_id:
+                raise ValueError("build.relics contains an empty relic id")
+            return {"id": relic_id}
+        if not isinstance(entry, dict):
+            raise TypeError("build.relics entries must be strings or dicts")
+        relic_id = str(entry.get("id") or entry.get("relic_id") or entry.get("name") or "").strip()
+        if not relic_id:
+            raise ValueError("build.relics entry is missing id")
+        normalized: dict[str, Any] = {"id": relic_id}
+        floor_added = entry.get("floor_added_to_deck")
+        if floor_added is not None:
+            normalized["floor_added_to_deck"] = int(floor_added)
+        return normalized
+
+    normalized_build: dict[str, Any] = {}
+    deck_entries = build.get("deck", build.get("cards"))
+    if deck_entries is not None:
+        if not isinstance(deck_entries, list):
+            raise TypeError("build.deck must be a list")
+        normalized_build["deck"] = [_normalize_card_entry(entry) for entry in deck_entries]
+
+    relic_entries = build.get("relics", build.get("relic_ids"))
+    if relic_entries is not None:
+        if not isinstance(relic_entries, list):
+            raise TypeError("build.relics must be a list")
+        normalized_build["relics"] = [_normalize_relic_entry(entry) for entry in relic_entries]
+
+    scalar_aliases = {
+        "current_hp": ("current_hp", "hp"),
+        "max_hp": ("max_hp",),
+        "max_energy": ("max_energy", "energy"),
+        "gold": ("gold",),
+    }
+    for target_key, aliases in scalar_aliases.items():
+        for alias in aliases:
+            if alias in build and build[alias] is not None:
+                normalized_build[target_key] = int(build[alias])
+                break
+
+    return normalized_build or None
 
 
 @dataclass(slots=True)
@@ -166,8 +245,10 @@ class ApiBackedFullRunClient:
         character_id: str = "IRONCLAD",
         ascension_level: int = 0,
         seed: str | None = None,
+        build: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
+        normalized_build = _normalize_build_spec(build)
         if self._should_use_v2():
             payload: dict[str, Any] = {
                 "character_id": str(character_id),
@@ -175,6 +256,8 @@ class ApiBackedFullRunClient:
             }
             if seed:
                 payload["seed"] = str(seed)
+            if normalized_build is not None:
+                payload["build"] = normalized_build
             wait_timeout = self.ready_timeout_s if timeout_s is None else float(timeout_s)
             initial_state = self._request_v2_state()
             if not _is_menu_ready_for_v2_reset(initial_state):
@@ -196,6 +279,8 @@ class ApiBackedFullRunClient:
         }
         if seed:
             payload["seed"] = str(seed)
+        if normalized_build is not None:
+            payload["build"] = normalized_build
         try:
             state = self._singleplayer.act(payload)
         except SingleplayerApiError:
@@ -361,6 +446,7 @@ class FullRunClientLike(Protocol):
         character_id: str = "IRONCLAD",
         ascension_level: int = 0,
         seed: str | None = None,
+        build: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]: ...
 
@@ -655,20 +741,24 @@ class PipeBackedFullRunClient:
         character_id: str = "IRONCLAD",
         ascension_level: int = 0,
         seed: str | None = None,
+        build: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
         self._ensure_connected()
+        normalized_build = _normalize_build_spec(build)
         params: dict[str, Any] = {
             "character_id": str(character_id),
             "ascension_level": int(ascension_level),
         }
         if seed:
             params["seed"] = str(seed)
+        if normalized_build is not None:
+            params["build"] = normalized_build
         self._maybe_retry_pipe()
         if self._http_fallback is not None:
             return self._http_fallback.reset(
                 character_id=character_id, ascension_level=ascension_level,
-                seed=seed, timeout_s=timeout_s)
+                seed=seed, build=normalized_build, timeout_s=timeout_s)
         try:
             state = self._pipe.call("reset", params)
         except (TimeoutError, ConnectionError, BrokenPipeError):
@@ -676,7 +766,7 @@ class PipeBackedFullRunClient:
             if self._http_fallback is not None:
                 return self._http_fallback.reset(
                     character_id=character_id, ascension_level=ascension_level,
-                    seed=seed, timeout_s=timeout_s)
+                    seed=seed, build=normalized_build, timeout_s=timeout_s)
             state = self._pipe.call("reset", params)
         if isinstance(state, dict):
             return state
@@ -858,6 +948,7 @@ class SingleplayerFullRunEnv(FullRunEnv):
         character_id: str = "IRONCLAD",
         ascension_level: int = 0,
         seed: str | None = None,
+        build: dict[str, Any] | None = None,
         auto_start_from_menu: bool | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
@@ -873,6 +964,7 @@ class SingleplayerFullRunEnv(FullRunEnv):
             character_id=character_id,
             ascension_level=int(ascension_level),
             seed=seed,
+            build=build,
             timeout_s=timeout_s,
         )
         self._has_entered_run = True

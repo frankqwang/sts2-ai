@@ -42,8 +42,8 @@ OP_EXPORT_STATE = 0x0D
 OP_IMPORT_STATE = 0x0E
 OP_SKIP_COMBAT = 0x0F
 OP_SEARCH_COMBAT_MCTS = 0x10
-PROTOCOL_VERSION = 11
-BINARY_SCHEMA_HASH = "sts2-binary-schema-2026-04-14-pending-split"
+PROTOCOL_VERSION = 12
+BINARY_SCHEMA_HASH = "sts2-binary-schema-2026-04-14-build-reset"
 
 STATE_TYPES = {
     0: "other",
@@ -490,6 +490,9 @@ class BinaryPipeClient(PipeClient):
             self._write_optional_string(body, params.get("character_id") or params.get("character"))
             self._write_optional_string(body, params.get("seed"))
             body.extend(struct.pack("<i", int(params.get("ascension_level", params.get("ascension", 0)) or 0)))
+            build = params.get("build")
+            build_json = None if build is None else json.dumps(build, ensure_ascii=False, separators=(",", ":"))
+            self._write_optional_string(body, build_json)
             return bytes(body)
         if method in {"state", "get_state", "legal_actions"}:
             return bytes([OP_STATE])

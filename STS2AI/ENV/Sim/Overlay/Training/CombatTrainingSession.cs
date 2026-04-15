@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Commands;
@@ -11,6 +12,7 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
+using MegaCrit.Sts2.Core.Simulation;
 
 namespace MegaCrit.Sts2.Core.Training;
 
@@ -138,7 +140,10 @@ public partial class CombatTrainingSession : Node
 			CurrentEncounterId = encounter.Id.Entry;
 			CurrentAscensionLevel = ascensionLevel;
 			Log.Info($"[CombatTrainer] Starting episode {episodeNumber} with character={character.Id.Entry}, encounter={encounter.Id.Entry}, seed={seed}, ascension={ascensionLevel}");
-			await game.StartNewSingleplayerRun(character, shouldSave: false, ActModel.GetDefaultList(), Array.Empty<ModifierModel>(), seed, ascensionLevel);
+			RunState runState = await game.StartNewSingleplayerRun(character, shouldSave: false, ActModel.GetDefaultList(), Array.Empty<ModifierModel>(), seed, ascensionLevel);
+			Player player = runState.Players.First();
+			SimulationBuildSupport.ApplyToPlayerIfRequested(player, request?.Build);
+			SimulationBuildSupport.RemoveOwnedRelicsFromGrabBags(runState, player);
 			await RunManager.Instance.EnterRoomDebug(encounter.RoomType, MapPointType.Unassigned, encounter, showTransition: false);
 			_episodeIndex++;
 		}

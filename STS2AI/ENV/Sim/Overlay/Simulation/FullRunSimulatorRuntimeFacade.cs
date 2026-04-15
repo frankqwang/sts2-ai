@@ -309,6 +309,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		List<ActModel> acts = ActModel.GetRandomList(seed, unlockState, isMultiplayer: false).Select(static act => act.ToMutable()).ToList();
 		Player player = Player.CreateForNewRun(character, unlockState, NetSingleplayerGameService.defaultNetId);
 		RunState runState = RunState.CreateForNewRun(new List<Player> { player }, acts, Array.Empty<ModifierModel>(), ascensionLevel, seed);
+		SimulationBuildSupport.ApplyToPlayerIfRequested(player, request?.Build);
 		FullRunSimulationTrace.Write($"headless_reset.after_create_run seed={seed} character={character.Id.Entry} ascension={ascensionLevel}");
 		try
 		{
@@ -329,6 +330,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			FullRunSimulationTrace.Write($"headless_reset.start_prepared_run_exception={ex}");
 			throw;
 		}
+		SimulationBuildSupport.RemoveOwnedRelicsFromGrabBags(runState, player);
 		FullRunSimulationTrace.Write($"headless_reset.after_start_prepared_run started_with_neow={runState.ExtraFields.StartedWithNeow}");
 		EpisodeNumber++;
 		CurrentSeed = seed;

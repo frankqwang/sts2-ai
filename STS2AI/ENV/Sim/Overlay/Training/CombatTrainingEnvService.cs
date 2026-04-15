@@ -731,7 +731,11 @@ public sealed class CombatTrainingEnvService
 		{
 			throw new InvalidOperationException("CombatTrainingEnvService requires either --combat-trainer or the pure simulator runtime.");
 		}
-		if ((UseTrainerBackend || CombatSimulationMode.IsServerActive) && !Nodes.NGame.IsMainThread())
+		if (SimulatorRuntime.IsPureSimulator)
+		{
+			return;
+		}
+		if (UseTrainerBackend && !Nodes.NGame.IsMainThread())
 		{
 			throw new InvalidOperationException("CombatTrainingEnvService must be called from the main game thread.");
 		}

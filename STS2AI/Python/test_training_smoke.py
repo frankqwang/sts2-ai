@@ -2095,6 +2095,196 @@ class TestCombatCurriculum:
 
         assert _parse_room_types("boss,elite,unknown") == {"boss", "elite"}
 
+    def test_adapt_combat_snapshot_builds_policy_state(self):
+        adapt_combat_snapshot = _import_or_skip("combat_training_env").adapt_combat_snapshot
+
+        snapshot = {
+            "encounter_id": "JAW_WORM",
+            "episode_done": False,
+            "round_number": 1,
+            "is_play_phase": True,
+            "is_hand_selection_active": False,
+            "is_card_selection_active": False,
+            "can_end_turn": True,
+            "player": {
+                "current_hp": 61,
+                "max_hp": 80,
+                "block": 0,
+                "energy": 3,
+                "max_energy": 3,
+                "powers": [],
+            },
+            "enemies": [
+                {
+                    "combat_id": 7,
+                    "id": "JAW_WORM",
+                    "name": "Jaw Worm",
+                    "current_hp": 40,
+                    "max_hp": 44,
+                    "block": 0,
+                    "is_alive": True,
+                    "intends_to_attack": True,
+                    "intents": [{"intent_type": "attack", "damage": 11, "total_damage": 11, "repeats": 1}],
+                    "powers": [],
+                }
+            ],
+            "hand": [
+                {
+                    "hand_index": 0,
+                    "id": "STRIKE_IRONCLAD",
+                    "title": "Strike",
+                    "energy_cost": 1,
+                    "target_type": 3,
+                    "card_type": 1,
+                    "can_play": True,
+                    "requires_target": True,
+                    "valid_target_ids": [7],
+                    "is_upgraded": False,
+                    "gains_block": False,
+                    "keywords": [],
+                }
+            ],
+            "piles": {"draw": 4, "discard": 0, "exhaust": 0, "draw_card_ids": [], "discard_card_ids": [], "exhaust_card_ids": []},
+        }
+
+        state = adapt_combat_snapshot(
+            snapshot,
+            current_build={"deck": [{"id": "BASH"}], "relics": [{"id": "BURNING_BLOOD"}]},
+            room_type_lookup={"JAW_WORM": "monster"},
+        )
+
+        assert state["state_type"] == "monster"
+        assert state["player"]["deck"] == [{"id": "BASH"}]
+        assert state["player"]["relics"] == [{"id": "BURNING_BLOOD"}]
+        assert any(action.get("action") == "play_card" and action.get("target_id") == 7 for action in state["legal_actions"])
+        assert any(action.get("action") == "end_turn" for action in state["legal_actions"])
+
+    def test_adapt_combat_snapshot_accepts_pascal_case_dto_payload(self):
+        adapt_combat_snapshot = _import_or_skip("combat_training_env").adapt_combat_snapshot
+
+        snapshot = {
+            "encounter_id": "AXEBOTS_NORMAL",
+            "episode_done": False,
+            "round_number": 1,
+            "is_play_phase": True,
+            "is_hand_selection_active": False,
+            "is_card_selection_active": False,
+            "can_end_turn": True,
+            "player": {
+                "CurrentHp": 80,
+                "MaxHp": 80,
+                "Block": 0,
+                "Energy": 3,
+                "MaxEnergy": 3,
+                "Powers": [],
+            },
+            "enemies": [
+                {
+                    "CombatId": 1,
+                    "Id": "AXEBOT",
+                    "Name": "Axebot",
+                    "CurrentHp": 45,
+                    "MaxHp": 45,
+                    "Block": 0,
+                    "IsAlive": True,
+                    "IsHittable": True,
+                    "IntendsToAttack": True,
+                    "Intents": [{"IntentType": "Attack", "Damage": 10, "TotalDamage": 10, "Repeats": 1}],
+                    "Powers": [],
+                }
+            ],
+            "hand": [
+                {
+                    "HandIndex": 0,
+                    "Id": "DEFEND_IRONCLAD",
+                    "Title": "Defend",
+                    "EnergyCost": 1,
+                    "TargetType": 1,
+                    "CardType": "Skill",
+                    "CanPlay": True,
+                    "RequiresTarget": False,
+                    "ValidTargetIds": [],
+                    "IsUpgraded": False,
+                    "GainsBlock": True,
+                    "Keywords": [],
+                }
+            ],
+            "piles": {"Draw": 20, "Discard": 0, "Exhaust": 0, "DrawCardIds": [], "DiscardCardIds": [], "ExhaustCardIds": []},
+        }
+
+        state = adapt_combat_snapshot(
+            snapshot,
+            current_build={"deck": [{"id": "DEFEND_IRONCLAD"}], "relics": [{"id": "BURNING_BLOOD"}]},
+            room_type_lookup={"AXEBOTS_NORMAL": "monster"},
+        )
+
+        assert state["battle"]["player"]["hp"] == 80
+        assert len(state["hand"]) == 1
+        assert state["hand"][0]["card_type"] == "SKILL"
+        assert any(action.get("action") == "play_card" for action in state["legal_actions"])
+        assert any(action.get("action") == "end_turn" for action in state["legal_actions"])
+
+    def test_adapt_combat_snapshot_prefers_selection_actions_over_play_card(self):
+        adapt_combat_snapshot = _import_or_skip("combat_training_env").adapt_combat_snapshot
+
+        snapshot = {
+            "encounter_id": "AXEBOTS_NORMAL",
+            "episode_done": False,
+            "round_number": 1,
+            "is_play_phase": True,
+            "is_hand_selection_active": True,
+            "is_card_selection_active": False,
+            "can_end_turn": False,
+            "player": {
+                "current_hp": 80,
+                "max_hp": 80,
+                "block": 0,
+                "energy": 3,
+                "max_energy": 3,
+                "powers": [],
+            },
+            "enemies": [],
+            "hand": [
+                {
+                    "hand_index": 0,
+                    "id": "STRIKE_IRONCLAD",
+                    "title": "Strike",
+                    "energy_cost": 1,
+                    "target_type": 3,
+                    "card_type": 1,
+                    "can_play": True,
+                    "requires_target": True,
+                    "valid_target_ids": [7],
+                    "is_upgraded": False,
+                    "gains_block": False,
+                    "keywords": [],
+                }
+            ],
+            "hand_selection": {
+                "selectable_cards": [
+                    {
+                        "hand_index": 0,
+                        "id": "STRIKE_IRONCLAD",
+                        "title": "Strike",
+                    }
+                ],
+                "can_confirm": True,
+                "cancelable": True,
+            },
+            "piles": {"draw": 4, "discard": 0, "exhaust": 0, "draw_card_ids": [], "discard_card_ids": [], "exhaust_card_ids": []},
+        }
+
+        state = adapt_combat_snapshot(
+            snapshot,
+            current_build={"deck": [{"id": "STRIKE_IRONCLAD"}], "relics": []},
+            room_type_lookup={"AXEBOTS_NORMAL": "monster"},
+        )
+
+        actions = state["legal_actions"]
+        assert any(action.get("action") == "select_hand_card" for action in actions)
+        assert any(action.get("action") == "confirm_selection" for action in actions)
+        assert not any(action.get("action") == "play_card" for action in actions)
+
     def test_should_train_combat_respects_floor_and_room_type(self):
         _should_train_combat = _import_or_skip("train_combat_only")._should_train_combat
 
@@ -6242,6 +6432,121 @@ def test_pipe_client_rejected_step_with_state_raises_api_error():
     exc = exc_info.value
     assert "full_run_combat_action_rejected" in str(exc)
     assert getattr(exc, "latest_state", None) == {"state_type": "monster"}
+
+
+def test_normalize_build_spec_accepts_aliases_and_upgrades():
+    from full_run_env import _normalize_build_spec
+
+    normalized = _normalize_build_spec(
+        {
+            "cards": [
+                "STRIKE_IRONCLAD",
+                {
+                    "card_id": "BASH",
+                    "is_upgraded": True,
+                    "floor_added_to_deck": 3,
+                    "props": {"ints": [{"name": "SomeEnum", "value": 1}]},
+                },
+            ],
+            "relic_ids": [
+                "BURNING_BLOOD",
+                {"relic_id": "VAJRA", "floor_added_to_deck": 5},
+            ],
+            "hp": 61,
+            "max_hp": 77,
+            "energy": 4,
+            "gold": 123,
+        }
+    )
+
+    assert normalized == {
+        "deck": [
+            {"id": "STRIKE_IRONCLAD"},
+            {
+                "id": "BASH",
+                "upgrade_level": 1,
+                "floor_added_to_deck": 3,
+                "props": {"ints": [{"name": "SomeEnum", "value": 1}]},
+            },
+        ],
+        "relics": [
+            {"id": "BURNING_BLOOD"},
+            {"id": "VAJRA", "floor_added_to_deck": 5},
+        ],
+        "current_hp": 61,
+        "max_hp": 77,
+        "max_energy": 4,
+        "gold": 123,
+    }
+
+
+def test_pipe_reset_forwards_normalized_build(monkeypatch):
+    from full_run_env import PipeBackedFullRunClient
+
+    class DummyPipe:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object] | None]] = []
+
+        def call(self, method: str, payload: dict[str, object] | None = None) -> dict[str, object]:
+            self.calls.append((method, payload))
+            return {"state_type": "event", "player": {"deck": [], "relics": []}}
+
+    monkeypatch.setattr(PipeBackedFullRunClient, "_ensure_connected", lambda self: None)
+    monkeypatch.setattr(PipeBackedFullRunClient, "_maybe_retry_pipe", lambda self: None)
+
+    pipe = DummyPipe()
+    client = object.__new__(PipeBackedFullRunClient)
+    client.port = 15527
+    client.protocol = "bin"
+    client.poll_interval_s = 0.0
+    client.connect_timeout_s = 1.0
+    client._pipe = pipe
+    client._connected = True
+    client._last_step_info = None
+    client._http_fallback = None
+    client._call_count_since_fallback = 0
+    client._consecutive_failures = 0
+    client._dead = False
+
+    client.reset(
+        character_id="IRONCLAD",
+        ascension_level=0,
+        seed="build-test-seed",
+        build={
+            "cards": [
+                {"name": "STRIKE_IRONCLAD", "upgrades": 1},
+                {"card_id": "BASH"},
+                {"card_id": "MAD_SCIENCE", "props": {"ints": [{"name": "TinkerTimeType", "value": 1}]}},
+            ],
+            "relic_ids": ["BURNING_BLOOD", {"name": "VAJRA"}],
+            "hp": 61,
+            "energy": 4,
+        },
+    )
+
+    assert pipe.calls == [
+        (
+            "reset",
+            {
+                "character_id": "IRONCLAD",
+                "ascension_level": 0,
+                "seed": "build-test-seed",
+                "build": {
+                    "deck": [
+                        {"id": "STRIKE_IRONCLAD", "upgrade_level": 1},
+                        {"id": "BASH"},
+                        {"id": "MAD_SCIENCE", "props": {"ints": [{"name": "TinkerTimeType", "value": 1}]}},
+                    ],
+                    "relics": [
+                        {"id": "BURNING_BLOOD"},
+                        {"id": "VAJRA"},
+                    ],
+                    "current_hp": 61,
+                    "max_energy": 4,
+                },
+            },
+        )
+    ]
 
 
 def test_pipe_reconnect_uses_dead_threshold_before_marking_dead(monkeypatch):
