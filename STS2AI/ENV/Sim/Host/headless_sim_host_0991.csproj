@@ -49,6 +49,7 @@
     <Compile Remove="$(UpstreamRoot)\src\Core\Assets\PreloadManager.cs" />
     <Compile Remove="$(UpstreamRoot)\src\Core\Models\Monsters\Vantom.cs" />
     <Compile Remove="$(UpstreamRoot)\src\Core\Models\Monsters\LagavulinMatriarch.cs" />
+    <Compile Remove="$(UpstreamRoot)\src\Core\Models\Monsters\SlumberingBeetle.cs" />
     <Compile Remove="$(UpstreamRoot)\src\SourceGeneration\GenerateSubtypesAttribute.cs" />
     <Compile Remove="$(UpstreamRoot)\src\Core\Saves\Migrations\IMigration.cs" />
     <Compile Remove="$(UpstreamRoot)\src\Core\Saves\Migrations\PrefsSaves\PrefsSaveV1ToV2.cs" />
@@ -108,6 +109,7 @@
     <Compile Include="..\Overlay\Compat\Upstream0991\Core\Assets\PreloadManager.cs" Link="Overlay\Compat\PreloadManager.cs" />
     <Compile Include="..\Overlay\Compat\Upstream0991\Core\Models\Monsters\Vantom.cs" Link="Overlay\Compat\Vantom.cs" />
     <Compile Include="..\Overlay\Compat\Upstream0991\Core\Models\Monsters\LagavulinMatriarch.cs" Link="Overlay\Compat\LagavulinMatriarch.cs" />
+    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Models\Monsters\SlumberingBeetle.cs" Link="Overlay\Compat\SlumberingBeetle.cs" />
     <Compile Include="..\Overlay\Training\CombatTrainingDtos.cs" Link="Overlay\Training\CombatTrainingDtos.cs" />
     <Compile Include="..\Overlay\Training\CombatTrainingActionType.cs" Link="Overlay\Training\CombatTrainingActionType.cs" />
     <Compile Include="..\Overlay\Training\CombatTrainingActionRequest.cs" Link="Overlay\Training\CombatTrainingActionRequest.cs" />
