@@ -27,6 +27,7 @@ import argparse
 import atexit
 import json
 import logging
+import gc
 import random
 import re
 import signal
@@ -694,10 +695,42 @@ def _choose_shop_remove_purchase_action(
     state: dict[str, Any],
     legal: list[dict[str, Any]],
 ) -> tuple[int, dict[str, Any], str] | None:
+    """If at a shop screen with an affordable, in-stock remove_card service,
+    return a forced shop_purchase action targeting it.
+
+    Historical bug (pre-fix): legal actions from binary protocol always have
+    action="shop_purchase" with no Label field — the original check
+    `action.get("action") == "remove_card"` never matched, so this hard rule
+    silently failed (only ~14% of shops actually used remove vs the intended
+    100% when a remove offer was available and affordable). The correct path
+    is to look up state.shop.items[index].category == "remove_card" and match
+    the legal action by index.
+    """
     if _lower_text(state.get("state_type")) != "shop":
         return None
+    shop_items = (state.get("shop") or {}).get("items") or []
+    remove_indices: set[int] = set()
+    for item in shop_items:
+        if _lower_text(item.get("category")) != "remove_card":
+            continue
+        if not bool(item.get("can_afford")):
+            continue
+        if not bool(item.get("is_stocked")):
+            continue
+        try:
+            remove_indices.add(int(item.get("index", -1)))
+        except (TypeError, ValueError):
+            continue
+    if not remove_indices:
+        return None
     for idx, action in enumerate(legal):
-        if _lower_text(action.get("action")) == "remove_card":
+        if _lower_text(action.get("action")) != "shop_purchase":
+            continue
+        try:
+            action_index = int(action.get("index", -1))
+        except (TypeError, ValueError):
+            continue
+        if action_index in remove_indices:
             return int(idx), action, "shop_force_remove"
     return None
 
@@ -4573,14 +4606,25 @@ def collect_unified_episode(
                     _flush_shop_session()
                     _flush_rest_session()
 
-                _ppo_pending = {
-                    "ss": ss, "sa": sa,
-                    "action_idx": action_idx,
-                    "log_prob": log_prob,
-                    "value": value,
-                    "pre_state": state,  # state BEFORE action
-                    "screen_type": st,
-                }
+                if _shop_remove_purchase_override is not None:
+                    # FIX: force_remove samples must NOT enter PPO buffer.
+                    # They carry synthetic log_prob=0.0 while the actor's real
+                    # log P_new(remove_card) is very small, so ratio collapses
+                    # toward 0 and approx_kl = |0 - new_log_prob| explodes
+                    # (observed KL 0.3-0.87 in validation runs even at epoch=1).
+                    # Skipping buffer here fully decouples the deterministic
+                    # hard rule from PPO learning while keeping the action
+                    # being actually executed in the environment.
+                    _ppo_pending = None
+                else:
+                    _ppo_pending = {
+                        "ss": ss, "sa": sa,
+                        "action_idx": action_idx,
+                        "log_prob": log_prob,
+                        "value": value,
+                        "pre_state": state,  # state BEFORE action
+                        "screen_type": st,
+                    }
 
             except Exception as e:
                 logger.warning("PPO inference failed at step %d: %s", step_i, e)
@@ -6924,6 +6968,14 @@ def main() -> int:
                 entry.get("combat_teacher_action_context_gate", 0.0),
                 iter_time,
             )
+
+            # Free per-iter refcycle garbage and return torch CUDA caching allocator
+            # pool to the driver. Without this, bigbatch configs (e.g. 2000 ep/iter)
+            # let the allocator pool grow to ~15GB and main RSS to ~20GB within 1-2
+            # iterations, causing throughput to fall 3x and risking CUDA OOM.
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             # Health check
             # Ramp up learned card evaluator blend (every 100 iter)
