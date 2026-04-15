@@ -75,7 +75,20 @@ from core.rl_reward_shaping import (
     _extract_player,
     _safe_int,
 )
-from combat_safety import rerank_combat_logits_with_safety
+from combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_safety
+
+# Combat hard-safety mask (R1 self-kill + R2 Phase-2-attack) feature flag.
+# Status 2026-04-15: LAB FEATURE, DISABLED BY DEFAULT. Apples-to-apples 5-iter
+# tests from hybrid_02293.pt showed -8 to -12pp boss_reach regression vs the
+# B.1 baseline, and attempting to fix it via PPO buffer-skip made it *worse*
+# (-4pp). The KL-blow hypothesis was disproved (B.1 itself trips
+# combat_target_kl early-stop at the same magnitude). Root cause is still
+# unknown — likely candidates are seed noise over-read or an off-policy
+# trajectory effect from R2 forcing defense in Waterfall Phase 2 that
+# propagates through combat PPO's rollout distribution. The mask code and
+# its unit tests are retained so a future diagnosis round can re-enable
+# and instrument it. Flip this to True to re-arm.
+_COMBAT_UNSAFE_MASK_ENABLED = False
 from rl_segment_buffer import SegmentRolloutBuffer, Segment
 from segment_collector import NonCombatSegmentCollector
 from search.counterfactual_scoring import compute_counterfactual_reward
@@ -3968,6 +3981,20 @@ def collect_unified_episode(
                         value = float(value_arr[0]) if value_arr.size > 0 else 0.0
                         mask = af["action_mask"].astype(np.float32)
                         logits_masked = logits_np + (1.0 - mask) * (-1e9)
+                        # R1+R2 combat hard-safety mask (2026-04-15, lab feature).
+                        # See `_COMBAT_UNSAFE_MASK_ENABLED` at top of module
+                        # for why this is currently disabled. Kept in code so
+                        # a future diagnosis round can flip the flag and
+                        # re-measure without reconstructing the logic.
+                        _combat_unsafe_mask_active = False
+                        if _COMBAT_UNSAFE_MASK_ENABLED:
+                            _pre_unsafe_argmax = int(np.argmax(logits_masked))
+                            _unsafe_mask = compute_combat_unsafe_mask(state, legal)
+                            _combat_unsafe_mask_active = (
+                                _pre_unsafe_argmax < len(_unsafe_mask)
+                                and float(_unsafe_mask[_pre_unsafe_argmax]) == 0.0
+                            )
+                            logits_masked[: len(_unsafe_mask)] += (1.0 - _unsafe_mask) * (-1e9)
                         if combat_safety_rerank_weight > 0.0:
                             logits_masked, _safety_adjustments = rerank_combat_logits_with_safety(
                                 state,
@@ -4005,6 +4032,18 @@ def collect_unified_episode(
                         mask = af_t["action_mask"].float()
                         logits_masked = logits + (1.0 - mask) * (-1e9)
                         logits_masked_np = logits_masked.squeeze(0).detach().cpu().numpy()
+                        # R1+R2 combat hard-safety mask (2026-04-15, lab feature).
+                        # Mirror of the ORT branch above; gated by the same
+                        # module-level flag for the same reason.
+                        _combat_unsafe_mask_active = False
+                        if _COMBAT_UNSAFE_MASK_ENABLED:
+                            _pre_unsafe_argmax = int(np.argmax(logits_masked_np))
+                            _unsafe_mask = compute_combat_unsafe_mask(state, legal)
+                            _combat_unsafe_mask_active = (
+                                _pre_unsafe_argmax < len(_unsafe_mask)
+                                and float(_unsafe_mask[_pre_unsafe_argmax]) == 0.0
+                            )
+                            logits_masked_np[: len(_unsafe_mask)] += (1.0 - _unsafe_mask) * (-1e9)
                         if combat_safety_rerank_weight > 0.0:
                             logits_masked_np, _safety_adjustments = rerank_combat_logits_with_safety(
                                 state,
@@ -4093,15 +4132,28 @@ def collect_unified_episode(
                         "elite": 2.5,
                         "boss": 5.0,
                     }.get(str(_combat_room_type or "monster").lower(), 1.0)
-                    _combat_ppo_pending = {
-                        "sf": sf, "af": af,
-                        "action_idx": action_idx,
-                        "log_prob": log_prob,
-                        "value": value,
-                        "screen_type": st,
-                        "sample_weight": _hard_weight * _room_type_weight,
-                        "hard_state_tags": _hard_tags,
-                    }
+                    if _combat_unsafe_mask_active:
+                        # Unsafe mask overrode the policy's argmax
+                        # (e.g. Phase-2 Waterfall forced defend). The
+                        # stored log_prob is from the masked Categorical
+                        # and would KL-blow against PPOTrainer's unmasked
+                        # training forward. Skip the PPO buffer — action
+                        # is still executed, but no training signal is
+                        # emitted. Mirrors force_remove buffer-skip (46950f8).
+                        _combat_ppo_pending = None
+                        stats["combat_unsafe_mask_skipped_steps"] = (
+                            stats.get("combat_unsafe_mask_skipped_steps", 0) + 1
+                        )
+                    else:
+                        _combat_ppo_pending = {
+                            "sf": sf, "af": af,
+                            "action_idx": action_idx,
+                            "log_prob": log_prob,
+                            "value": value,
+                            "screen_type": st,
+                            "sample_weight": _hard_weight * _room_type_weight,
+                            "hard_state_tags": _hard_tags,
+                        }
                     _combat_trace_payload = {
                         "source": _src,
                         "context_zh": _combat_ctx_zh,
