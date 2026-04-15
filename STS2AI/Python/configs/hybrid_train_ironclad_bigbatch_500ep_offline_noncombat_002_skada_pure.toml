@@ -1,0 +1,111 @@
+# Hybrid training - 500 ep + offline_noncombat_ranking 纯 skada softened teacher
+#
+# 派生自 hybrid_train_ironclad_bigbatch_500ep_offline_noncombat_002.toml (B.1 config)。
+# 唯一变化：offline_noncombat_ranking_data_dir 指向 skada 软化 bridge 数据
+# (1830 条真人 IRONCLAD card_reward 决策，来自 skada_analytics.sqlite 的
+# 4371 runs 清洗。soft-mode 打分：用 context_score 作诚实 ranking，只在胜局
+# 给 chosen 一个 small nudge，不再硬拉到 max+0.05)
+# 而不是 B.1 版本的 274 条 self-play teacher。
+#
+# 目的：证伪/证实 "Plan B +5.78pp boss_reach 机制是多拿杂食卡磨过中段、ANGER
+# 被稀释" 的诊断。skada 是真人数据、不是 02293 self-play，理论上不会放大
+# agent 当前偏好；若 act1% 提升机制从"skip 率下降"变成"选 S-tier 卡"，则
+# 证实 teacher source (self-play vs human) 才是 key，而不是 teacher 数据量。
+#
+# 其他参数完全跟 B.1 一致以保证 apples-to-apples 归因
+# (num_envs / ppo_lr / epochs / ep/iter / loss_weight 0.02 等)
+
+[environment]
+pipe = true
+transport = "pipe-binary"
+auto_launch = true
+multi_process = true
+num_envs = 4
+start_port = 15527
+character_id = "IRONCLAD"
+
+[training]
+max_iterations = 10
+episodes_per_iter = 500
+episode_timeout = 90.0
+max_episode_steps = 600
+output_dir = "STS2AI/Artifacts/hybrid_training_main_attention"
+save_interval = 1
+
+[ppo]
+ppo_lr = 1e-4
+ppo_epochs = 1
+ppo_minibatch = 512
+target_kl = 0.02
+ppo_entropy_coeff = 0.1
+ppo_clip = 0.2
+boss_readiness_coeff = 0.05
+
+[mcts]
+mcts = false
+mcts_sims = 50
+mcts_lr = 1e-3
+mcts_batch_size = 128
+mcts_train_steps = 10
+mcts_warmup_iters = 50
+mcts_replay_size = 50000
+
+[combat_ppo]
+combat_ppo_lr = 3e-4
+combat_ppo_epochs = 1
+combat_ppo_minibatch = 512
+combat_target_kl = 0.02
+combat_ppo_entropy_coeff = 0.05
+combat_ppo_clip = 0.2
+combat_monster_reward_weight = 0.7
+
+[architecture]
+embed_dim = 48
+combat_hidden_dim = 192
+combat_main_path_mode = "light_attention"
+deck_repr_dim = 0
+
+[saved_offline_episodes]
+saved_offline_episodes_enabled = true
+saved_offline_episodes_min_floor = 14
+saved_offline_replay_traces_enabled = true
+saved_offline_metrics_log_enabled = true
+
+[offline_noncombat_ranking]
+# 关键：指向 hybrid_02293 派生的新数据
+offline_noncombat_ranking_data_dir = "STS2AI/Artifacts/skada/ironclad_matchup_bridge_softened"
+offline_noncombat_ranking_batch_size = 32
+offline_noncombat_ranking_loss_weight = 0.02
+offline_noncombat_ranking_updates_per_iter = 1
+offline_noncombat_ranking_warmup_iters = 0
+offline_noncombat_ranking_loss_decay_tau = 0.0
+offline_noncombat_ranking_blend_beta = 0.0
+offline_noncombat_ranking_min_spread = 0.001
+
+[offline_combat_teacher]
+offline_combat_teacher_data_dir = "STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_320.jsonl"
+offline_combat_teacher_loss_weight = 0.2
+offline_combat_teacher_batch_size = 64
+offline_combat_teacher_updates_per_iter = 4
+offline_combat_teacher_warmup_iters = 0
+
+[counterfactual]
+counterfactual_scoring = false
+counterfactual_weight = 0.0
+skada_prior_weight = 0.15
+skada_boss_weights = false
+
+[kl]
+kl_warmstart = false
+kl_beta_start = 0.5
+kl_beta_decay = 2000
+
+[milestones]
+boss_entry_quality_weight = 0.15
+early_damage_potion_penalty_weight = 0.0
+
+[runtime_flags]
+act1_no_elite_routes = true
+combat_pending_stall_threshold = 30
+boss_conditioned_card_guidance_weight = 0.8
+combat_safety_rerank_weight = 1.0

@@ -66,7 +66,11 @@ from rl_reward_shaping import (
     extract_next_boss_token,
 )
 from heuristic_combat import heuristic_combat_action
-from combat_safety import rerank_combat_logits_with_safety
+from combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_safety
+
+# Combat hard-safety mask feature flag — kept in sync with train_hybrid.py's
+# `_COMBAT_UNSAFE_MASK_ENABLED`. See that module for the status note.
+_COMBAT_UNSAFE_MASK_ENABLED = False
 from combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
 from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from mcts_core import MCTSConfig
@@ -1566,6 +1570,15 @@ def _select_action_nn(
                 if teacher_choice[0] is not None and teacher_choice[1] is not None and teacher_choice[2] is not None:
                     action_idx, action, action_source = teacher_choice
                     return action_idx, action, action_source, None
+            # R1+R2 combat hard-safety mask (2026-04-15, lab feature).
+            # Gated by `_COMBAT_UNSAFE_MASK_ENABLED`; see that constant's
+            # comment in train_hybrid.py for the status note. Currently off
+            # because apples-to-apples 5-iter training showed a -12pp
+            # boss_reach regression with no working remedy.
+            if _COMBAT_UNSAFE_MASK_ENABLED and len(decision_logits) > 0:
+                _unsafe_mask = compute_combat_unsafe_mask(state, legal)
+                decision_logits = np.asarray(decision_logits, dtype=np.float32).copy()
+                decision_logits[: len(_unsafe_mask)] += (1.0 - _unsafe_mask) * (-1e9)
             if combat_safety_rerank and len(decision_logits) > 0:
                 decision_logits, _safety_adjustments = rerank_combat_logits_with_safety(
                     state,

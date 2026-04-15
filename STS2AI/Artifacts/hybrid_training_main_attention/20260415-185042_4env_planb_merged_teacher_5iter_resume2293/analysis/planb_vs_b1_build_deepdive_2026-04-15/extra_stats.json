@@ -1,0 +1,849 @@
+{
+  "death_floor_hist": {
+    "B1": {
+      "7": 136,
+      "6": 69,
+      "15": 156,
+      "11": 123,
+      "17": 1185,
+      "9": 152,
+      "12": 135,
+      "13": 120,
+      "14": 155,
+      "8": 162,
+      "5": 27,
+      "4": 3,
+      "2": 1
+    },
+    "PlanB": {
+      "8": 152,
+      "14": 138,
+      "17": 1265,
+      "9": 130,
+      "13": 106,
+      "11": 142,
+      "7": 126,
+      "15": 147,
+      "12": 119,
+      "6": 63,
+      "5": 25,
+      "3": 1,
+      "2": 1
+    }
+  },
+  "death_enemy_top": {
+    "B1": [
+      [
+        "WATERFALL_GIANT",
+        401
+      ],
+      [
+        "SOUL_FYSH",
+        398
+      ],
+      [
+        "LAGAVULIN_MATRIARCH",
+        386
+      ],
+      [
+        "CALCIFIED_CULTIST+DAMP_CULTIST",
+        215
+      ],
+      [
+        "TWO_TAILED_RAT+TWO_TAILED_RAT+TWO_TAILED_RAT",
+        165
+      ],
+      [
+        "CORPSE_SLUG+CORPSE_SLUG+CORPSE_SLUG",
+        146
+      ],
+      [
+        "PUNCH_CONSTRUCT+PUNCH_CONSTRUCT",
+        121
+      ],
+      [
+        "FOSSIL_STALKER",
+        106
+      ],
+      [
+        "LIVING_FOG",
+        106
+      ],
+      [
+        "SEWER_CLAM",
+        72
+      ],
+      [
+        "CALCIFIED_CULTIST+TOADPOLE",
+        70
+      ],
+      [
+        "HAUNTED_SHIP",
+        68
+      ],
+      [
+        "GREMLIN_MERC",
+        62
+      ],
+      [
+        "PHANTASMAL_GARDENER+PHANTASMAL_GARDENER+PHANTASMAL_GARDENER+PHANTASMAL_GARDENER",
+        31
+      ],
+      [
+        "PUNCH_CONSTRUCT",
+        27
+      ]
+    ],
+    "PlanB": [
+      [
+        "WATERFALL_GIANT",
+        444
+      ],
+      [
+        "LAGAVULIN_MATRIARCH",
+        432
+      ],
+      [
+        "SOUL_FYSH",
+        389
+      ],
+      [
+        "CALCIFIED_CULTIST+DAMP_CULTIST",
+        176
+      ],
+      [
+        "TWO_TAILED_RAT+TWO_TAILED_RAT+TWO_TAILED_RAT",
+        162
+      ],
+      [
+        "CORPSE_SLUG+CORPSE_SLUG+CORPSE_SLUG",
+        152
+      ],
+      [
+        "PUNCH_CONSTRUCT+PUNCH_CONSTRUCT",
+        103
+      ],
+      [
+        "FOSSIL_STALKER",
+        97
+      ],
+      [
+        "HAUNTED_SHIP",
+        86
+      ],
+      [
+        "SEWER_CLAM",
+        82
+      ],
+      [
+        "LIVING_FOG",
+        76
+      ],
+      [
+        "CALCIFIED_CULTIST+TOADPOLE",
+        71
+      ],
+      [
+        "GREMLIN_MERC",
+        49
+      ],
+      [
+        "PUNCH_CONSTRUCT",
+        35
+      ],
+      [
+        "PHANTASMAL_GARDENER+PHANTASMAL_GARDENER+PHANTASMAL_GARDENER+PHANTASMAL_GARDENER",
+        26
+      ]
+    ]
+  },
+  "card_delta_clear": [
+    [
+      "ANGER",
+      -0.1626934984520123
+    ],
+    [
+      "OFFERING",
+      -0.12120743034055728
+    ],
+    [
+      "ASHEN_STRIKE",
+      0.10170278637770898
+    ],
+    [
+      "INFERNO",
+      0.07538699690402477
+    ],
+    [
+      "ONE_TWO_PUNCH",
+      0.07058823529411765
+    ],
+    [
+      "CASCADE",
+      0.06780185758513932
+    ],
+    [
+      "HEADBUTT",
+      -0.06656346749226005
+    ],
+    [
+      "COLOSSUS",
+      0.058823529411764705
+    ],
+    [
+      "SWORD_BOOMERANG",
+      0.05665634674922601
+    ],
+    [
+      "DOMINATE",
+      -0.05263157894736842
+    ],
+    [
+      "MOLTEN_FIST",
+      -0.047832817337461295
+    ],
+    [
+      "BULLY",
+      -0.04721362229102166
+    ],
+    [
+      "GRAPPLE",
+      0.0456656346749226
+    ],
+    [
+      "BLOOD_WALL",
+      -0.043653250773993804
+    ],
+    [
+      "THUNDERCLAP",
+      0.04349845201238389
+    ],
+    [
+      "TAUNT",
+      -0.04226006191950464
+    ],
+    [
+      "STONE_ARMOR",
+      -0.04086687306501548
+    ],
+    [
+      "UNMOVABLE",
+      -0.04086687306501548
+    ],
+    [
+      "CINDER",
+      -0.0396284829721362
+    ],
+    [
+      "BURNING_PACT",
+      -0.039473684210526314
+    ],
+    [
+      "RAMPAGE",
+      -0.036068111455108354
+    ],
+    [
+      "UPPERCUT",
+      -0.036068111455108354
+    ],
+    [
+      "BREAKTHROUGH",
+      -0.035448916408668735
+    ],
+    [
+      "PYRE",
+      0.03529411764705882
+    ],
+    [
+      "INFLAME",
+      -0.03328173374613003
+    ],
+    [
+      "PRIMAL_FORCE",
+      -0.0304953560371517
+    ],
+    [
+      "INFERNAL_BLADE",
+      0.02972136222910217
+    ],
+    [
+      "TRUE_GRIT",
+      -0.029102167182662536
+    ],
+    [
+      "EXPECT_A_FIGHT",
+      -0.029102167182662536
+    ],
+    [
+      "FEEL_NO_PAIN",
+      -0.029102167182662536
+    ]
+  ],
+  "card_delta_reach": [
+    [
+      "ANGER",
+      -0.100622071012825
+    ],
+    [
+      "TWIN_STRIKE",
+      0.07789729991160921
+    ],
+    [
+      "SWORD_BOOMERANG",
+      0.07677323593669219
+    ],
+    [
+      "BREAKTHROUGH",
+      0.04793449075232234
+    ],
+    [
+      "CINDER",
+      0.04493253948399792
+    ],
+    [
+      "BLOODLETTING",
+      0.04083320825203046
+    ],
+    [
+      "BODY_SLAM",
+      0.03296142492620202
+    ],
+    [
+      "HEADBUTT",
+      0.03171394739914277
+    ],
+    [
+      "SETUP_STRIKE",
+      -0.030409766348126283
+    ],
+    [
+      "THUNDERCLAP",
+      0.02987942162405563
+    ],
+    [
+      "UPPERCUT",
+      -0.02105034939377262
+    ],
+    [
+      "SPITE",
+      0.019639432297660145
+    ],
+    [
+      "SECOND_WIND",
+      0.019592735277930658
+    ],
+    [
+      "PERFECTED_STRIKE",
+      -0.0187855439368923
+    ],
+    [
+      "INFERNAL_BLADE",
+      -0.018552058838244866
+    ],
+    [
+      "MOLTEN_FIST",
+      -0.0180884241423592
+    ],
+    [
+      "WHIRLWIND",
+      -0.01786828104934874
+    ],
+    [
+      "DISMANTLE",
+      -0.0173112523140041
+    ],
+    [
+      "HOWL_FROM_BEYOND",
+      -0.016233885358816563
+    ],
+    [
+      "INFERNO",
+      0.015023098347259047
+    ],
+    [
+      "HEMOKINESIS",
+      0.014906355797935325
+    ],
+    [
+      "BLUDGEON",
+      -0.014696219209152615
+    ],
+    [
+      "FEEL_NO_PAIN",
+      0.014209236003402213
+    ],
+    [
+      "UNRELENTING",
+      0.013805640332883048
+    ],
+    [
+      "BULLY",
+      -0.013708910792014806
+    ],
+    [
+      "EXPECT_A_FIGHT",
+      0.01329197311585864
+    ],
+    [
+      "DOMINATE",
+      0.012478110772001802
+    ],
+    [
+      "RAMPAGE",
+      0.012117876619802875
+    ],
+    [
+      "PILLAGE",
+      0.01202114707893464
+    ],
+    [
+      "EVIL_EYE",
+      0.011003819149113591
+    ]
+  ],
+  "event_top5": [
+    "EVENT.NEOW",
+    "EVENT.ABYSSAL_BATHS",
+    "EVENT.PUNCH_OFF",
+    "EVENT.ROOM_FULL_OF_CHEESE",
+    "EVENT.TRASH_HEAP"
+  ],
+  "event_options": {
+    "EVENT.NEOW": {
+      "B1": [
+        [
+          "NEOW.pages.INITIAL.options.SCROLL_BOXES.title",
+          224
+        ],
+        [
+          "NEOW.pages.INITIAL.options.CURSED_PEARL.title",
+          210
+        ],
+        [
+          "NEOW.pages.INITIAL.options.PRECARIOUS_SHEARS.title",
+          209
+        ],
+        [
+          "NEOW.pages.INITIAL.options.LARGE_CAPSULE.title",
+          208
+        ],
+        [
+          "NEOW.pages.INITIAL.options.SILVER_CRUCIBLE.title",
+          206
+        ],
+        [
+          "NEOW.pages.INITIAL.options.LEAFY_POULTICE.title",
+          190
+        ]
+      ],
+      "PlanB": [
+        [
+          "NEOW.pages.INITIAL.options.POMANDER.title",
+          173
+        ],
+        [
+          "NEOW.pages.INITIAL.options.ARCANE_SCROLL.title",
+          171
+        ],
+        [
+          "NEOW.pages.INITIAL.options.BOOMING_CONCH.title",
+          166
+        ],
+        [
+          "NEOW.pages.INITIAL.options.SILVER_CRUCIBLE.title",
+          164
+        ],
+        [
+          "NEOW.pages.INITIAL.options.LARGE_CAPSULE.title",
+          164
+        ],
+        [
+          "NEOW.pages.INITIAL.options.LEAFY_POULTICE.title",
+          163
+        ]
+      ],
+      "B1_total": 2724,
+      "PlanB_total": 2658
+    },
+    "EVENT.ABYSSAL_BATHS": {
+      "B1": [
+        [
+          "ABYSSAL_BATHS.pages.INITIAL.options.IMMERSE.title",
+          197
+        ],
+        [
+          "ABYSSAL_BATHS.pages.INITIAL.options.ABSTAIN.title",
+          193
+        ],
+        [
+          "ABYSSAL_BATHS.pages.ALL.options.LINGER.title",
+          154
+        ],
+        [
+          "ABYSSAL_BATHS.pages.ALL.options.EXIT_BATHS.title",
+          145
+        ]
+      ],
+      "PlanB": [
+        [
+          "ABYSSAL_BATHS.pages.INITIAL.options.IMMERSE.title",
+          201
+        ],
+        [
+          "ABYSSAL_BATHS.pages.INITIAL.options.ABSTAIN.title",
+          189
+        ],
+        [
+          "ABYSSAL_BATHS.pages.ALL.options.LINGER.title",
+          187
+        ],
+        [
+          "ABYSSAL_BATHS.pages.ALL.options.EXIT_BATHS.title",
+          134
+        ]
+      ],
+      "B1_total": 689,
+      "PlanB_total": 711
+    },
+    "EVENT.PUNCH_OFF": {
+      "B1": [
+        [
+          "PUNCH_OFF.pages.INITIAL.options.I_CAN_TAKE_THEM.title",
+          189
+        ],
+        [
+          "PUNCH_OFF.pages.I_CAN_TAKE_THEM.options.FIGHT.title",
+          189
+        ],
+        [
+          "PUNCH_OFF.pages.INITIAL.options.NAB.title",
+          112
+        ]
+      ],
+      "PlanB": [
+        [
+          "PUNCH_OFF.pages.INITIAL.options.I_CAN_TAKE_THEM.title",
+          178
+        ],
+        [
+          "PUNCH_OFF.pages.I_CAN_TAKE_THEM.options.FIGHT.title",
+          178
+        ],
+        [
+          "PUNCH_OFF.pages.INITIAL.options.NAB.title",
+          103
+        ]
+      ],
+      "B1_total": 490,
+      "PlanB_total": 459
+    },
+    "EVENT.ROOM_FULL_OF_CHEESE": {
+      "B1": [
+        [
+          "ROOM_FULL_OF_CHEESE.pages.INITIAL.options.GORGE.title",
+          222
+        ],
+        [
+          "ROOM_FULL_OF_CHEESE.pages.INITIAL.options.SEARCH.title",
+          219
+        ]
+      ],
+      "PlanB": [
+        [
+          "ROOM_FULL_OF_CHEESE.pages.INITIAL.options.GORGE.title",
+          228
+        ],
+        [
+          "ROOM_FULL_OF_CHEESE.pages.INITIAL.options.SEARCH.title",
+          184
+        ]
+      ],
+      "B1_total": 441,
+      "PlanB_total": 412
+    },
+    "EVENT.TRASH_HEAP": {
+      "B1": [
+        [
+          "TRASH_HEAP.pages.INITIAL.options.DIVE_IN.title",
+          218
+        ],
+        [
+          "TRASH_HEAP.pages.INITIAL.options.GRAB.title",
+          179
+        ]
+      ],
+      "PlanB": [
+        [
+          "TRASH_HEAP.pages.INITIAL.options.DIVE_IN.title",
+          234
+        ],
+        [
+          "TRASH_HEAP.pages.INITIAL.options.GRAB.title",
+          207
+        ]
+      ],
+      "B1_total": 397,
+      "PlanB_total": 441
+    }
+  },
+  "iter_trend": {
+    "B1": {
+      "2294": {
+        "total": 500,
+        "clear": 19,
+        "reach": 242
+      },
+      "2295": {
+        "total": 500,
+        "clear": 24,
+        "reach": 258
+      },
+      "2296": {
+        "total": 500,
+        "clear": 12,
+        "reach": 237
+      },
+      "2297": {
+        "total": 500,
+        "clear": 13,
+        "reach": 259
+      },
+      "2298": {
+        "total": 500,
+        "clear": 8,
+        "reach": 265
+      }
+    },
+    "PlanB": {
+      "2294": {
+        "total": 500,
+        "clear": 12,
+        "reach": 240
+      },
+      "2295": {
+        "total": 500,
+        "clear": 21,
+        "reach": 239
+      },
+      "2296": {
+        "total": 500,
+        "clear": 21,
+        "reach": 271
+      },
+      "2297": {
+        "total": 500,
+        "clear": 15,
+        "reach": 311
+      },
+      "2298": {
+        "total": 500,
+        "clear": 16,
+        "reach": 289
+      }
+    }
+  },
+  "clear_cards_B1": [
+    [
+      "ANGER",
+      1.0921052631578947
+    ],
+    [
+      "BLOODLETTING",
+      0.2894736842105263
+    ],
+    [
+      "CINDER",
+      0.2631578947368421
+    ],
+    [
+      "SETUP_STRIKE",
+      0.25
+    ],
+    [
+      "IRON_WAVE",
+      0.23684210526315788
+    ],
+    [
+      "BULLY",
+      0.2236842105263158
+    ],
+    [
+      "BREAKTHROUGH",
+      0.2236842105263158
+    ],
+    [
+      "HEADBUTT",
+      0.18421052631578946
+    ],
+    [
+      "SPITE",
+      0.15789473684210525
+    ],
+    [
+      "THUNDERCLAP",
+      0.14473684210526316
+    ],
+    [
+      "TREMBLE",
+      0.14473684210526316
+    ],
+    [
+      "OFFERING",
+      0.14473684210526316
+    ],
+    [
+      "TWIN_STRIKE",
+      0.14473684210526316
+    ],
+    [
+      "POMMEL_STRIKE",
+      0.14473684210526316
+    ],
+    [
+      "SWORD_BOOMERANG",
+      0.13157894736842105
+    ],
+    [
+      "UPPERCUT",
+      0.11842105263157894
+    ],
+    [
+      "RAMPAGE",
+      0.11842105263157894
+    ],
+    [
+      "MOLTEN_FIST",
+      0.11842105263157894
+    ],
+    [
+      "CONFLAGRATION",
+      0.10526315789473684
+    ],
+    [
+      "HAVOC",
+      0.10526315789473684
+    ],
+    [
+      "INFLAME",
+      0.09210526315789473
+    ],
+    [
+      "HELLRAISER",
+      0.07894736842105263
+    ],
+    [
+      "RAGE",
+      0.07894736842105263
+    ],
+    [
+      "BLOOD_WALL",
+      0.07894736842105263
+    ],
+    [
+      "SHRUG_IT_OFF",
+      0.07894736842105263
+    ]
+  ],
+  "clear_cards_PlanB": [
+    [
+      "ANGER",
+      0.9294117647058824
+    ],
+    [
+      "BLOODLETTING",
+      0.2823529411764706
+    ],
+    [
+      "IRON_WAVE",
+      0.24705882352941178
+    ],
+    [
+      "SETUP_STRIKE",
+      0.23529411764705882
+    ],
+    [
+      "CINDER",
+      0.2235294117647059
+    ],
+    [
+      "BREAKTHROUGH",
+      0.18823529411764706
+    ],
+    [
+      "THUNDERCLAP",
+      0.18823529411764706
+    ],
+    [
+      "SWORD_BOOMERANG",
+      0.18823529411764706
+    ],
+    [
+      "BULLY",
+      0.17647058823529413
+    ],
+    [
+      "POMMEL_STRIKE",
+      0.16470588235294117
+    ],
+    [
+      "TWIN_STRIKE",
+      0.16470588235294117
+    ],
+    [
+      "INFERNO",
+      0.1411764705882353
+    ],
+    [
+      "ASHEN_STRIKE",
+      0.1411764705882353
+    ],
+    [
+      "HAVOC",
+      0.12941176470588237
+    ],
+    [
+      "TREMBLE",
+      0.12941176470588237
+    ],
+    [
+      "SPITE",
+      0.12941176470588237
+    ],
+    [
+      "HEADBUTT",
+      0.11764705882352941
+    ],
+    [
+      "HELLRAISER",
+      0.09411764705882353
+    ],
+    [
+      "HEMOKINESIS",
+      0.09411764705882353
+    ],
+    [
+      "RAGE",
+      0.09411764705882353
+    ],
+    [
+      "CASCADE",
+      0.09411764705882353
+    ],
+    [
+      "SHRUG_IT_OFF",
+      0.08235294117647059
+    ],
+    [
+      "RAMPAGE",
+      0.08235294117647059
+    ],
+    [
+      "UPPERCUT",
+      0.08235294117647059
+    ],
+    [
+      "INFERNAL_BLADE",
+      0.08235294117647059
+    ]
+  ]
+}

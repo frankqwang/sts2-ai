@@ -44,6 +44,18 @@ SETUP_CARD_IDS = {
 SELF_DAMAGE_CARD_IDS = {
     "BLOODLETTING",
     "OFFERING",
+    "HEMOKINESIS",
+}
+
+
+# Self-damage per card in HP (for the R1 "would kill me this turn" mask).
+# Only include cards that deal damage to self ON PLAY — not power-cards like
+# COMBUST that self-damage on future turns, and not conditional cards like
+# BLOOD_FOR_BLOOD whose cost reduces from being hurt (no self-damage on play).
+SELF_DAMAGE_AMOUNT: dict[str, int] = {
+    "BLOODLETTING": 3,
+    "OFFERING": 6,
+    "HEMOKINESIS": 2,
 }
 
 
@@ -275,6 +287,85 @@ def rerank_combat_logits_with_safety(
     reranked = np.asarray(base_logits, dtype=np.float32).copy()
     reranked[: len(adjustments)] += np.asarray(adjustments, dtype=np.float32)
     return reranked, adjustments
+
+
+def compute_combat_unsafe_mask(
+    state: dict[str, Any],
+    legal: list[dict[str, Any]],
+) -> np.ndarray:
+    """Return a float mask with 1.0 = safe action, 0.0 = obvious mistake.
+
+    Callers multiply ``(1.0 - mask) * -1e9`` into the combat logits before any
+    rerank / argmax, collapsing unsafe actions to ``-inf`` probability. The
+    goal here is **zero false positives**: a rule that might be wrong in any
+    realistic game state belongs in ``score_combat_action_safety`` (soft
+    rerank), NOT here. If in doubt, let the policy decide.
+
+    Currently covered:
+
+    * **R1 self-kill self-damage.** Mask any self-damage card whose damage
+      is strictly >= current HP. Playing it this turn drops HP to 0 regardless
+      of what else is in hand, and no card draw / energy gain matters when
+      you're dead. The softer case "survives this play but incoming damage
+      next turn would kill" is *not* masked here — extra energy / draw may
+      let you dig into a block; ``score_combat_action_safety`` already
+      penalises it with -2.2 in severe_danger.
+
+    * **R2 Phase 2 / invulnerable boss attack lock.** Detection mirrors
+      ``rl_encoder_v2`` feat[39] ``boss_critical_state`` so the mask and the
+      NN input feature stay in sync:
+
+          max_hp > 10000         (WaterfallGiant TriggerAboutToBlowState
+                                  sets max_hp = 999999999 as sentinel;
+                                  no real boss is > 500 HP)
+          is_hittable == False   (targetable block)
+          intent contains "deathblow"
+
+      When any alive enemy matches, **all** attack-type card plays are
+      masked. Attacks do 0 useful damage in these phases; use the turn for
+      block / power / draw instead. end_turn is never masked (stays safe).
+
+    Non-``play_card`` actions (end_turn, use_potion, targeting, etc.) pass
+    through as safe — their safety is handled by other layers.
+    """
+    mask = np.ones(len(legal), dtype=np.float32)
+    player = _player(state)
+    hp = _safe_int(player.get("current_hp", player.get("hp", 0)), 0)
+
+    # R2 precheck: is any alive enemy in a Phase-2 / invulnerable regime?
+    phase2_marker = False
+    for enemy in _alive_enemies(state):
+        if _safe_int(enemy.get("max_hp", 0), 0) > 10000:
+            phase2_marker = True
+            break
+        is_hittable = enemy.get("is_hittable")
+        if is_hittable is not None and not bool(is_hittable):
+            phase2_marker = True
+            break
+        for intent in enemy.get("intents") or []:
+            if "deathblow" in _lower(intent.get("type")):
+                phase2_marker = True
+                break
+        if phase2_marker:
+            break
+
+    for idx, action in enumerate(legal):
+        if _lower(action.get("action")) != "play_card":
+            continue
+        card_id = _card_id_for_action(state, action)
+
+        # R1: would this self-damage kill me on play?
+        sd = SELF_DAMAGE_AMOUNT.get(card_id, 0)
+        if sd > 0 and hp > 0 and hp <= sd:
+            mask[idx] = 0.0
+            continue
+
+        # R2: Phase 2 / invulnerable — attacks are wasted
+        if phase2_marker and _card_type_for_action(state, action) == "attack":
+            mask[idx] = 0.0
+            continue
+
+    return mask
 
 
 def choose_heuristic_combat_action(legal: list[dict[str, Any]], state: dict[str, Any]) -> tuple[int, dict[str, Any]]:
