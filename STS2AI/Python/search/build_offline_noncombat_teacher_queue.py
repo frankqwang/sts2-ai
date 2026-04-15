@@ -57,12 +57,12 @@ def _categorize_summary(summary: dict[str, Any], *, min_preboss_floor: int) -> t
     floor = _safe_int(summary.get("final_floor", 0), 0)
     boss_reached = bool(summary.get("boss_reached"))
     act1_cleared = bool(summary.get("act1_cleared"))
-    if outcome == RUN_OUTCOME_VICTORY or act1_cleared:
-        return "act1_clear_anchor", 30 + floor
     if boss_reached and normalized_defeat:
         return "boss_reached_defeat", 20 + floor
     if normalized_defeat and floor >= int(min_preboss_floor):
-        return "preboss_death", 10 + floor
+        return "preboss_death", 30 + floor
+    if outcome == RUN_OUTCOME_VICTORY or act1_cleared:
+        return "act1_clear_anchor", 10 + floor
     return None, -1
 
 
@@ -142,7 +142,7 @@ def main() -> int:
     parser.add_argument("--max-total", type=int, default=12)
     parser.add_argument("--max-boss-reached-defeat", type=int, default=6)
     parser.add_argument("--max-preboss-death", type=int, default=4)
-    parser.add_argument("--max-act1-clear-anchor", type=int, default=2)
+    parser.add_argument("--max-act1-clear-anchor", type=int, default=1)
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)

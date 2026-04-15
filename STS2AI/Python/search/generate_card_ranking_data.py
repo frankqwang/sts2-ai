@@ -168,6 +168,7 @@ class CombatOutcome:
     end_floor: int = 0
     boss_reached: bool = False
     run_outcome: str | None = None
+    timed_out: bool = False
 
 
 @dataclass
@@ -784,6 +785,25 @@ def _extract_card_reward_options(state: dict[str, Any]) -> list[dict[str, Any]]:
                 "action": action,
             })
     return options
+
+
+def _choose_card_reward_fallback_action(
+    state: dict[str, Any],
+    options: list[dict[str, Any]],
+) -> dict[str, Any]:
+    legal = state.get("legal_actions") or []
+    skip_action = next(
+        (
+            action for action in legal
+            if str(action.get("action") or "").strip().lower() == "skip_card_reward"
+        ),
+        None,
+    )
+    if skip_action is not None:
+        return skip_action
+    if options:
+        return options[0]["action"]
+    return legal[0] if legal else {"action": "wait"}
 
 
 def _extract_remove_options(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1491,14 +1511,15 @@ def play_forward_multi_combat(
         total_hp_lost += max(0, combat_entry_hp - hp_now)
         total_turns += current_turns
     outcome = CombatOutcome(
-        won=(str(state.get("run_outcome") or "").lower() == "victory"),
+        won=(normalize_run_outcome(state.get("run_outcome"), default=RUN_OUTCOME_TIMEOUT) == RUN_OUTCOME_VICTORY),
         hp_after=hp_now,
         hp_lost=total_hp_lost,
         turns=total_turns,
         terminal_state_type=f"timeout_after_{combats_completed}_combats",
         end_floor=_extract_floor(state),
         boss_reached=_did_reach_boss(state),
-        run_outcome=(str(state.get("run_outcome")) if state.get("run_outcome") is not None else None),
+        run_outcome=RUN_OUTCOME_TIMEOUT,
+        timed_out=True,
     )
     if trace_sink is not None:
         trace_sink.append(
@@ -1563,6 +1584,23 @@ def _score_spread(scores: list[float]) -> float:
     if not scores:
         return 0.0
     return float(max(scores) - min(scores))
+
+
+def _has_terminal_timeout_outcome(
+    outcomes: dict[int, CombatOutcome],
+    *,
+    rollout_goal: str,
+) -> bool:
+    if str(rollout_goal or "").strip().lower() != "terminal":
+        return False
+    for outcome in outcomes.values():
+        if bool(getattr(outcome, "timed_out", False)):
+            return True
+        if normalize_run_outcome(outcome.run_outcome, default="") == RUN_OUTCOME_TIMEOUT:
+            return True
+        if str(outcome.terminal_state_type or "").strip().lower().startswith("timeout_after_"):
+            return True
+    return False
 
 
 def _evaluate_branch_outcomes(
@@ -1937,6 +1975,31 @@ def generate_from_episode(
 
                 if card_reward_handled:
                     scores = tree_result.scores if tree_result is not None else compute_option_scores(combat_outcomes, max_hp=max(hp_before, 1))
+                    live_state = client.get_state()
+                    if str(live_state.get("state_type") or "").strip().lower() != "card_reward":
+                        final_status = "post_card_reward_restore_failed"
+                        state = live_state
+                        break
+                    state = live_state
+                    if _has_terminal_timeout_outcome(combat_outcomes, rollout_goal=rollout_goal):
+                        sampling_skip_reasons["terminal_timeout"] += 1
+                        state = _apply_action_and_advance(
+                            client,
+                            state,
+                            _choose_card_reward_fallback_action(state, options),
+                            rng,
+                            combat_evaluator=combat_evaluator,
+                            ppo_policy=ppo_policy,
+                            use_local_ort_rollout=use_local_ort_rollout,
+                            local_ort_max_combat_steps=local_ort_max_combat_steps,
+                            stop_floor=stop_floor,
+                        )
+                        if continuation_state_id:
+                            try:
+                                client.delete_state(continuation_state_id)
+                            except Exception:
+                                pass
+                        continue
                     best_idx = int(max(range(len(scores)), key=lambda i: scores[i]))
                     tensor_rel_path = f"tensors/sample_{len(samples):05d}.npz" if encoded_tensors else None
                     sample = CardRankingSample(
@@ -1986,11 +2049,6 @@ def generate_from_episode(
                     )
 
                     best_action = options[best_idx]["action"]
-                    live_state = client.get_state()
-                    if str(live_state.get("state_type") or "").strip().lower() != "card_reward":
-                        final_status = "post_card_reward_restore_failed"
-                        state = live_state
-                        break
                     card_reward_samples_recorded += 1
                     state = _apply_action_and_advance(
                         client,
@@ -2128,6 +2186,36 @@ def generate_from_episode(
                         pass
 
                 scores = compute_option_scores(combat_outcomes, max_hp=max(hp_before, 1))
+                live_state = client.get_state()
+                if str(live_state.get("state_type") or "").strip().lower() != "card_reward":
+                    final_status = "post_card_reward_restore_failed"
+                    state = live_state
+                    break
+                state = live_state
+                if _has_terminal_timeout_outcome(combat_outcomes, rollout_goal=rollout_goal):
+                    sampling_skip_reasons["terminal_timeout"] += 1
+                    state = _apply_action_and_advance(
+                        client,
+                        state,
+                        _choose_card_reward_fallback_action(state, options),
+                        rng,
+                        combat_evaluator=combat_evaluator,
+                        ppo_policy=ppo_policy,
+                        use_local_ort_rollout=use_local_ort_rollout,
+                        local_ort_max_combat_steps=local_ort_max_combat_steps,
+                        stop_floor=stop_floor,
+                    )
+                    if continuation_sid:
+                        try:
+                            client.delete_state(continuation_sid)
+                        except Exception:
+                            pass
+                    if continuation_state_id:
+                        try:
+                            client.delete_state(continuation_state_id)
+                        except Exception:
+                            pass
+                    continue
                 best_idx = int(max(range(len(scores)), key=lambda i: scores[i]))
 
                 # Determine tensor path (will be saved later by caller)
@@ -2174,11 +2262,6 @@ def generate_from_episode(
 
                 # Continue episode: select best option
                 best_action = options[best_idx]["action"]
-                live_state = client.get_state()
-                if str(live_state.get("state_type") or "").strip().lower() != "card_reward":
-                    final_status = "post_card_reward_restore_failed"
-                    state = live_state
-                    break
                 card_reward_samples_recorded += 1
                 state = _apply_action_and_advance(
                     client,
@@ -2304,7 +2387,7 @@ def generate_from_episode(
         card_reward_samples_recorded=int(card_reward_samples_recorded),
         sampling_skip_reasons={
             key: int(sampling_skip_reasons.get(key, 0))
-            for key in ("single_path_map", "invalid_card_reward_options", "search_error", "post_terminal")
+            for key in ("single_path_map", "invalid_card_reward_options", "search_error", "post_terminal", "terminal_timeout")
         },
     )
     return samples, summary, raw_branch_records
