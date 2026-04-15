@@ -12,9 +12,13 @@
 
 如果只需要一个可直接复现的恢复点，优先使用：
 
-- `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
+- **2026-04-16 当前 10-iter 冠军**（act1% 3.50%, boss_reach 56.02%）：
+  `STS2AI/Assets/checkpoints/act1/planb_iter2303_selfplay_teacher.pt`
+- 保守稳定起点（作为 fallback）：
+  `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`（2026-04-14 frozen）
 
-当前推荐恢复命令见上面的接手说明文档；`README` 这里只保留入口和基础环境说明。
+两者 SHA256、训练链路、关联 run dir / teacher data / config 都在
+`STS2AI/Assets/checkpoints/act1/manifest.json` 里追溯。`README` 这里只保留入口。
 
 ## 前置准备
 所有环境、ai相关代码都在STS2AI里。
@@ -161,16 +165,19 @@ STS2AI/
 
 ## 当前 Checkpoint
 
-当前推荐恢复点：
+当前推荐恢复点（按 act1% 排序，路径都在规范目录 `STS2AI/Assets/checkpoints/act1/`）：
 
-- `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
+1. **Plan B 10-iter 冠军**（2026-04-16，act1% 3.50%，boss_reach 56.02%）：
+   `STS2AI/Assets/checkpoints/act1/planb_iter2303_selfplay_teacher.pt`
+2. 保守 baseline（2026-04-14 frozen）：
+   `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
 
-包含：
+两者都包含：
 - PPO 非战斗脑（选卡/商店/路径/休息）
 - 战斗脑（出牌/药水/目标）
 - SymbolicFeaturesHead（符号特征交叉注意力）
 - main combat rollout `light_attention`
 
-checkpoint 说明和 SHA256 见：
-
-- `STS2AI/Assets/checkpoints/act1/manifest.json`
+详细追溯见：
+- `STS2AI/docs/session_2026-04-15_skada_vs_selfplay_teacher.md`（本场 teacher 实验完整结果）
+- `STS2AI/Assets/checkpoints/act1/manifest.json`（SHA256 + 历史 champion）
