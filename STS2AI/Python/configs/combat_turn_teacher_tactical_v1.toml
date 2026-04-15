@@ -1,0 +1,30 @@
+[combat_turn_teacher]
+search_mode = "beam"
+leaf_eval_mode = "tactical_mechanism_v1"
+emit_prefix_samples = true
+rerun_solver_per_prefix = true
+
+hallway_beam_width = 4
+elite_beam_width = 6
+boss_beam_width = 8
+
+hallway_max_actions = 6
+elite_max_actions = 8
+boss_max_actions = 10
+
+candidate_cap_per_state = 12
+max_nodes_per_solve = 2000
+top_n_rerank = 8
+
+damage_progress_weight = 0.35
+hp_loss_weight = 0.45
+mechanism_weight = 0.20
+
+lethal_bonus = 1.00
+bad_end_turn_penalty = 0.35
+potion_waste_penalty = 0.25
+vulnerable_setup_bonus = 0.20
+power_early_bonus_boss = 0.40
+power_early_bonus_elite = 0.25
+x_cost_first_bonus = 0.30
+early_defend_penalty = 0.30

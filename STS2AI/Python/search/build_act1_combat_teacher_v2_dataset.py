@@ -12,6 +12,7 @@ import _path_init  # noqa: F401  (adds STS2AI/Python library dirs to sys.path)
 
 import argparse
 import atexit
+import hashlib
 import json
 import math
 from collections import Counter
@@ -46,6 +47,7 @@ from combat_teacher_dataset import (
     write_combat_teacher_samples,
 )
 from combat_turn_solver import CombatTurnSolver
+from combat_turn_teacher_config import CombatTurnTeacherConfig, load_combat_turn_teacher_config
 from full_run_env import create_full_run_client
 from headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
 from rl_encoder_v2 import build_structured_actions, build_structured_state
@@ -323,27 +325,26 @@ def _solver_motifs(
     return sorted(motifs)
 
 
-def _build_sample(
+def _sample_id_for_prefix(seed: str, state: dict[str, Any], legal_actions: list[dict[str, Any]], prefix_depth: int) -> str:
+    base = stable_sample_id(seed, state, legal_actions)
+    if prefix_depth <= 0:
+        return base
+    digest = hashlib.sha1(f"{base}:prefix:{prefix_depth}".encode("utf-8")).hexdigest()
+    return f"{base}-p{prefix_depth}-{digest[:10]}"
+
+
+def _solution_to_sample(
     *,
-    client,
     state: dict[str, Any],
     legal_actions: list[dict[str, Any]],
     baseline_policy,
-    solver: CombatTurnSolver,
+    solution,
     seed: str,
     source_checkpoint: str,
     sample_reasons: list[str],
     include_baseline_matches: bool,
+    prefix_depth: int,
 ) -> CombatTeacherSample | None:
-    root_state_id = client.save_state()
-    try:
-        solution = solver.solve(state, root_state_id=root_state_id)
-    finally:
-        try:
-            client.delete_state(root_state_id)
-        except Exception:
-            pass
-
     if not solution.supported or not solution.best_first_action:
         return None
 
@@ -364,16 +365,26 @@ def _build_sample(
     if best_action_index >= len(legal_actions):
         return None
 
-    sample_id = stable_sample_id(seed, state, legal_actions)
+    sample_id = _sample_id_for_prefix(seed, state, legal_actions, prefix_depth)
+    motifs = _solver_motifs(state, legal_actions, sample_reasons, solution)
+    motifs.append(f"prefix_depth:{int(prefix_depth)}")
+    if prefix_depth > 0:
+        motifs.append("turn_prefix_sample")
+    leaf_breakdown = {str(key): float(value) for key, value in solution.leaf_breakdown.items()}
+    for key, value in (solution.search_stats or {}).items():
+        if isinstance(value, bool):
+            leaf_breakdown[f"search_{key}"] = 1.0 if value else 0.0
+        elif isinstance(value, (int, float)):
+            leaf_breakdown[f"search_{key}"] = float(value)
     return CombatTeacherSample(
         schema_version=COMBAT_TEACHER_SCHEMA_VERSION,
         sample_id=sample_id,
         split=stable_split(sample_id),
-        source_bucket="act1_solver_v2",
+        source_bucket="act1_solver_v2_prefix" if prefix_depth > 0 else "act1_solver_v2",
         source_seed=seed,
         source_checkpoint=str(source_checkpoint),
         state_hash=canonical_public_state_hash(state),
-        motif_labels=_solver_motifs(state, legal_actions, sample_reasons, solution),
+        motif_labels=sorted(set(motifs)),
         state=state,
         legal_actions=legal_actions,
         baseline_logits=[float(item) for item in baseline["logits"].tolist()],
@@ -384,9 +395,159 @@ def _build_sample(
         per_action_score=per_action_score,
         per_action_regret=per_action_regret,
         root_value=float(solution.root_value),
-        leaf_breakdown={str(key): float(value) for key, value in solution.leaf_breakdown.items()},
+        leaf_breakdown=leaf_breakdown,
         continuation_targets={str(key): float(value) for key, value in solution.continuation_targets.items()},
     )
+
+
+def _solve_state(client, solver: CombatTurnSolver, state: dict[str, Any]):
+    root_state_id = client.save_state()
+    try:
+        return solver.solve(state, root_state_id=root_state_id)
+    finally:
+        try:
+            client.delete_state(root_state_id)
+        except Exception:
+            pass
+
+
+def _build_samples(
+    *,
+    client,
+    state: dict[str, Any],
+    legal_actions: list[dict[str, Any]],
+    baseline_policy,
+    solver: CombatTurnSolver,
+    seed: str,
+    source_checkpoint: str,
+    sample_reasons: list[str],
+    include_baseline_matches: bool,
+    emit_prefix_samples: bool,
+    rerun_solver_per_prefix: bool,
+) -> tuple[list[CombatTeacherSample], dict[str, Any]]:
+    samples: list[CombatTeacherSample] = []
+    prefix_depth = 0
+    current_state = state
+    current_legal_actions = legal_actions
+    unsupported_reason = ""
+    max_prefix_depth = max(
+        1,
+        int(
+            solver.teacher_config.max_actions_for_state(state, fallback=solver.max_player_actions)
+            if getattr(solver, "teacher_config", None) is not None
+            else solver.max_player_actions
+        ),
+    )
+    root_snapshot_id = client.save_state()
+
+    try:
+        while prefix_depth <= max_prefix_depth:
+            if prefix_depth > 0 and not emit_prefix_samples:
+                break
+            if prefix_depth > 0 and not rerun_solver_per_prefix:
+                unsupported_reason = "prefix_requires_rerun_solver"
+                break
+            prefix_restore_state_id = client.save_state()
+            try:
+                solution = _solve_state(client, solver, current_state)
+            finally:
+                try:
+                    client.load_state(prefix_restore_state_id)
+                except Exception:
+                    pass
+                try:
+                    client.delete_state(prefix_restore_state_id)
+                except Exception:
+                    pass
+            if not solution.supported or not solution.best_first_action:
+                unsupported_reason = str(solution.unsupported_reason or "solver_unsupported")
+                break
+            sample = _solution_to_sample(
+                state=current_state,
+                legal_actions=current_legal_actions,
+                baseline_policy=baseline_policy,
+                solution=solution,
+                seed=seed,
+                source_checkpoint=source_checkpoint,
+                sample_reasons=sample_reasons,
+                include_baseline_matches=include_baseline_matches,
+                prefix_depth=prefix_depth,
+            )
+            if sample is not None:
+                samples.append(sample)
+
+            if not emit_prefix_samples:
+                break
+            chosen_index = _match_action_index(current_legal_actions, solution.best_first_action)
+            if chosen_index >= len(current_legal_actions):
+                unsupported_reason = "best_action_not_legal_in_prefix"
+                break
+            chosen_action = current_legal_actions[chosen_index]
+            if _lower(chosen_action.get("action")) == "end_turn":
+                break
+            current_state = client.act(chosen_action)
+            state_type = _lower(current_state.get("state_type"))
+            if state_type not in {"combat", "monster", "elite", "boss"} or current_state.get("terminal"):
+                break
+            current_legal_actions = _enabled_legal_actions(current_state)
+            if not current_legal_actions or not is_supported_solver_state(current_state):
+                unsupported_reason = "prefix_state_unsupported"
+                break
+            prefix_depth += 1
+    finally:
+        try:
+            client.load_state(root_snapshot_id)
+        except Exception:
+            pass
+        try:
+            client.delete_state(root_snapshot_id)
+        except Exception:
+            pass
+
+    return samples, {
+        "prefix_depth_reached": int(prefix_depth),
+        "prefix_samples": sum(1 for sample in samples if str(sample.source_bucket).endswith("_prefix")),
+        "root_samples": sum(1 for sample in samples if str(sample.source_bucket) == "act1_solver_v2"),
+        "unsupported_reason": unsupported_reason,
+    }
+
+
+def _choose_combat_progress_action(
+    *,
+    client,
+    state: dict[str, Any],
+    legal_actions: list[dict[str, Any]],
+    baseline_policy,
+    solver: CombatTurnSolver,
+    progress_combat_with_solver: bool,
+) -> dict[str, Any]:
+    if progress_combat_with_solver and is_supported_solver_state(state):
+        restore_state_id = None
+        try:
+            restore_state_id = client.save_state()
+            solution = _solve_state(client, solver, state)
+            try:
+                client.load_state(restore_state_id)
+            except Exception:
+                pass
+            if solution.supported and solution.best_first_action:
+                idx = _match_action_index(legal_actions, solution.best_first_action)
+                if 0 <= idx < len(legal_actions):
+                    return legal_actions[idx]
+        except Exception:
+            pass
+        finally:
+            if restore_state_id:
+                try:
+                    client.load_state(restore_state_id)
+                except Exception:
+                    pass
+                try:
+                    client.delete_state(restore_state_id)
+                except Exception:
+                    pass
+    baseline_choice = int(baseline_policy.score(state, legal_actions)["best_index"])
+    return legal_actions[baseline_choice] if 0 <= baseline_choice < len(legal_actions) else legal_actions[0]
 
 
 def _combat_room_type(state: dict[str, Any]) -> str:
@@ -495,18 +656,27 @@ def _rollout_and_collect(
     max_episode_steps: int,
     max_samples: int,
     max_samples_per_seed: int,
+    min_sample_floor: int,
+    max_samples_per_floor_per_seed: int,
     uncertainty_margin_threshold: float,
     uncertainty_entropy_threshold: float,
     low_hp_attacker_threshold: int,
     danger_net_incoming_threshold: int,
     include_baseline_matches: bool,
+    emit_prefix_samples: bool,
+    rerun_solver_per_prefix: bool,
+    progress_combat_with_solver: bool,
 ) -> tuple[list[CombatTeacherSample], dict[str, Any]]:
     samples: list[CombatTeacherSample] = []
     sampled_reason_counts: Counter[str] = Counter()
     solver_reason_counts: Counter[str] = Counter()
     per_seed_counts: Counter[str] = Counter()
+    prefix_stats: Counter[str] = Counter()
+    per_seed_floor_counts: Counter[tuple[str, int]] = Counter()
     considered_states = 0
     supported_states = 0
+    skipped_low_floor_states = 0
+    skipped_floor_cap_states = 0
 
     for seed in seeds:
         if max_samples > 0 and len(samples) >= max_samples:
@@ -529,6 +699,23 @@ def _rollout_and_collect(
 
             if state_type in {"combat", "monster", "elite", "boss"} and act <= 1 and floor <= floor_limit:
                 considered_states += 1
+                if floor < int(min_sample_floor):
+                    skipped_low_floor_states += 1
+                    action = _choose_combat_progress_action(
+                        client=client,
+                        state=state,
+                        legal_actions=legal_actions,
+                        baseline_policy=baseline_policy,
+                        solver=solver,
+                        progress_combat_with_solver=progress_combat_with_solver,
+                    )
+                    combat_step += 1
+                    state = client.act(action)
+                    next_floor = _safe_int((state.get("run") or {}).get("floor") or state.get("floor"), 0)
+                    next_act = _safe_int((state.get("run") or {}).get("act") or state.get("act"), 0)
+                    if next_act > 1 or next_floor > floor_limit + 1:
+                        break
+                    continue
                 if is_supported_solver_state(state):
                     supported_states += 1
                     baseline = baseline_policy.score(state, legal_actions)
@@ -549,8 +736,30 @@ def _rollout_and_collect(
                         combat_step % max(1, sample_every_combat_step) == 0
                         or _combat_room_type(state) in {"elite", "boss"}
                     )
+                    floor_cap_ok = (
+                        max_samples_per_floor_per_seed <= 0
+                        or per_seed_floor_counts[(seed, floor)] < int(max_samples_per_floor_per_seed)
+                    )
+                    if should_sample and not floor_cap_ok:
+                        skipped_floor_cap_states += 1
                     if should_sample and (max_samples_per_seed <= 0 or seed_sample_count < max_samples_per_seed):
-                        sample = _build_sample(
+                        if not floor_cap_ok:
+                            action = _choose_combat_progress_action(
+                                client=client,
+                                state=state,
+                                legal_actions=legal_actions,
+                                baseline_policy=baseline_policy,
+                                solver=solver,
+                                progress_combat_with_solver=progress_combat_with_solver,
+                            )
+                            combat_step += 1
+                            state = client.act(action)
+                            next_floor = _safe_int((state.get("run") or {}).get("floor") or state.get("floor"), 0)
+                            next_act = _safe_int((state.get("run") or {}).get("act") or state.get("act"), 0)
+                            if next_act > 1 or next_floor > floor_limit + 1:
+                                break
+                            continue
+                        new_samples, build_stats = _build_samples(
                             client=client,
                             state=state,
                             legal_actions=legal_actions,
@@ -560,17 +769,34 @@ def _rollout_and_collect(
                             source_checkpoint=source_checkpoint,
                             sample_reasons=sample_reasons,
                             include_baseline_matches=include_baseline_matches,
+                            emit_prefix_samples=emit_prefix_samples,
+                            rerun_solver_per_prefix=rerun_solver_per_prefix,
                         )
-                        if sample is not None:
-                            samples.append(sample)
-                            seed_sample_count += 1
-                            sampled_reason_counts.update(sample_reasons)
-                            solver_reason_counts.update(sample.motif_labels)
-                            per_seed_counts.update([seed])
+                        if new_samples:
+                            for sample in new_samples:
+                                if max_samples > 0 and len(samples) >= max_samples:
+                                    break
+                                samples.append(sample)
+                                sampled_reason_counts.update(sample_reasons)
+                                solver_reason_counts.update(sample.motif_labels)
+                                per_seed_counts.update([seed])
+                                per_seed_floor_counts[(seed, floor)] += 1
+                            seed_sample_count += len(new_samples)
+                            prefix_stats.update({"sampled_roots": 1})
+                            prefix_stats.update({"prefix_samples": int(build_stats.get("prefix_samples", 0))})
+                            prefix_stats.update({"root_samples": int(build_stats.get("root_samples", 0))})
+                            if build_stats.get("unsupported_reason"):
+                                prefix_stats.update([f"prefix_stop:{build_stats['unsupported_reason']}"])
                             if max_samples > 0 and len(samples) >= max_samples:
                                 break
-                baseline_choice = int(baseline_policy.score(state, legal_actions)["best_index"])
-                action = legal_actions[baseline_choice] if 0 <= baseline_choice < len(legal_actions) else legal_actions[0]
+                action = _choose_combat_progress_action(
+                    client=client,
+                    state=state,
+                    legal_actions=legal_actions,
+                    baseline_policy=baseline_policy,
+                    solver=solver,
+                    progress_combat_with_solver=progress_combat_with_solver,
+                )
                 combat_step += 1
             else:
                 action = _select_noncombat_action(state, legal_actions, noncombat_policy, vocab=vocab, device=device)
@@ -588,8 +814,165 @@ def _rollout_and_collect(
         "sampled_reason_counts": dict(sorted(sampled_reason_counts.items())),
         "solver_reason_counts": dict(sorted(solver_reason_counts.items())),
         "per_seed_counts": dict(sorted(per_seed_counts.items())),
+        "per_seed_floor_counts": {
+            f"{seed}:floor_{floor}": count
+            for (seed, floor), count in sorted(per_seed_floor_counts.items())
+        },
+        "prefix_stats": dict(sorted(prefix_stats.items())),
+        "skipped_low_floor_states": int(skipped_low_floor_states),
+        "skipped_floor_cap_states": int(skipped_floor_cap_states),
     }
     return samples, metadata
+
+
+def _finite(values: list[float]) -> list[float]:
+    return [float(item) for item in values if math.isfinite(float(item))]
+
+
+def _summary_stats(values: list[float]) -> dict[str, float]:
+    clean = _finite(values)
+    if not clean:
+        return {"count": 0.0, "mean": 0.0, "min": 0.0, "max": 0.0}
+    return {
+        "count": float(len(clean)),
+        "mean": float(sum(clean) / len(clean)),
+        "min": float(min(clean)),
+        "max": float(max(clean)),
+    }
+
+
+def _build_teacher_eval(
+    samples: list[CombatTeacherSample],
+    *,
+    metadata: dict[str, Any],
+    teacher_config: CombatTurnTeacherConfig,
+) -> dict[str, Any]:
+    motif_counts: Counter[str] = Counter()
+    breakdown_values: dict[str, list[float]] = {}
+    line_lengths: list[float] = []
+    baseline_regrets: list[float] = []
+    baseline_regret_missing = 0
+    disagreements = 0
+    prefix_samples = 0
+    root_samples = 0
+    for sample in samples:
+        labels = set(sample.motif_labels or [])
+        motif_counts.update(labels)
+        if "turn_prefix_sample" in labels or str(sample.source_bucket).endswith("_prefix"):
+            prefix_samples += 1
+        else:
+            root_samples += 1
+        if int(sample.best_action_index) != int(sample.baseline_best_action_index):
+            disagreements += 1
+        regret = _baseline_regret(sample)
+        if math.isfinite(regret) and regret < 1e8:
+            baseline_regrets.append(regret)
+        else:
+            baseline_regret_missing += 1
+        line_lengths.append(float(len(sample.best_full_turn_line or [])))
+        for key, value in (sample.leaf_breakdown or {}).items():
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(numeric):
+                breakdown_values.setdefault(str(key), []).append(numeric)
+
+    considered = max(0, int(metadata.get("considered_states", 0)))
+    supported = max(0, int(metadata.get("supported_states", 0)))
+    sample_count = len(samples)
+    breakdown_summary = {
+        key: _summary_stats(values)
+        for key, values in sorted(breakdown_values.items())
+    }
+    include_baseline_matches = bool(metadata.get("include_baseline_matches", False))
+    sampled_roots = int((metadata.get("prefix_stats") or {}).get("sampled_roots", root_samples) or root_samples)
+    return {
+        "schema_version": "combat_turn_teacher_eval_v1",
+        "teacher_config": teacher_config.to_metadata(),
+        "sample_count": int(sample_count),
+        "root_sample_count": int(root_samples),
+        "prefix_sample_count": int(prefix_samples),
+        "prefix_per_emitted_root": float(prefix_samples / max(1, root_samples)),
+        "prefix_per_sampled_root": float(prefix_samples / max(1, sampled_roots)),
+        "solver_support_rate": float(supported / max(1, considered)),
+        "considered_states": int(considered),
+        "supported_states": int(supported),
+        "baseline_teacher_disagreement_rate": float(disagreements / max(1, sample_count)),
+        "baseline_teacher_disagreement_rate_note": (
+            "filtered_sample_only; include_baseline_matches=false removes baseline-match samples"
+            if not include_baseline_matches
+            else "all_emitted_samples"
+        ),
+        "baseline_regret": _summary_stats(baseline_regrets),
+        "baseline_regret_missing_or_pruned": int(baseline_regret_missing),
+        "line_length": _summary_stats(line_lengths),
+        "search_nodes": breakdown_summary.get("search_nodes_expanded", {}),
+        "search_evaluated_leaves": breakdown_summary.get("search_evaluated_leaves", {}),
+        "search_cache_hits": breakdown_summary.get("search_cache_hits", {}),
+        "score_breakdown": breakdown_summary,
+        "motif_counts": dict(sorted(motif_counts.items())),
+        "metadata": metadata,
+        "training_eval_placeholders": {
+            "prefix_action_accuracy": None,
+            "pairwise_ranking_loss": None,
+            "fixed_seed_win_rate": None,
+            "fixed_seed_avg_hp_loss": None,
+        },
+    }
+
+
+def _write_teacher_eval_report(
+    output_jsonl: str | Path,
+    samples: list[CombatTeacherSample],
+    *,
+    metadata: dict[str, Any],
+    teacher_config: CombatTurnTeacherConfig,
+    eval_output_dir: str | Path | None,
+) -> dict[str, str]:
+    if eval_output_dir:
+        out_dir = Path(eval_output_dir)
+    else:
+        output_path = Path(output_jsonl)
+        out_dir = output_path.parent / f"{output_path.stem}_eval"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = _build_teacher_eval(samples, metadata=metadata, teacher_config=teacher_config)
+    json_path = out_dir / "teacher_eval.json"
+    md_path = out_dir / "teacher_eval.md"
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    lines = [
+        "# Combat Turn Teacher Eval v1",
+        "",
+        f"- 样本数：{payload['sample_count']}",
+        f"- root 样本数：{payload['root_sample_count']}",
+        f"- prefix 样本数：{payload['prefix_sample_count']}",
+        f"- 每个保留 root 平均 prefix：{payload['prefix_per_emitted_root']:.3f}",
+        f"- 每个采样 root 平均 prefix：{payload['prefix_per_sampled_root']:.3f}",
+        f"- solver 支持率：{payload['solver_support_rate']:.3f}",
+        f"- baseline/teacher 分歧率：{payload['baseline_teacher_disagreement_rate']:.3f}",
+        f"- 分歧率口径：{payload['baseline_teacher_disagreement_rate_note']}",
+        f"- baseline regret 均值：{payload['baseline_regret'].get('mean', 0.0):.4f}",
+        f"- baseline regret 缺失/被裁剪：{payload['baseline_regret_missing_or_pruned']}",
+        f"- 平均 line 长度：{payload['line_length'].get('mean', 0.0):.3f}",
+        f"- 平均搜索节点：{payload.get('search_nodes', {}).get('mean', 0.0):.1f}",
+        "",
+        "## Motif Coverage",
+        "",
+    ]
+    for key, value in payload["motif_counts"].items():
+        lines.append(f"- {key}: {value}")
+    lines.extend([
+        "",
+        "## Score Breakdown Mean",
+        "",
+    ])
+    for key, stats in payload["score_breakdown"].items():
+        if key.startswith("search_"):
+            continue
+        lines.append(f"- {key}: {stats.get('mean', 0.0):.4f}")
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"teacher_eval_json": str(json_path), "teacher_eval_md": str(md_path)}
 
 
 def main() -> None:
@@ -605,9 +988,18 @@ def main() -> None:
     parser.add_argument("--repo-root", type=Path, default=DEFAULT_REPO_ROOT)
     parser.add_argument("--headless-dll", type=Path, default=DEFAULT_DLL_PATH)
     parser.add_argument("--floor-limit", type=int, default=17)
+    parser.add_argument("--min-sample-floor", type=int, default=0)
+    parser.add_argument("--max-samples-per-floor-per-seed", type=int, default=0)
+    parser.add_argument("--progress-combat-with-solver", action="store_true", default=False)
     parser.add_argument("--sample-every-combat-step", type=int, default=2)
     parser.add_argument("--max-episode-steps", type=int, default=500)
     parser.add_argument("--max-player-actions", type=int, default=12)
+    parser.add_argument("--teacher-config", default="STS2AI/Python/configs/combat_turn_teacher_tactical_v1.toml")
+    parser.add_argument("--emit-prefix-samples", dest="emit_prefix_samples", action="store_true", default=None)
+    parser.add_argument("--no-emit-prefix-samples", dest="emit_prefix_samples", action="store_false")
+    parser.add_argument("--rerun-solver-per-prefix", dest="rerun_solver_per_prefix", action="store_true", default=None)
+    parser.add_argument("--no-rerun-solver-per-prefix", dest="rerun_solver_per_prefix", action="store_false")
+    parser.add_argument("--eval-output-dir", default="", help="Directory for teacher_eval.json and teacher_eval.md.")
     parser.add_argument("--max-samples", type=int, default=120, help="Candidate pool cap before balancing.")
     parser.add_argument("--target-samples", type=int, default=0, help="Optional final balanced dataset size (0 keeps all collected samples).")
     parser.add_argument("--max-samples-per-seed", type=int, default=10)
@@ -619,6 +1011,11 @@ def main() -> None:
     parser.add_argument("--include-baseline-matches", action="store_true", default=False)
     parser.add_argument("--output", default="STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset.jsonl")
     args = parser.parse_args()
+    teacher_config = load_combat_turn_teacher_config(args.teacher_config)
+    teacher_config = teacher_config.with_overrides(
+        emit_prefix_samples=args.emit_prefix_samples,
+        rerun_solver_per_prefix=args.rerun_solver_per_prefix,
+    )
 
     seeds = [str(seed).strip() for seed in args.seed if str(seed).strip()]
     if args.seed_file:
@@ -655,7 +1052,12 @@ def main() -> None:
             ready_timeout_s=20.0,
             request_timeout_s=30.0,
         )
-        solver = CombatTurnSolver(client, baseline_policy, max_player_actions=int(args.max_player_actions))
+        solver = CombatTurnSolver(
+            client,
+            baseline_policy,
+            max_player_actions=int(args.max_player_actions),
+            teacher_config=teacher_config,
+        )
         samples, stats = _rollout_and_collect(
             client=client,
             seeds=seeds,
@@ -670,11 +1072,16 @@ def main() -> None:
             max_episode_steps=int(args.max_episode_steps),
             max_samples=int(args.max_samples),
             max_samples_per_seed=int(args.max_samples_per_seed),
+            min_sample_floor=int(args.min_sample_floor),
+            max_samples_per_floor_per_seed=int(args.max_samples_per_floor_per_seed),
             uncertainty_margin_threshold=float(args.uncertainty_margin_threshold),
             uncertainty_entropy_threshold=float(args.uncertainty_entropy_threshold),
             low_hp_attacker_threshold=int(args.low_hp_attacker_threshold),
             danger_net_incoming_threshold=int(args.danger_net_incoming_threshold),
             include_baseline_matches=bool(args.include_baseline_matches),
+            emit_prefix_samples=bool(teacher_config.emit_prefix_samples),
+            rerun_solver_per_prefix=bool(teacher_config.rerun_solver_per_prefix),
+            progress_combat_with_solver=bool(args.progress_combat_with_solver),
         )
     finally:
         if solver is not None:
@@ -704,9 +1111,16 @@ def main() -> None:
         "seeds": seeds,
         "transport": args.transport,
         "floor_limit": int(args.floor_limit),
+        "min_sample_floor": int(args.min_sample_floor),
+        "max_samples_per_floor_per_seed": int(args.max_samples_per_floor_per_seed),
+        "progress_combat_with_solver": bool(args.progress_combat_with_solver),
         "sample_every_combat_step": int(args.sample_every_combat_step),
         "max_episode_steps": int(args.max_episode_steps),
         "max_player_actions": int(args.max_player_actions),
+        "teacher_config_path": str(args.teacher_config),
+        "teacher_config": teacher_config.to_metadata(),
+        "emit_prefix_samples": bool(teacher_config.emit_prefix_samples),
+        "rerun_solver_per_prefix": bool(teacher_config.rerun_solver_per_prefix),
         "max_samples_per_seed": int(args.max_samples_per_seed),
         "balanced_seed_cap": int(args.balanced_seed_cap),
         "candidate_count": int(candidate_count),
@@ -717,7 +1131,14 @@ def main() -> None:
         **stats,
     }
     write_combat_teacher_samples(args.output, samples, metadata=metadata)
-    print(json.dumps({"output": str(args.output), "sample_count": len(samples), "metadata": metadata}, ensure_ascii=False, indent=2))
+    eval_paths = _write_teacher_eval_report(
+        args.output,
+        samples,
+        metadata=metadata,
+        teacher_config=teacher_config,
+        eval_output_dir=args.eval_output_dir or None,
+    )
+    print(json.dumps({"output": str(args.output), "sample_count": len(samples), "metadata": metadata, **eval_paths}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
