@@ -1,0 +1,25 @@
+{
+  "dataset_kind": "ranking_sample",
+  "schema_version": "ranking_sample.v1",
+  "generated_at_utc": "2026-04-14T20:16:04.533727Z",
+  "output_dir": "STS2AI\\Artifacts\\offline_noncombat_ranking\\from_hybrid_02293_20260415-031531",
+  "status": "complete",
+  "source_raw_paths": [
+    "STS2AI\\Artifacts\\offline_noncombat_ranking\\from_hybrid_02293_20260415-031531\\raw\\raw_branch_rollout.jsonl"
+  ],
+  "derived_from": [
+    "raw_branch_rollout.v1"
+  ],
+  "generator_config": {},
+  "summary": {
+    "num_samples": 274,
+    "usable_samples": 229,
+    "tensor_samples": 274,
+    "sample_type_counts": {
+      "card_reward": 274
+    }
+  },
+  "ranking_jsonl_path": "STS2AI\\Artifacts\\offline_noncombat_ranking\\from_hybrid_02293_20260415-031531\\card_ranking.jsonl",
+  "derived_ranking_jsonl_path": "STS2AI\\Artifacts\\offline_noncombat_ranking\\from_hybrid_02293_20260415-031531\\derived\\rl\\ranking_sample.jsonl",
+  "tensors_dir": "STS2AI\\Artifacts\\offline_noncombat_ranking\\from_hybrid_02293_20260415-031531\\tensors"
+}

@@ -1,0 +1,30 @@
+# STS2AI Python 依赖
+# 2026-04-15 首次补齐。README 之前只写了 `pip install torch numpy`，本文件把
+# 核心 / 可选工具链拆开。
+
+# --- 核心训练 / 推理 ---
+# train_hybrid.py, evaluate_ai.py, inference_server.py 直接依赖。
+# 只装这两项就能跑 README §Smoke Test 和主线训练命令。
+torch>=2.0
+numpy>=1.24
+
+# --- 可选：ONNX 导出（STS2AI/Python/export_actor_onnx.py）---
+# 用于把 PPO actor 冻结成 ONNX 给 C# / MCTS / 稳定推理路径消费。
+# 不跑 export 可以不装。
+# onnx>=1.15
+# onnxruntime>=1.16
+
+# --- 可选：Skada 抓取（STS2AI/Python/skada/scrape_skada.py）---
+# 重新拉 skada 社区统计数据（549 张卡牌、290 遗物等）。
+# 只在 STS2AI/Assets/datasets/skada/skada_analytics.sqlite 丢失 / 过期时需要。
+# requests>=2.31
+# beautifulsoup4>=4.12
+
+# --- 可选：Smoke / pytest ---
+# STS2AI/Python/test_*.py 系列冒烟测试。
+# pytest>=7.4
+
+# --- Python 版本要求 ---
+# tomllib 是 Python 3.11+ 标准库；train_hybrid.py 用它读 toml config。
+# 低版本 Python 需要替换成 `pip install tomli` 并改 import。
+# 本仓库主线只测试过 Python 3.11 / 3.12 / 3.13。
