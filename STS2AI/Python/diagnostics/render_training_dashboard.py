@@ -1,3 +1,4 @@
+"""Render a multi-panel matplotlib training dashboard (win rate, floor, combat stats)."""
 from __future__ import annotations
 
 import argparse

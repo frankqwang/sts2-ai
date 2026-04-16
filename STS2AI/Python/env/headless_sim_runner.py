@@ -1,3 +1,4 @@
+"""Launch and manage headless STS2 simulator processes (dotnet build + start)."""
 from __future__ import annotations
 
 import argparse
@@ -15,8 +16,8 @@ if __package__ in {None, ""}:
     if str(python_root) not in sys.path:
         sys.path.insert(0, str(python_root))
 
-from ipc.binary_pipe_client import BinaryPipeClient
-from ipc.pipe_client import PipeClient
+from env.binary_pipe_client import BinaryPipeClient
+from env.pipe_client import PipeClient
 from constants import REPO_ROOT, SIM_HOST_EXE, SIM_LEGACY_DLL
 
 

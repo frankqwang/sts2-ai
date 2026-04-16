@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Interactive MCTS decision probe — run a single combat state through MCTS and dump tree statistics."""
 from __future__ import annotations
 
 import sys
@@ -28,8 +29,8 @@ from evaluate_ai import (
     _safe_load_state_dict,
     _summarize_mcts_root,
 )
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
-from ipc.full_run_env import PipeBackedFullRunClient, create_full_run_client
+from env.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from env.full_run_env import PipeBackedFullRunClient, create_full_run_client
 from search.mcts_core import MCTSConfig
 from network.fullrun_policy import FullRunPolicyNetworkV2
 from verify_save_load import COMBAT_TYPES, drive_to_state

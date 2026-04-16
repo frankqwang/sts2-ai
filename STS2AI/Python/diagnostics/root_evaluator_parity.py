@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Verify parity between Python root evaluator and C# MCTS evaluator on shared combat states."""
 from __future__ import annotations
 
 import sys
@@ -32,8 +33,8 @@ from evaluate_ai import (
     _infer_retrieval_proj_dim,
     _safe_load_state_dict,
 )
-from ipc.full_run_env import PipeBackedFullRunClient, create_full_run_client
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from env.full_run_env import PipeBackedFullRunClient, create_full_run_client
+from env.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from network.fullrun_policy import FullRunPolicyNetworkV2
 from verify_save_load import COMBAT_TYPES, drive_to_state
 from core.vocab import load_vocab

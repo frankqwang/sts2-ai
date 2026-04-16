@@ -22,7 +22,7 @@ from collections import Counter
 from dataclasses import dataclass, asdict
 from typing import Any
 
-from runtime.run_outcome_vocab import RUN_OUTCOME_VICTORY, is_failure_outcome, normalize_run_outcome
+from env.run_outcome_vocab import RUN_OUTCOME_VICTORY, is_failure_outcome, normalize_run_outcome
 
 
 @dataclass

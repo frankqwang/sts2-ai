@@ -1,3 +1,4 @@
+"""Integration tests that verify deterministic replay and save/load parity across simulator backends."""
 from __future__ import annotations
 
 
@@ -14,8 +15,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from ipc.full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from env.full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
+from env.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 
 
 DEFAULT_PORT = 15527

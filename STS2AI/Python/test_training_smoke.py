@@ -2342,7 +2342,7 @@ class TestEvaluateHarness:
         assert callable(eval_bc.main)
 
     def test_headless_sim_runner_defaults_point_at_workspace(self):
-        import ipc.headless_sim_runner as headless_sim_runner
+        import env.headless_sim_runner as headless_sim_runner
         repo_root_expected = Path(__file__).resolve().parents[2]
         repo_root = Path(headless_sim_runner.DEFAULT_REPO_ROOT).resolve()
         dll_path = Path(headless_sim_runner.DEFAULT_DLL_PATH).resolve()
@@ -6401,8 +6401,8 @@ def test_dispatch_action_with_fallbacks_does_not_mutate_combat_action():
 
 
 def test_pipe_client_rejected_step_with_state_raises_api_error():
-    from ipc.full_run_env import PipeBackedFullRunClient
-    from ipc.sts2_singleplayer_env import SingleplayerApiError
+    from env.full_run_env import PipeBackedFullRunClient
+    from env.sts2_singleplayer_env import SingleplayerApiError
 
     class DummyPipe:
         def connect(self, timeout_s: float | None = None) -> None:
@@ -6442,7 +6442,7 @@ def test_pipe_client_rejected_step_with_state_raises_api_error():
 
 
 def test_normalize_build_spec_accepts_aliases_and_upgrades():
-    from ipc.full_run_env import _normalize_build_spec
+    from env.full_run_env import _normalize_build_spec
 
     normalized = _normalize_build_spec(
         {
@@ -6488,7 +6488,7 @@ def test_normalize_build_spec_accepts_aliases_and_upgrades():
 
 
 def test_pipe_reset_forwards_normalized_build(monkeypatch):
-    from ipc.full_run_env import PipeBackedFullRunClient
+    from env.full_run_env import PipeBackedFullRunClient
 
     class DummyPipe:
         def __init__(self) -> None:
@@ -6557,7 +6557,7 @@ def test_pipe_reset_forwards_normalized_build(monkeypatch):
 
 
 def test_pipe_reconnect_uses_dead_threshold_before_marking_dead(monkeypatch):
-    from ipc.full_run_env import PipeBackedFullRunClient
+    from env.full_run_env import PipeBackedFullRunClient
 
     class DummyPipe:
         def close(self) -> None:
@@ -6603,7 +6603,7 @@ def test_pipe_reconnect_uses_dead_threshold_before_marking_dead(monkeypatch):
 
 
 def test_pipe_reconnect_restarts_host_before_marking_dead(monkeypatch):
-    from ipc.full_run_env import PipeBackedFullRunClient
+    from env.full_run_env import PipeBackedFullRunClient
 
     class DummyPipe:
         def close(self) -> None:

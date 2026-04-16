@@ -1,10 +1,11 @@
+"""Backend-agnostic adapter for advancing full-run game state across HTTP and pipe backends."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-from ipc.full_run_env import ApiBackedFullRunClient, FullRunClientLike
-from ipc.sts2_singleplayer_env import SingleplayerApiError
+from env.full_run_env import ApiBackedFullRunClient, FullRunClientLike
+from env.sts2_singleplayer_env import SingleplayerApiError
 
 
 def is_wait_action(action: dict[str, Any] | None) -> bool:

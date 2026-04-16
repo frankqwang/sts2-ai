@@ -20,8 +20,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from ipc.full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from env.full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
+from env.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from constants import ARTIFACTS_ROOT, REPO_ROOT
 from test_simulator_consistency import pick_deterministic_action, state_summary
 

@@ -1,3 +1,4 @@
+"""Convert raw records into RL-ready ranking samples and transition tensors (.npz)."""
 from __future__ import annotations
 
 import json

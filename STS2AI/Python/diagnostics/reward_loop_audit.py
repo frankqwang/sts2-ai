@@ -1,3 +1,4 @@
+"""Audit card-reward and combat-reward loops for state-transition correctness."""
 from __future__ import annotations
 # --- wizardly cleanup 2026-04-08: tools/python subdir sys.path bootstrap ---
 # Moved out of tools/python/ root; bootstrap below re-adds the parent dir so

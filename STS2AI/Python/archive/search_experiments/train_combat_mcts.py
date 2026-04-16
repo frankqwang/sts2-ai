@@ -212,7 +212,7 @@ def collect_combat_episode_pipe(
         examples: list of TrainingExample from combat steps
         stats: dict with episode statistics
     """
-    from ipc.full_run_env import ApiBackedFullRunClient
+    from env.full_run_env import ApiBackedFullRunClient
 
     client = ApiBackedFullRunClient(base_url=http_base_url, poll_interval_s=0.005,
                                     request_timeout_s=90.0)
@@ -391,7 +391,7 @@ def collect_combat_episode_http(
     ascension_level: int = 0,
 ) -> tuple[list[TrainingExample], dict]:
     """Play one full run via HTTP, collecting MCTS training data from combats."""
-    from ipc.full_run_env import ApiBackedFullRunClient
+    from env.full_run_env import ApiBackedFullRunClient
 
     client = ApiBackedFullRunClient(base_url=base_url, poll_interval_s=0.005,
                                     request_timeout_s=90.0)
@@ -658,7 +658,7 @@ def main() -> int:
     # Connect pipes (one per env) if needed
     pipe_clients: dict[int, Any] = {}
     if args.pipe:
-        from ipc.pipe_client import PipeClient
+        from env.pipe_client import PipeClient
         for port in env_ports:
             pc = PipeClient(port=port)
             try:

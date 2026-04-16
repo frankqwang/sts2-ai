@@ -1,3 +1,4 @@
+"""Bundle multiple derived JSONL views into a single LLM training package with manifest."""
 from __future__ import annotations
 
 import sys

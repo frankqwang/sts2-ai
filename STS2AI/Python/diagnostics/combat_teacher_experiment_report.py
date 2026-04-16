@@ -1,3 +1,4 @@
+"""Generate comparison report and charts for combat-teacher experiment results."""
 from __future__ import annotations
 
 import argparse

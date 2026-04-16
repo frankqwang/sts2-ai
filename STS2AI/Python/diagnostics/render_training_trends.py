@@ -1,3 +1,4 @@
+"""Render per-iteration training trend line charts (floor, win rate, loss curves)."""
 from __future__ import annotations
 
 import argparse

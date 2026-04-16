@@ -1,10 +1,11 @@
+"""Lifecycle manager for launching and tearing down headless sim host processes."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
+from env.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
 
 
 def transport_launch_protocol(transport: str) -> str | None:

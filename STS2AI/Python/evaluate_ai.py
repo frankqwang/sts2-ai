@@ -40,7 +40,7 @@ import numpy as np
 import torch
 
 from core.vocab import load_vocab, Vocab
-from ipc.full_run_env import PipeBackedFullRunClient, ApiBackedFullRunClient, create_full_run_client
+from env.full_run_env import PipeBackedFullRunClient, ApiBackedFullRunClient, create_full_run_client
 from network.combat_network import (
     CombatPolicyValueNetwork,
     build_combat_features,
@@ -78,12 +78,12 @@ from training.combat_safety import compute_combat_unsafe_mask, rerank_combat_log
 # `_COMBAT_UNSAFE_MASK_ENABLED`. See that module for the status note.
 _COMBAT_UNSAFE_MASK_ENABLED = False
 from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from env.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from search.mcts_core import MCTSConfig
 from data.raw.raw_dataset_writer import write_raw_full_run_exports
 from data.derived.build_rl_views import build_transition_view
 from data.derived.build_llm_views import build_sft_dialogue_view
-from ipc.sts2_singleplayer_env import (
+from env.sts2_singleplayer_env import (
     adapt_v1_state_for_combat_policy,
 )
 from archive.combat_actions import normalize_action

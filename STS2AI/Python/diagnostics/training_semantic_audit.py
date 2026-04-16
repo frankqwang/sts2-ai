@@ -1,3 +1,4 @@
+"""Semantic audit of training runs — compares baseline vs candidate checkpoints on fixed seeds."""
 from __future__ import annotations
 # --- wizardly cleanup 2026-04-08: tools/python subdir sys.path bootstrap ---
 # Moved out of tools/python/ root; bootstrap below re-adds the parent dir so
@@ -20,7 +21,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from ipc.headless_sim_runner import start_headless_sim, stop_process
+from env.headless_sim_runner import start_headless_sim, stop_process
 from sim_semantic_audit_common import DEFAULT_GODOT_EXE, DEFAULT_HEADLESS_DLL, DEFAULT_REPO_ROOT
 from constants import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
 

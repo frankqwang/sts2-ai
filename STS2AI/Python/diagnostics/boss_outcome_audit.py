@@ -1,3 +1,4 @@
+"""Audit boss encounter outcomes across seeds to verify combat result consistency."""
 from __future__ import annotations
 # --- wizardly cleanup 2026-04-08: tools/python subdir sys.path bootstrap ---
 # Moved out of tools/python/ root; bootstrap below re-adds the parent dir so

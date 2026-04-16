@@ -1,3 +1,4 @@
+"""Schema helpers for raw full-run step records (state/action/reward per game step)."""
 from __future__ import annotations
 
 import hashlib

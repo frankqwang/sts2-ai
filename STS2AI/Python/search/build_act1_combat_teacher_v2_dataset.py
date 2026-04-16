@@ -47,8 +47,8 @@ from search.combat_teacher_dataset import (
 )
 from search.combat_turn_solver import CombatTurnSolver
 from search.combat_turn_teacher_config import CombatTurnTeacherConfig, load_combat_turn_teacher_config
-from ipc.full_run_env import create_full_run_client
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
+from env.full_run_env import create_full_run_client
+from env.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
 from network.state_features import build_structured_actions, build_structured_state
 from network.fullrun_policy import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
 from constants import MAINLINE_CHECKPOINT

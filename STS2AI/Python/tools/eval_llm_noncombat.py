@@ -23,8 +23,8 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(python_root))
 
 
-from backends.full_run_backend import apply_backend_action
-from runtime.full_run_action_semantics import (
+from env.full_run_backend import apply_backend_action
+from env.action_semantics import (
     choose_auto_progress_action,
     choose_rollout_decision,
     next_reward_claim_signature,

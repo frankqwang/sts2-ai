@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Render a human-readable report from offline non-combat branch rollout JSONL data."""
 from __future__ import annotations
 
 import argparse

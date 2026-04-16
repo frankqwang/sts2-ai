@@ -1,3 +1,4 @@
+"""Dataset manifest builder — stamps schema version, provenance, and summary into manifest.json."""
 from __future__ import annotations
 
 import json

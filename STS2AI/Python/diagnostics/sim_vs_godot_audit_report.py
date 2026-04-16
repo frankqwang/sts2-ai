@@ -1,3 +1,4 @@
+"""Generate a summary report comparing headless-sim vs Godot audit JSON results."""
 from __future__ import annotations
 # --- wizardly cleanup 2026-04-08: tools/python subdir sys.path bootstrap ---
 # Moved out of tools/python/ root; bootstrap below re-adds the parent dir so

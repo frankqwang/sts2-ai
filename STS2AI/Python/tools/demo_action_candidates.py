@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ipc.sts2_singleplayer_env import translate_combat_action_for_v1
+from env.sts2_singleplayer_env import translate_combat_action_for_v1
 
 
 def _lower(value: Any) -> str:

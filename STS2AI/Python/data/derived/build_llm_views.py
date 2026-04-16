@@ -1,3 +1,4 @@
+"""Convert raw full-run records into LLM-friendly SFT dialogue and preference-pair JSONL views."""
 from __future__ import annotations
 
 import json

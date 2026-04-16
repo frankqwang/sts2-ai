@@ -1,3 +1,4 @@
+"""Orchestrator that runs all diagnostics mining scripts in sequence on a training window."""
 from __future__ import annotations
 
 import argparse

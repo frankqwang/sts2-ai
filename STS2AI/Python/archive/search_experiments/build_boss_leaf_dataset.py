@@ -28,7 +28,7 @@ from build_combat_teacher_dataset import load_noncombat_policy
 from search.combat_teacher_common import BaselineCombatPolicy, is_supported_solver_state, sanitize_action
 from search.combat_turn_solver import CombatTurnSolver
 from evaluate_ai import _choose_auto_progress_action, _next_reward_claim_signature
-from ipc.full_run_env import create_full_run_client
+from env.full_run_env import create_full_run_client
 from network.shared_encoders import load_vocab
 from network.state_features import build_structured_actions, build_structured_state
 from network.fullrun_policy import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict

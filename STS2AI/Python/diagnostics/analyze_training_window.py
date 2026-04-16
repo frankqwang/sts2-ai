@@ -1,3 +1,4 @@
+"""Aggregate training-window statistics (floor distribution, combat, shop, rewards) across iterations."""
 from __future__ import annotations
 
 import argparse

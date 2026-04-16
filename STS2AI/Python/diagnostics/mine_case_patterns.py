@@ -1,3 +1,4 @@
+"""Mine per-combat case patterns (damage, block, HP loss) and correlate with episode outcomes."""
 from __future__ import annotations
 
 import argparse

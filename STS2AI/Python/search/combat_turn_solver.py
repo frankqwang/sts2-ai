@@ -27,7 +27,7 @@ from search.combat_teacher_common import (
     _card_slug,
 )
 from search.combat_turn_teacher_config import CombatTurnTeacherConfig
-from ipc.full_run_env import create_full_run_client
+from env.full_run_env import create_full_run_client
 
 
 class CombatTurnBranchEnv(Protocol):

@@ -1,3 +1,4 @@
+"""Derive LLM SFT and preference-pair views from ranking/card_ranking JSONL data."""
 from __future__ import annotations
 
 import sys

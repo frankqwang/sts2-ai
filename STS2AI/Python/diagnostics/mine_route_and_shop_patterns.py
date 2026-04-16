@@ -1,3 +1,4 @@
+"""Mine map-route and shop-visit patterns, comparing top vs bottom performers."""
 from __future__ import annotations
 
 import argparse

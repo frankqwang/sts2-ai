@@ -30,7 +30,7 @@ from search.combat_teacher_dataset import (
 )
 from combat_teacher_regression_samples import build_regression_motif_samples
 from search.combat_turn_solver import CombatTurnSolver
-from ipc.full_run_env import create_full_run_client
+from env.full_run_env import create_full_run_client
 from network.state_features import build_structured_actions, build_structured_state
 from network.fullrun_policy import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
 from core.vocab import Vocab, load_vocab

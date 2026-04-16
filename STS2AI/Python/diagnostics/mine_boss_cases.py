@@ -1,3 +1,4 @@
+"""Mine boss encounter cases — deck state, HP, turns, and outcome per boss fight."""
 from __future__ import annotations
 
 import argparse

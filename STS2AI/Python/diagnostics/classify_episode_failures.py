@@ -1,3 +1,4 @@
+"""Classify episode failures into categories (boss death, early death, stall, loop, etc.)."""
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,4 @@
+"""Compare AI training deck builds against Skada community win-rate statistics."""
 from __future__ import annotations
 
 import argparse

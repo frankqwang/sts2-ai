@@ -1,3 +1,4 @@
+"""Analyze deck-building and shop patterns correlated with episode win/loss outcomes."""
 from __future__ import annotations
 
 import argparse

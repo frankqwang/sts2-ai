@@ -1,3 +1,4 @@
+"""Project-wide path constants (roots for checkpoints, datasets, assets, etc.)."""
 from __future__ import annotations
 
 from pathlib import Path

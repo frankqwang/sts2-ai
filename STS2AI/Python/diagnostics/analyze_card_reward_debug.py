@@ -1,3 +1,4 @@
+"""Analyze card-reward selection sources, overrides, and boss-specific pick distributions."""
 import argparse
 import json
 from collections import Counter, defaultdict

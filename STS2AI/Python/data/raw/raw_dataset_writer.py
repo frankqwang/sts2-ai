@@ -1,3 +1,4 @@
+"""Write raw full-run and branch-rollout JSONL datasets with manifests."""
 from __future__ import annotations
 
 import json

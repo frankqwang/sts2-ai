@@ -1,3 +1,4 @@
+"""Parse per-iteration replay .txt logs and extract structured episode summaries."""
 from __future__ import annotations
 
 import argparse

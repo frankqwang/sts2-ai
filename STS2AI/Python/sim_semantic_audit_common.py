@@ -1,3 +1,4 @@
+"""Shared helpers and seed/state definitions for simulator semantic audit scripts."""
 from __future__ import annotations
 
 
@@ -12,7 +13,7 @@ from typing import Any, Iterator
 sys.path.insert(0, str(Path(__file__).parent))
 
 from constants import REPO_ROOT
-from ipc.headless_sim_runner import stop_process
+from env.headless_sim_runner import stop_process
 from test_simulator_consistency import (
 	BOSS_PARITY_SEEDS,
 	COVERAGE_SEEDS,

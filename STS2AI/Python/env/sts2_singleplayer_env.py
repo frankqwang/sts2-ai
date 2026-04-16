@@ -1,3 +1,4 @@
+"""HTTP client for the STS2 MCP singleplayer automation API (state/act/wait)."""
 from __future__ import annotations
 
 import json

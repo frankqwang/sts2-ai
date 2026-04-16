@@ -157,18 +157,18 @@ from network.combat_network import (
 )
 from search.mcts_core import MCTSConfig, action_key, mcts_search
 from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
-from ipc.full_run_env import ApiBackedFullRunClient, PipeBackedFullRunClient, create_full_run_client
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, stop_process
-from ipc.sim_host_lifecycle import SimHostLifecycleManager, transport_launch_protocol
+from env.full_run_env import ApiBackedFullRunClient, PipeBackedFullRunClient, create_full_run_client
+from env.headless_sim_runner import DEFAULT_DLL_PATH, stop_process
+from env.sim_host_lifecycle import SimHostLifecycleManager, transport_launch_protocol
 from constants import ARTIFACTS_ROOT, DATASETS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
 from training.training_health import TrainingHealthMonitor
 from training.episode_data_saver import EpisodeDataSaver
-from runtime.run_outcome_vocab import (
+from env.run_outcome_vocab import (
     RUN_OUTCOME_DEATH,
     RUN_OUTCOME_VICTORY,
     normalize_run_outcome,
 )
-from runtime.full_run_action_semantics import (
+from env.action_semantics import (
     legal_action_name_set as _shared_legal_action_name_set,
     is_selection_screen as _shared_is_selection_screen,
     choose_auto_progress_action as _shared_choose_auto_progress_action,
@@ -1214,7 +1214,7 @@ def _mp_episode_worker(
     import logging
     logging.basicConfig(level=logging.WARNING)
     log = logging.getLogger(f"worker-{worker_id}")
-    from ipc.full_run_env import create_full_run_client
+    from env.full_run_env import create_full_run_client
     ppo_ort_session = None
     combat_ort_session = None
 

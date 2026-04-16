@@ -1,3 +1,4 @@
+"""Standalone combat-only PPO training loop using headless simulator combat encounters."""
 from __future__ import annotations
 
 
@@ -18,9 +19,9 @@ from network.combat_network import CombatPolicyValueNetwork, build_combat_action
 from core.checkpoint_compat import get_combat_model_state
 from core.rl_reward_shaping import combat_local_tactical_reward, combat_step_reward
 from core.vocab import Vocab, load_vocab
-from ipc.combat_training_env import PipeBackedCombatTrainingClient, sample_weighted_room_type
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT
-from ipc.simulator_api_error import SimulatorApiError
+from env.combat_training_env import PipeBackedCombatTrainingClient, sample_weighted_room_type
+from env.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT
+from env.simulator_api_error import SimulatorApiError
 from train_hybrid import (
     CombatPPOTrainer,
     CombatRolloutBuffer,

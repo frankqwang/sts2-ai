@@ -1,3 +1,4 @@
+"""Structured error type raised by HTTP and pipe simulator transports."""
 from __future__ import annotations
 
 

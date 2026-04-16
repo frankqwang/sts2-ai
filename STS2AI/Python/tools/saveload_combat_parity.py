@@ -27,7 +27,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from ipc.full_run_env import FullRunClientLike
+from env.full_run_env import FullRunClientLike
 from sim_semantic_audit_common import (
     DEFAULT_GODOT_EXE,
     DEFAULT_HEADLESS_DLL,

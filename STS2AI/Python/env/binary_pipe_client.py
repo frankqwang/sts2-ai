@@ -1,3 +1,4 @@
+"""Binary-protocol named-pipe client for compact IPC with the STS2 simulator."""
 from __future__ import annotations
 
 import ctypes
@@ -8,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ipc.pipe_client import (
+from env.pipe_client import (
     FILE_FLAG_OVERLAPPED,
     GENERIC_READ,
     GENERIC_WRITE,
@@ -17,7 +18,7 @@ from ipc.pipe_client import (
     PipeClient,
     _kernel32,
 )
-from ipc.simulator_api_error import SimulatorApiError
+from env.simulator_api_error import SimulatorApiError
 
 
 STATUS_OK = 0

@@ -50,20 +50,20 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from ipc.full_run_env import FullRunClientLike, create_full_run_client
+from env.full_run_env import FullRunClientLike, create_full_run_client
 from test_simulator_consistency import COMBAT_TYPES
 from verify_save_load import choose_default_action
-from backends.full_run_backend import apply_backend_action
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH
-from ipc.sim_host_lifecycle import SimHostLifecycleManager
-from runtime.full_run_action_semantics import (
+from env.full_run_backend import apply_backend_action
+from env.headless_sim_runner import DEFAULT_DLL_PATH
+from env.sim_host_lifecycle import SimHostLifecycleManager
+from env.action_semantics import (
     RolloutDecision,
     choose_auto_progress_action,
     choose_rollout_decision,
     claim_reward_action_count,
     next_reward_claim_signature,
 )
-from runtime.run_outcome_vocab import RUN_OUTCOME_DEATH, RUN_OUTCOME_TIMEOUT, RUN_OUTCOME_VICTORY, is_failure_outcome, normalize_run_outcome
+from env.run_outcome_vocab import RUN_OUTCOME_DEATH, RUN_OUTCOME_TIMEOUT, RUN_OUTCOME_VICTORY, is_failure_outcome, normalize_run_outcome
 from search.card_reward_tree import RewardTreeConfig, evaluate_card_reward_tree
 from search.map_route_tree import MapRouteConfig, evaluate_map_route_tree
 from search.noncombat_deterministic import (

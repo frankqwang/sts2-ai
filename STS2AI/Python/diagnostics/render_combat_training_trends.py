@@ -1,3 +1,4 @@
+"""Render matplotlib charts of combat-teacher training metrics over iterations."""
 from __future__ import annotations
 
 import argparse

@@ -501,7 +501,7 @@ def dump_real_fixtures(
     num_samples: int = 10,
 ) -> None:
     """Collect real combat states from sim and dump features + model outputs as fixtures."""
-    from ipc.full_run_env import create_full_run_client
+    from env.full_run_env import create_full_run_client
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)

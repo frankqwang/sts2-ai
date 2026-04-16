@@ -1,3 +1,4 @@
+"""Schema helpers for raw branch-rollout records used in MCTS data collection."""
 from __future__ import annotations
 
 import hashlib

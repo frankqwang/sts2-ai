@@ -1,3 +1,4 @@
+"""Full-run environment clients (HTTP, pipe, binary-pipe) for driving complete STS2 games."""
 from __future__ import annotations
 
 import argparse
@@ -8,16 +9,16 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
-from ipc.sts2_singleplayer_env import (
+from env.sts2_singleplayer_env import (
     SingleplayerApiError,
     SingleplayerClient,
     SingleplayerConnectionError,
     SingleplayerTimeoutError,
 )
-from ipc.binary_pipe_client import BinaryPipeClient
-from ipc.headless_sim_runner import start_headless_sim, stop_process
-from ipc.pipe_client import PipeClient
-from ipc.simulator_api_error import SimulatorApiError
+from env.binary_pipe_client import BinaryPipeClient
+from env.headless_sim_runner import start_headless_sim, stop_process
+from env.pipe_client import PipeClient
+from env.simulator_api_error import SimulatorApiError
 
 logger = logging.getLogger(__name__)
 

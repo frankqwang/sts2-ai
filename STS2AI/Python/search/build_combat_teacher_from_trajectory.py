@@ -51,8 +51,8 @@ from search.combat_teacher_dataset import (
 )
 from search.combat_turn_solver import CombatTurnSolver
 from search.combat_turn_teacher_config import load_combat_turn_teacher_config
-from ipc.full_run_env import create_full_run_client
-from ipc.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
+from env.full_run_env import create_full_run_client
+from env.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
 from constants import MAINLINE_CHECKPOINT
 from core.vocab import load_vocab
 

@@ -1,3 +1,4 @@
+"""Action semantics helpers — classify, auto-progress, and rerank full-run actions."""
 from __future__ import annotations
 
 from dataclasses import dataclass

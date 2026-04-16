@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Static analysis of C# combat snapshot capture/restore coverage."""
 from __future__ import annotations
 
 import argparse

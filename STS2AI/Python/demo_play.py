@@ -57,8 +57,8 @@ from core.rl_reward_shaping import (
 )
 from tools.nn_hooks import NNInternalsCollector, format_internals_for_broadcast
 from tools.training_monitor import TrainingMetricsMonitor
-from ipc.full_run_env import create_full_run_client
-from ipc.sts2_singleplayer_env import adapt_v1_state_for_combat_policy
+from env.full_run_env import create_full_run_client
+from env.sts2_singleplayer_env import adapt_v1_state_for_combat_policy
 from tools.demo_action_candidates import _combat_candidate_actions, _non_combat_candidate_actions
 from core.checkpoint_compat import get_combat_model_state
 

@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     from .simulator_api_error import SimulatorApiError
 except ImportError:
-    from ipc.simulator_api_error import SimulatorApiError
+    from env.simulator_api_error import SimulatorApiError
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +332,7 @@ def main():
         try:
             from .pipe_client import PipeBackedMctsEnv
         except ImportError:
-            from ipc.pipe_client import PipeBackedMctsEnv
+            from env.pipe_client import PipeBackedMctsEnv
         env = PipeBackedMctsEnv(port=args.port)
     else:
         try:
