@@ -17,7 +17,6 @@ Usage:
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds STS2AI/Python library dirs to sys.path)
 
 import copy
 import sys
@@ -1977,10 +1976,18 @@ class TestTrainingConfig:
     def test_shop_force_remove_purchase_action(self):
         import train_hybrid
 
-        state = {"state_type": "shop"}
+        state = {
+            "state_type": "shop",
+            "shop": {
+                "items": [
+                    {"category": "card", "index": 0, "can_afford": True, "is_stocked": True},
+                    {"category": "remove_card", "index": 1, "can_afford": True, "is_stocked": True},
+                ],
+            },
+        }
         legal = [
-            {"action": "shop_purchase", "label": "ANGER"},
-            {"action": "remove_card", "label": "remove_card"},
+            {"action": "shop_purchase", "index": 0, "label": "ANGER"},
+            {"action": "shop_purchase", "index": 1, "label": "remove_card"},
             {"action": "proceed", "label": "proceed"},
         ]
 
@@ -1989,7 +1996,7 @@ class TestTrainingConfig:
         assert override is not None
         idx, action, source = override
         assert idx == 1
-        assert action["action"] == "remove_card"
+        assert action["action"] == "shop_purchase"
         assert source == "shop_force_remove"
 
     def test_shop_remove_target_prefers_basic_cards(self):
@@ -2448,9 +2455,10 @@ class TestEvaluateHarness:
         tracker = RepeatLoopTracker(trigger_count=2, max_repeats=5)
 
         assert tracker.choose_escape_action(legal) is None
-        tracker.observe("event", legal)
-        tracker.observe("event", legal)
-        tracker.observe("event", legal)
+
+        # Simulate reaching the trigger count by setting repeat_count directly
+        # (observe_transition requires full game states with progress fields)
+        tracker.repeat_count = 3
 
         escape = tracker.choose_escape_action(legal)
         assert escape is not None

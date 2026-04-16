@@ -10,7 +10,6 @@ Batch dimension is dynamic (default batch=1 for C# per-env inference).
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import argparse
 import json

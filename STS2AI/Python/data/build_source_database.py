@@ -18,7 +18,6 @@ from __future__ import annotations
 import sys as _sys; from pathlib import Path as _Path  # noqa: E401,E702
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))  # noqa: E402
 
-import _path_init  # noqa: F401,E402  (adds tools/python/{core,ipc,search} to sys.path)
 
 import argparse
 import hashlib

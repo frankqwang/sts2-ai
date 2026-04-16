@@ -65,7 +65,6 @@ a bad position for the next turn.
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import json
 import logging

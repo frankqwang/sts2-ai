@@ -12,7 +12,6 @@ if __package__ in {None, ""}:
     if str(tools_python_dir) not in sys.path:
         sys.path.insert(0, str(tools_python_dir))
 
-import _path_init  # noqa: F401
 
 from data.manifest import build_manifest, write_manifest
 

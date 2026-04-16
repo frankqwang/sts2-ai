@@ -11,7 +11,6 @@ Fused from original implementation + codex/reward branch best practices:
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import copy
 import logging

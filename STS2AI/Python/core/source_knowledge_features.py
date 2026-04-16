@@ -40,7 +40,6 @@ import sys as _sys  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))  # noqa: E402
 
-import _path_init  # noqa: F401,E402  (adds tools/python/{core,ipc,search} to sys.path)
 
 import hashlib
 import json

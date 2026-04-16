@@ -8,7 +8,6 @@ same seed and the same action sequence, then emits state-level mismatches.
 """
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/{core,ipc,search} to sys.path)
 
 import argparse
 import json

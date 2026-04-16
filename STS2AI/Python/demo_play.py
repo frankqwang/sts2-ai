@@ -13,7 +13,6 @@ Recommended for recording:
 """
 from __future__ import annotations
 
-import _path_init  # noqa: F401
 
 import argparse
 import asyncio

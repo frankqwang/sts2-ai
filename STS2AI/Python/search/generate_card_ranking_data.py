@@ -30,7 +30,6 @@ if __package__ in {None, ""}:
     if str(python_root) not in sys.path:
         sys.path.insert(0, str(python_root))
 
-import _path_init  # noqa: F401  (adds STS2AI/Python library dirs to sys.path)
 from core.checkpoint_compat import get_combat_model_state
 
 import argparse

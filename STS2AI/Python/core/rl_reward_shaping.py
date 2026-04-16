@@ -18,7 +18,6 @@ Key changes from v4:
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import math
 import re

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import _path_init  # noqa: F401
 
 from typing import Any
 

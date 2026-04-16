@@ -17,7 +17,6 @@ Usage in evaluate_ai.py:
 """
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import logging
 import math

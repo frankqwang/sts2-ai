@@ -20,7 +20,6 @@ exhausted, the next state hash diverges, or end_turn is reached).
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import logging
 from dataclasses import dataclass, field

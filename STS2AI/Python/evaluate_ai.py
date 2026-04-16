@@ -20,7 +20,6 @@ Usage:
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds STS2AI/Python library dirs to sys.path)
 
 import argparse
 import atexit

@@ -12,7 +12,63 @@ from typing import Any
 
 from network.state_features import _lower, _safe_float, _safe_int
 
+# These are used by RepeatLoopTracker but still live in evaluate_ai.py
+# (too intertwined with other evaluate_ai code to extract cleanly)
+def _action_signature(action) -> str:
+    if not isinstance(action, dict):
+        return ""
+    parts = [
+        _lower(action.get("action")), _lower(action.get("label")),
+        str(action.get("index") if action.get("index") is not None else ""),
+        str(action.get("target_id") if action.get("target_id") is not None else ""),
+        str(action.get("target") if action.get("target") is not None else ""),
+        str(action.get("card_index") if action.get("card_index") is not None else ""),
+        _lower(action.get("card_id")),
+        str(action.get("slot") if action.get("slot") is not None else ""),
+        _lower(action.get("screen_type")),
+    ]
+    return "|".join(parts)
+
+def _enabled_legal_actions(state):
+    legal = state.get("legal_actions", [])
+    return [a for a in legal if isinstance(a, dict) and a.get("is_enabled") is not False]
+
+def _extract_player_snapshot(state):
+    battle = state.get("battle")
+    if isinstance(battle, dict) and isinstance(battle.get("player"), dict):
+        return battle["player"]
+    for key in ("map", "shop", "rest_site", "event", "rewards", "card_reward",
+                "card_select", "relic_select", "treasure", "menu"):
+        container = state.get(key)
+        if isinstance(container, dict) and isinstance(container.get("player"), dict):
+            return container["player"]
+    if isinstance(state.get("player"), dict):
+        return state["player"]
+    return None
+
+def _loop_state_signature(state, legal):
+    """Simplified signature for loop detection."""
+    st = _lower(state.get("state_type"))
+    legal_sig = tuple(sorted(_action_signature(a) for a in legal if isinstance(a, dict)))
+    return (st, _safe_int(state.get("floor")), len(legal), legal_sig)
+
+COMBAT_SCREENS = {"combat", "monster", "elite", "boss"}
 SELECTION_SCREENS = {"card_select", "hand_select", "relic_select"}
+ESCAPE_ACTION_NAMES = ("proceed", "skip", "cancel_selection")
+
+
+def _choose_repeat_escape_action(legal, avoid_action_signature=""):
+    if not legal:
+        return None
+    for action_name in ESCAPE_ACTION_NAMES:
+        for action in legal:
+            if action.get("action") == action_name and _action_signature(action) != avoid_action_signature:
+                return action
+    if len(legal) > 1:
+        for action in legal:
+            if _action_signature(action) != avoid_action_signature:
+                return action
+    return legal[0]
 
 
 def _combat_rewards_state(state: dict) -> dict:

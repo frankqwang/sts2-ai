@@ -37,7 +37,6 @@ _PYTHON_ROOT = Path(__file__).resolve().parents[1]
 if str(_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_PYTHON_ROOT))
 
-import _path_init  # noqa: F401
 
 from network.state_features import build_structured_actions, build_structured_state
 from network.fullrun_policy import _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict

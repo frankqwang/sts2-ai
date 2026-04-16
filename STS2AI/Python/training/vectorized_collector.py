@@ -9,7 +9,6 @@ This replaces the per-worker independent episode collection when
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 import logging
 import time

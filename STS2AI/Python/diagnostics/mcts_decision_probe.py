@@ -9,7 +9,6 @@ _PYTHON_ROOT = _THIS_DIR.parent
 if str(_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_PYTHON_ROOT))
 
-import _path_init  # noqa: F401
 
 import argparse
 import atexit

@@ -10,7 +10,6 @@ the effective horizon and improves credit assignment.
 
 from __future__ import annotations
 
-import _path_init  # noqa: F401  (adds tools/python/core to sys.path)
 
 from dataclasses import dataclass, field
 from typing import Any

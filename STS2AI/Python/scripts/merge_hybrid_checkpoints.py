@@ -24,7 +24,6 @@ if __package__ in {None, ""}:
     if str(python_root) not in sys.path:
         sys.path.insert(0, str(python_root))
 
-import _path_init  # noqa: F401
 
 import torch
 
