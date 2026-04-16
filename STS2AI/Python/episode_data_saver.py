@@ -1,2 +1,4 @@
-"""Shim — moved to training/episode_data_saver.py"""
-from training.episode_data_saver import *  # noqa: F401,F403
+# === SHIM === canonical code → training/episode_data_saver.py
+import importlib as _il, sys as _s
+_m = _il.import_module("training.episode_data_saver")
+_s.modules[__name__] = _m
