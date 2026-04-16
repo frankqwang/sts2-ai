@@ -73,11 +73,11 @@ flowchart TD
     D --> E["写入 ppo_buffer"]
 
     B --> F["战斗状态"]
-    F --> G["若开启 MCTS: mcts_net + 前向模型做搜索"]
+    F --> G["若开启 MCTS: combat_net + 前向模型做搜索"]
     G --> H["选中 combat 动作"]
     H --> I["保存 (state, action, root visit distribution) 到 mcts_pending"]
 
-    F --> J["若未用 MCTS, 由 mcts_net 直接采样动作"]
+    F --> J["若未用 MCTS, 由 combat_net 直接采样动作"]
     J --> K["写入 combat_buffer"]
 
     I --> L["战斗结束"]
@@ -90,8 +90,8 @@ flowchart TD
     K --> O
 
     O --> P["更新 ppo_net: ppo_trainer.update(ppo_buffer)"]
-    O --> Q["更新 mcts_net: mcts_train_step(mcts_replay)"]
-    O --> R["更新 mcts_net: combat_ppo_trainer.update(combat_buffer)"]
+    O --> Q["更新 combat_net: mcts_train_step(mcts_replay)"]
+    O --> R["更新 combat_net: combat_ppo_trainer.update(combat_buffer)"]
 
     P --> S["保存 checkpoint / 进入下一轮"]
     Q --> S

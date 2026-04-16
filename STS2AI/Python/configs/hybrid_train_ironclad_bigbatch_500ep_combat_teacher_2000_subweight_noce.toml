@@ -1,0 +1,122 @@
+# Hybrid training - 500 ep + combat_teacher 2000_balanced + **关 CE sub-loss** (Plan C-subweight)
+#
+# 派生自 hybrid_train_ironclad_bigbatch_500ep_combat_teacher_2000balanced_lw005.toml (Plan C-lite)。
+# 2 处变化：
+#   1. combat_teacher_loss_weight 从 0.05 恢复到 0.2（Plan C-lite 证明降 weight 不够）
+#   2. 新增 sub-weight 控制：combat_teacher_ce_weight = 0.0 （关掉 hard label CE）
+#      保留 rank_weight=1.0, cont_weight=1.0
+#
+# Plan C / Plan C-lite 证据（见 teacher_policy_mismatch_lessons_2026-04-16.md）：
+#   - M1 BASH 卡序错下降 3.6pp（teacher 真教了 vulnerable setup 原则）
+#   - M2 bad end_turn 上升 4.8pp，M5 致死不挡上升 2.6pp（副作用）
+#   - 根因：ct_ce (hard label CE) 强拉 action 分布 + teacher 数据 include_baseline_matches=False
+#     里多数是 "2175 不该 end_turn 该 play_card" → agent 被 CE 拉成 "全局 play_card 偏见"
+#
+# 本次实验假设：
+#   - 关 CE 只留 pairwise ranking + continuation 后
+#   - M1（BASH 先手）信号来自 ranking 不会丢
+#   - M2 / M5 的 play_card 偏见副作用应该消失
+#   - combat policy 不被硬拉到 2175 action 分布，保留 PPO 自由度
+#
+# 如果 10 iter 后 M1 保持改善 + M2/M5 回到 Plan B baseline 水平 + act1% 不退化，
+# 则证明 CE 是 Plan C 退化主因，可作为后续 combat teacher 默认设置。
+
+[environment]
+pipe = true
+transport = "pipe-binary"
+auto_launch = true
+multi_process = true
+num_envs = 4
+start_port = 15527
+character_id = "IRONCLAD"
+
+[training]
+max_iterations = 10
+episodes_per_iter = 500
+episode_timeout = 90.0
+max_episode_steps = 600
+output_dir = "STS2AI/Artifacts/hybrid_training_main_attention"
+save_interval = 1
+
+[ppo]
+ppo_lr = 1e-4
+ppo_epochs = 1
+ppo_minibatch = 512
+target_kl = 0.02
+ppo_entropy_coeff = 0.1
+ppo_clip = 0.2
+boss_readiness_coeff = 0.05
+
+[mcts]
+mcts = false
+mcts_sims = 50
+mcts_lr = 1e-3
+mcts_batch_size = 128
+mcts_train_steps = 10
+mcts_warmup_iters = 50
+mcts_replay_size = 50000
+
+[combat_ppo]
+combat_ppo_lr = 3e-4
+combat_ppo_epochs = 1
+combat_ppo_minibatch = 512
+combat_target_kl = 0.02
+combat_ppo_entropy_coeff = 0.05
+combat_ppo_clip = 0.2
+combat_monster_reward_weight = 0.7
+
+[architecture]
+embed_dim = 48
+combat_hidden_dim = 192
+combat_main_path_mode = "light_attention"
+deck_repr_dim = 0
+
+[saved_offline_episodes]
+saved_offline_episodes_enabled = true
+saved_offline_episodes_min_floor = 14
+saved_offline_replay_traces_enabled = true
+saved_offline_metrics_log_enabled = true
+
+[offline_noncombat_ranking]
+# 关键：指向 hybrid_02293 派生的新数据
+offline_noncombat_ranking_data_dir = "STS2AI/Artifacts/offline_noncombat_ranking/from_hybrid_02293_merged_20260415"
+offline_noncombat_ranking_batch_size = 32
+offline_noncombat_ranking_loss_weight = 0.02
+offline_noncombat_ranking_updates_per_iter = 1
+offline_noncombat_ranking_warmup_iters = 0
+offline_noncombat_ranking_loss_decay_tau = 0.0
+offline_noncombat_ranking_blend_beta = 0.0
+offline_noncombat_ranking_min_spread = 0.001
+
+[offline_combat_teacher]
+offline_combat_teacher_data_dir = "STS2AI/Artifacts/combat_teacher/ironclad_act1_solver_v2_dataset_2000_balanced.jsonl"
+offline_combat_teacher_loss_weight = 0.2
+offline_combat_teacher_batch_size = 64
+offline_combat_teacher_updates_per_iter = 4
+offline_combat_teacher_warmup_iters = 0
+# Sub-loss weights (2026-04-16 新增, 详见 train_hybrid.py:5295 argparse 注释)
+# ce_weight=0 关掉 hard label CE, 避免 play_card 偏见
+offline_combat_teacher_ce_weight = 0.0
+offline_combat_teacher_rank_weight = 1.0
+offline_combat_teacher_cont_weight = 1.0
+
+[counterfactual]
+counterfactual_scoring = false
+counterfactual_weight = 0.0
+skada_prior_weight = 0.15
+skada_boss_weights = false
+
+[kl]
+kl_warmstart = false
+kl_beta_start = 0.5
+kl_beta_decay = 2000
+
+[milestones]
+boss_entry_quality_weight = 0.15
+early_damage_potion_penalty_weight = 0.0
+
+[runtime_flags]
+act1_no_elite_routes = true
+combat_pending_stall_threshold = 30
+boss_conditioned_card_guidance_weight = 0.8
+combat_safety_rerank_weight = 1.0
