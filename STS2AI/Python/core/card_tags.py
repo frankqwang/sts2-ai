@@ -324,7 +324,7 @@ def build_card_tags(repo_root: str | Path) -> dict[str, list[str]]:
 # 2026-04-08 (wizardly cleanup): card_tags.py moved into tools/python/core/
 # but card_tags.json stays at tools/python/card_tags.json so external tooling
 # doesn't need to know about the move.
-_DEFAULT_PATH = Path(__file__).parent.parent / "card_tags.json"
+_DEFAULT_PATH = Path(__file__).parent.parent / "data" / "card_tags.json"
 
 
 def save_card_tags(tags: dict[str, list[str]], path: str | Path | None = None) -> Path:

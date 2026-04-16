@@ -211,7 +211,7 @@ def build_vocab(repo_root: str | Path) -> Vocab:
 # tools/python/core/, but vocab.json stayed at tools/python/vocab.json
 # because that's where operators and older tools have always looked. We
 # walk one extra `parent` to compensate.
-_DEFAULT_VOCAB_PATH = Path(__file__).parent.parent / "vocab.json"
+_DEFAULT_VOCAB_PATH = Path(__file__).parent.parent / "data" / "vocab.json"
 
 
 def save_vocab(vocab: Vocab, path: str | Path | None = None) -> Path:

@@ -216,7 +216,7 @@ def build_relic_tags(repo_root: str | Path) -> dict[str, list[str]]:
 
 # 2026-04-08 (wizardly cleanup): relic_tags.py moved into tools/python/core/
 # but relic_tags.json stays at tools/python/relic_tags.json.
-_DEFAULT_PATH = Path(__file__).parent.parent / "relic_tags.json"
+_DEFAULT_PATH = Path(__file__).parent.parent / "data" / "relic_tags.json"
 
 
 def _find_repo_root() -> Path | None:
