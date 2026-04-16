@@ -153,13 +153,14 @@ python STS2AI/Python/skada/scrape_skada.py --skip-runs
 STS2AI/
   Assets/        稳定资产：checkpoint、数据集
   Artifacts/     临时输出：训练结果、评估结果、录屏
+  docs/          文档用中文。sts2ai/docs下面放文档，文档上面开头用2026-0416日期开头，好判断时效性
   ENV/           HeadlessSim、Spectator Mod 等 C# 代码
   Python/        训练、评估、数据工具
     core/        NN 模型、编码器、奖励塑形
     search/      MCTS、反事实评分、排名损失
     ipc/         模拟器通信（pipe/HTTP）
     skada/       Skada 社区数据加载
-    data/        source_knowledge 知识库
+    data/        数据生成
     scripts/     启动脚本
 ```
 

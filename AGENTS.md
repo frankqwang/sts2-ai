@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Global Repo Rules
-- 文档用中文。
+- 文档用中文。sts2ai/docs下面放文档，文档上面开头用2026-0416日期开头，好判断时效性
 - Local clickable file links in Codex responses must use a leading `/` before the absolute Windows path.
 - Correct format: `[train_hybrid.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Python/train_hybrid.py:172)`
 - Wrong format: `[train_hybrid.py](C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Python/train_hybrid.py:172)`
