@@ -20,6 +20,47 @@
 两者 SHA256、训练链路、关联 run dir / teacher data / config 都在
 `STS2AI/Assets/checkpoints/act1/manifest.json` 里追溯。`README` 这里只保留入口。
 
+## Python 代码目录结构
+
+```
+STS2AI/Python/
+├── network/                     ← 【核心】网络架构（打开就看 AI 大脑）
+│   ├── combat_network.py         战斗 Policy+Value 网络 + 11个Gate
+│   ├── fullrun_policy.py         全局策略网络 + PPO Trainer
+│   └── shared_encoders.py        共享 NN 模块 (EntityEmbeddings, SetEncoder...)
+│
+├── core/                        ← 特征工程 + 基础工具
+│   ├── combat_features.py        战斗状态/动作特征构建
+│   ├── state_features.py         全局状态特征构建 + StructuredState
+│   ├── rl_reward_shaping.py      奖励塑形
+│   ├── symbolic_features_head.py 符号特征 (sqlite-backed cross-attention)
+│   ├── vocab.py                  词表管理
+│   └── card_tags.py / relic_tags.py / card_base_stats.py  实体元数据
+│
+├── training/                    ← 训练/评估基础设施
+│   ├── combat_ppo.py             战斗 PPO buffer + trainer + MCTS train
+│   ├── combat_diagnostics.py     战斗诊断/trace/中文日志
+│   ├── game_decisions.py         地图路线/卡牌奖励/商店决策逻辑
+│   ├── eval_action_selection.py  推理动作选择策略
+│   ├── eval_game_state.py        游戏状态追踪/循环检测
+│   ├── combat_safety.py          战斗安全遮罩 (R1+R2 规则)
+│   ├── episode_data_saver.py     高质量轨迹存储
+│   ├── training_health.py        训练异常检测
+│   └── ...                       segment buffer, vectorized collector 等
+│
+├── data/skada/                  ← 数据采集/清洗/模型
+├── tools/                       ← 非主线脚本（审计/导出/demo 工具）
+├── configs/                     ← 训练配置 TOML
+├── search/                      ← MCTS / turn solver / teacher builder
+├── diagnostics/                 ← 一致性审计脚本
+│
+├── train_hybrid.py              ← 【主入口】统一训练循环
+├── evaluate_ai.py               ← 【主入口】评估/benchmark
+└── test_training_smoke.py       ← 回归测试
+```
+
+**规范：根目录只放主入口脚本和测试，所有新代码按职责放入对应子目录。**
+
 ## 前置准备
 所有环境、ai相关代码都在STS2AI里。
 src下面以及最外层，都是反编译的源码，本项目中反编译部分只包含了游戏逻辑，sim模式只依赖这部分游戏逻辑源码,剔除了godot相关游戏资源。
