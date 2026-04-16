@@ -1890,7 +1890,7 @@ class TestTrainingConfig:
         from combat_nn import CombatPolicyValueNetwork
 
         ppo_net = FullRunPolicyNetworkV2(vocab=vocab, embed_dim=32)
-        mcts_net = CombatPolicyValueNetwork(
+        combat_net = CombatPolicyValueNetwork(
             vocab=vocab,
             embed_dim=32,
             hidden_dim=128,
@@ -1898,7 +1898,7 @@ class TestTrainingConfig:
             symbolic_head=ppo_net.symbolic_head,
         )
         fresh_ppo = copy.deepcopy(ppo_net)
-        fresh_mcts = copy.deepcopy(mcts_net)
+        fresh_mcts = copy.deepcopy(combat_net)
 
         with torch.no_grad():
             next(iter(fresh_ppo.parameters())).fill_(0.1234)
@@ -1917,7 +1917,7 @@ class TestTrainingConfig:
             log=type("Log", (), {"warning": lambda *args, **kwargs: None})(),
             worker_config={"ppo_onnx_path": "old_ppo.onnx", "combat_onnx_path": "old_combat.onnx"},
             ppo_net=ppo_net,
-            mcts_net=mcts_net,
+            combat_net=combat_net,
             refresh_task={
                 "ppo_state_dict": fresh_ppo.state_dict(),
                 "mcts_state_dict": fresh_mcts.state_dict(),
@@ -1930,7 +1930,7 @@ class TestTrainingConfig:
         )
 
         assert torch.allclose(next(iter(ppo_net.parameters())), next(iter(fresh_ppo.parameters())))
-        assert torch.allclose(next(iter(mcts_net.parameters())), next(iter(fresh_mcts.parameters())))
+        assert torch.allclose(next(iter(combat_net.parameters())), next(iter(fresh_mcts.parameters())))
         assert ppo_session == "PPO:new_ppo.onnx:worker2"
         assert combat_session == "combat:new_combat.onnx:worker2"
         assert rebuilt_sessions == [("PPO", "new_ppo.onnx"), ("combat", "new_combat.onnx")]

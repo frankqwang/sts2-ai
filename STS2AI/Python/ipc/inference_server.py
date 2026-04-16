@@ -14,7 +14,7 @@ Architecture:
 
 Usage:
     # Main process
-    server = InferenceServer(ppo_net, mcts_net, device, num_workers=8)
+    server = InferenceServer(ppo_net, combat_net, device, num_workers=8)
     server.start()
 
     # Worker process

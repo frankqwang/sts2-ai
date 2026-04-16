@@ -369,7 +369,7 @@ def _apply_mp_worker_refresh_message(
     log: Any,
     worker_config: dict[str, Any],
     ppo_net: FullRunPolicyNetworkV2,
-    mcts_net: CombatPolicyValueNetwork,
+    combat_net: CombatPolicyValueNetwork,
     refresh_task: dict[str, Any],
     ppo_ort_session: Any,
     combat_ort_session: Any,
@@ -384,10 +384,10 @@ def _apply_mp_worker_refresh_message(
 
     mcts_state_dict = refresh_task.get("mcts_state_dict")
     if isinstance(mcts_state_dict, dict):
-        mcts_net.load_state_dict(mcts_state_dict, strict=False)
+        combat_net.load_state_dict(mcts_state_dict, strict=False)
 
     ppo_net.eval()
-    mcts_net.eval()
+    combat_net.eval()
 
     ppo_onnx_path = str(
         refresh_task.get("ppo_onnx_path")
@@ -2716,7 +2716,7 @@ def _mp_episode_worker(
             symbolic_proj_dim=symbolic_proj_dim,
             offline_noncombat_ranking_head_mode=offline_mode,
         ).cpu().eval()
-        mcts_net = CombatPolicyValueNetwork(
+        combat_net = CombatPolicyValueNetwork(
             vocab=vocab,
             embed_dim=int(worker_config.get("embed_dim", 32)),
             hidden_dim=int(worker_config.get("combat_hidden_dim", 128)),
@@ -2726,12 +2726,12 @@ def _mp_episode_worker(
             symbolic_head=ppo_net.symbolic_head,
         ).cpu().eval()
         _configure_offline_noncombat_ranking_head_mode(ppo_net, offline_mode)
-        _configure_main_combat_path_mode(mcts_net, combat_main_path_mode)
+        _configure_main_combat_path_mode(combat_net, combat_main_path_mode)
         ppo_net.load_state_dict(ppo_state_dict, strict=False)
-        mcts_net.load_state_dict(mcts_state_dict, strict=False)
+        combat_net.load_state_dict(mcts_state_dict, strict=False)
         for param in ppo_net.parameters():
             param.requires_grad_(False)
-        for param in mcts_net.parameters():
+        for param in combat_net.parameters():
             param.requires_grad_(False)
         ppo_onnx_path = str(worker_config.get("ppo_onnx_path", "") or "").strip()
         if ppo_onnx_path:
@@ -2750,7 +2750,7 @@ def _mp_episode_worker(
                 log=log,
             )
         mcts_agent = CombatMCTSAgent(
-            network=mcts_net,
+            network=combat_net,
             vocab=vocab,
             config=MCTSConfig(num_simulations=int(worker_config.get("mcts_sims", 50))),
             training=False,
@@ -2789,7 +2789,7 @@ def _mp_episode_worker(
                     log=log,
                     worker_config=worker_config,
                     ppo_net=ppo_net,
-                    mcts_net=mcts_net,
+                    combat_net=combat_net,
                     refresh_task=task if isinstance(task, dict) else {},
                     ppo_ort_session=ppo_ort_session,
                     combat_ort_session=combat_ort_session,
@@ -5560,7 +5560,7 @@ def main() -> int:
         except Exception as _e:
             logger.warning("Could not peek checkpoint for deck_repr_dim auto-detect: %s", _e)
 
-    mcts_net = CombatPolicyValueNetwork(
+    combat_net = CombatPolicyValueNetwork(
         vocab=vocab, embed_dim=args.embed_dim,
         hidden_dim=args.combat_hidden_dim,
         entity_embeddings=ppo_net.entity_emb,  # shared embeddings
@@ -5625,7 +5625,7 @@ def main() -> int:
             logger.info("Loaded PPO from hybrid checkpoint")
         combat_state = get_combat_model_state(ckpt, allow_standalone=False)
         if combat_state is not None:
-            _safe_load_state_dict(mcts_net, combat_state, "combat")
+            _safe_load_state_dict(combat_net, combat_state, "combat")
             logger.info("Loaded combat policy from hybrid checkpoint")
         start_iter = ckpt.get("iteration", 0) + 1
 
@@ -5651,27 +5651,27 @@ def main() -> int:
         ckpt = torch.load(args.resume_mcts, map_location="cpu", weights_only=False)
         combat_state = get_combat_model_state(ckpt, allow_standalone=True)
         if combat_state is not None:
-            _safe_load_state_dict(mcts_net, combat_state, "combat")
+            _safe_load_state_dict(combat_net, combat_state, "combat")
         logger.info("Loaded combat policy from %s", args.resume_mcts)
 
     combat_main_path_mode = _configure_main_combat_path_mode(
-        mcts_net,
+        combat_net,
         getattr(args, "combat_main_path_mode", "mlp"),
     )
     logger.info("Combat main rollout path mode: %s", combat_main_path_mode)
 
     # Initialize combat deck_encoder from PPO deck_encoder (transfer learned representation)
-    if deck_repr_dim > 0 and hasattr(mcts_net, 'deck_encoder') and hasattr(ppo_net, 'deck_encoder'):
+    if deck_repr_dim > 0 and hasattr(combat_net, 'deck_encoder') and hasattr(ppo_net, 'deck_encoder'):
         try:
             ppo_deck_sd = {k: v for k, v in ppo_net.deck_encoder.state_dict().items()}
-            combat_deck_sd = mcts_net.deck_encoder.state_dict()
+            combat_deck_sd = combat_net.deck_encoder.state_dict()
             matched = 0
             for k in combat_deck_sd:
                 if k in ppo_deck_sd and combat_deck_sd[k].shape == ppo_deck_sd[k].shape:
                     combat_deck_sd[k] = ppo_deck_sd[k]
                     matched += 1
             if matched > 0:
-                mcts_net.deck_encoder.load_state_dict(combat_deck_sd)
+                combat_net.deck_encoder.load_state_dict(combat_deck_sd)
                 logger.info("Initialized combat deck_encoder from PPO deck_encoder (%d/%d params copied)",
                             matched, len(combat_deck_sd))
         except Exception as e:
@@ -5686,7 +5686,7 @@ def main() -> int:
         )
 
     ppo_net.to(device)
-    mcts_net.to(device)
+    combat_net.to(device)
 
     ppo_trainer = PPOTrainerV2(
         network=ppo_net, lr=args.ppo_lr, ppo_epochs=args.ppo_epochs,
@@ -5708,7 +5708,7 @@ def main() -> int:
 
     mcts_config = MCTSConfig(num_simulations=args.mcts_sims, c_puct=1.5,
                               temperature=1.0, dirichlet_alpha=0.3, dirichlet_fraction=0.25)
-    mcts_agent = CombatMCTSAgent(network=mcts_net, vocab=vocab, config=mcts_config,
+    mcts_agent = CombatMCTSAgent(network=combat_net, vocab=vocab, config=mcts_config,
                                   training=True, device=device, ppo_net=ppo_net,
                                   backend=combat_mcts_backend,
                                   use_continuation_value=bool(args.combat_mcts_continuation_value))
@@ -5719,12 +5719,12 @@ def main() -> int:
     # moving averages, which would cause thrashing.
     def _combat_trainable_params():
         return [
-            p for n, p in mcts_net.named_parameters()
+            p for n, p in combat_net.named_parameters()
             if not n.startswith("symbolic_head.")
         ]
     if use_symbolic_features:
         excluded_combat = sum(
-            p.numel() for n, p in mcts_net.named_parameters()
+            p.numel() for n, p in combat_net.named_parameters()
             if n.startswith("symbolic_head.")
         )
         logger.info(
@@ -5732,18 +5732,18 @@ def main() -> int:
             "(owned by PPO optimizer instead)", excluded_combat,
         )
     mcts_optimizer = torch.optim.Adam(
-        _combat_trainable_params() if use_symbolic_features else mcts_net.parameters(),
+        _combat_trainable_params() if use_symbolic_features else combat_net.parameters(),
         lr=args.mcts_lr,
         weight_decay=1e-4,
     )
     mcts_replay = MCTSReplayBuffer(max_size=args.mcts_replay_size)
 
-    # Combat PPO trainer (shares mcts_net, uses its own optimizer with separate lr)
+    # Combat PPO trainer (shares combat_net, uses its own optimizer with separate lr)
     # NOTE: CombatPPOTrainer builds its own optimizer from network.parameters()
     # in its __init__. When symbolic features are enabled we need to rebuild
     # that optimizer with the filtered param list. Done immediately below.
     combat_ppo_trainer = CombatPPOTrainer(
-        network=mcts_net,
+        network=combat_net,
         lr=args.combat_ppo_lr,
         clip_epsilon=args.combat_ppo_clip,
         entropy_coeff=args.combat_ppo_entropy_coeff,
@@ -5766,7 +5766,7 @@ def main() -> int:
                             "adapter_alpha", "adapter_beta")
         frozen_count = 0
         trainable_count = 0
-        for name, param in mcts_net.named_parameters():
+        for name, param in combat_net.named_parameters():
             if any(name.startswith(p) for p in adapter_prefixes):
                 param.requires_grad = True
                 trainable_count += param.numel()
@@ -5789,7 +5789,7 @@ def main() -> int:
     # Freeze entire combat brain (splice diagnostic finding: combat475 > combat600)
     if getattr(args, "freeze_combat", False):
         frozen_combat = 0
-        for name, param in mcts_net.named_parameters():
+        for name, param in combat_net.named_parameters():
             param.requires_grad = False
             frozen_combat += param.numel()
         logger.info("Frozen entire combat brain: %d params (PPO-only training)", frozen_combat)
@@ -5804,7 +5804,7 @@ def main() -> int:
         logger.info("Frozen entire PPO brain: %d params (combat-only training)", frozen_ppo)
 
     logger.info("PPO params: %d | MCTS params: %d | Envs: %d",
-                ppo_net.param_count(), mcts_net.param_count(), len(env_ports))
+                ppo_net.param_count(), combat_net.param_count(), len(env_ports))
 
     # Pipe clients — reuse from PipeBackedFullRunClient (single session per port)
     transport = initial_transport
@@ -5912,7 +5912,7 @@ def main() -> int:
             mp_combat_onnx_path = str(output_dir / "combat_actor_worker.onnx")
             export_from_training_snapshot(
                 ppo_net.state_dict(),
-                mcts_net.state_dict(),
+                combat_net.state_dict(),
                 vocab,
                 mp_combat_onnx_path,
                 export_mode="legacy",
@@ -5957,7 +5957,7 @@ def main() -> int:
             "combat_onnx_path": mp_combat_onnx_path,
         }
         ppo_worker_state = {k: v.detach().cpu() for k, v in ppo_net.state_dict().items()}
-        mcts_worker_state = {k: v.detach().cpu() for k, v in mcts_net.state_dict().items()}
+        mcts_worker_state = {k: v.detach().cpu() for k, v in combat_net.state_dict().items()}
         for i, port in enumerate(env_ports):
             task_q = mp_ctx.Queue()
             worker = mp_ctx.Process(
@@ -6068,10 +6068,10 @@ def main() -> int:
 
     # --- Zero-CUDA collector: CPU policy snapshot for worker threads ---
     _cpu_ppo_net = None
-    _cpu_mcts_net = None
+    _cpu_combat_net = None
     _cpu_mcts_agent = None
     _collector_ppo_nets = None
-    _collector_mcts_nets = None
+    _collector_combat_nets = None
     _collector_mcts_agents = None
     _use_zero_cuda = args.zero_cuda_collector and args.multi_process
     _ppo_ort_session = None  # ORT CPU session for non-combat (Branch C)
@@ -6081,9 +6081,9 @@ def main() -> int:
     if _use_zero_cuda:
         import copy
         _cpu_ppo_net = copy.deepcopy(ppo_net).cpu().eval()
-        _cpu_mcts_net = copy.deepcopy(mcts_net).cpu().eval()
+        _cpu_combat_net = copy.deepcopy(combat_net).cpu().eval()
         _cpu_mcts_agent = CombatMCTSAgent(
-            network=_cpu_mcts_net, vocab=vocab, config=mcts_config,
+            network=_cpu_combat_net, vocab=vocab, config=mcts_config,
             training=False, device=torch.device("cpu"), ppo_net=_cpu_ppo_net,
             backend=combat_mcts_backend,
             use_continuation_value=bool(args.combat_mcts_continuation_value))
@@ -6104,13 +6104,13 @@ def main() -> int:
     elif len(env_ports) > 1 and not args.multi_process:
         import copy
         _collector_ppo_nets = []
-        _collector_mcts_nets = []
+        _collector_combat_nets = []
         _collector_mcts_agents = []
         for _ in env_ports:
             _ppo_copy = copy.deepcopy(ppo_net).cpu().eval()
-            _mcts_copy = copy.deepcopy(mcts_net).cpu().eval()
+            _mcts_copy = copy.deepcopy(combat_net).cpu().eval()
             _collector_ppo_nets.append(_ppo_copy)
-            _collector_mcts_nets.append(_mcts_copy)
+            _collector_combat_nets.append(_mcts_copy)
             _collector_mcts_agents.append(
                 CombatMCTSAgent(
                     network=_mcts_copy,
@@ -6156,7 +6156,7 @@ def main() -> int:
             "cmd": "refresh_weights",
             "iteration": int(iteration),
             "ppo_state_dict": _snapshot_state_dict_cpu(ppo_net),
-            "mcts_state_dict": _snapshot_state_dict_cpu(mcts_net),
+            "mcts_state_dict": _snapshot_state_dict_cpu(combat_net),
         }
 
         has_worker_ort = bool(mp_ppo_onnx_path or mp_combat_onnx_path)
@@ -6179,7 +6179,7 @@ def main() -> int:
                         _next_combat_onnx_path = str(output_dir / f"combat_actor_worker_iter{iteration:05d}.onnx")
                         export_from_training_snapshot(
                             ppo_net.state_dict(),
-                            mcts_net.state_dict(),
+                            combat_net.state_dict(),
                             vocab,
                             _next_combat_onnx_path,
                             export_mode="legacy",
@@ -6254,7 +6254,7 @@ def main() -> int:
             # Refresh CPU snapshots + ORT sessions every iteration (zero-CUDA mode)
             if _use_zero_cuda and _cpu_ppo_net is not None:
                 _cpu_ppo_net.load_state_dict({k: v.cpu() for k, v in ppo_net.state_dict().items()})
-                _cpu_mcts_net.load_state_dict({k: v.cpu() for k, v in mcts_net.state_dict().items()})
+                _cpu_combat_net.load_state_dict({k: v.cpu() for k, v in combat_net.state_dict().items()})
                 # Re-export PPO ORT every 25 iter (amortize ~800ms export cost)
                 if _ppo_ort_session is not None and iteration % 25 == 0 and iteration > 0:
                     try:
@@ -6262,12 +6262,12 @@ def main() -> int:
                         _ppo_ort_session = ort.InferenceSession(_ppo_onnx_path, _ppo_ort_opts, providers=["CPUExecutionProvider"])
                     except Exception:
                         pass
-            elif _collector_ppo_nets is not None and _collector_mcts_nets is not None:
+            elif _collector_ppo_nets is not None and _collector_combat_nets is not None:
                 _ppo_sd = {k: v.cpu() for k, v in ppo_net.state_dict().items()}
-                _mcts_sd = {k: v.cpu() for k, v in mcts_net.state_dict().items()}
+                _mcts_sd = {k: v.cpu() for k, v in combat_net.state_dict().items()}
                 for _ppo_copy in _collector_ppo_nets:
                     _ppo_copy.load_state_dict(_ppo_sd)
-                for _mcts_copy in _collector_mcts_nets:
+                for _mcts_copy in _collector_combat_nets:
                     _mcts_copy.load_state_dict(_mcts_sd)
 
                 # Export fresh combat ONNX and hot-reload into C# sims
@@ -6279,7 +6279,7 @@ def main() -> int:
                     _onnx_path = str(output_dir / f"actor_v{iteration:05d}.onnx")
                     try:
                         _export_ms = export_from_training_snapshot(
-                            ppo_net.state_dict(), mcts_net.state_dict(), vocab, _onnx_path,
+                            ppo_net.state_dict(), combat_net.state_dict(), vocab, _onnx_path,
                             policy_version=iteration)
                         for _port, _pipe in pipe_clients.items():
                             _pipe.call("load_ort_model", {"path": os.path.abspath(_onnx_path)})
@@ -6308,7 +6308,7 @@ def main() -> int:
                 else:
                     logger.info("Pure PPO mode: combat NN selects actions directly (no search)")
             ppo_net.eval()
-            mcts_net.eval()
+            combat_net.eval()
             ppo_buffer = StructuredRolloutBuffer()
             combat_buffer = CombatRolloutBuffer()
             _ep_counter = 0
@@ -6601,7 +6601,7 @@ def main() -> int:
                 vec_clients = [env_clients[p] for p in env_ports]
                 vec_ppo, vec_combat, vec_stats = collect_vectorized_episodes(
                     ppo_net=ppo_net,
-                    combat_net=mcts_net,
+                    combat_net=combat_net,
                     vocab=vocab,
                     clients=vec_clients,
                     character_id=args.character_id,
@@ -6759,16 +6759,16 @@ def main() -> int:
                 and len(mcts_replay) >= args.mcts_batch_size
                 and new_mcts > 0
             ):
-                mcts_net.train()
+                combat_net.train()
                 for _ in range(args.mcts_train_steps):
                     batch = mcts_replay.sample(args.mcts_batch_size)
-                    mcts_metrics = mcts_train_step(mcts_net, mcts_optimizer, batch,
+                    mcts_metrics = mcts_train_step(combat_net, mcts_optimizer, batch,
                                                        device=device, use_amp=use_amp)
 
             # --- Train Combat PPO ---
             combat_ppo_metrics = {"combat_ppo_ploss": 0, "combat_ppo_vloss": 0, "combat_entropy": 0}
             if len(combat_buffer) >= 32 and not getattr(args, "freeze_combat", False):
-                mcts_net.train()
+                combat_net.train()
                 combat_ppo_metrics = combat_ppo_trainer.update(combat_buffer)
                 combat_buffer.clear()
             elif len(combat_buffer) >= 32:
@@ -6828,7 +6828,7 @@ def main() -> int:
                     _regret_weighted_pairwise_ranking,
                     _stack_batch as _ct_stack_batch,
                 )
-                mcts_net.train()
+                combat_net.train()
                 ct_updates = max(1, int(getattr(args, "combat_teacher_updates_per_iter", 1)))
                 ct_loss_history: list[float] = []
                 ct_ce_history: list[float] = []
@@ -6845,7 +6845,7 @@ def main() -> int:
                     ct_raw_batch = [combat_teacher_dataset[i] for i in ct_indices]
                     ct_batch = _ct_stack_batch(ct_raw_batch, device)
 
-                    ct_logits, _ct_value, ct_action_scores, ct_continuation = mcts_net.forward_teacher(
+                    ct_logits, _ct_value, ct_action_scores, ct_continuation = combat_net.forward_teacher(
                         ct_batch["state_features"], ct_batch["action_features"])
                     ct_action_mask = ct_batch["action_features"]["action_mask"]
                     ct_masked_scores = ct_action_scores.masked_fill(~ct_action_mask, -1e9)
@@ -6878,7 +6878,7 @@ def main() -> int:
                     )
                     combat_ppo_trainer.optimizer.zero_grad()
                     ct_total.backward()
-                    torch.nn.utils.clip_grad_norm_(mcts_net.parameters(), 1.0)
+                    torch.nn.utils.clip_grad_norm_(combat_net.parameters(), 1.0)
                     combat_ppo_trainer.optimizer.step()
 
                     ct_loss_history.append(ct_total.item())
@@ -7008,33 +7008,33 @@ def main() -> int:
                 entry["offline_ranking_state_context_gate"] = round(
                     float(ppo_net.offline_ranking_state_context_gate.detach().item()), 6
                 )
-            if hasattr(mcts_net, "main_action_context_gate"):
+            if hasattr(combat_net, "main_action_context_gate"):
                 entry["combat_main_action_context_gate"] = round(
-                    float(mcts_net.main_action_context_gate.detach().item()), 6
+                    float(combat_net.main_action_context_gate.detach().item()), 6
                 )
-            if hasattr(mcts_net, "action_aux_gate"):
+            if hasattr(combat_net, "action_aux_gate"):
                 entry["combat_action_aux_gate"] = round(
-                    float(mcts_net.action_aux_gate.detach().item()), 6
+                    float(combat_net.action_aux_gate.detach().item()), 6
                 )
-            if hasattr(mcts_net, "action_family_gate"):
+            if hasattr(combat_net, "action_family_gate"):
                 entry["combat_action_family_gate"] = round(
-                    float(mcts_net.action_family_gate.detach().item()), 6
+                    float(combat_net.action_family_gate.detach().item()), 6
                 )
-            if hasattr(mcts_net, "stop_continue_gate"):
+            if hasattr(combat_net, "stop_continue_gate"):
                 entry["combat_stop_continue_gate"] = round(
-                    float(mcts_net.stop_continue_gate.detach().item()), 6
+                    float(combat_net.stop_continue_gate.detach().item()), 6
                 )
-            if hasattr(mcts_net, "resource_gate"):
+            if hasattr(combat_net, "resource_gate"):
                 entry["combat_resource_gate"] = round(
-                    float(mcts_net.resource_gate.detach().item()), 6
+                    float(combat_net.resource_gate.detach().item()), 6
                 )
-            if hasattr(mcts_net, "main_state_context_gate"):
+            if hasattr(combat_net, "main_state_context_gate"):
                 entry["combat_main_state_context_gate"] = round(
-                    float(mcts_net.main_state_context_gate.detach().item()), 6
+                    float(combat_net.main_state_context_gate.detach().item()), 6
                 )
-            if hasattr(mcts_net, "teacher_action_context_gate"):
+            if hasattr(combat_net, "teacher_action_context_gate"):
                 entry["combat_teacher_action_context_gate"] = round(
-                    float(mcts_net.teacher_action_context_gate.detach().item()), 6
+                    float(combat_net.teacher_action_context_gate.detach().item()), 6
                 )
             metrics_history.append(entry)
             if metrics_log is not None:
@@ -7180,7 +7180,7 @@ def main() -> int:
             if iteration % args.save_interval == 0:
                 torch.save(make_hybrid_checkpoint_payload(
                     ppo_model=ppo_net.state_dict(),
-                    combat_model=mcts_net.state_dict(),
+                    combat_model=combat_net.state_dict(),
                     iteration=iteration,
                     ppo_config={
                         "embed_dim": args.embed_dim,
@@ -7197,7 +7197,7 @@ def main() -> int:
         logger.error("Crash: %s\n%s", e, traceback.format_exc())
         torch.save(make_hybrid_checkpoint_payload(
             ppo_model=ppo_net.state_dict(),
-            combat_model=mcts_net.state_dict(),
+            combat_model=combat_net.state_dict(),
             crash=str(e),
             ppo_config={
                 "embed_dim": args.embed_dim,
@@ -7250,7 +7250,7 @@ def main() -> int:
     # because the current defaults are embed_dim=48 / hidden_dim=192.
     torch.save(make_hybrid_checkpoint_payload(
         ppo_model=ppo_net.state_dict(),
-        combat_model=mcts_net.state_dict(),
+        combat_model=combat_net.state_dict(),
         iteration=end_iter - 1,
         ppo_config={
             "embed_dim": args.embed_dim,
