@@ -24,42 +24,69 @@
 
 ```
 STS2AI/Python/
-├── network/                     ← 【核心】网络架构（打开就看 AI 大脑）
-│   ├── combat_network.py         战斗 Policy+Value 网络 + 11个Gate
-│   ├── fullrun_policy.py         全局策略网络 + PPO Trainer
-│   └── shared_encoders.py        共享 NN 模块 (EntityEmbeddings, SetEncoder...)
 │
-├── core/                        ← 特征工程 + 基础工具
-│   ├── combat_features.py        战斗状态/动作特征构建
-│   ├── state_features.py         全局状态特征构建 + StructuredState
-│   ├── rl_reward_shaping.py      奖励塑形
-│   ├── symbolic_features_head.py 符号特征 (sqlite-backed cross-attention)
-│   ├── vocab.py                  词表管理
-│   └── card_tags.py / relic_tags.py / card_base_stats.py  实体元数据
+├── network/                      ← 【核心】网络架构 + 特征工程
+│   ├── combat_network.py          战斗策略-价值网络 (CombatPolicyValueNetwork)
+│   ├── fullrun_policy.py          全局策略网络 (FullRunPolicyNetworkV2 + PPOTrainer)
+│   ├── shared_encoders.py         共享 NN 模块 (EntityEmbeddings, SetEncoder, BilinearActionScorer)
+│   ├── combat_features.py         战斗状态/动作特征构建
+│   └── state_features.py          全局状态特征构建 (StructuredState, build_structured_state)
 │
-├── training/                    ← 训练/评估基础设施
-│   ├── combat_ppo.py             战斗 PPO buffer + trainer + MCTS train
-│   ├── combat_diagnostics.py     战斗诊断/trace/中文日志
-│   ├── game_decisions.py         地图路线/卡牌奖励/商店决策逻辑
-│   ├── eval_action_selection.py  推理动作选择策略
-│   ├── eval_game_state.py        游戏状态追踪/循环检测
-│   ├── combat_safety.py          战斗安全遮罩 (R1+R2 规则)
-│   ├── episode_data_saver.py     高质量轨迹存储
-│   ├── training_health.py        训练异常检测
-│   └── ...                       segment buffer, vectorized collector 等
+├── env/                          ← 游戏环境接口
+│   ├── full_run_env.py            HTTP/Pipe 两种后端的统一客户端
+│   ├── full_run_backend.py        后端适配层（屏蔽 HTTP/Pipe 差异）
+│   ├── binary_pipe_client.py      二进制管道通信（高性能）
+│   ├── pipe_client.py             JSON 管道通信（调试用）
+│   ├── headless_sim_runner.py     无头模拟器进程管理
+│   ├── sim_host_lifecycle.py      多进程环境的进程池和端口分配
+│   ├── inference_server.py        GPU 批量推理服务器
+│   ├── action_semantics.py        动作语义和自动推进规则
+│   └── ...                        combat_training_env, sts2_singleplayer_env 等
 │
-├── data/skada/                  ← 数据采集/清洗/模型
-├── tools/                       ← 非主线脚本（审计/导出/demo 工具）
-├── configs/                     ← 训练配置 TOML
-├── search/                      ← MCTS / turn solver / teacher builder
-├── diagnostics/                 ← 一致性审计脚本
+├── training/                     ← 训练/评估基础设施
+│   ├── combat_ppo.py              战斗 PPO buffer + trainer + mcts_train_step
+│   ├── combat_diagnostics.py      战斗诊断/trace/中文日志
+│   ├── game_decisions.py          地图路线/卡牌奖励/商店决策逻辑
+│   ├── eval_action_selection.py   推理动作选择（NN/Teacher/MCTS 路由）
+│   ├── eval_game_state.py         游戏状态追踪/循环检测/自动推进
+│   ├── combat_safety.py           战斗安全遮罩 (R1+R2 规则)
+│   ├── training_health.py         训练异常检测（loss 爆炸、KL 过大等）
+│   └── ...                        episode_data_saver, segment_collector, vectorized_collector 等
 │
-├── train_hybrid.py              ← 【主入口】统一训练循环
-├── evaluate_ai.py               ← 【主入口】评估/benchmark
-└── test_training_smoke.py       ← 回归测试
+├── core/                         ← 基础工具
+│   ├── vocab.py                   词表管理（卡牌/遗物/药水/怪物 ID ↔ 索引）
+│   ├── rl_reward_shaping.py       奖励塑形（PBRS + 里程碑 + 战斗局部奖励）
+│   ├── symbolic_features_head.py  符号特征头（sqlite cross-attention 零样本先验）
+│   ├── card_tags.py               卡牌 32 维功能标签
+│   ├── card_base_stats.py         卡牌伤害/格挡查找表
+│   └── ...                        relic_tags, checkpoint_compat, full_run_agent 等
+│
+├── search/                       ← MCTS / 求解器 / Teacher
+│   ├── mcts_core.py               蒙特卡洛树搜索核心
+│   ├── combat_mcts_agent.py       战斗 MCTS 代理
+│   ├── combat_turn_solver.py      回合穷举求解器
+│   ├── train_combat_teacher.py    离线 Teacher 训练
+│   └── ...                        turn_solver_planner, counterfactual_scoring 等
+│
+├── data/                         ← 数据
+│   ├── vocab.json / card_tags.json / relic_tags.json  词表和标签数据
+│   ├── skada/                     人类玩家数据采集/清洗/模型
+│   └── ...                        source_knowledge, derived 等
+│
+├── configs/                      ← 训练配置 TOML
+├── diagnostics/                  ← 分析和审计脚本
+├── tools/                        ← 非主线工具（ONNX 导出、审计、演示等）
+├── archive/                      ← 归档的旧实验代码
+│
+├── train_hybrid.py               ← 【主入口】统一训练循环
+├── evaluate_ai.py                ← 【主入口】评估/benchmark
+├── demo_play.py                  ← 【主入口】实时可视化演示
+├── train_combat_only.py          ← 战斗专项训练
+├── test_training_smoke.py        ← 回归测试（185 tests）
+└── constants.py                  ← 全局路径常量
 ```
 
-**规范：根目录只放主入口脚本和测试，所有新代码按职责放入对应子目录。**
+**规范：根目录只放主入口脚本和测试。所有新代码按职责放入对应子目录，不要在根目录写脚本。**
 
 ## 前置准备
 所有环境、ai相关代码都在STS2AI里。
