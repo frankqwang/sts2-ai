@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from core.combat_nn import CombatPolicyValueNetwork
+from network.combat_network import CombatPolicyValueNetwork
 
 logger = logging.getLogger(__name__)
 

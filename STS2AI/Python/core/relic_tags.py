@@ -9,7 +9,7 @@ Scans each relic's .cs file to extract functional tags based on:
 Usage:
     python relic_tags.py --repo-root /path/to/sts2
 
-    from relic_tags import load_relic_tags, RELIC_FUNCTIONAL_TAGS
+    from core.relic_tags import load_relic_tags, RELIC_FUNCTIONAL_TAGS
     tags = load_relic_tags()
     tags["bag_of_preparation"]  # ["draw", "combat_start", "common"]
 """
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from vocab import _slugify
+from core.vocab import _slugify
 
 # ---------------------------------------------------------------------------
 # Relic tag vocabulary

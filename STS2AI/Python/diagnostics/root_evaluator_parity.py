@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from combat_nn import (
+from network.combat_network import (
     CombatPolicyValueNetwork,
     build_combat_action_features,
     build_combat_features,
@@ -35,10 +35,10 @@ from evaluate_ai import (
 )
 from ipc.full_run_env import PipeBackedFullRunClient, create_full_run_client
 from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
-from rl_policy_v2 import FullRunPolicyNetworkV2
+from network.fullrun_policy import FullRunPolicyNetworkV2
 from verify_save_load import COMBAT_TYPES, drive_to_state
-from vocab import load_vocab
-from checkpoint_compat import get_combat_model_config, get_combat_model_state
+from core.vocab import load_vocab
+from core.checkpoint_compat import get_combat_model_config, get_combat_model_state
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -136,7 +136,7 @@ def _compute_python_eval(
     af = build_combat_action_features(state, legal_actions, vocab)
 
     try:
-        from rl_encoder_v2 import build_structured_state
+        from network.state_features import build_structured_state
 
         ss = build_structured_state(state, vocab)
         deck_t = {

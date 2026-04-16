@@ -31,7 +31,7 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(python_root))
 
 import _path_init  # noqa: F401  (adds STS2AI/Python library dirs to sys.path)
-from checkpoint_compat import get_combat_model_state
+from core.checkpoint_compat import get_combat_model_state
 
 import argparse
 from collections import Counter
@@ -51,7 +51,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from full_run_env import FullRunClientLike, create_full_run_client
+from ipc.full_run_env import FullRunClientLike, create_full_run_client
 from test_simulator_consistency import COMBAT_TYPES
 from verify_save_load import choose_default_action
 from backends.full_run_backend import apply_backend_action
@@ -65,9 +65,9 @@ from runtime.full_run_action_semantics import (
     next_reward_claim_signature,
 )
 from runtime.run_outcome_vocab import RUN_OUTCOME_DEATH, RUN_OUTCOME_TIMEOUT, RUN_OUTCOME_VICTORY, is_failure_outcome, normalize_run_outcome
-from card_reward_tree import RewardTreeConfig, evaluate_card_reward_tree
-from map_route_tree import MapRouteConfig, evaluate_map_route_tree
-from noncombat_deterministic import (
+from search.card_reward_tree import RewardTreeConfig, evaluate_card_reward_tree
+from search.map_route_tree import MapRouteConfig, evaluate_map_route_tree
+from search.noncombat_deterministic import (
     choose_deterministic_card_select_action,
     choose_deterministic_rest_action,
     choose_deterministic_shop_action,
@@ -76,7 +76,7 @@ from data.raw.branch_schema import make_raw_branch_rollout_record
 from data.raw.raw_dataset_writer import write_raw_branch_exports
 from data.derived.build_rl_views import build_ranking_view
 from data.derived.build_llm_views import build_preference_pair_view
-from sts2ai_paths import ARTIFACTS_ROOT
+from constants import ARTIFACTS_ROOT
 
 
 def _peek_config_path(argv: list[str]) -> str | None:
@@ -1055,8 +1055,8 @@ def _encode_option_tensors(
     if not option_actions:
         return None
     try:
-        from rl_encoder_v2 import build_structured_actions, build_structured_state
-        from vocab import load_vocab as _load_vocab
+        from network.state_features import build_structured_actions, build_structured_state
+        from core.vocab import load_vocab as _load_vocab
 
         vocab = _load_vocab()
         ss = build_structured_state(state, vocab)
@@ -2464,9 +2464,9 @@ def _load_combat_evaluator(
         return None
     try:
         import torch
-        from vocab import load_vocab
-        from combat_nn import CombatPolicyValueNetwork, CombatNNEvaluator
-        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from core.vocab import load_vocab
+        from network.combat_network import CombatPolicyValueNetwork, CombatNNEvaluator
+        from network.fullrun_policy import FullRunPolicyNetworkV2
 
         vocab = load_vocab()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -2526,8 +2526,8 @@ def _load_ppo_rollout_policy(checkpoint_path: str | None) -> Any | None:
         return None
     try:
         import torch
-        from vocab import load_vocab
-        from rl_policy_v2 import FullRunPolicyNetworkV2, RLFullRunPolicyV2
+        from core.vocab import load_vocab
+        from network.fullrun_policy import FullRunPolicyNetworkV2, RLFullRunPolicyV2
 
         vocab = load_vocab()
         ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -2565,7 +2565,7 @@ def _prepare_local_ort_rollout_model(
     try:
         import torch
         from tools.export_actor_onnx import export_from_training_snapshot
-        from vocab import load_vocab
+        from core.vocab import load_vocab
 
         hybrid_ckpt = {}
         if checkpoint_path:

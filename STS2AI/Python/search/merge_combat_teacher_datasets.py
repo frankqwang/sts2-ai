@@ -22,7 +22,7 @@ import json
 from collections import Counter
 from dataclasses import replace
 
-from combat_teacher_dataset import (
+from search.combat_teacher_dataset import (
     CombatTeacherSample,
     dedupe_samples_by_id,
     load_combat_teacher_samples,

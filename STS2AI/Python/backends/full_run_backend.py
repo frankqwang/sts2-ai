@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from full_run_env import ApiBackedFullRunClient, FullRunClientLike
-from sts2_singleplayer_env import SingleplayerApiError
+from ipc.full_run_env import ApiBackedFullRunClient, FullRunClientLike
+from ipc.sts2_singleplayer_env import SingleplayerApiError
 
 
 def is_wait_action(action: dict[str, Any] | None) -> bool:

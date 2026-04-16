@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from pipe_client import (
+from ipc.pipe_client import (
     FILE_FLAG_OVERLAPPED,
     GENERIC_READ,
     GENERIC_WRITE,
@@ -17,7 +17,7 @@ from pipe_client import (
     PipeClient,
     _kernel32,
 )
-from simulator_api_error import SimulatorApiError
+from ipc.simulator_api_error import SimulatorApiError
 
 
 STATUS_OK = 0

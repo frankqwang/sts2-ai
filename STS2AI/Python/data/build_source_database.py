@@ -33,8 +33,8 @@ from typing import Any
 # 2026-04-08 (wizardly cleanup): card_tags / vocab moved into core/.
 # `import _path_init` above puts core/ on sys.path so the flat imports below
 # still resolve.
-from card_tags import extract_tags_from_card
-from vocab import _extract_card_props, _slugify
+from core.card_tags import extract_tags_from_card
+from core.vocab import _extract_card_props, _slugify
 
 
 def _read_text(path: Path) -> str:

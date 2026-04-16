@@ -38,27 +38,27 @@ from typing import Any
 
 import torch
 
-from combat_teacher_common import (
+from search.combat_teacher_common import (
     canonical_public_state_hash,
     is_supported_solver_state,
     load_baseline_combat_policy,
     sanitize_action,
     stable_sample_id,
 )
-from combat_teacher_dataset import (
+from search.combat_teacher_dataset import (
     CombatTeacherSample,
     dedupe_samples_by_id,
     write_combat_teacher_samples,
 )
-from combat_turn_solver import CombatTurnSolver
-from combat_turn_teacher_config import load_combat_turn_teacher_config
-from full_run_env import create_full_run_client
-from headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
-from sts2ai_paths import MAINLINE_CHECKPOINT
-from vocab import load_vocab
+from search.combat_turn_solver import CombatTurnSolver
+from search.combat_turn_teacher_config import load_combat_turn_teacher_config
+from ipc.full_run_env import create_full_run_client
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
+from constants import MAINLINE_CHECKPOINT
+from core.vocab import load_vocab
 
 # Re-use helpers from the live builder so the sample shape stays identical.
-from build_act1_combat_teacher_v2_dataset import (
+from search.build_act1_combat_teacher_v2_dataset import (
     _build_samples,
     _enabled_legal_actions,
     _sampling_reasons,

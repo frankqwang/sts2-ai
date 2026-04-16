@@ -19,7 +19,7 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-from combat_teacher_dataset import dedupe_samples_by_id, load_combat_teacher_samples, write_combat_teacher_samples
+from search.combat_teacher_dataset import dedupe_samples_by_id, load_combat_teacher_samples, write_combat_teacher_samples
 from search.build_act1_combat_teacher_v2_dataset import _load_seeds, _take_balanced_samples
 
 

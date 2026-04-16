@@ -17,7 +17,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from sts2ai_paths import ARTIFACTS_ROOT, REPO_ROOT
+from constants import ARTIFACTS_ROOT, REPO_ROOT
 from sim_semantic_audit_common import (
     DEFAULT_GODOT_EXE,
     DEFAULT_HEADLESS_DLL,

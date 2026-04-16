@@ -21,22 +21,22 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from combat_nn import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
-from rl_encoder_v2 import (
+from network.combat_network import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
+from network.state_features import (
     COMBAT_SCREENS,
     build_structured_actions,
     build_structured_state,
 )
-from rl_policy_v2 import (
+from network.fullrun_policy import (
     _structured_state_to_numpy_dict,
     _structured_actions_to_numpy_dict,
 )
-from rl_reward_shaping import (
+from core.rl_reward_shaping import (
     fight_summary,
     screen_local_delta_reward,
     shaped_reward,
 )
-from vocab import Vocab
+from core.vocab import Vocab
 
 logger = logging.getLogger(__name__)
 

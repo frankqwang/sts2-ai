@@ -14,19 +14,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from combat_nn import _get_power_amount
-from rl_encoder_v2 import (
-    CARD_AUX_DIM,
-    ENEMY_AUX_DIM,
-    Vocab,
-    _cached_card_encoding,
-    _cached_monster_idx,
-    _enemy_aux_features,
-    _extract_player,
-    _safe_float,
-    _safe_int,
-    load_vocab,
-)
+from network.combat_network import _get_power_amount
+from network.shared_encoders import Vocab, load_vocab
+from network.state_features import CARD_AUX_DIM, ENEMY_AUX_DIM, _cached_card_encoding, _cached_monster_idx, _enemy_aux_features, _extract_player, _safe_float, _safe_int
 
 LEAF_DATASET_SCHEMA_VERSION = 2
 LEAF_SCORE_V1_COEFFICIENTS = {

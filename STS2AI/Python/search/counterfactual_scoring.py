@@ -352,7 +352,7 @@ def _learned_card_scores(
         return None
 
     try:
-        from rl_encoder_v2 import build_structured_state, MAX_DECK_SIZE, CARD_AUX_DIM
+        from network.state_features import build_structured_state, MAX_DECK_SIZE, CARD_AUX_DIM
 
         # Build base state encoding
         ss = build_structured_state(state, _ppo_vocab)
@@ -481,7 +481,7 @@ def _matchup_card_scores(
     if _ppo_network is None or _ppo_vocab is None:
         return None
     try:
-        from rl_encoder_v2 import encode_structured_state, encode_structured_actions
+        from network.shared_encoders import encode_structured_state, encode_structured_actions
         state_tensors = encode_structured_state(state, _ppo_vocab)
         action_tensors = encode_structured_actions(state, legal_actions, _ppo_vocab)
         import torch
@@ -892,7 +892,7 @@ def compute_counterfactual_reward(
 
     Returns: (reward, teacher_logits_padded_to_MAX_ACTIONS_or_None)
     """
-    from rl_encoder_v2 import MAX_ACTIONS
+    from network.state_features import MAX_ACTIONS
 
     scores = get_counterfactual_scores(screen_type, state, legal_actions)
     if scores is None:

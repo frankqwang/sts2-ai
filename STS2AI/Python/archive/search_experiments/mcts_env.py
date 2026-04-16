@@ -20,7 +20,7 @@ from typing import Any
 try:
     from .simulator_api_error import SimulatorApiError
 except ImportError:
-    from simulator_api_error import SimulatorApiError
+    from ipc.simulator_api_error import SimulatorApiError
 
 
 class MctsEnv:

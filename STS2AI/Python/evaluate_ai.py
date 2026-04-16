@@ -40,16 +40,16 @@ from typing import Any
 import numpy as np
 import torch
 
-from vocab import load_vocab, Vocab
-from full_run_env import PipeBackedFullRunClient, ApiBackedFullRunClient, create_full_run_client
-from combat_nn import (
+from core.vocab import load_vocab, Vocab
+from ipc.full_run_env import PipeBackedFullRunClient, ApiBackedFullRunClient, create_full_run_client
+from network.combat_network import (
     CombatPolicyValueNetwork,
     build_combat_features,
     build_combat_action_features,
     MAX_ACTIONS,
 )
-from rl_policy_v2 import FullRunPolicyNetworkV2
-from checkpoint_compat import get_combat_model_config, get_combat_model_state
+from network.fullrun_policy import FullRunPolicyNetworkV2
+from core.checkpoint_compat import get_combat_model_config, get_combat_model_state
 
 from training.eval_game_state import (
     RepeatLoopTracker, _choose_auto_progress_action, _choose_claimable_reward_action, _combat_loop_progress_signature, _compute_delta, _extract_progress, _is_selection_screen, _legal_action_name_set, _loop_progress_signature, _next_reward_claim_signature, _reward_claim_signature, _reward_item_claimable,
@@ -57,17 +57,17 @@ from training.eval_game_state import (
 from training.eval_action_selection import (
     CombatMctsTacticalBlendEvaluator, CombatMctsTrace, CombatTeacherOverride, _build_combat_tensors, _build_ppo_tensors, _probe_direct_lethal_indices, _select_action_combat_teacher, _select_action_combat_teacher_rerank, _select_action_heuristic, _select_action_nn, _select_action_random,
 )
-from rl_encoder_v2 import (
+from network.state_features import (
     build_structured_state,
     build_structured_actions,
     _compute_route_features,
     _extract_map_paths,
 )
-from rl_policy_v2 import (
+from network.fullrun_policy import (
     _structured_state_to_numpy_dict,
     _structured_actions_to_numpy_dict,
 )
-from rl_reward_shaping import (
+from core.rl_reward_shaping import (
     boss_readiness_score,
     compute_problem_vector,
     extract_next_boss_token,
@@ -78,25 +78,25 @@ from training.combat_safety import compute_combat_unsafe_mask, rerank_combat_log
 # Combat hard-safety mask feature flag — kept in sync with train_hybrid.py's
 # `_COMBAT_UNSAFE_MASK_ENABLED`. See that module for the status note.
 _COMBAT_UNSAFE_MASK_ENABLED = False
-from combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
-from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
-from mcts_core import MCTSConfig
+from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from search.mcts_core import MCTSConfig
 from data.raw.raw_dataset_writer import write_raw_full_run_exports
 from data.derived.build_rl_views import build_transition_view
 from data.derived.build_llm_views import build_sft_dialogue_view
-from sts2_singleplayer_env import (
+from ipc.sts2_singleplayer_env import (
     adapt_v1_state_for_combat_policy,
 )
 from archive.combat_actions import normalize_action
 from archive.combat_bc import BehaviorCloningLinearPolicy
-from combat_teacher_common import BODY_SLAM_TOKENS, _card_for_action, _card_slug, detect_motif_labels
-from card_tags import load_card_tags
+from search.combat_teacher_common import BODY_SLAM_TOKENS, _card_for_action, _card_slug, detect_motif_labels
+from core.card_tags import load_card_tags
 from search.noncombat_deterministic import (
     choose_deterministic_card_select_action,
     choose_deterministic_rest_action,
     choose_deterministic_shop_action,
 )
-from sts2ai_paths import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT, SEEDS_ROOT
+from constants import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT, SEEDS_ROOT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -2981,7 +2981,7 @@ def main() -> int:
         # teacher head was trained but never consulted at deploy, so all teacher
         # loss impact on inference was indirect (via shared encoder only).
         try:
-            from full_run_agent import load_agent_config as _lac
+            from core.full_run_agent import load_agent_config as _lac
             _ag_cfg = _lac(getattr(args, "inference_config", "") or "")
             if _ag_cfg.combat_teacher_rerank:
                 combat_net.teacher_rerank_weight = float(_ag_cfg.combat_teacher_rerank_weight)
@@ -3074,7 +3074,7 @@ def main() -> int:
     # Create turn planner if requested
     _turn_planner = None
     if getattr(args, "combat_turn_planner", False) and combat_net is not None:
-        from combat_turn_planner import (
+        from search.combat_turn_planner import (
             TurnPlanner, PolicyBeamCandidateGenerator, RolloutCombatEvaluator, BeamConfig,
         )
         beam_cfg = BeamConfig(
@@ -3102,7 +3102,7 @@ def main() -> int:
             _fallback_planner = None
             fb_name = getattr(args, "combat_boss_expert_fallback_search", "") or ""
             if fb_name:
-                from turn_solver_planner import build_turn_solver_planner
+                from search.turn_solver_planner import build_turn_solver_planner
                 if fb_name == "frac_leaf":
                     # Fraction leaf, no abs HP, no whitelist — runs on all bosses
                     _fallback_planner = build_turn_solver_planner(
@@ -3189,7 +3189,7 @@ def main() -> int:
                 _turn_planner.is_v2,
             )
     elif getattr(args, "combat_turn_solver", False) and combat_net is not None:
-        from turn_solver_planner import build_turn_solver_planner
+        from search.turn_solver_planner import build_turn_solver_planner
         _whitelist_raw = getattr(args, "turn_solver_boss_token_whitelist", "") or ""
         _whitelist = [t.strip() for t in _whitelist_raw.split(",") if t.strip()] if _whitelist_raw else None
         _turn_planner = build_turn_solver_planner(
@@ -3218,7 +3218,7 @@ def main() -> int:
             _whitelist or "(none)",
         )
     elif getattr(args, "multi_turn_solver", False) and combat_net is not None:
-        from multi_turn_solver_planner import build_multi_turn_solver_planner
+        from search.multi_turn_solver_planner import build_multi_turn_solver_planner
         _turn_planner = build_multi_turn_solver_planner(
             combat_net=combat_net,
             vocab=vocab,

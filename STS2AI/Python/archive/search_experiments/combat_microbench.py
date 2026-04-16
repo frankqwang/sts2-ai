@@ -9,19 +9,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from combat_teacher_common import (
+from search.combat_teacher_common import (
     COMBAT_MICROBENCH_SCHEMA_VERSION,
     BaselineCombatPolicy,
     load_baseline_combat_policy,
 )
-from combat_teacher_dataset import (
+from search.combat_teacher_dataset import (
     CombatTeacherSample,
     STRICT_MOTIF_REGRET_MARGIN,
     dedupe_samples_by_id,
     load_combat_teacher_samples,
     sample_metric_applicable,
 )
-from checkpoint_compat import get_combat_model_state
+from core.checkpoint_compat import get_combat_model_state
 
 
 class SamplePolicy(Protocol):
@@ -50,7 +50,7 @@ class TeacherSamplePolicy:
     name: str = "teacher"
 
     def choose_action_index(self, sample: CombatTeacherSample) -> int:
-        from combat_nn import build_combat_action_features, build_combat_features
+        from network.combat_network import build_combat_action_features, build_combat_features
         import numpy as np
         import torch
 
@@ -102,8 +102,8 @@ def _load_teacher_policy(
 ) -> TeacherSamplePolicy:
     import torch
 
-    from combat_nn import CombatPolicyValueNetwork
-    from vocab import load_vocab
+    from network.combat_network import CombatPolicyValueNetwork
+    from core.vocab import load_vocab
 
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     model_state = get_combat_model_state(checkpoint, allow_standalone=True)

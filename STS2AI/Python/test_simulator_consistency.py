@@ -15,8 +15,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
-from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from ipc.full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 
 
 DEFAULT_PORT = 15527

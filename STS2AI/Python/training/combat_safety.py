@@ -200,7 +200,7 @@ def _estimate_damage_for_action(state: dict[str, Any], action: dict[str, Any]) -
     # Path 3: derive from card_base_stats + live state modifiers. This is the
     # main working path in STS2 since the sim doesn't expose damage fields.
     try:
-        from card_base_stats import total_damage_vs_target, base_damage as _base_damage
+        from core.card_base_stats import total_damage_vs_target, base_damage as _base_damage
     except Exception:
         _base_damage = None
         total_damage_vs_target = None

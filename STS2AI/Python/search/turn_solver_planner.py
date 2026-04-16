@@ -2,7 +2,7 @@
 `evaluate_ai.py`'s `_select_action_nn` hook.
 
 Usage in `evaluate_ai.py`:
-    from turn_solver_planner import build_turn_solver_planner
+    from search.turn_solver_planner import build_turn_solver_planner
     planner = build_turn_solver_planner(combat_net=combat_net,
                                         vocab=vocab, device=device,
                                         mode="boss",
@@ -29,21 +29,21 @@ from typing import Any
 
 import torch
 
-from boss_leaf_evaluator import load_boss_leaf_evaluator_runtime
-from combat_nn import CombatPolicyValueNetwork
-from combat_teacher_common import (
+from search.boss_leaf_evaluator import load_boss_leaf_evaluator_runtime
+from network.combat_network import CombatPolicyValueNetwork
+from search.combat_teacher_common import (
     BaselineCombatPolicy,
     combine_leaf_breakdown,
     sanitize_action,
 )
-from combat_turn_solver import (
+from search.combat_turn_solver import (
     CombatTurnSolver,
     CombatTurnSolution,
     SolverLineResult,
     _is_terminal_combat_leaf,
     _zero_components,
 )
-from rl_encoder_v2 import Vocab
+from network.shared_encoders import Vocab
 
 logger = logging.getLogger("turn_solver_planner")
 

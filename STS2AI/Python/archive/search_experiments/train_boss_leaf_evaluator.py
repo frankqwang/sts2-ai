@@ -19,7 +19,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from boss_leaf_evaluator import (
+from search.boss_leaf_evaluator import (
     DEFAULT_LEAF_SCORE_TARGET,
     BossLeafEvaluator,
     LEAF_DATASET_SCHEMA_VERSION,
@@ -40,7 +40,7 @@ from boss_leaf_evaluator import (
     pairwise_group_accuracy,
     vocab_snapshot_checksum,
 )
-from vocab import load_vocab
+from core.vocab import load_vocab
 
 logging.basicConfig(
     level=logging.INFO,

@@ -15,9 +15,9 @@ if __package__ in {None, ""}:
     if str(python_root) not in sys.path:
         sys.path.insert(0, str(python_root))
 
-from binary_pipe_client import BinaryPipeClient
-from pipe_client import PipeClient
-from sts2ai_paths import REPO_ROOT, SIM_HOST_EXE, SIM_LEGACY_DLL
+from ipc.binary_pipe_client import BinaryPipeClient
+from ipc.pipe_client import PipeClient
+from constants import REPO_ROOT, SIM_HOST_EXE, SIM_LEGACY_DLL
 
 
 DEFAULT_REPO_ROOT = REPO_ROOT

@@ -21,8 +21,8 @@ def _encode_option_tensors(
     if not option_actions:
         return None
     try:
-        from rl_encoder_v2 import build_structured_actions, build_structured_state
-        from vocab import load_vocab as _load_vocab
+        from network.state_features import build_structured_actions, build_structured_state
+        from core.vocab import load_vocab as _load_vocab
 
         vocab = _load_vocab()
         ss = build_structured_state(state, vocab)

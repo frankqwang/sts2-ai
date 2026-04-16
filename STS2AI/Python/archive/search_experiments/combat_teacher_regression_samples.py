@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from combat_teacher_common import canonical_public_state_hash, stable_sample_id
-from combat_teacher_dataset import CombatTeacherSample, stable_split
+from search.combat_teacher_common import canonical_public_state_hash, stable_sample_id
+from search.combat_teacher_dataset import CombatTeacherSample, stable_split
 
 
 def _make_combat_state(

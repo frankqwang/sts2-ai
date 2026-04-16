@@ -20,7 +20,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from full_run_env import FullRunClientLike
+from ipc.full_run_env import FullRunClientLike
 from tools.public_state_trace import PublicStateTraceEntry as TraceEntry
 from tools.public_state_trace import build_trace_entry
 from sim_semantic_audit_common import (

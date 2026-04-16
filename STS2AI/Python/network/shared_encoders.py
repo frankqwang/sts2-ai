@@ -24,7 +24,7 @@ import torch.nn.functional as F
 from core.vocab import Vocab
 
 # Import constants and features from state_features (the canonical home)
-from core.state_features import (
+from network.state_features import (
     # Dimension constants needed by NN modules
     SCALAR_DIM, CARD_AUX_DIM, ENEMY_AUX_DIM,
     MAX_DECK_SIZE, MAX_HAND_SIZE, MAX_RELICS, MAX_POTIONS,

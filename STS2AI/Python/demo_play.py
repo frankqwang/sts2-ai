@@ -29,7 +29,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-from sts2ai_paths import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT
+from constants import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT
 
 DEFAULT_HYBRID_CHECKPOINT = MAINLINE_CHECKPOINT
 DEFAULT_COMBAT_CHECKPOINT = MAINLINE_CHECKPOINT.with_name("_no_default_combat_override.pt")
@@ -40,28 +40,28 @@ import torch
 import websockets
 import websockets.server
 
-from vocab import load_vocab
-from combat_nn import (
+from core.vocab import load_vocab
+from network.combat_network import (
     CombatPolicyValueNetwork, build_combat_features, build_combat_action_features,
 )
-from rl_policy_v2 import (
+from network.fullrun_policy import (
     FullRunPolicyNetworkV2, _structured_state_to_numpy_dict, _structured_actions_to_numpy_dict,
 )
-from rl_encoder_v2 import build_structured_state, build_structured_actions
+from network.state_features import build_structured_state, build_structured_actions
 try:
-    from rl_reward_shaping import deck_score
+    from core.rl_reward_shaping import deck_score
 except ImportError:
-    from rl_reward_shaping import problem_score as deck_score
-from rl_reward_shaping import (
+    from core.rl_reward_shaping import problem_score as deck_score
+from core.rl_reward_shaping import (
     compute_problem_vector, problem_score, survival_margin,
     economy_score, potential, boss_readiness_score, extract_next_boss_token,
 )
 from tools.nn_hooks import NNInternalsCollector, format_internals_for_broadcast
 from tools.training_monitor import TrainingMetricsMonitor
-from full_run_env import create_full_run_client
-from sts2_singleplayer_env import adapt_v1_state_for_combat_policy
+from ipc.full_run_env import create_full_run_client
+from ipc.sts2_singleplayer_env import adapt_v1_state_for_combat_policy
 from tools.demo_action_candidates import _combat_candidate_actions, _non_combat_candidate_actions
-from checkpoint_compat import get_combat_model_state
+from core.checkpoint_compat import get_combat_model_state
 
 import io
 

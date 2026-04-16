@@ -19,8 +19,8 @@ from typing import Any
 import numpy as np
 import torch
 
-from combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel, _reconcile_action
-from combat_nn import CombatNNEvaluator, CombatPolicyValueNetwork
+from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel, _reconcile_action
+from network.combat_network import CombatNNEvaluator, CombatPolicyValueNetwork
 from evaluate_ai import (
     _build_combat_tensors,
     _infer_combat_dims,
@@ -29,13 +29,13 @@ from evaluate_ai import (
     _safe_load_state_dict,
     _summarize_mcts_root,
 )
-from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from ipc.full_run_env import PipeBackedFullRunClient, create_full_run_client
-from mcts_core import MCTSConfig
-from rl_policy_v2 import FullRunPolicyNetworkV2
+from search.mcts_core import MCTSConfig
+from network.fullrun_policy import FullRunPolicyNetworkV2
 from verify_save_load import COMBAT_TYPES, drive_to_state
-from vocab import load_vocab
-from checkpoint_compat import get_combat_model_config, get_combat_model_state
+from core.vocab import load_vocab
+from core.checkpoint_compat import get_combat_model_config, get_combat_model_state
 
 
 def _load_models(checkpoint_path: Path) -> tuple[Any, FullRunPolicyNetworkV2, CombatPolicyValueNetwork]:

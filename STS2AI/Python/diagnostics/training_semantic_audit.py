@@ -21,9 +21,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from headless_sim_runner import start_headless_sim, stop_process
+from ipc.headless_sim_runner import start_headless_sim, stop_process
 from sim_semantic_audit_common import DEFAULT_GODOT_EXE, DEFAULT_HEADLESS_DLL, DEFAULT_REPO_ROOT
-from sts2ai_paths import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
+from constants import ARTIFACTS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
 
 
 DEFAULT_BASELINE_START_PORT = 15640

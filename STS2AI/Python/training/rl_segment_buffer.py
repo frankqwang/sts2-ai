@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from core.rl_encoder_v2 import MAX_ACTIONS, StructuredActions, StructuredState
+from network.state_features import MAX_ACTIONS, StructuredActions, StructuredState
 
 
 @dataclass

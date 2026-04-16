@@ -28,13 +28,13 @@ import _path_init  # noqa: F401
 
 import torch
 
-from checkpoint_compat import (
+from core.checkpoint_compat import (
     COMBAT_MODEL_KEY,
     get_combat_model_config,
     get_combat_model_state,
     make_hybrid_checkpoint_payload,
 )
-from sts2ai_paths import ARTIFACTS_ROOT
+from constants import ARTIFACTS_ROOT
 
 
 SHARED_COMBAT_KEY_PREFIXES = (

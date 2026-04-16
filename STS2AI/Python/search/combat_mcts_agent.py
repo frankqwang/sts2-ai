@@ -29,7 +29,7 @@ from search.mcts_core import (
     mcts_search,
     mcts_search_with_determinization,
 )
-from core.combat_nn import (
+from network.combat_network import (
     CombatNNEvaluator,
     CombatPolicyValueNetwork,
 )

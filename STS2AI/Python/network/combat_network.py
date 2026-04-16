@@ -44,18 +44,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from core.vocab import Vocab, load_vocab
-from network.shared_encoders import (
-    CARD_AUX_DIM,
-    ENEMY_AUX_DIM,
-    MAX_ACTIONS,
-    MAX_ENEMIES,
-    MAX_HAND_SIZE,
-    EntityEmbeddings,
-    SetEncoder,
-    BilinearActionScorer,
-    build_structured_state,
-)
-from core.combat_features import (
+from network.shared_encoders import EntityEmbeddings, SetEncoder, BilinearActionScorer
+from network.state_features import CARD_AUX_DIM, ENEMY_AUX_DIM, MAX_ACTIONS, MAX_ENEMIES, MAX_HAND_SIZE, build_structured_state
+from network.combat_features import (
     COMBAT_SCALAR_DIM,
     COMBAT_EXTRA_SCALAR_DIM,
     COMBAT_TURN_PREFIX_LEN,
@@ -953,7 +944,7 @@ class CombatNNEvaluator:
 # ---------------------------------------------------------------------------
 # Backward-compat re-exports (canonical home: core.combat_features)
 # ---------------------------------------------------------------------------
-from core.combat_features import (  # noqa: F401
+from network.combat_features import (  # noqa: F401
     COMBAT_TOTAL_SCALAR_DIM,
     _get_power_amount,
     _player_power_list,

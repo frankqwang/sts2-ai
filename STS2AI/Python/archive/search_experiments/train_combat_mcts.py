@@ -40,20 +40,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vocab import load_vocab, Vocab
-from combat_nn import (
+from core.vocab import load_vocab, Vocab
+from network.combat_network import (
     CombatPolicyValueNetwork,
     CombatNNEvaluator,
     build_combat_features,
     build_combat_action_features,
     MAX_ACTIONS,
 )
-from mcts_core import (
+from search.mcts_core import (
     MCTSConfig,
     mcts_search,
     action_key,
 )
-from combat_mcts_agent import CombatMCTSAgent, HttpCombatForwardModel, PipeCombatForwardModel
+from search.combat_mcts_agent import CombatMCTSAgent, HttpCombatForwardModel, PipeCombatForwardModel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -213,7 +213,7 @@ def collect_combat_episode_pipe(
         examples: list of TrainingExample from combat steps
         stats: dict with episode statistics
     """
-    from full_run_env import ApiBackedFullRunClient
+    from ipc.full_run_env import ApiBackedFullRunClient
 
     client = ApiBackedFullRunClient(base_url=http_base_url, poll_interval_s=0.005,
                                     request_timeout_s=90.0)
@@ -392,7 +392,7 @@ def collect_combat_episode_http(
     ascension_level: int = 0,
 ) -> tuple[list[TrainingExample], dict]:
     """Play one full run via HTTP, collecting MCTS training data from combats."""
-    from full_run_env import ApiBackedFullRunClient
+    from ipc.full_run_env import ApiBackedFullRunClient
 
     client = ApiBackedFullRunClient(base_url=base_url, poll_interval_s=0.005,
                                     request_timeout_s=90.0)
@@ -659,7 +659,7 @@ def main() -> int:
     # Connect pipes (one per env) if needed
     pipe_clients: dict[int, Any] = {}
     if args.pipe:
-        from pipe_client import PipeClient
+        from ipc.pipe_client import PipeClient
         for port in env_ports:
             pc = PipeClient(port=port)
             try:

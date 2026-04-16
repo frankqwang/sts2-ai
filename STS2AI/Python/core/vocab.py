@@ -10,7 +10,7 @@ Usage:
     python vocab.py --repo-root /path/to/sts2
 
     # In code
-    from vocab import load_vocab
+    from core.vocab import load_vocab
     v = load_vocab()
     idx = v.card_to_idx["strike_ironclad"]
 """

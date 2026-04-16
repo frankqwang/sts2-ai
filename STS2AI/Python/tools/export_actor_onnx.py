@@ -22,7 +22,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from combat_nn import (
+from network.combat_network import (
     CARD_AUX_DIM,
     COMBAT_ACTION_AUX_DIM,
     COMBAT_ROOM_TYPE_DIM,
@@ -30,9 +30,9 @@ from combat_nn import (
     build_combat_action_features,
     build_combat_features,
 )
-from symbolic_features_head import SymbolicFeaturesHead
-from vocab import Vocab, load_vocab
-from checkpoint_compat import get_combat_model_state
+from core.symbolic_features_head import SymbolicFeaturesHead
+from core.vocab import Vocab, load_vocab
+from core.checkpoint_compat import get_combat_model_state
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -502,7 +502,7 @@ def dump_real_fixtures(
     num_samples: int = 10,
 ) -> None:
     """Collect real combat states from sim and dump features + model outputs as fixtures."""
-    from full_run_env import create_full_run_client
+    from ipc.full_run_env import create_full_run_client
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)

@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from combat_teacher_common import (
+from search.combat_teacher_common import (
     COMBAT_TEACHER_SCHEMA_VERSION,
     BaselineCombatPolicy,
     canonical_public_state_hash,
@@ -22,7 +22,7 @@ from combat_teacher_common import (
     sanitize_action,
     stable_sample_id,
 )
-from combat_teacher_dataset import (
+from search.combat_teacher_dataset import (
     CombatTeacherSample,
     load_combat_teacher_samples,
     sample_metric_applicable,
@@ -30,11 +30,11 @@ from combat_teacher_dataset import (
     write_combat_teacher_samples,
 )
 from combat_teacher_regression_samples import build_regression_motif_samples
-from combat_turn_solver import CombatTurnSolver
-from full_run_env import create_full_run_client
-from rl_encoder_v2 import build_structured_actions, build_structured_state
-from rl_policy_v2 import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
-from vocab import Vocab, load_vocab
+from search.combat_turn_solver import CombatTurnSolver
+from ipc.full_run_env import create_full_run_client
+from network.state_features import build_structured_actions, build_structured_state
+from network.fullrun_policy import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
+from core.vocab import Vocab, load_vocab
 
 REAL_SOURCE_FRACTIONS: dict[str, float] = {
     "on_policy": 0.80,

@@ -74,10 +74,10 @@ from typing import Any
 
 import torch
 
-from combat_nn import CombatPolicyValueNetwork
-from combat_teacher_common import BaselineCombatPolicy
-from rl_encoder_v2 import Vocab
-from turn_solver_planner import (
+from network.combat_network import CombatPolicyValueNetwork
+from search.combat_teacher_common import BaselineCombatPolicy
+from network.shared_encoders import Vocab
+from search.turn_solver_planner import (
     _CachedTurnPlan,
     _PipeEnvAdapter,
     _action_matches_legal,

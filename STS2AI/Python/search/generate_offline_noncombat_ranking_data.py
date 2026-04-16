@@ -8,7 +8,7 @@ non-combat ranking samples rather than only card rewards.
 """
 from __future__ import annotations
 
-from generate_card_ranking_data import main
+from search.generate_card_ranking_data import main
 
 
 if __name__ == "__main__":

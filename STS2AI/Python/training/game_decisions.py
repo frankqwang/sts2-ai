@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from core.rl_encoder_v2 import _lower, _safe_float, _safe_int, _extract_player
+from network.state_features import _lower, _safe_float, _safe_int, _extract_player
 from core.rl_reward_shaping import extract_next_boss_token
 
 logger = logging.getLogger(__name__)

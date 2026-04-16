@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, str(_PYTHON_ROOT))
 from skada_db import DB_PATH
 from skada_priors import SkadaPriors
-from sts2ai_paths import ARTIFACTS_ROOT
+from constants import ARTIFACTS_ROOT
 
 
 def _slug(card_id: str | None) -> str:

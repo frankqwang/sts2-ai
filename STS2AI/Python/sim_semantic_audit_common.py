@@ -12,8 +12,8 @@ from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from sts2ai_paths import REPO_ROOT
-from headless_sim_runner import stop_process
+from constants import REPO_ROOT
+from ipc.headless_sim_runner import stop_process
 from test_simulator_consistency import (
 	BOSS_PARITY_SEEDS,
 	COVERAGE_SEEDS,

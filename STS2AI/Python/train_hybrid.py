@@ -56,15 +56,15 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from core.vocab import load_vocab, Vocab
-from core.rl_encoder_v2 import build_structured_state, build_structured_actions
-from core.rl_policy_v2 import (
+from network.state_features import build_structured_state, build_structured_actions
+from network.fullrun_policy import (
     FullRunPolicyNetworkV2,
     PPOTrainerV2,
     StructuredRolloutBuffer,
     _structured_state_to_numpy_dict,
     _structured_actions_to_numpy_dict,
 )
-from checkpoint_compat import (
+from core.checkpoint_compat import (
     COMBAT_MODEL_KEY,
     get_combat_model_state,
     make_hybrid_checkpoint_payload,
@@ -150,7 +150,7 @@ from training.game_decisions import (
 )
 from training.segment_collector import NonCombatSegmentCollector
 from search.counterfactual_scoring import compute_counterfactual_reward
-from core.combat_nn import (
+from network.combat_network import (
     CombatPolicyValueNetwork,
     build_combat_features,
     build_combat_action_features,
@@ -158,10 +158,10 @@ from core.combat_nn import (
 )
 from search.mcts_core import MCTSConfig, action_key, mcts_search
 from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel
-from full_run_env import ApiBackedFullRunClient, PipeBackedFullRunClient, create_full_run_client
-from headless_sim_runner import DEFAULT_DLL_PATH, stop_process
+from ipc.full_run_env import ApiBackedFullRunClient, PipeBackedFullRunClient, create_full_run_client
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, stop_process
 from ipc.sim_host_lifecycle import SimHostLifecycleManager, transport_launch_protocol
-from sts2ai_paths import ARTIFACTS_ROOT, DATASETS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
+from constants import ARTIFACTS_ROOT, DATASETS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
 from training.training_health import TrainingHealthMonitor
 from training.episode_data_saver import EpisodeDataSaver
 from runtime.run_outcome_vocab import (
@@ -1215,7 +1215,7 @@ def _mp_episode_worker(
     import logging
     logging.basicConfig(level=logging.WARNING)
     log = logging.getLogger(f"worker-{worker_id}")
-    from full_run_env import create_full_run_client
+    from ipc.full_run_env import create_full_run_client
     ppo_ort_session = None
     combat_ort_session = None
 
@@ -1392,7 +1392,7 @@ def _mp_episode_worker(
 def _export_ppo_actor_onnx(net, output_path: str, vocab) -> None:
     """Export PPO actor-only ONNX for ORT CPU inference."""
     import torch.nn as nn
-    from core.rl_encoder_v2 import (SCALAR_DIM, MAX_DECK_SIZE, MAX_RELICS, MAX_POTIONS,
+    from network.state_features import (SCALAR_DIM, MAX_DECK_SIZE, MAX_RELICS, MAX_POTIONS,
         MAX_HAND_SIZE, MAX_ENEMIES, MAX_MAP_NODES, MAX_CARD_REWARDS, MAX_SHOP_ITEMS,
         MAX_REST_OPTIONS, MAX_ACTIONS, CARD_AUX_DIM, ENEMY_AUX_DIM, NUM_RELIC_TAGS, MAP_ROUTE_DIM)
 

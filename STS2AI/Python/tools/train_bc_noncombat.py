@@ -31,14 +31,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-from vocab import load_vocab, Vocab
-from rl_encoder_v2 import build_structured_state, build_structured_actions, MAX_ACTIONS
-from rl_policy_v2 import (
+from core.vocab import load_vocab, Vocab
+from network.state_features import build_structured_state, build_structured_actions, MAX_ACTIONS
+from network.fullrun_policy import (
     FullRunPolicyNetworkV2,
     _structured_state_to_numpy_dict,
     _structured_actions_to_numpy_dict,
 )
-from sts2ai_paths import MAINLINE_CHECKPOINT
+from constants import MAINLINE_CHECKPOINT
 
 logging.basicConfig(
     level=logging.INFO,

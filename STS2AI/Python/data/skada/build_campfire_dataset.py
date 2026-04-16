@@ -22,7 +22,7 @@ sys.path.insert(0, str(_PYTHON_ROOT))
 from skada_context import DeckTracker, dict_factory, fetch_many, safe_float, safe_int
 from skada_db import DB_PATH
 from skada_priors import SkadaPriors
-from sts2ai_paths import ARTIFACTS_ROOT
+from constants import ARTIFACTS_ROOT
 
 
 def build_dataset(

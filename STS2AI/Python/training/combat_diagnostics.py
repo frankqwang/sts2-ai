@@ -19,8 +19,8 @@ import torch
 
 from pathlib import Path
 
-from core.rl_encoder_v2 import _lower, _safe_float, _safe_int, _extract_player
-from core.state_features import COMBAT_SCREENS
+from network.state_features import _lower, _safe_float, _safe_int, _extract_player
+from network.state_features import COMBAT_SCREENS
 from search.mcts_core import action_key
 
 logger = logging.getLogger(__name__)

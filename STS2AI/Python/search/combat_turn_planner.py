@@ -207,7 +207,7 @@ class PolicyBeamCandidateGenerator:
         legal: list[dict[str, Any]],
     ) -> np.ndarray:
         """Get log-probabilities from combat policy for legal actions."""
-        from combat_nn import build_combat_features, build_combat_action_features
+        from network.combat_network import build_combat_features, build_combat_action_features
 
         sf = build_combat_features(state, self.vocab)
         af = build_combat_action_features(state, legal, self.vocab)
@@ -397,7 +397,7 @@ class TurnPlanner:
 
         Returns best candidate or None if planning fails.
         """
-        from combat_mcts_agent import PipeCombatForwardModel
+        from search.combat_mcts_agent import PipeCombatForwardModel
 
         fm = None
         try:

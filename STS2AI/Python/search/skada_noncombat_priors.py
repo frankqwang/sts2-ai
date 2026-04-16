@@ -10,12 +10,12 @@ from typing import Any
 
 import torch
 
-from rl_reward_shaping import _extract_player, _extract_progress, _lower, _safe_int
+from core.rl_reward_shaping import _extract_player, _extract_progress, _lower, _safe_int
 from data.skada.skada_context import STARTER_DECKS, act_from_floor, is_basic_slug, is_curse_slug, slugify
 from data.skada.skada_priors import SkadaPriors
 from data.skada.train_campfire_model import CampfireChoiceModel
 from data.skada.train_shop_core_model import ACTION_LABELS, ShopActionModel, ShopItemChoiceModel
-from sts2ai_paths import ARTIFACTS_ROOT, DATASETS_ROOT
+from constants import ARTIFACTS_ROOT, DATASETS_ROOT
 
 logger = logging.getLogger(__name__)
 

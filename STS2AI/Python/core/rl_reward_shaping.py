@@ -333,7 +333,7 @@ def _get_card_tags() -> dict[str, list[str]]:
     global _CARD_TAGS_CACHE
     if _CARD_TAGS_CACHE is None:
         try:
-            from card_tags import load_card_tags
+            from core.card_tags import load_card_tags
             _CARD_TAGS_CACHE = load_card_tags()
         except Exception:
             _CARD_TAGS_CACHE = {}

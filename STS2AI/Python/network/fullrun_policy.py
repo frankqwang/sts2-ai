@@ -36,34 +36,8 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 
 from core.vocab import Vocab, load_vocab
-from network.shared_encoders import (
-    CARD_AUX_DIM,
-    ENEMY_AUX_DIM,
-    MAX_ACTIONS,
-    MAX_CARD_REWARDS,
-    MAX_DECK_SIZE,
-    MAX_ENEMIES,
-    MAX_HAND_SIZE,
-    MAX_MAP_NODES,
-    MAP_ROUTE_DIM,
-    MAX_POTIONS,
-    MAX_RELICS,
-    MAX_REST_OPTIONS,
-    MAX_SHOP_ITEMS,
-    SCALAR_DIM,
-    SCREEN_TYPE_TO_IDX,
-    COMBAT_SCREENS,
-    BilinearActionScorer,
-    EntityEmbeddings,
-    ScreenHead,
-    SetEncoder,
-    SharedTrunk,
-    SimpleScreenHead,
-    StructuredActions,
-    StructuredState,
-    build_structured_actions,
-    build_structured_state,
-)
+from network.shared_encoders import BilinearActionScorer, EntityEmbeddings, ScreenHead, SetEncoder, SharedTrunk, SimpleScreenHead
+from network.state_features import CARD_AUX_DIM, ENEMY_AUX_DIM, MAX_ACTIONS, MAX_CARD_REWARDS, MAX_DECK_SIZE, MAX_ENEMIES, MAX_HAND_SIZE, MAX_MAP_NODES, MAP_ROUTE_DIM, MAX_POTIONS, MAX_RELICS, MAX_REST_OPTIONS, MAX_SHOP_ITEMS, SCALAR_DIM, SCREEN_TYPE_TO_IDX, COMBAT_SCREENS, StructuredActions, StructuredState, build_structured_actions, build_structured_state
 from core.relic_tags import NUM_RELIC_TAGS
 from core.symbolic_features_head import SymbolicFeaturesHead
 

@@ -38,7 +38,7 @@ import torch
 import torch.nn.functional as F
 
 from core.vocab import Vocab
-from core.rl_encoder_v2 import (
+from network.state_features import (
     CARD_AUX_DIM,
     ENEMY_AUX_DIM,
     MAX_ACTIONS,
@@ -371,7 +371,8 @@ def build_combat_features(
     # Optional: include full deck for build_plan_z bridge
     deck = player.get("deck") or player.get("cards") or state.get("deck") or []
     if deck:
-        from core.rl_encoder_v2 import MAX_DECK_SIZE, CARD_AUX_DIM as NC_CARD_AUX_DIM
+        from network.shared_encoders import CARD_AUX_DIM as NC_CARD_AUX_DIM
+        from network.state_features import MAX_DECK_SIZE
         deck_ids = np.zeros(MAX_DECK_SIZE, dtype=np.int64)
         deck_aux = np.zeros((MAX_DECK_SIZE, NC_CARD_AUX_DIM), dtype=np.float32)
         deck_mask = np.zeros(MAX_DECK_SIZE, dtype=bool)
@@ -522,7 +523,7 @@ def build_combat_action_features(
         # curated card knowledge.
         if damage <= 0.0 or block <= 0.0:
             try:
-                from card_base_stats import base_damage as _bd, base_hits as _bh, base_block as _bb
+                from core.card_base_stats import base_damage as _bd, base_hits as _bh, base_block as _bb
                 cid = (card.get("id") or card.get("name") or card.get("label") or "").upper().replace(" ", "_").replace(".TITLE", "")
                 if damage <= 0.0:
                     dv = _bd(cid)

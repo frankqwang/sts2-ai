@@ -31,7 +31,7 @@ from training.combat_safety import (
     _player,
     _target_enemy,
 )
-from combat_teacher_common import (
+from search.combat_teacher_common import (
     COMBAT_TEACHER_SCHEMA_VERSION,
     canonical_public_state_hash,
     detect_motif_labels,
@@ -40,20 +40,20 @@ from combat_teacher_common import (
     sanitize_action,
     stable_sample_id,
 )
-from combat_teacher_dataset import (
+from search.combat_teacher_dataset import (
     CombatTeacherSample,
     dedupe_samples_by_id,
     stable_split,
     write_combat_teacher_samples,
 )
-from combat_turn_solver import CombatTurnSolver
-from combat_turn_teacher_config import CombatTurnTeacherConfig, load_combat_turn_teacher_config
-from full_run_env import create_full_run_client
-from headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
-from rl_encoder_v2 import build_structured_actions, build_structured_state
-from rl_policy_v2 import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
-from sts2ai_paths import MAINLINE_CHECKPOINT
-from vocab import Vocab, load_vocab
+from search.combat_turn_solver import CombatTurnSolver
+from search.combat_turn_teacher_config import CombatTurnTeacherConfig, load_combat_turn_teacher_config
+from ipc.full_run_env import create_full_run_client
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
+from network.state_features import build_structured_actions, build_structured_state
+from network.fullrun_policy import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
+from constants import MAINLINE_CHECKPOINT
+from core.vocab import Vocab, load_vocab
 
 
 BALANCE_MOTIF_TARGET_RATIOS: dict[str, float] = {
@@ -1069,7 +1069,7 @@ def main() -> None:
     # Shared inference agent: same auto_progress + loop_escape + NN pipeline
     # as evaluate_ai.py. Fixes the builder-stalls-on-noncombat-screens bug
     # that previously kept most seeds from getting past floor 2-6.
-    from full_run_agent import FullRunAgent, load_agent_config
+    from core.full_run_agent import FullRunAgent, load_agent_config
     agent_cfg = load_agent_config(args.inference_config)
     agent = FullRunAgent(
         ppo_net=noncombat_policy,

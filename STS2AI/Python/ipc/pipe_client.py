@@ -8,7 +8,7 @@ Previous implementation used os.fdopen().read() which holds the GIL
 and cannot be interrupted by threading timeout.
 
 Usage:
-    from pipe_client import PipeClient
+    from ipc.pipe_client import PipeClient
 
     pipe = PipeClient(port=15527)
     pipe.connect()
@@ -31,7 +31,7 @@ from typing import Any
 try:
     from .simulator_api_error import SimulatorApiError
 except ImportError:
-    from simulator_api_error import SimulatorApiError
+    from ipc.simulator_api_error import SimulatorApiError
 
 
 # Windows constants

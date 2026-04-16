@@ -18,7 +18,7 @@ from typing import Any
 import torch
 import numpy as np
 
-from boss_leaf_evaluator import (
+from search.boss_leaf_evaluator import (
     LEAF_DATASET_SCHEMA_VERSION,
     LEAF_SCORE_V1_COEFFICIENTS,
     build_leaf_state_features,
@@ -26,15 +26,16 @@ from boss_leaf_evaluator import (
     score_targets_from_labels,
 )
 from build_combat_teacher_dataset import load_noncombat_policy
-from combat_teacher_common import BaselineCombatPolicy, is_supported_solver_state, sanitize_action
-from combat_turn_solver import CombatTurnSolver
+from search.combat_teacher_common import BaselineCombatPolicy, is_supported_solver_state, sanitize_action
+from search.combat_turn_solver import CombatTurnSolver
 from evaluate_ai import _choose_auto_progress_action, _next_reward_claim_signature
-from full_run_env import create_full_run_client
-from rl_encoder_v2 import build_structured_actions, build_structured_state, load_vocab
-from rl_policy_v2 import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
-from turn_solver_planner import _PipeEnvAdapter, _action_matches_legal
-from vocab import Vocab
-from checkpoint_compat import get_combat_model_state
+from ipc.full_run_env import create_full_run_client
+from network.shared_encoders import load_vocab
+from network.state_features import build_structured_actions, build_structured_state
+from network.fullrun_policy import FullRunPolicyNetworkV2, _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
+from search.turn_solver_planner import _PipeEnvAdapter, _action_matches_legal
+from core.vocab import Vocab
+from core.checkpoint_compat import get_combat_model_state
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,7 +88,7 @@ def _infer_combat_dims(state_dict: dict[str, Any]) -> tuple[int, int, int]:
 
 
 def _load_combat_policy(checkpoint_path: str | Path, *, vocab: Vocab) -> BaselineCombatPolicy:
-    from combat_nn import CombatPolicyValueNetwork
+    from network.combat_network import CombatPolicyValueNetwork
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     combat_state = get_combat_model_state(checkpoint, allow_standalone=False)
@@ -508,8 +509,8 @@ def _rollout_leaf_search_once(
     """
     # Import locally to avoid paying the torch import cost when the
     # search rollout is not used.
-    from combat_turn_solver import CombatTurnSolution
-    from turn_solver_planner import _TunedCombatTurnSolver
+    from search.combat_turn_solver import CombatTurnSolution
+    from search.turn_solver_planner import _TunedCombatTurnSolver
 
     state = env.load_state(leaf_state_id)
     initial_hp, initial_max_hp = _state_player_hp(leaf_state)

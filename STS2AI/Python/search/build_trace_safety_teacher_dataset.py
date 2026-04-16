@@ -27,7 +27,7 @@ from training.combat_safety import (
     _target_enemy,
     rerank_combat_logits_with_safety,
 )
-from combat_teacher_common import (
+from search.combat_teacher_common import (
     COMBAT_STATE_TYPES,
     canonical_public_state_hash,
     detect_motif_labels,
@@ -36,7 +36,7 @@ from combat_teacher_common import (
     sanitize_action,
     stable_sample_id,
 )
-from combat_teacher_dataset import (
+from search.combat_teacher_dataset import (
     CombatTeacherSample,
     dedupe_samples_by_id,
     stable_split,

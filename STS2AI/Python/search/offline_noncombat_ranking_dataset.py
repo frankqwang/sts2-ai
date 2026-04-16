@@ -6,7 +6,7 @@ This module exposes the accurate public names while keeping the legacy
 """
 from __future__ import annotations
 
-from matchup_dataset import (
+from search.matchup_dataset import (
     MAX_OPTIONS,
     MatchupRankingDataset,
     OfflineNoncombatRankingDataset,

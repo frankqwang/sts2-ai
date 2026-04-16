@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from combat_teacher_common import (
+from search.combat_teacher_common import (
     COMBAT_STATE_TYPES,
     COMBAT_TURN_SOLUTION_SCHEMA_VERSION,
     aggregate_action_components,
@@ -26,8 +26,8 @@ from combat_teacher_common import (
     _card_for_action,
     _card_slug,
 )
-from combat_turn_teacher_config import CombatTurnTeacherConfig
-from full_run_env import create_full_run_client
+from search.combat_turn_teacher_config import CombatTurnTeacherConfig
+from ipc.full_run_env import create_full_run_client
 
 
 class CombatTurnBranchEnv(Protocol):

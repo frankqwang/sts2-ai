@@ -15,7 +15,7 @@ and reached boss fine. Sharing through `FullRunAgent` means there's literally
 one place to change behaviour.
 
 Usage:
-    from full_run_agent import FullRunAgent, AgentConfig, load_agent_config
+    from core.full_run_agent import FullRunAgent, AgentConfig, load_agent_config
 
     cfg = load_agent_config("STS2AI/Python/configs/inference_config.toml")
     agent = FullRunAgent(

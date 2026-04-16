@@ -15,7 +15,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from combat_nn import CombatPolicyValueNetwork
+from network.combat_network import CombatPolicyValueNetwork
 from evaluate_ai import (
     COMBAT_SCREENS,
     _build_combat_tensors,
@@ -24,8 +24,8 @@ from evaluate_ai import (
     _infer_ppo_embed_dim,
     _safe_load_state_dict,
 )
-from rl_policy_v2 import FullRunPolicyNetworkV2
-from checkpoint_compat import get_combat_model_state
+from network.fullrun_policy import FullRunPolicyNetworkV2
+from core.checkpoint_compat import get_combat_model_state
 from sim_semantic_audit_common import (
     DEFAULT_GODOT_EXE,
     DEFAULT_HEADLESS_DLL,
@@ -35,7 +35,7 @@ from sim_semantic_audit_common import (
     build_seed_list,
 )
 from test_simulator_consistency import normalize_legal_action, state_summary
-from vocab import Vocab, load_vocab
+from core.vocab import Vocab, load_vocab
 
 
 def _lower(value: Any) -> str:

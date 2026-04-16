@@ -7,11 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
-from pipe_client import PipeClient
-from simulator_api_error import SimulatorApiError
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process
+from ipc.pipe_client import PipeClient
+from ipc.simulator_api_error import SimulatorApiError
 
-from full_run_env import _normalize_build_spec
+from ipc.full_run_env import _normalize_build_spec
 
 
 _CARD_TYPE_NAMES = {

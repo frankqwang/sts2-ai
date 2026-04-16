@@ -41,7 +41,7 @@ def _import_or_skip(module_name: str):
 
 @pytest.fixture(scope="session")
 def vocab():
-    from vocab import load_vocab
+    from core.vocab import load_vocab
     return load_vocab()
 
 
@@ -449,23 +449,23 @@ class _DummyBaselinePolicy:
 
 class TestImports:
     def test_vocab(self):
-        from vocab import load_vocab, Vocab
+        from core.vocab import load_vocab, Vocab
         assert Vocab is not None
 
     def test_encoder(self):
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
+        from network.state_features import build_structured_state, build_structured_actions
 
     def test_ppo_network(self):
-        from rl_policy_v2 import FullRunPolicyNetworkV2, PPOTrainerV2, StructuredRolloutBuffer
+        from network.fullrun_policy import FullRunPolicyNetworkV2, PPOTrainerV2, StructuredRolloutBuffer
 
     def test_combat_network(self):
-        from combat_nn import CombatPolicyValueNetwork, build_combat_features
+        from network.combat_network import CombatPolicyValueNetwork, build_combat_features
 
     def test_reward_shaping(self):
-        from rl_reward_shaping import shaped_reward
+        from core.rl_reward_shaping import shaped_reward
 
     def test_mcts_core(self):
-        from mcts_core import MCTSConfig
+        from search.mcts_core import MCTSConfig
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +496,7 @@ class TestVocab:
 
 class TestEncoder:
     def test_structured_state_shape(self, vocab):
-        from rl_encoder_v2 import (
+        from network.state_features import (
             build_structured_state, SCALAR_DIM, MAX_DECK_SIZE,
             MAX_HAND_SIZE, MAX_RELICS, MAX_POTIONS, MAX_ENEMIES,
             CARD_AUX_DIM,
@@ -516,7 +516,7 @@ class TestEncoder:
         assert ss.enemy_ids.shape == (MAX_ENEMIES,)
 
     def test_structured_actions_shape(self, vocab):
-        from rl_encoder_v2 import build_structured_actions, MAX_ACTIONS
+        from network.state_features import build_structured_actions, MAX_ACTIONS
 
         state = _make_synthetic_state("map")
         actions = _make_synthetic_actions("map")
@@ -528,12 +528,12 @@ class TestEncoder:
         assert sa.num_actions == 2
 
     def test_combat_features_shape(self, vocab):
-        from combat_nn import (
+        from network.combat_network import (
             build_combat_features, build_combat_action_features,
             COMBAT_SCALAR_DIM, MAX_ACTIONS,
         )
-        from rl_encoder_v2 import MAX_HAND_SIZE, MAX_ENEMIES, CARD_AUX_DIM, ENEMY_AUX_DIM
-        from combat_nn import COMBAT_EXTRA_SCALAR_DIM
+        from network.state_features import MAX_HAND_SIZE, MAX_ENEMIES, CARD_AUX_DIM, ENEMY_AUX_DIM
+        from network.combat_network import COMBAT_EXTRA_SCALAR_DIM
 
         state = _make_synthetic_state("combat")
         sf = build_combat_features(state, vocab)
@@ -561,9 +561,9 @@ class TestEncoder:
 
 class TestPPONetwork:
     def test_forward(self, vocab):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from rl_encoder_v2 import build_structured_state, build_structured_actions, MAX_ACTIONS
-        from rl_policy_v2 import _structured_state_to_numpy_dict, _structured_actions_to_numpy_dict
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from network.state_features import build_structured_state, build_structured_actions, MAX_ACTIONS
+        from network.fullrun_policy import _structured_state_to_numpy_dict, _structured_actions_to_numpy_dict
 
         net = FullRunPolicyNetworkV2(vocab=vocab)
         net.eval()
@@ -609,9 +609,9 @@ class TestPPONetwork:
         assert torch.isfinite(action_adv).all()
 
     def test_get_action_and_value(self, vocab):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
-        from rl_policy_v2 import _structured_state_to_numpy_dict, _structured_actions_to_numpy_dict
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from network.state_features import build_structured_state, build_structured_actions
+        from network.fullrun_policy import _structured_state_to_numpy_dict, _structured_actions_to_numpy_dict
 
         net = FullRunPolicyNetworkV2(vocab=vocab)
         net.eval()
@@ -651,7 +651,7 @@ class TestPPONetwork:
 
 class TestCombatNetwork:
     def test_forward(self, vocab):
-        from combat_nn import CombatPolicyValueNetwork, build_combat_features, build_combat_action_features, MAX_ACTIONS
+        from network.combat_network import CombatPolicyValueNetwork, build_combat_features, build_combat_action_features, MAX_ACTIONS
 
         net = CombatPolicyValueNetwork(vocab=vocab)
         net.eval()
@@ -697,8 +697,8 @@ class TestCombatNetwork:
 
 class TestBuffer:
     def test_add_and_len(self, vocab):
-        from rl_policy_v2 import StructuredRolloutBuffer
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
+        from network.fullrun_policy import StructuredRolloutBuffer
+        from network.state_features import build_structured_state, build_structured_actions
 
         buf = StructuredRolloutBuffer()
         state = _make_synthetic_state("map")
@@ -712,8 +712,8 @@ class TestBuffer:
         assert len(buf) == 10
 
     def test_gae(self, vocab):
-        from rl_policy_v2 import StructuredRolloutBuffer
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
+        from network.fullrun_policy import StructuredRolloutBuffer
+        from network.state_features import build_structured_state, build_structured_actions
 
         buf = StructuredRolloutBuffer()
         state = _make_synthetic_state("map")
@@ -732,8 +732,8 @@ class TestBuffer:
         assert all(np.isfinite(r) for r in buf.returns)
 
     def test_clear(self, vocab):
-        from rl_policy_v2 import StructuredRolloutBuffer
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
+        from network.fullrun_policy import StructuredRolloutBuffer
+        from network.state_features import build_structured_state, build_structured_actions
 
         buf = StructuredRolloutBuffer()
         ss = build_structured_state(_make_synthetic_state("map"), vocab)
@@ -749,8 +749,8 @@ class TestBuffer:
 
 class TestPPOUpdate:
     def test_gradient_flow(self, vocab):
-        from rl_policy_v2 import FullRunPolicyNetworkV2, PPOTrainerV2, StructuredRolloutBuffer
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
+        from network.fullrun_policy import FullRunPolicyNetworkV2, PPOTrainerV2, StructuredRolloutBuffer
+        from network.state_features import build_structured_state, build_structured_actions
 
         net = FullRunPolicyNetworkV2(vocab=vocab)
         trainer = PPOTrainerV2(network=net, lr=1e-3, ppo_epochs=1, minibatch_size=8)
@@ -853,7 +853,7 @@ class TestQualityGate:
 
 class TestRewardShaping:
     def test_shaped_reward_basic(self):
-        from rl_reward_shaping import shaped_reward
+        from core.rl_reward_shaping import shaped_reward
 
         prev = {
             "run": {"floor": 1, "act": 1},
@@ -870,7 +870,7 @@ class TestRewardShaping:
         assert r > 0, f"Floor increase should give positive reward, got {r}"
 
     def test_terminal_reward(self):
-        from rl_reward_shaping import shaped_reward
+        from core.rl_reward_shaping import shaped_reward
 
         prev = {
             "run": {"floor": 10, "act": 2},
@@ -900,7 +900,7 @@ class TestRewardShaping:
         assert r_early < -0.5, f"Early death (floor 2) should be very negative, got {r_early}"
 
     def test_screen_local_delta_reward_card_reward_positive(self):
-        from rl_reward_shaping import screen_local_delta_reward
+        from core.rl_reward_shaping import screen_local_delta_reward
 
         prev = {
             "state_type": "card_reward",
@@ -928,7 +928,7 @@ class TestRewardShaping:
         assert 0.0 < r <= 0.05
 
     def test_screen_local_delta_reward_ignores_event(self):
-        from rl_reward_shaping import screen_local_delta_reward
+        from core.rl_reward_shaping import screen_local_delta_reward
 
         prev = _make_synthetic_state("event")
         curr = _make_synthetic_state("event")
@@ -937,7 +937,7 @@ class TestRewardShaping:
         assert screen_local_delta_reward(prev, curr, "event") == 0.0
 
     def test_screen_local_delta_reward_includes_map(self):
-        from rl_reward_shaping import screen_local_delta_reward
+        from core.rl_reward_shaping import screen_local_delta_reward
 
         prev = _make_synthetic_state("map")
         curr = _make_synthetic_state("map")
@@ -947,7 +947,7 @@ class TestRewardShaping:
         assert screen_local_delta_reward(prev, curr, "map") <= 0.0
 
     def test_combat_local_tactical_reward_prefers_vulnerable_setup(self):
-        from rl_reward_shaping import combat_local_tactical_reward
+        from core.rl_reward_shaping import combat_local_tactical_reward
 
         state = {
             "state_type": "monster",
@@ -979,7 +979,7 @@ class TestRewardShaping:
         assert combat_local_tactical_reward(state, legal[1], legal) < 0.0
 
     def test_combat_local_tactical_reward_penalizes_zero_block_body_slam(self):
-        from rl_reward_shaping import combat_local_tactical_reward
+        from core.rl_reward_shaping import combat_local_tactical_reward
 
         state = {
             "state_type": "monster",
@@ -1027,7 +1027,7 @@ class TestRolloutAlignment:
     def test_ppo_reward_comes_after_action(self):
         """Simulate the non-combat PPO collection pattern from train_hybrid.py
         and verify reward is computed from (pre_action_state, post_action_state)."""
-        from rl_reward_shaping import shaped_reward
+        from core.rl_reward_shaping import shaped_reward
 
         # Simulate 3 states: floor 1 → floor 2 → floor 3
         states = [
@@ -1083,7 +1083,7 @@ class TestRolloutAlignment:
           4. reward = shaped(state, next_state)
           5. buffer.add(state, action, reward, value)
         """
-        from rl_reward_shaping import shaped_reward
+        from core.rl_reward_shaping import shaped_reward
 
         s0 = {"state_type": "map", "run": {"floor": 1, "act": 1},
               "player": {"hp": 70, "max_hp": 80, "gold": 50,
@@ -1128,7 +1128,7 @@ class TestSchemaContract:
 
     def test_map_reads_next_options(self, vocab):
         """C# sends map.next_options, not available_next_nodes or paths."""
-        from rl_encoder_v2 import build_structured_state
+        from network.state_features import build_structured_state
 
         state = _make_synthetic_state("map")
         state["map"] = {
@@ -1145,7 +1145,7 @@ class TestSchemaContract:
 
     def test_extract_player_prefers_richer_nested_payload(self, vocab):
         """Godot map/menu states may have a lightweight top-level player and a richer nested copy."""
-        from rl_encoder_v2 import build_structured_state
+        from network.state_features import build_structured_state
 
         state = {
             "state_type": "map",
@@ -1176,7 +1176,7 @@ class TestSchemaContract:
 
     def test_map_falls_back_to_legal_actions_and_point_type(self, vocab):
         """Some backends expose map choices only in legal_actions and use point_type instead of type."""
-        from rl_encoder_v2 import build_structured_state, build_structured_actions, NODE_TYPE_TO_IDX
+        from network.state_features import build_structured_state, build_structured_actions, NODE_TYPE_TO_IDX
 
         state = {
             "state_type": "map",
@@ -1199,7 +1199,7 @@ class TestSchemaContract:
 
     def test_player_powers_reads_status(self, vocab):
         """C# sends player.status, not player.powers or player.buffs."""
-        from combat_nn import build_combat_features
+        from network.combat_network import build_combat_features
 
         state = _make_synthetic_state("combat")
         state["player"]["status"] = [   # C# field name (McpMod.StateBuilder.cs:356)
@@ -1213,7 +1213,7 @@ class TestSchemaContract:
 
     def test_enemy_powers_reads_status(self, vocab):
         """C# sends enemy.status, not enemy.powers."""
-        from rl_encoder_v2 import _enemy_aux_features
+        from network.state_features import _enemy_aux_features
 
         enemy = {
             "id": "JAW_WORM", "hp": 40, "max_hp": 44, "block": 0,
@@ -1229,7 +1229,7 @@ class TestSchemaContract:
 
     def test_enemy_intent_reads_nested_intents(self, vocab):
         """C# sends enemy.intents[].type, not flat intent_type."""
-        from rl_encoder_v2 import _enemy_aux_features
+        from network.state_features import _enemy_aux_features
 
         enemy = {
             "id": "CULTIST", "hp": 48, "max_hp": 48, "block": 0,
@@ -1246,7 +1246,7 @@ class TestSchemaContract:
 
     def test_enemy_id_reads_entity_id(self, vocab):
         """C# sends entity_id (e.g. 'JAW_WORM_0'), not id."""
-        from combat_nn import build_combat_features
+        from network.combat_network import build_combat_features
 
         state = _make_synthetic_state("combat")
         # Use entity_id like C# actually sends
@@ -1261,7 +1261,7 @@ class TestSchemaContract:
 
     def test_enemy_id_strips_runtime_suffix_for_vocab_lookup(self, vocab):
         """Runtime combat ids like SHRINKER_BEETLE_0 should resolve to the base monster vocab entry."""
-        from rl_encoder_v2 import _cached_monster_idx
+        from network.state_features import _cached_monster_idx
 
         base_idx = _cached_monster_idx(vocab, "SHRINKER_BEETLE")
         suffixed_idx = _cached_monster_idx(vocab, "SHRINKER_BEETLE_0")
@@ -1271,7 +1271,7 @@ class TestSchemaContract:
 
     def test_intent_buff_not_match_debuff(self, vocab):
         """'DebuffStrong' should be debuff=1, buff=0 (not both)."""
-        from rl_encoder_v2 import _enemy_aux_features
+        from network.state_features import _enemy_aux_features
 
         enemy = {"entity_id": "X", "hp": 40, "max_hp": 44, "block": 0,
                  "status": [], "intents": [{"type": "DebuffStrong"}]}
@@ -1281,7 +1281,7 @@ class TestSchemaContract:
 
     def test_action_types_cover_all_screens(self):
         """All game action types should have a dedicated embedding index."""
-        from rl_encoder_v2 import ACTION_TYPE_TO_IDX
+        from network.state_features import ACTION_TYPE_TO_IDX
         required = [
             "play_card", "end_turn", "choose_map_node", "select_card_reward",
             "choose_rest_option", "choose_event_option", "shop_purchase",
@@ -1294,7 +1294,7 @@ class TestSchemaContract:
 
     def test_screen_types_cover_all_states(self):
         """All game screen types should have a dedicated encoding index."""
-        from rl_encoder_v2 import SCREEN_TYPE_TO_IDX
+        from network.state_features import SCREEN_TYPE_TO_IDX
         required = [
             "combat", "monster", "elite", "boss", "map", "card_reward",
             "rest_site", "shop", "event", "card_select", "relic_select",
@@ -1310,7 +1310,7 @@ class TestSchemaContract:
         node target exists. If a real type (e.g. 'monster') is at index 0,
         it gets silently filtered out.
         """
-        from rl_encoder_v2 import NODE_TYPES
+        from network.state_features import NODE_TYPES
         assert NODE_TYPES[0] == "unknown", \
             f"NODE_TYPES[0] must be 'unknown' (padding), got '{NODE_TYPES[0]}'"
 
@@ -1328,7 +1328,7 @@ class TestFeatureNonZero:
 
     def test_map_node_features_nonzero(self, vocab):
         """Map state with next_options should produce non-zero node features."""
-        from rl_encoder_v2 import build_structured_state
+        from network.state_features import build_structured_state
         state = {
             "state_type": "map",
             "run": {"floor": 3, "act": 1},
@@ -1348,7 +1348,7 @@ class TestFeatureNonZero:
 
     def test_combat_player_powers_nonzero(self, vocab):
         """Combat state with player status should encode powers."""
-        from combat_nn import build_combat_features
+        from network.combat_network import build_combat_features
         state = _make_synthetic_state("combat")
         state["player"]["status"] = [
             {"id": "strength", "amount": 3},
@@ -1360,7 +1360,7 @@ class TestFeatureNonZero:
 
     def test_combat_pile_counts_accept_numeric_counts_without_lists(self, vocab):
         """Headless can expose draw/discard/exhaust counts directly without full pile arrays."""
-        from combat_nn import build_combat_features
+        from network.combat_network import build_combat_features
         state = _make_synthetic_state("combat")
         state["player"].update({
             "draw_pile_count": 7,
@@ -1380,7 +1380,7 @@ class TestFeatureNonZero:
 
     def test_combat_enemy_intent_nonzero(self, vocab):
         """Enemy with attack intent should have non-zero intent features."""
-        from rl_encoder_v2 import _enemy_aux_features
+        from network.state_features import _enemy_aux_features
         enemy = {
             "id": "JAW_WORM", "hp": 40, "max_hp": 44, "block": 0,
             "status": [],
@@ -1392,7 +1392,7 @@ class TestFeatureNonZero:
 
     def test_combat_enemy_powers_nonzero(self, vocab):
         """Enemy with status should have non-zero power features."""
-        from rl_encoder_v2 import _enemy_aux_features
+        from network.state_features import _enemy_aux_features
         enemy = {
             "id": "CULTIST", "hp": 48, "max_hp": 48, "block": 0,
             "status": [{"id": "strength", "amount": 5}],
@@ -1403,7 +1403,7 @@ class TestFeatureNonZero:
 
     def test_combat_turn_prefix_features_nonzero(self, vocab):
         """Current-turn card prefix should be visible to the combat encoder."""
-        from combat_nn import build_combat_features
+        from network.combat_network import build_combat_features
 
         state = _make_synthetic_state("combat")
         state["_combat_turn_prefix"] = {
@@ -1454,7 +1454,7 @@ class TestFeatureNonZero:
 
     def test_ppo_scalars_nonzero_for_typical_state(self, vocab):
         """A mid-run state should have non-zero scalar features."""
-        from rl_encoder_v2 import build_structured_state
+        from network.state_features import build_structured_state
         state = {
             "state_type": "map",
             "run": {"floor": 5, "act": 1},
@@ -1473,7 +1473,7 @@ class TestFeatureNonZero:
 
     def test_noncombat_scalars_ignore_leaked_combat_energy_fields(self, vocab):
         """Map/event screens should not drift because one backend leaks max_energy/player block."""
-        from rl_encoder_v2 import build_structured_state
+        from network.state_features import build_structured_state
         state = {
             "state_type": "map",
             "run": {"floor": 0, "act": 1},
@@ -1510,7 +1510,7 @@ class TestActionDistinguishability:
 
     def test_map_nodes_distinguishable(self, vocab):
         """Different map node types should produce different action features."""
-        from rl_encoder_v2 import build_structured_actions
+        from network.state_features import build_structured_actions
         state = {
             "state_type": "map",
             "map": {"next_options": [
@@ -1534,7 +1534,7 @@ class TestActionDistinguishability:
 
     def test_card_rewards_distinguishable(self, vocab):
         """Different card reward choices should produce different action features."""
-        from rl_encoder_v2 import build_structured_actions
+        from network.state_features import build_structured_actions
         state = {
             "state_type": "card_reward",
             "card_reward": {"cards": [
@@ -1557,7 +1557,7 @@ class TestActionDistinguishability:
 
     def test_event_options_distinguishable(self, vocab):
         """Different event options should produce different action features."""
-        from rl_encoder_v2 import build_structured_actions
+        from network.state_features import build_structured_actions
         state = {"state_type": "event", "player": {"hp": 60, "max_hp": 80}}
         actions = [
             {"action": "choose_event_option", "index": 0},
@@ -1571,7 +1571,7 @@ class TestActionDistinguishability:
 
     def test_rest_options_distinguishable(self, vocab):
         """Rest and smith should produce different action features."""
-        from rl_encoder_v2 import build_structured_actions, ACTION_TYPE_TO_IDX
+        from network.state_features import build_structured_actions, ACTION_TYPE_TO_IDX
         state = {"state_type": "rest_site", "player": {"hp": 60, "max_hp": 80}}
         actions = [
             {"action": "choose_rest_option", "index": 0},  # rest
@@ -1591,7 +1591,7 @@ class TestScreenValueHeads:
     """Phase 1A: Screen-specific value heads."""
 
     def test_network_has_value_heads(self, vocab):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from network.fullrun_policy import FullRunPolicyNetworkV2
         net = FullRunPolicyNetworkV2(vocab=vocab)
         assert hasattr(net, "value_heads")
         assert "combat" in net.value_heads
@@ -1603,8 +1603,8 @@ class TestScreenValueHeads:
         assert "default" in net.value_heads
 
     def test_different_screens_use_different_heads(self, vocab):
-        from rl_policy_v2 import FullRunPolicyNetworkV2, _structured_state_to_numpy_dict, _structured_actions_to_numpy_dict
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
+        from network.fullrun_policy import FullRunPolicyNetworkV2, _structured_state_to_numpy_dict, _structured_actions_to_numpy_dict
+        from network.state_features import build_structured_state, build_structured_actions
 
         net = FullRunPolicyNetworkV2(vocab=vocab)
         net.eval()
@@ -1638,7 +1638,7 @@ class TestPerScreenAdvNorm:
     """Phase 1B: Per-screen advantage normalization."""
 
     def test_normalize_per_screen(self):
-        from rl_policy_v2 import PPOTrainerV2
+        from network.fullrun_policy import PPOTrainerV2
         # 10 steps: 5 from screen 4 (map), 5 from screen 5 (card_reward)
         adv = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0,  # map (high)
                             0.1, 0.2, 0.3, 0.4, 0.5])  # card_reward (low)
@@ -1651,7 +1651,7 @@ class TestPerScreenAdvNorm:
         assert abs(card_adv.mean().item()) < 0.01
 
     def test_small_group_fallback(self):
-        from rl_policy_v2 import PPOTrainerV2
+        from network.fullrun_policy import PPOTrainerV2
         # 8 steps: 6 from map, 2 from shop (too few for per-screen)
         adv = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0,  # map
                             10.0, 20.0])  # shop (only 2 — below threshold)
@@ -1734,7 +1734,7 @@ class TestCounterfactualScoring:
     """Phase 3: Screen-local counterfactual scoring."""
 
     def test_card_reward_scoring(self):
-        from counterfactual_scoring import score_card_reward
+        from search.counterfactual_scoring import score_card_reward
         state = _make_synthetic_state("card_reward")
         state["card_reward"] = {"cards": [
             {"id": "POMMEL_STRIKE", "cost": 1, "type": "ATTACK", "upgrades": 0},
@@ -1751,7 +1751,7 @@ class TestCounterfactualScoring:
         assert isinstance(scores[1], float)
 
     def test_counterfactual_reward(self):
-        from counterfactual_scoring import counterfactual_reward
+        from search.counterfactual_scoring import counterfactual_reward
         scores = [0.1, 0.05, 0.0, -0.03]
         # Choosing the best should give positive reward
         reward_best, teacher = counterfactual_reward(0, scores)
@@ -1759,7 +1759,7 @@ class TestCounterfactualScoring:
         assert reward_best >= reward_worst
 
     def test_dispersion_guard(self):
-        from counterfactual_scoring import counterfactual_reward
+        from search.counterfactual_scoring import counterfactual_reward
         # All scores nearly identical — should return 0
         scores = [0.001, 0.001, 0.001]
         reward, teacher = counterfactual_reward(0, scores, min_dispersion=0.01)
@@ -1767,7 +1767,7 @@ class TestCounterfactualScoring:
         assert teacher is None
 
     def test_teacher_distribution_valid(self):
-        from counterfactual_scoring import counterfactual_reward
+        from search.counterfactual_scoring import counterfactual_reward
         scores = [0.3, 0.1, -0.1, 0.0]
         _, teacher = counterfactual_reward(0, scores)
         assert teacher is not None
@@ -1776,7 +1776,7 @@ class TestCounterfactualScoring:
 
     def test_gold_not_directly_rewarded(self):
         """Gold holding should not produce positive reward by itself."""
-        from rl_reward_shaping import economy_score
+        from core.rl_reward_shaping import economy_score
         # economy_score returns threshold-based utility, not raw gold
         assert economy_score({"player": {"gold": 0}}) == 0.0
         # But having gold near a threshold gives value
@@ -1784,14 +1784,14 @@ class TestCounterfactualScoring:
 
     def test_elite_clear_positive_with_moderate_hp_loss(self):
         """Winning elite fight with moderate HP loss should still be positive."""
-        from rl_reward_shaping import fight_summary
+        from core.rl_reward_shaping import fight_summary
         # 20% HP loss on elite (expected is 30%), so no excess
         result = fight_summary(hp_before=80, hp_after=64, max_hp=80, won=True, room_type="elite")
         assert result > 0, f"Elite clear with moderate HP loss gave negative reward: {result}"
 
     def test_skip_not_punished(self):
         """Skip on bad card reward should not be negative."""
-        from counterfactual_scoring import score_card_reward
+        from search.counterfactual_scoring import score_card_reward
         state = _make_synthetic_state("card_reward")
         # Offer only strikes to an already strike-heavy deck
         state["player"]["deck"] = [
@@ -1811,7 +1811,7 @@ class TestCounterfactualScoring:
         assert scores[1] >= 0, "Skip has negative score"
 
     def test_map_scoring(self):
-        from counterfactual_scoring import score_map_choice
+        from search.counterfactual_scoring import score_map_choice
         state = _make_synthetic_state("map")
         actions = [
             {"action": "choose_map_node", "node_type": "monster"},
@@ -1827,20 +1827,20 @@ class TestGenericStateDelta:
     """Phase 3 prerequisite: screen-specific state delta."""
 
     def test_screen_mix_exists(self):
-        from rl_reward_shaping import _SCREEN_MIX
+        from core.rl_reward_shaping import _SCREEN_MIX
         assert "card_reward" in _SCREEN_MIX
         assert "campfire" in _SCREEN_MIX
         assert "map" in _SCREEN_MIX
         assert "shop" in _SCREEN_MIX
 
     def test_card_reward_problem_heavy(self):
-        from rl_reward_shaping import _SCREEN_MIX
+        from core.rl_reward_shaping import _SCREEN_MIX
         w_p, w_s, w_e = _SCREEN_MIX["card_reward"]
         assert w_p > w_s, "card_reward should weight problem more than survival"
         assert w_p > w_e, "card_reward should weight problem more than economy"
 
     def test_campfire_survival_significant(self):
-        from rl_reward_shaping import _SCREEN_MIX
+        from core.rl_reward_shaping import _SCREEN_MIX
         w_p, w_s, w_e = _SCREEN_MIX["campfire"]
         assert w_s > w_e, "campfire should weight survival more than economy"
         assert w_s >= 0.35, "campfire survival weight should be significant"
@@ -1886,8 +1886,8 @@ class TestTrainingConfig:
 
     def test_mp_worker_refresh_reloads_latest_weights_and_ort_sessions(self, vocab, monkeypatch):
         import train_hybrid
-        from core.rl_policy_v2 import FullRunPolicyNetworkV2
-        from combat_nn import CombatPolicyValueNetwork
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from network.combat_network import CombatPolicyValueNetwork
 
         ppo_net = FullRunPolicyNetworkV2(vocab=vocab, embed_dim=32)
         combat_net = CombatPolicyValueNetwork(
@@ -2335,8 +2335,7 @@ class TestEvaluateHarness:
         assert callable(eval_bc.main)
 
     def test_headless_sim_runner_defaults_point_at_workspace(self):
-        import headless_sim_runner
-
+        import ipc.headless_sim_runner as headless_sim_runner
         repo_root_expected = Path(__file__).resolve().parents[2]
         repo_root = Path(headless_sim_runner.DEFAULT_REPO_ROOT).resolve()
         dll_path = Path(headless_sim_runner.DEFAULT_DLL_PATH).resolve()
@@ -2736,9 +2735,9 @@ class TestEvaluateHarness:
         assert flat["combat_teacher_updates_per_iter"] == 4
 
     def test_combat_teacher_trainer_main_path_mode_toggles_attention_params(self):
-        from combat_nn import CombatPolicyValueNetwork
+        from network.combat_network import CombatPolicyValueNetwork
         from search.train_combat_teacher import _configure_main_combat_path_mode
-        from vocab import load_vocab
+        from core.vocab import load_vocab
 
         network = CombatPolicyValueNetwork(vocab=load_vocab(), embed_dim=32, hidden_dim=128)
 
@@ -2759,9 +2758,9 @@ class TestEvaluateHarness:
         assert network.main_action_context_attn.in_proj_weight.requires_grad is True
 
     def test_train_hybrid_main_path_mode_toggles_attention_params(self):
-        from combat_nn import CombatPolicyValueNetwork
+        from network.combat_network import CombatPolicyValueNetwork
         from train_hybrid import _configure_main_combat_path_mode
-        from vocab import load_vocab
+        from core.vocab import load_vocab
 
         network = CombatPolicyValueNetwork(vocab=load_vocab(), embed_dim=32, hidden_dim=128)
 
@@ -2782,9 +2781,9 @@ class TestEvaluateHarness:
         assert network.main_action_context_attn.in_proj_weight.requires_grad is True
 
     def test_train_hybrid_offline_noncombat_ranking_head_mode_toggles_attention_params(self):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from network.fullrun_policy import FullRunPolicyNetworkV2
         from train_hybrid import _configure_offline_noncombat_ranking_head_mode
-        from vocab import load_vocab
+        from core.vocab import load_vocab
 
         network = FullRunPolicyNetworkV2(vocab=load_vocab(), embed_dim=32)
 
@@ -3782,9 +3781,9 @@ class TestStage25PlanAssets:
 
 class TestBossAwarePlanning:
     def test_extract_next_boss_token_and_structured_state(self, vocab):
-        from rl_reward_shaping import extract_next_boss_token, boss_readiness_score
-        from rl_encoder_v2 import build_structured_state
-        from rl_policy_v2 import _structured_state_to_numpy_dict
+        from core.rl_reward_shaping import extract_next_boss_token, boss_readiness_score
+        from network.state_features import build_structured_state
+        from network.fullrun_policy import _structured_state_to_numpy_dict
 
         state = _make_synthetic_state("map")
         assert extract_next_boss_token(state) == "ceremonial_beast"
@@ -3797,8 +3796,8 @@ class TestBossAwarePlanning:
         assert int(flat["next_boss_idx"]) == ss.next_boss_idx
 
     def test_structured_rollout_buffer_keeps_boss_readiness_targets(self, vocab):
-        from rl_encoder_v2 import build_structured_state, build_structured_actions
-        from rl_policy_v2 import StructuredRolloutBuffer
+        from network.state_features import build_structured_state, build_structured_actions
+        from network.fullrun_policy import StructuredRolloutBuffer
 
         state = _make_synthetic_state("map")
         actions = _make_synthetic_actions("map")
@@ -3814,7 +3813,7 @@ class TestBossAwarePlanning:
         assert tensors["boss_readiness_targets"][0].item() == pytest.approx(0.62)
 
     def test_boss_aware_warmup_freezes_old_ppo_params(self, vocab):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from network.fullrun_policy import FullRunPolicyNetworkV2
         from train_hybrid import _configure_boss_aware_warmup
 
         net = FullRunPolicyNetworkV2(vocab=vocab)
@@ -3920,7 +3919,7 @@ class TestNnBackendParityAudit:
 @pytest.mark.skip(reason="Combat teacher/microbench dataset stack is no longer part of the STS2AI mainline.")
 class TestCombatTeacherStackV1:
     def test_forward_teacher_shapes(self, vocab):
-        from combat_nn import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
+        from network.combat_network import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
 
         state = _make_teacher_combat_state(
             [
@@ -3968,7 +3967,7 @@ class TestCombatTeacherStackV1:
         assert float(continuation[0, 2].item()) >= 0.0
 
     def test_canonical_public_state_hash_ignores_hidden_draw_order(self):
-        from combat_teacher_common import canonical_public_state_hash
+        from search.combat_teacher_common import canonical_public_state_hash
 
         base = _make_teacher_combat_state(
             [
@@ -3988,7 +3987,7 @@ class TestCombatTeacherStackV1:
         assert canonical_public_state_hash(a) != canonical_public_state_hash(b)
 
     def test_turn_solver_prefers_bash_before_strike(self, vocab):
-        from combat_turn_solver import CombatTurnSolver
+        from search.combat_turn_solver import CombatTurnSolver
 
         state = _make_teacher_combat_state(
             [
@@ -4012,7 +4011,7 @@ class TestCombatTeacherStackV1:
         assert solution.best_full_turn_line[0]["card_id"] == "BASH"
 
     def test_transposition_cache_hits_on_repeated_solve(self, vocab):
-        from combat_turn_solver import CombatTurnSolver
+        from search.combat_turn_solver import CombatTurnSolver
 
         state = _make_teacher_combat_state(
             [
@@ -4037,7 +4036,7 @@ class TestCombatTeacherStackV1:
 
     def test_teacher_dataset_roundtrip_and_microbench(self, tmp_path):
         from combat_microbench import build_microbench_report
-        from combat_teacher_dataset import CombatTeacherSample, load_combat_teacher_samples, write_combat_teacher_samples
+        from search.combat_teacher_dataset import CombatTeacherSample, load_combat_teacher_samples, write_combat_teacher_samples
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4081,7 +4080,7 @@ class TestCombatTeacherStackV1:
         assert report["source_sample_count"] == 1
 
     def test_build_combat_features_exposes_room_type_onehot(self, vocab):
-        from combat_nn import build_combat_features
+        from network.combat_network import build_combat_features
 
         boss_state = _make_v1_combat_state("boss", floor=16)
         elite_state = _make_v1_combat_state("elite", floor=12)
@@ -4096,7 +4095,7 @@ class TestCombatTeacherStackV1:
         assert monster_feat["room_type_onehot"].tolist() == pytest.approx([1.0, 0.0, 0.0])
 
     def test_room_conditioned_value_prefers_boss_survival_over_hp_preservation(self):
-        from combat_nn import compose_room_conditioned_value
+        from network.combat_network import compose_room_conditioned_value
 
         base = torch.tensor([0.0], dtype=torch.float32)
         continuation = torch.tensor([[0.80, 12.0, 0.0]], dtype=torch.float32)
@@ -4110,7 +4109,7 @@ class TestCombatTeacherStackV1:
 
     def test_microbench_dedupes_duplicate_sample_ids(self):
         from combat_microbench import build_microbench_report
-        from combat_teacher_dataset import CombatTeacherSample
+        from search.combat_teacher_dataset import CombatTeacherSample
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4147,7 +4146,7 @@ class TestCombatTeacherStackV1:
         assert report["sample_count"] == 1
 
     def test_strict_bash_metric_excludes_tied_solver_states(self):
-        from combat_teacher_dataset import CombatTeacherSample, sample_metric_applicable
+        from search.combat_teacher_dataset import CombatTeacherSample, sample_metric_applicable
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4187,7 +4186,7 @@ class TestCombatTeacherStackV1:
 
     def test_microbench_uses_regret_not_exact_index_for_errors(self):
         from combat_microbench import evaluate_policy_on_samples
-        from combat_teacher_dataset import CombatTeacherSample
+        from search.combat_teacher_dataset import CombatTeacherSample
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4236,7 +4235,7 @@ class TestCombatTeacherStackV1:
         import torch
 
         from combat_microbench import TeacherSamplePolicy
-        from combat_teacher_dataset import CombatTeacherSample
+        from search.combat_teacher_dataset import CombatTeacherSample
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4298,9 +4297,9 @@ class TestCombatTeacherStackV1:
     def test_teacher_trainer_tiny_overfit(self, vocab):
         from torch.utils.data import DataLoader
 
-        from combat_teacher_dataset import CombatTeacherSample
-        from train_combat_teacher import CombatTeacherTorchDataset, _run_epoch
-        from combat_nn import CombatPolicyValueNetwork
+        from search.combat_teacher_dataset import CombatTeacherSample
+        from search.train_combat_teacher import CombatTeacherTorchDataset, _run_epoch
+        from network.combat_network import CombatPolicyValueNetwork
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4348,7 +4347,7 @@ class TestCombatTeacherStackV1:
 
     def test_dataset_assembly_preserves_scarce_motifs(self):
         from build_combat_teacher_dataset import _assemble_dataset
-        from combat_teacher_dataset import CombatTeacherSample
+        from search.combat_teacher_dataset import CombatTeacherSample
 
         bash_state = _make_teacher_combat_state(
             [
@@ -4514,7 +4513,7 @@ class TestCombatTeacherStackV1:
 
     def test_dataset_assembly_reserves_holdout_anchor_coverage(self):
         from build_combat_teacher_dataset import _assemble_dataset
-        from combat_teacher_dataset import CombatTeacherSample, sample_metric_applicable
+        from search.combat_teacher_dataset import CombatTeacherSample, sample_metric_applicable
 
         bash_state = _make_teacher_combat_state(
             [
@@ -4584,7 +4583,7 @@ class TestCombatTeacherStackV1:
 
     def test_dataset_assembly_can_zero_historical_bulk_fraction(self):
         from build_combat_teacher_dataset import _assemble_dataset
-        from combat_teacher_dataset import CombatTeacherSample
+        from search.combat_teacher_dataset import CombatTeacherSample
 
         base_state = _make_teacher_combat_state(
             [{"id": "DEFEND_IRONCLAD", "name": "Defend", "cost": 1, "is_upgraded": False}],
@@ -4636,7 +4635,7 @@ class TestCombatTeacherStackV1:
 
     def test_targeted_hard_motif_selection_prefers_high_regret_and_diverse_hashes(self):
         from build_combat_teacher_dataset import _take_prioritized_samples
-        from combat_teacher_dataset import CombatTeacherSample
+        from search.combat_teacher_dataset import CombatTeacherSample
 
         base_state = _make_teacher_combat_state(
             [
@@ -4694,7 +4693,7 @@ class TestCombatTeacherStackV1:
 
     def test_dataset_assembly_prioritizes_on_policy_holdout_for_direct_lethal(self):
         from build_combat_teacher_dataset import _assemble_dataset
-        from combat_teacher_dataset import CombatTeacherSample, sample_metric_applicable
+        from search.combat_teacher_dataset import CombatTeacherSample, sample_metric_applicable
 
         lethal_state = _make_teacher_combat_state(
             [
@@ -4769,7 +4768,7 @@ class TestCombatTeacherStackV1:
         assert "potion_misuse" in labels
 
     def test_regression_motif_samples_have_train_and_holdout_coverage(self):
-        from combat_teacher_dataset import sample_metric_applicable
+        from search.combat_teacher_dataset import sample_metric_applicable
         from combat_teacher_regression_samples import build_regression_motif_samples
 
         samples = build_regression_motif_samples()
@@ -4795,8 +4794,8 @@ class TestCombatTeacherStackV1:
             assert holdout_count >= 2, f"{motif} holdout coverage too small: {holdout_count}"
 
     def test_teacher_train_weights_simple_missed_lethal_above_regular_states(self):
-        from combat_teacher_dataset import CombatTeacherSample
-        from train_combat_teacher import _train_sample_weight
+        from search.combat_teacher_dataset import CombatTeacherSample
+        from search.train_combat_teacher import _train_sample_weight
 
         regular = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4875,8 +4874,8 @@ class TestCombatTeacherStackV1:
         assert lethal_weight > regular_weight
 
     def test_teacher_train_weights_direct_lethal_above_regular_states(self):
-        from combat_teacher_dataset import CombatTeacherSample
-        from train_combat_teacher import _train_sample_weight
+        from search.combat_teacher_dataset import CombatTeacherSample
+        from search.train_combat_teacher import _train_sample_weight
 
         regular = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -4955,8 +4954,8 @@ class TestCombatTeacherStackV1:
         assert direct_lethal_weighted > regular_weight
 
     def test_teacher_baseline_anchor_weight_only_boosts_direct_lethal_when_baseline_is_correct(self):
-        from combat_teacher_dataset import CombatTeacherSample
-        from train_combat_teacher import _baseline_anchor_weight
+        from search.combat_teacher_dataset import CombatTeacherSample
+        from search.train_combat_teacher import _baseline_anchor_weight
 
         baseline_correct = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -5028,7 +5027,7 @@ class TestCombatTeacherStackV1:
         assert wrong_weight == 1.0
 
     def test_teacher_score_kl_ignores_masked_actions(self):
-        from train_combat_teacher import _masked_policy_kl_to_reference
+        from search.train_combat_teacher import _masked_policy_kl_to_reference
 
         masked_scores = torch.tensor([[np.log(0.7), np.log(0.3), -1e9]], dtype=torch.float32)
         baseline_probs = torch.tensor([[0.7, 0.3, 0.9]], dtype=torch.float32)
@@ -5040,8 +5039,8 @@ class TestCombatTeacherStackV1:
         assert float(kl.item()) == pytest.approx(0.0, abs=1e-6)
 
     def test_teacher_train_weights_can_scale_with_baseline_regret(self):
-        from combat_teacher_dataset import CombatTeacherSample
-        from train_combat_teacher import _train_sample_weight
+        from search.combat_teacher_dataset import CombatTeacherSample
+        from search.train_combat_teacher import _train_sample_weight
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -5092,8 +5091,8 @@ class TestCombatTeacherStackV1:
         assert regret_weighted > base_weight
 
     def test_teacher_train_ignores_sentinel_baseline_regret_for_weighting(self):
-        from combat_teacher_dataset import CombatTeacherSample
-        from train_combat_teacher import _train_sample_weight
+        from search.combat_teacher_dataset import CombatTeacherSample
+        from search.train_combat_teacher import _train_sample_weight
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -5145,7 +5144,7 @@ class TestCombatTeacherStackV1:
 
     def test_microbench_caps_sentinel_regret_values(self):
         from combat_microbench import _sample_regret
-        from combat_teacher_dataset import CombatTeacherSample
+        from search.combat_teacher_dataset import CombatTeacherSample
 
         sample = CombatTeacherSample(
             schema_version="combat_teacher_dataset.v1",
@@ -5484,7 +5483,7 @@ class TestRankingLoss:
     """Smoke tests for ranking_loss.py — listwise and pairwise losses."""
 
     def test_listwise_identical_scores_low_loss(self):
-        from ranking_loss import listwise_ranking_loss
+        from search.ranking_loss import listwise_ranking_loss
 
         scores = torch.tensor([[1.0, 0.5, 0.2, -0.1]])
         mask = torch.tensor([[True, True, True, True]])
@@ -5493,7 +5492,7 @@ class TestRankingLoss:
         assert loss.item() < 0.01  # nearly zero for identical inputs
 
     def test_listwise_opposite_scores_high_loss(self):
-        from ranking_loss import listwise_ranking_loss
+        from search.ranking_loss import listwise_ranking_loss
 
         predicted = torch.tensor([[1.0, 0.5, 0.2, -0.1]])
         target = torch.tensor([[-0.1, 0.2, 0.5, 1.0]])  # reversed
@@ -5503,7 +5502,7 @@ class TestRankingLoss:
         assert loss.item() > 0.1  # significant loss for opposite rankings
 
     def test_listwise_respects_mask(self):
-        from ranking_loss import listwise_ranking_loss
+        from search.ranking_loss import listwise_ranking_loss
 
         predicted = torch.tensor([[1.0, 0.5, 999.0, -999.0]])
         target = torch.tensor([[1.0, 0.5, 0.0, 0.0]])
@@ -5514,7 +5513,7 @@ class TestRankingLoss:
         assert loss.item() < 0.1  # masked entries don't affect loss
 
     def test_pairwise_correct_order_low_loss(self):
-        from ranking_loss import pairwise_ranking_loss
+        from search.ranking_loss import pairwise_ranking_loss
 
         # Predicted matches target ordering
         predicted = torch.tensor([[3.0, 2.0, 1.0]])
@@ -5525,7 +5524,7 @@ class TestRankingLoss:
         assert loss.item() < 0.5  # correct ordering has low loss
 
     def test_pairwise_wrong_order_high_loss(self):
-        from ranking_loss import pairwise_ranking_loss
+        from search.ranking_loss import pairwise_ranking_loss
 
         # Predicted reverses target ordering
         predicted = torch.tensor([[1.0, 2.0, 3.0]])
@@ -5536,7 +5535,7 @@ class TestRankingLoss:
         assert loss.item() > 0.5  # wrong ordering has high loss
 
     def test_pairwise_empty_returns_zero(self):
-        from ranking_loss import pairwise_ranking_loss
+        from search.ranking_loss import pairwise_ranking_loss
 
         predicted = torch.tensor([[1.0]])
         target = torch.tensor([[0.5]])
@@ -5546,7 +5545,7 @@ class TestRankingLoss:
         assert loss.item() == 0.0  # can't form pairs with 1 element
 
     def test_loss_gradient_flows(self):
-        from ranking_loss import listwise_ranking_loss
+        from search.ranking_loss import listwise_ranking_loss
 
         predicted = torch.tensor([[1.0, 0.5, 0.2]], requires_grad=True)
         target = torch.tensor([[-0.1, 0.2, 1.0]])
@@ -5562,8 +5561,8 @@ class TestMatchupScoreHead:
     """Smoke tests for matchup_score_head in FullRunPolicyNetworkV2."""
 
     def test_matchup_head_exists_and_zero_init(self):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from vocab import load_vocab
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from core.vocab import load_vocab
 
         vocab = load_vocab()
         net = FullRunPolicyNetworkV2(vocab=vocab, embed_dim=32)
@@ -5580,8 +5579,8 @@ class TestMatchupScoreHead:
         assert net.offline_ranking_state_context_gate.item() == 0.0
 
     def test_matchup_head_param_count_reasonable(self):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from vocab import load_vocab
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from core.vocab import load_vocab
 
         vocab = load_vocab()
         net = FullRunPolicyNetworkV2(vocab=vocab, embed_dim=32)
@@ -5595,8 +5594,8 @@ class TestMatchupScoreHead:
 
     def test_old_checkpoint_loads_with_new_head(self):
         """Verify that loading old checkpoint (without matchup_score_head) works via strict=False."""
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from vocab import load_vocab
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from core.vocab import load_vocab
 
         vocab = load_vocab()
         net_old = FullRunPolicyNetworkV2(vocab=vocab, embed_dim=32)
@@ -5611,8 +5610,8 @@ class TestMatchupScoreHead:
         assert len(unexpected) == 0
 
     def test_matchup_head_mode_toggles_attention_params(self):
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from vocab import load_vocab
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from core.vocab import load_vocab
 
         net = FullRunPolicyNetworkV2(vocab=load_vocab(), embed_dim=32)
 
@@ -5645,7 +5644,7 @@ class TestMatchupDataset:
     """Smoke tests for matchup_dataset.py — dataset loading."""
 
     def test_empty_dataset(self):
-        from matchup_dataset import MatchupRankingDataset
+        from search.matchup_dataset import MatchupRankingDataset
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5654,7 +5653,7 @@ class TestMatchupDataset:
             assert ds.sample_batch(8) is None
 
     def test_load_jsonl(self, tmp_path):
-        from matchup_dataset import MatchupRankingDataset
+        from search.matchup_dataset import MatchupRankingDataset
 
         # Write mock data
         data = [
@@ -5670,7 +5669,7 @@ class TestMatchupDataset:
         assert len(ds) == 2
 
     def test_sample_batch_shapes(self, tmp_path):
-        from matchup_dataset import MatchupRankingDataset, MAX_OPTIONS
+        from search.matchup_dataset import MatchupRankingDataset, MAX_OPTIONS
 
         data = [
             {"scores": [0.8, 0.5, 0.3, 0.2], "best_idx": 0, "options": [{}, {}, {}, {}]},
@@ -5690,7 +5689,7 @@ class TestMatchupDataset:
         assert batch["option_mask"].dtype == torch.bool
 
     def test_dataset_stats(self, tmp_path):
-        from matchup_dataset import MatchupRankingDataset
+        from search.matchup_dataset import MatchupRankingDataset
 
         data = [
             {"scores": [0.8, 0.5, 0.3, 0.2], "best_idx": 0},
@@ -5711,7 +5710,7 @@ class TestGenerateCardRanking:
     """Smoke tests for generate_card_ranking_data.py — scoring logic."""
 
     def test_compute_option_scores(self):
-        from generate_card_ranking_data import CombatOutcome, compute_option_scores
+        from search.generate_card_ranking_data import CombatOutcome, compute_option_scores
 
         outcomes = {
             0: CombatOutcome(won=True, hp_after=70, hp_lost=10, turns=3, terminal_state_type="combat_rewards"),
@@ -5726,7 +5725,7 @@ class TestGenerateCardRanking:
         assert scores[2] < 0.5  # lost fight
 
     def test_compute_option_scores_all_wins(self):
-        from generate_card_ranking_data import CombatOutcome, compute_option_scores
+        from search.generate_card_ranking_data import CombatOutcome, compute_option_scores
 
         outcomes = {
             0: CombatOutcome(won=True, hp_after=75, hp_lost=5, turns=2, terminal_state_type="cr"),
@@ -5736,7 +5735,7 @@ class TestGenerateCardRanking:
         assert scores[0] > scores[1]  # better HP + fewer turns
 
     def test_compute_option_scores_breaks_ties_for_boss_losses(self):
-        from generate_card_ranking_data import CombatOutcome, compute_option_scores
+        from search.generate_card_ranking_data import CombatOutcome, compute_option_scores
 
         outcomes = {
             0: CombatOutcome(
@@ -5775,7 +5774,7 @@ class TestGenerateCardRanking:
         assert scores[1] > scores[2]  # boss-loss should still outrank pre-boss death
 
     def test_extract_card_reward_options_format(self):
-        from generate_card_ranking_data import _extract_card_reward_options
+        from search.generate_card_ranking_data import _extract_card_reward_options
 
         state = {
             "card_reward": {
@@ -5799,7 +5798,7 @@ class TestGenerateCardRanking:
 
     def test_safe_load_state_dict_accepts_current_and_legacy_keys(self):
         import torch.nn as nn
-        from generate_card_ranking_data import _safe_load_state_dict
+        from search.generate_card_ranking_data import _safe_load_state_dict
 
         model = nn.Linear(4, 2)
         original = model.weight.detach().clone()
@@ -5867,13 +5866,13 @@ def _make_dummy_ppo_state_action_tensors(vocab):
     returns numpy arrays and needs more conversion; a direct tensor build
     exercises the network just as well).
     """
-    from rl_encoder_v2 import (
+    from network.state_features import (
         MAX_DECK_SIZE, MAX_HAND_SIZE, MAX_RELICS, MAX_POTIONS, MAX_ENEMIES,
         MAX_ACTIONS, MAX_MAP_NODES, MAX_CARD_REWARDS, MAX_SHOP_ITEMS,
         MAX_REST_OPTIONS, SCALAR_DIM, CARD_AUX_DIM, ENEMY_AUX_DIM,
         MAP_ROUTE_DIM, SCREEN_TYPE_TO_IDX,
     )
-    from relic_tags import NUM_RELIC_TAGS
+    from core.relic_tags import NUM_RELIC_TAGS
 
     torch.manual_seed(17)  # Deterministic across calls in a single test
     B = 2
@@ -5930,7 +5929,7 @@ class TestSymbolicFeaturesHead:
 
     # (a) -------------------------------------------------------------------
     def test_build_global_symbol_vocab_deterministic(self):
-        from source_knowledge_features import build_global_symbol_vocab
+        from core.source_knowledge_features import build_global_symbol_vocab
         vocab1, sha1 = build_global_symbol_vocab()
         vocab2, sha2 = build_global_symbol_vocab()
         assert vocab1 == vocab2, "global symbol vocab is not deterministic across runs"
@@ -5945,7 +5944,7 @@ class TestSymbolicFeaturesHead:
 
     # (b) -------------------------------------------------------------------
     def test_per_entity_symbol_id_shapes_and_coverage(self, vocab):
-        from source_knowledge_features import build_all_symbol_tables
+        from core.source_knowledge_features import build_all_symbol_tables
         tables, meta = build_all_symbol_tables(vocab)
         assert set(tables.keys()) == {"card", "relic", "monster", "potion"}
 
@@ -5969,7 +5968,7 @@ class TestSymbolicFeaturesHead:
 
     # (c) -------------------------------------------------------------------
     def test_pad_unk_rows_zeroed(self, vocab):
-        from source_knowledge_features import build_all_symbol_tables
+        from core.source_knowledge_features import build_all_symbol_tables
         tables, _ = build_all_symbol_tables(vocab)
         for name in ("card", "relic", "monster", "potion"):
             ids, mask = tables[name]
@@ -5981,7 +5980,7 @@ class TestSymbolicFeaturesHead:
 
     # (d) -------------------------------------------------------------------
     def test_symbolic_head_forward_shapes(self, vocab):
-        from symbolic_features_head import SymbolicFeaturesHead
+        from core.symbolic_features_head import SymbolicFeaturesHead
         head = SymbolicFeaturesHead(vocab, embed_dim=32, proj_dim=16)
 
         # Single batch, 4 slots. Include a pad (0) and a real id to verify
@@ -6018,7 +6017,7 @@ class TestSymbolicFeaturesHead:
              partial copy preserves old columns bit-for-bit and zero-inits new
              columns. Since the new-column input is 0, they contribute 0.
         """
-        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from network.fullrun_policy import FullRunPolicyNetworkV2
 
         net_off = FullRunPolicyNetworkV2(vocab)
         net_off.eval()
@@ -6056,7 +6055,7 @@ class TestSymbolicFeaturesHead:
         """After enabling retrieval, relic_encoder.proj should be Linear(80, 64)
         with [I | 0] initialization so baseline behavior is preserved.
         """
-        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from network.fullrun_policy import FullRunPolicyNetworkV2
         import torch.nn as nn
 
         net = FullRunPolicyNetworkV2(vocab, use_symbolic_features=True, symbolic_proj_dim=16)
@@ -6082,7 +6081,7 @@ class TestSymbolicFeaturesHead:
         retrieval-on deck_encoder.proj (101 cols), the first 85 cols should be
         bit-identical and the last 16 cols zero.
         """
-        from rl_policy_v2 import FullRunPolicyNetworkV2
+        from network.fullrun_policy import FullRunPolicyNetworkV2
 
         net_off = FullRunPolicyNetworkV2(vocab)
         baseline_weight = net_off.deck_encoder.proj.weight.detach().clone()
@@ -6111,8 +6110,8 @@ class TestSymbolicFeaturesHead:
         two Adam optimizer states updating the same parameter with independent
         moving averages (which would cause weight thrashing).
         """
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from combat_nn import CombatPolicyValueNetwork
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from network.combat_network import CombatPolicyValueNetwork
 
         ppo = FullRunPolicyNetworkV2(vocab, use_symbolic_features=True, symbolic_proj_dim=16)
         combat = CombatPolicyValueNetwork(
@@ -6158,9 +6157,9 @@ class TestSymbolicFeaturesHead:
         optimizer and verify the parameter changed. This is the autograd-level
         wiring the optimizer-ownership design depends on.
         """
-        from rl_policy_v2 import FullRunPolicyNetworkV2
-        from combat_nn import CombatPolicyValueNetwork
-        from rl_encoder_v2 import MAX_HAND_SIZE, MAX_ENEMIES, CARD_AUX_DIM, ENEMY_AUX_DIM
+        from network.fullrun_policy import FullRunPolicyNetworkV2
+        from network.combat_network import CombatPolicyValueNetwork
+        from network.state_features import MAX_HAND_SIZE, MAX_ENEMIES, CARD_AUX_DIM, ENEMY_AUX_DIM
 
         ppo = FullRunPolicyNetworkV2(vocab, use_symbolic_features=True, symbolic_proj_dim=16)
         combat = CombatPolicyValueNetwork(
@@ -6177,7 +6176,7 @@ class TestSymbolicFeaturesHead:
         # reprs and then appends `extra_scalars` (14-dim v2 player powers). We
         # must split these or the encoder input width doesn't match.
         B = 2
-        from combat_nn import COMBAT_SCALAR_DIM, COMBAT_EXTRA_SCALAR_DIM
+        from network.combat_network import COMBAT_SCALAR_DIM, COMBAT_EXTRA_SCALAR_DIM
         state = {
             "scalars":       torch.rand(B, COMBAT_SCALAR_DIM),
             "extra_scalars": torch.rand(B, COMBAT_EXTRA_SCALAR_DIM),
@@ -6188,7 +6187,7 @@ class TestSymbolicFeaturesHead:
             "enemy_aux":  torch.rand(B, MAX_ENEMIES, ENEMY_AUX_DIM),
             "enemy_mask": torch.ones(B, MAX_ENEMIES, dtype=torch.bool),
         }
-        from rl_encoder_v2 import MAX_ACTIONS
+        from network.state_features import MAX_ACTIONS
         action = {
             "action_type_ids":  torch.randint(0, 5, (B, MAX_ACTIONS), dtype=torch.long),
             "target_card_ids":  torch.randint(0, 5, (B, MAX_ACTIONS), dtype=torch.long),
@@ -6237,7 +6236,7 @@ class TestSymbolicFeaturesHead:
             "After out_proj is nonzero, gradients should flow to query_proj " \
             "through cross-attention — the autograd chain is broken"
 def test_pipe_combat_forward_model_keeps_combat_start_pending_non_terminal():
-    from combat_mcts_agent import _check_terminal
+    from search.combat_mcts_agent import _check_terminal
 
     is_terminal, player_won = _check_terminal({
         "state_type": "combat_start_pending",
@@ -6250,7 +6249,7 @@ def test_pipe_combat_forward_model_keeps_combat_start_pending_non_terminal():
 
 
 def test_pipe_combat_forward_model_treats_post_end_pending_as_terminal():
-    from combat_mcts_agent import _check_terminal
+    from search.combat_mcts_agent import _check_terminal
 
     is_terminal, player_won = _check_terminal({
         "state_type": "combat_post_end_pending",
@@ -6263,7 +6262,7 @@ def test_pipe_combat_forward_model_treats_post_end_pending_as_terminal():
 
 
 def test_mcts_puct_uses_prior_when_parent_has_zero_visits():
-    from mcts_core import MCTSNode
+    from search.mcts_core import MCTSNode
 
     root = MCTSNode()
     legal = [
@@ -6278,7 +6277,7 @@ def test_mcts_puct_uses_prior_when_parent_has_zero_visits():
 
 
 def test_mcts_best_action_visit_q_blend_can_override_top_visits():
-    from mcts_core import MCTSNode
+    from search.mcts_core import MCTSNode
 
     root = MCTSNode()
     root.visit_count = 300
@@ -6335,7 +6334,7 @@ def test_match_legal_action_index_does_not_loose_match_play_card():
 
 
 def test_pipe_forward_model_get_legal_actions_does_not_bleed_card_metadata():
-    from combat_mcts_agent import PipeCombatForwardModel
+    from search.combat_mcts_agent import PipeCombatForwardModel
 
     state = {
         "state_type": "monster",
@@ -6394,8 +6393,8 @@ def test_dispatch_action_with_fallbacks_does_not_mutate_combat_action():
 
 
 def test_pipe_client_rejected_step_with_state_raises_api_error():
-    from full_run_env import PipeBackedFullRunClient
-    from sts2_singleplayer_env import SingleplayerApiError
+    from ipc.full_run_env import PipeBackedFullRunClient
+    from ipc.sts2_singleplayer_env import SingleplayerApiError
 
     class DummyPipe:
         def connect(self, timeout_s: float | None = None) -> None:
@@ -6435,7 +6434,7 @@ def test_pipe_client_rejected_step_with_state_raises_api_error():
 
 
 def test_normalize_build_spec_accepts_aliases_and_upgrades():
-    from full_run_env import _normalize_build_spec
+    from ipc.full_run_env import _normalize_build_spec
 
     normalized = _normalize_build_spec(
         {
@@ -6481,7 +6480,7 @@ def test_normalize_build_spec_accepts_aliases_and_upgrades():
 
 
 def test_pipe_reset_forwards_normalized_build(monkeypatch):
-    from full_run_env import PipeBackedFullRunClient
+    from ipc.full_run_env import PipeBackedFullRunClient
 
     class DummyPipe:
         def __init__(self) -> None:
@@ -6550,7 +6549,7 @@ def test_pipe_reset_forwards_normalized_build(monkeypatch):
 
 
 def test_pipe_reconnect_uses_dead_threshold_before_marking_dead(monkeypatch):
-    from full_run_env import PipeBackedFullRunClient
+    from ipc.full_run_env import PipeBackedFullRunClient
 
     class DummyPipe:
         def close(self) -> None:
@@ -6596,7 +6595,7 @@ def test_pipe_reconnect_uses_dead_threshold_before_marking_dead(monkeypatch):
 
 
 def test_pipe_reconnect_restarts_host_before_marking_dead(monkeypatch):
-    from full_run_env import PipeBackedFullRunClient
+    from ipc.full_run_env import PipeBackedFullRunClient
 
     class DummyPipe:
         def close(self) -> None:

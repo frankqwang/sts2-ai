@@ -19,8 +19,8 @@ from typing import Any
 
 import torch
 
-from combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel, _reconcile_action
-from combat_nn import CombatPolicyValueNetwork
+from search.combat_mcts_agent import CombatMCTSAgent, PipeCombatForwardModel, _reconcile_action
+from network.combat_network import CombatPolicyValueNetwork
 from evaluate_ai import (
     _infer_combat_dims,
     _infer_ppo_embed_dim,
@@ -28,14 +28,14 @@ from evaluate_ai import (
     _safe_load_state_dict,
     _summarize_mcts_root,
 )
-from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
+from ipc.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from ipc.full_run_env import PipeBackedFullRunClient, create_full_run_client
-from mcts_core import MCTSConfig
+from search.mcts_core import MCTSConfig
 from tools.public_state_trace import build_trace_entry
-from rl_policy_v2 import FullRunPolicyNetworkV2
+from network.fullrun_policy import FullRunPolicyNetworkV2
 from verify_save_load import COMBAT_TYPES, drive_to_state
-from vocab import load_vocab
-from checkpoint_compat import get_combat_model_config, get_combat_model_state
+from core.vocab import load_vocab
+from core.checkpoint_compat import get_combat_model_config, get_combat_model_state
 
 
 logger = logging.getLogger("mcts_pipe_audit")

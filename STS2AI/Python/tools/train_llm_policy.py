@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sts2ai_paths import ARTIFACTS_ROOT
+from constants import ARTIFACTS_ROOT
 
 # Keep the train process conservative on Windows workstations.
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")

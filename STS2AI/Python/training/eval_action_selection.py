@@ -20,8 +20,8 @@ from typing import Any
 import numpy as np
 import torch
 
-from core.rl_encoder_v2 import _lower, _safe_float, _safe_int, MAX_ACTIONS, build_structured_state
-from core.combat_nn import CombatPolicyValueNetwork, CombatNNEvaluator, build_combat_features, build_combat_action_features
+from network.state_features import _lower, _safe_float, _safe_int, MAX_ACTIONS, build_structured_state
+from network.combat_network import CombatPolicyValueNetwork, CombatNNEvaluator, build_combat_features, build_combat_action_features
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ def _build_combat_tensors(
     # Inject deck_repr from PPO brain if available (build_plan_z bridge)
     if ppo_net is not None and hasattr(ppo_net, "compute_deck_repr"):
         try:
-            from rl_encoder_v2 import build_structured_state as _bss
+            from network.shared_encoders import build_structured_state as _bss
             ss = _bss(state, vocab)
             deck_t = {
                 "deck_ids": torch.tensor(ss.deck_ids).unsqueeze(0).to(device),

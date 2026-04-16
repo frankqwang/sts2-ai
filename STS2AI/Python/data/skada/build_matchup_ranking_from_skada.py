@@ -39,9 +39,9 @@ if str(_PYTHON_ROOT) not in sys.path:
 
 import _path_init  # noqa: F401
 
-from rl_encoder_v2 import build_structured_actions, build_structured_state
-from rl_policy_v2 import _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
-from vocab import load_vocab
+from network.state_features import build_structured_actions, build_structured_state
+from network.fullrun_policy import _structured_actions_to_numpy_dict, _structured_state_to_numpy_dict
+from core.vocab import load_vocab
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:

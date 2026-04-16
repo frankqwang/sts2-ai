@@ -15,7 +15,7 @@ Usage:
     python card_tags.py --repo-root /path/to/sts2
 
     # In code
-    from card_tags import load_card_tags, TAG_VOCAB
+    from core.card_tags import load_card_tags, TAG_VOCAB
     tags = load_card_tags()  # dict[str, list[str]]
     tag_indices = tags["offering"]  # e.g. ["draw", "energy_gen", "exhaust", "hp_loss", "self_target"]
 """
@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from vocab import _slugify
+from core.vocab import _slugify
 
 # ---------------------------------------------------------------------------
 # Tag vocabulary — every possible tag a card can have

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.rl_encoder_v2 import _lower, _safe_float, _safe_int
+from network.state_features import _lower, _safe_float, _safe_int
 
 SELECTION_SCREENS = {"card_select", "hand_select", "relic_select"}
 

@@ -8,16 +8,16 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
-from sts2_singleplayer_env import (
+from ipc.sts2_singleplayer_env import (
     SingleplayerApiError,
     SingleplayerClient,
     SingleplayerConnectionError,
     SingleplayerTimeoutError,
 )
-from binary_pipe_client import BinaryPipeClient
-from headless_sim_runner import start_headless_sim, stop_process
-from pipe_client import PipeClient
-from simulator_api_error import SimulatorApiError
+from ipc.binary_pipe_client import BinaryPipeClient
+from ipc.headless_sim_runner import start_headless_sim, stop_process
+from ipc.pipe_client import PipeClient
+from ipc.simulator_api_error import SimulatorApiError
 
 logger = logging.getLogger(__name__)
 

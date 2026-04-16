@@ -41,8 +41,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vocab import Vocab
-from source_knowledge_features import (
+from core.vocab import Vocab
+from core.source_knowledge_features import (
     KnowledgeMeta,
     build_all_symbol_tables,
 )

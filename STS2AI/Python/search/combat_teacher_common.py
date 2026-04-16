@@ -14,14 +14,14 @@ import numpy as np
 import torch
 
 from core.card_tags import load_card_tags
-from core.combat_nn import (
+from network.combat_network import (
     CombatPolicyValueNetwork,
     build_combat_action_features,
     build_combat_features,
 )
-from core.rl_encoder_v2 import _lower, _safe_float, _safe_int
+from network.state_features import _lower, _safe_float, _safe_int
 from core.vocab import Vocab, _slugify, load_vocab
-from checkpoint_compat import get_combat_model_state
+from core.checkpoint_compat import get_combat_model_state
 
 COMBAT_TEACHER_SCHEMA_VERSION = "combat_teacher_dataset.v1"
 COMBAT_TURN_SOLUTION_SCHEMA_VERSION = "combat_turn_solution.v1"

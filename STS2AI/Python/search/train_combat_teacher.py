@@ -15,10 +15,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
-from core.combat_nn import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
+from network.combat_network import CombatPolicyValueNetwork, build_combat_action_features, build_combat_features
 from search.combat_teacher_dataset import CombatTeacherSample, load_combat_teacher_samples, sample_metric_applicable
 from core.vocab import load_vocab
-from checkpoint_compat import get_combat_model_state
+from core.checkpoint_compat import get_combat_model_state
 
 
 def _safe_load_state_dict(model: torch.nn.Module, state_dict: dict[str, Any]) -> None:

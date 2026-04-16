@@ -52,7 +52,7 @@ from typing import Any
 
 import numpy as np
 
-from vocab import Vocab
+from core.vocab import Vocab
 
 logger = logging.getLogger(__name__)
 
@@ -479,7 +479,7 @@ def build_all_symbol_tables(
 
 def _main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    from vocab import load_vocab
+    from core.vocab import load_vocab
     v = load_vocab()
     tables, meta = build_all_symbol_tables(v)
     print(f"Global symbol vocab size: {len(meta.global_symbol_vocab)}")
