@@ -839,6 +839,13 @@ class CombatPolicyValueNetwork(nn.Module):
         )
         self.teacher_action_context_ffn_norm = nn.LayerNorm(hidden_dim)
         self.teacher_action_context_gate = nn.Parameter(torch.tensor(0.0))
+        # FREEZE_TEACHER_CONTEXT_GATE=1 keeps the gate pinned at its init value.
+        # In v10 this gate ran away to -0.036 during teacher loss training and
+        # silently pulled the shared encoder via residual attention, which
+        # degraded online PPO policy. Freezing it lets teacher loss still
+        # train action_score_head directly but stops the indirect encoder drift.
+        if _os.getenv("FREEZE_TEACHER_CONTEXT_GATE", "0") in ("1", "true", "yes"):
+            self.teacher_action_context_gate.requires_grad_(False)
         self.continuation_value_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
