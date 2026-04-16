@@ -170,6 +170,9 @@ _CONFIG_ALIASES = {
     "offline_combat_teacher_batch_size": "combat_teacher_batch_size",
     "offline_combat_teacher_updates_per_iter": "combat_teacher_updates_per_iter",
     "offline_combat_teacher_warmup_iters": "combat_teacher_warmup_iters",
+    "offline_combat_teacher_ce_weight": "combat_teacher_ce_weight",
+    "offline_combat_teacher_rank_weight": "combat_teacher_rank_weight",
+    "offline_combat_teacher_cont_weight": "combat_teacher_cont_weight",
     "resume_combat": "resume_mcts",
 }
 
@@ -5296,6 +5299,23 @@ def main() -> int:
     parser.add_argument("--combat-teacher-warmup-iters", "--offline-combat-teacher-warmup-iters",
                         type=int, default=0,
                         help="Skip offline combat teacher loss for first N iterations (default: 0)")
+    # Sub-loss weights (2026-04-16 加). Old code:
+    #   ct_total = combat_teacher_loss_weight * (ct_ce + ct_rank + ct_cont)
+    # 3 sub-loss 等权相加. 本场 Plan C 发现 ct_ce (hard label CE) 会让 agent
+    # 过度偏向 "play_card"（因为 teacher 数据 include_baseline_matches=False
+    # 里多数 state 是 "2175 不该 end_turn 该 play_card"），M2 bad end_turn 从
+    # 28.5%→33.3%, M5 致死不挡 8.3%→10.9% 都是这个 side effect. 加 3 个
+    # sub-weight 能单独关掉某一路 (常用: ce_weight=0 时只训 pairwise+continuation,
+    # 相对打分不强拉 action 分布).
+    parser.add_argument("--combat-teacher-ce-weight",
+                        type=float, default=1.0,
+                        help="Sub-weight for combat teacher cross-entropy loss (default: 1.0, set 0 to disable hard label CE)")
+    parser.add_argument("--combat-teacher-rank-weight",
+                        type=float, default=1.0,
+                        help="Sub-weight for combat teacher regret-weighted pairwise ranking loss (default: 1.0)")
+    parser.add_argument("--combat-teacher-cont-weight",
+                        type=float, default=1.0,
+                        help="Sub-weight for combat teacher continuation value regression loss (default: 1.0)")
 
     # --- Build Mode (non-boss combat auto-win) ---
     parser.add_argument("--build-mode", action="store_true", default=False,
@@ -6847,7 +6867,15 @@ def main() -> int:
                         ct_batch["state_features"].get("room_type_onehot"),
                     )
 
-                    ct_total = args.combat_teacher_loss_weight * (ct_ce + ct_rank + ct_cont)
+                    # 2026-04-16: sub-loss 独立加权。默认 (1,1,1) 等价原公式；
+                    # 测试 ce_weight=0 可关掉 hard label CE, 避免 agent 被强拉
+                    # 到 teacher action 分布（Plan C 证据：CE 会让 agent 学成
+                    # "play_card 偏见" → M2 bad end_turn +4.8pp / M5 致死不挡 +2.6pp）。
+                    ct_total = args.combat_teacher_loss_weight * (
+                        args.combat_teacher_ce_weight * ct_ce
+                        + args.combat_teacher_rank_weight * ct_rank
+                        + args.combat_teacher_cont_weight * ct_cont
+                    )
                     combat_ppo_trainer.optimizer.zero_grad()
                     ct_total.backward()
                     torch.nn.utils.clip_grad_norm_(mcts_net.parameters(), 1.0)
