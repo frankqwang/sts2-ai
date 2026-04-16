@@ -31,7 +31,7 @@ from evaluate_ai import (
 from headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from ipc.full_run_env import PipeBackedFullRunClient, create_full_run_client
 from mcts_core import MCTSConfig
-from public_state_trace import build_trace_entry
+from tools.public_state_trace import build_trace_entry
 from rl_policy_v2 import FullRunPolicyNetworkV2
 from verify_save_load import COMBAT_TYPES, drive_to_state
 from vocab import load_vocab

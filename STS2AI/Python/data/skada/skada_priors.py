@@ -7,7 +7,7 @@ Loads Skada analytics DB and provides fast lookup dicts for:
 - Boss difficulty (wipe_rate, best_cards)
 
 Usage:
-    from skada.skada_priors import SkadaPriors
+    from data.skada.skada_priors import SkadaPriors
     priors = SkadaPriors()  # auto-detects DB path
     card = priors.card("bloodletting")  # CardPrior namedtuple
     relic = priors.relic("burning_blood")

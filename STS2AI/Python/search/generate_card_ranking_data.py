@@ -2564,7 +2564,7 @@ def _prepare_local_ort_rollout_model(
         return None
     try:
         import torch
-        from export_actor_onnx import export_from_training_snapshot
+        from tools.export_actor_onnx import export_from_training_snapshot
         from vocab import load_vocab
 
         hybrid_ckpt = {}

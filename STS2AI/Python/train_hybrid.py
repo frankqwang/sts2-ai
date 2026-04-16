@@ -95,6 +95,59 @@ from combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_
 # and instrument it. Flip this to True to re-arm.
 _COMBAT_UNSAFE_MASK_ENABLED = False
 from rl_segment_buffer import SegmentRolloutBuffer, Segment
+
+from combat_diagnostics import (
+    _action_target_summary,
+    _combat_action_label,
+    _combat_action_looks_attack,
+    _combat_action_looks_defensive,
+    _combat_action_name,
+    _combat_card_effect_summary,
+    _combat_card_type,
+    _combat_enemy_change_items,
+    _combat_enemy_group_key,
+    _combat_enemy_intent_summary,
+    _combat_enemy_map,
+    _combat_hand_summary,
+    _combat_hard_state_tags,
+    _combat_hard_state_weight,
+    _combat_is_end_turn_action,
+    _combat_is_use_potion_action,
+    _combat_mcts_suspect_reasons,
+    _combat_played_card_from_action,
+    _combat_player_view,
+    _combat_result_summary_zh,
+    _combat_room_conditioned_continuation_loss,
+    _combat_root_action_summary,
+    _combat_root_topk_summary,
+    _combat_step_structured_summary,
+    _combat_target_label_zh,
+    _load_trace_name_maps,
+    _topk_action_summary,
+    _trace_enemy_change_summary,
+    _trace_pretty_token,
+    _trace_resolve_name,
+)
+
+from game_decisions import (
+    _action_card_slug,
+    _boss_conditioned_card_bonus,
+    _build_card_reward_decision_details,
+    _build_map_node_lookup,
+    _build_shop_decision_details,
+    _build_shop_session_snapshot,
+    _choose_act1_no_elite_map_action,
+    _choose_boss_conditioned_card_reward_action,
+    _choose_shop_remove_purchase_action,
+    _choose_shop_remove_target_action,
+    _lookup_boss_best_cards,
+    _map_option_has_elite_free_path,
+    _map_option_route_stats,
+    _normalize_card_slug,
+    _resolve_map_option_coord,
+    _runtime_skada_priors,
+    _score_act1_route_plan,
+)
 from segment_collector import NonCombatSegmentCollector
 from search.counterfactual_scoring import compute_counterfactual_reward
 from core.combat_nn import (
@@ -175,100 +228,6 @@ _CONFIG_ALIASES = {
     "offline_combat_teacher_cont_weight": "combat_teacher_cont_weight",
     "resume_combat": "resume_mcts",
 }
-
-
-def _load_trace_name_maps() -> dict[str, dict[str, str]]:
-    global _TRACE_NAME_MAPS
-    if _TRACE_NAME_MAPS is not None:
-        return _TRACE_NAME_MAPS
-    maps: dict[str, dict[str, str]] = {
-        "cards": {},
-        "encounters": {},
-        "relics": {},
-        "campfire": {},
-    }
-    db_path = Path(__file__).resolve().parents[1] / "Assets" / "datasets" / "skada" / "skada_analytics.sqlite"
-    if not db_path.exists():
-        _TRACE_NAME_MAPS = maps
-        return maps
-    try:
-        conn = sqlite3.connect(db_path)
-        try:
-            for card_id, name_zh in conn.execute("SELECT card_id, name_zh FROM cards"):
-                key = str(card_id or "").strip().upper()
-                val = str(name_zh or "").strip()
-                if key and val:
-                    maps["cards"][key] = val
-            for encounter, name_zh in conn.execute("SELECT encounter, name_zh FROM encounters"):
-                key = str(encounter or "").strip().upper()
-                val = str(name_zh or "").strip()
-                if key and val:
-                    maps["encounters"][key] = val
-            for relic_id, name_zh in conn.execute("SELECT relic_id, name_zh FROM relics"):
-                key = str(relic_id or "").strip().upper()
-                val = str(name_zh or "").strip()
-                if key and val:
-                    maps["relics"][key] = val
-            for action, name_zh in conn.execute("SELECT action, name_zh FROM campfire_decisions"):
-                key = str(action or "").strip().upper()
-                val = str(name_zh or "").strip()
-                if key and val:
-                    maps["campfire"][key] = val
-        finally:
-            conn.close()
-    except Exception:
-        pass
-    _TRACE_NAME_MAPS = maps
-    return maps
-
-
-def _trace_pretty_token(token: Any) -> str:
-    text = str(token or "").strip()
-    if not text:
-        return "未知"
-    if all(ch.isupper() or ch.isdigit() or ch == "_" for ch in text):
-        return " ".join(part.capitalize() for part in text.split("_") if part)
-    return text
-
-
-def _trace_resolve_name(token: Any, *, category: str = "generic") -> str:
-    text = str(token or "").strip()
-    if not text:
-        return "未知"
-    key = text.upper()
-    maps = _load_trace_name_maps()
-    if category == "card":
-        return maps["cards"].get(key) or _trace_pretty_token(text)
-    if category == "encounter":
-        return maps["encounters"].get(key) or _trace_pretty_token(text)
-    if category == "relic":
-        return maps["relics"].get(key) or _trace_pretty_token(text)
-    if category == "campfire":
-        return maps["campfire"].get(key) or _trace_pretty_token(text)
-    generic_known = {
-        "monster": "普通战斗",
-        "unknown": "事件",
-        "rest_site": "火堆",
-        "treasure": "宝箱",
-        "shop": "商店",
-        "elite": "精英",
-        "boss": "Boss",
-        "skip_card_reward": "跳过卡奖",
-        "rest": "休息",
-        "smith": "锻造",
-        "proceed": "离开/继续",
-        "remove_card": "删牌",
-        "play_card": "出牌",
-        "use_potion": "使用药水",
-        "end_turn": "结束回合",
-    }
-    return (
-        maps["cards"].get(key)
-        or maps["encounters"].get(key)
-        or maps["relics"].get(key)
-        or generic_known.get(text.lower())
-        or _trace_pretty_token(text)
-    )
 
 
 def _lower_text(value: Any) -> str:
@@ -463,410 +422,11 @@ def _is_act1_map_state(state: dict[str, Any]) -> bool:
     return _safe_int(run.get("act", 0), 0) == 1
 
 
-def _build_map_node_lookup(map_state: dict[str, Any]) -> dict[tuple[int, int], dict[str, Any]]:
-    lookup: dict[tuple[int, int], dict[str, Any]] = {}
-    for node in map_state.get("nodes") or []:
-        if not isinstance(node, dict):
-            continue
-        try:
-            lookup[(int(node.get("col", 0)), int(node.get("row", 0)))] = node
-        except Exception:
-            continue
-    return lookup
-
-
-def _resolve_map_option_coord(
-    action: dict[str, Any],
-    next_options: list[dict[str, Any]],
-) -> tuple[int, int] | None:
-    try:
-        if action.get("col") is not None and action.get("row") is not None:
-            return int(action.get("col", 0)), int(action.get("row", 0))
-    except Exception:
-        pass
-
-    action_idx = _safe_int(action.get("index", -1), -1)
-    if 0 <= action_idx < len(next_options):
-        option = next_options[action_idx]
-        try:
-            return int(option.get("col", 0)), int(option.get("row", 0))
-        except Exception:
-            return None
-    return None
-
-
-def _map_option_has_elite_free_path(
-    map_state: dict[str, Any],
-    action: dict[str, Any],
-) -> bool:
-    next_options = map_state.get("next_options") or []
-    node_lookup = _build_map_node_lookup(map_state)
-    start_coord = _resolve_map_option_coord(action, next_options)
-    if start_coord is None:
-        return False
-
-    seen: set[tuple[int, int]] = set()
-
-    def _dfs(coord: tuple[int, int]) -> bool:
-        if coord in seen:
-            return False
-        seen.add(coord)
-        node = node_lookup.get(coord)
-        if node is None:
-            return True
-        if "elite" in _lower_text(node.get("type")):
-            return False
-        children = node.get("children") or []
-        valid_children: list[tuple[int, int]] = []
-        for child in children:
-            if not isinstance(child, (list, tuple)) or len(child) != 2:
-                continue
-            try:
-                valid_children.append((int(child[0]), int(child[1])))
-            except Exception:
-                continue
-        if not valid_children:
-            return True
-        return any(_dfs(child_coord) for child_coord in valid_children)
-
-    return _dfs(start_coord)
-
-
-def _map_option_route_stats(
-    state: dict[str, Any],
-    action: dict[str, Any],
-) -> dict[str, Any] | None:
-    map_state = state.get("map") if isinstance(state.get("map"), dict) else {}
-    next_options = map_state.get("next_options") or []
-    node_lookup = _build_map_node_lookup(map_state)
-    start_coord = _resolve_map_option_coord(action, next_options)
-    if start_coord is None:
-        return None
-
-    boss = map_state.get("boss") if isinstance(map_state.get("boss"), dict) else {}
-    boss_row = int(boss.get("row", 0) or 0)
-    start_node = node_lookup.get(start_coord, {})
-    option_type = _lower_text(start_node.get("type") or action.get("label") or action.get("action"))
-
-    child_coords: list[tuple[int, int]] = []
-    for child in start_node.get("children") or []:
-        if not isinstance(child, (list, tuple)) or len(child) != 2:
-            continue
-        try:
-            child_coords.append((int(child[0]), int(child[1])))
-        except Exception:
-            continue
-    child_types = [_lower_text((node_lookup.get(coord) or {}).get("type")) for coord in child_coords]
-    non_empty_child_types = [child_type for child_type in child_types if child_type]
-
-    stack: list[tuple[tuple[int, int], dict[str, int]]] = [
-        (start_coord, {"elite": 0, "shop": 0, "restsite": 0, "monster": 0})
-    ]
-    path_stats: list[dict[str, int]] = []
-    max_paths = 64
-    while stack and len(path_stats) < max_paths:
-        coord, counts = stack.pop()
-        node = node_lookup.get(coord)
-        if node is None:
-            path_stats.append(dict(counts))
-            continue
-        ntype = _lower_text(node.get("type"))
-        new_counts = dict(counts)
-        if ntype in new_counts:
-            new_counts[ntype] += 1
-        children = node.get("children") or []
-        valid_children: list[tuple[int, int]] = []
-        for child in children:
-            if not isinstance(child, (list, tuple)) or len(child) != 2:
-                continue
-            try:
-                valid_children.append((int(child[0]), int(child[1])))
-            except Exception:
-                continue
-        if not valid_children or coord[1] >= boss_row:
-            path_stats.append(new_counts)
-            continue
-        for child_coord in valid_children:
-            stack.append((child_coord, new_counts))
-
-    if not path_stats:
-        path_stats = [{"elite": 0, "shop": 0, "restsite": 0, "monster": 0}]
-
-    elites = [float(p.get("elite", 0)) for p in path_stats]
-    shops = [float(p.get("shop", 0)) for p in path_stats]
-    rests = [float(p.get("restsite", 0)) for p in path_stats]
-    monsters = [float(p.get("monster", 0)) for p in path_stats]
-    rows_to_boss = max(0.0, float(boss_row - start_coord[1]))
-    return {
-        "min_elite": min(elites) if elites else 0.0,
-        "max_shop": max(shops) if shops else 0.0,
-        "max_rest": max(rests) if rests else 0.0,
-        "avg_monster": (sum(monsters) / max(1, len(monsters))) if monsters else 0.0,
-        "rows_to_boss": rows_to_boss,
-        "option_type": option_type,
-        "forced_next_elite": bool(non_empty_child_types) and all(t == "elite" for t in non_empty_child_types),
-        "has_rest_child": any(t == "restsite" for t in non_empty_child_types),
-        "has_shop_child": any(t == "shop" for t in non_empty_child_types),
-        "elite_free_path": _map_option_has_elite_free_path(map_state, action),
-    }
-
-
-def _score_act1_route_plan(
-    state: dict[str, Any],
-    route_stats: dict[str, Any],
-) -> float:
-    player = _extract_player(state)
-    hp = float(player.get("hp", player.get("current_hp", 0)) or 0.0)
-    max_hp = max(1.0, float(player.get("max_hp", 1) or 1.0))
-    hp_ratio = max(0.0, min(1.0, hp / max_hp))
-    gold = int(player.get("gold", 0) or 0)
-    run = state.get("run") if isinstance(state.get("run"), dict) else {}
-    floor = int(run.get("floor", 0) or 0)
-
-    min_elite = float(route_stats.get("min_elite", 0.0) or 0.0)
-    max_shop = float(route_stats.get("max_shop", 0.0) or 0.0)
-    max_rest = float(route_stats.get("max_rest", 0.0) or 0.0)
-    avg_monster = float(route_stats.get("avg_monster", 0.0) or 0.0)
-    rows_to_boss = float(route_stats.get("rows_to_boss", 0.0) or 0.0)
-
-    low_hp = max(0.0, (0.72 - hp_ratio) / 0.42)
-    rich_enough = 1.0 if gold >= 120 else 0.65 if gold >= 75 else 0.25 if gold >= 50 else 0.0
-    early_act = 1.0 if floor <= 8 else 0.55 if floor <= 11 else 0.2
-    boss_pressure = max(0.0, (6.0 - rows_to_boss) / 6.0)
-
-    elite_penalty = min_elite * (3.0 - 1.2 * hp_ratio + 0.6 * early_act + 0.5 * low_hp)
-    rest_bonus = max_rest * (2.2 * low_hp + 0.45 * boss_pressure)
-    shop_bonus = max_shop * (1.15 * rich_enough + 0.30 * boss_pressure)
-    monster_penalty = avg_monster * (0.16 + 0.65 * low_hp)
-
-    option_type = _lower_text(route_stats.get("option_type"))
-    immediate_type_bonus = 0.0
-    if option_type == "restsite":
-        immediate_type_bonus += 0.35 + 0.30 * low_hp
-    elif option_type == "shop":
-        immediate_type_bonus += 0.25 + 0.35 * rich_enough
-    elif option_type == "unknown":
-        immediate_type_bonus += 0.05
-    elif option_type == "elite":
-        immediate_type_bonus -= 1.4 + 0.8 * low_hp
-
-    if bool(route_stats.get("forced_next_elite")):
-        elite_penalty += 3.5 + 1.5 * low_hp
-    if bool(route_stats.get("has_rest_child")):
-        immediate_type_bonus += 0.10 + 0.10 * low_hp
-    if bool(route_stats.get("has_shop_child")):
-        immediate_type_bonus += 0.08 + 0.10 * rich_enough
-    if bool(route_stats.get("elite_free_path")):
-        immediate_type_bonus += 0.30
-
-    return float(-elite_penalty + rest_bonus + shop_bonus - monster_penalty + immediate_type_bonus)
-
-
-def _choose_act1_no_elite_map_action(
-    state: dict[str, Any],
-    legal: list[dict[str, Any]],
-    *,
-    action_logits: np.ndarray | None = None,
-    fallback_idx: int | None = None,
-) -> tuple[int, dict[str, Any], str] | None:
-    if not _is_act1_map_state(state) or not legal:
-        return None
-    map_state = state.get("map") if isinstance(state.get("map"), dict) else {}
-    if not map_state:
-        return None
-
-    route_candidates: list[tuple[int, dict[str, Any], float]] = []
-    safe_candidates: list[tuple[int, dict[str, Any], float]] = []
-    for idx, action in enumerate(legal):
-        if _lower_text(action.get("action")) != "choose_map_node":
-            continue
-        route_stats = _map_option_route_stats(state, action)
-        if route_stats is None:
-            continue
-        score = _score_act1_route_plan(state, route_stats)
-        route_candidates.append((idx, action, score))
-        if bool(route_stats.get("elite_free_path")):
-            safe_candidates.append((idx, action, score))
-
-    if not route_candidates:
-        return None
-
-    candidates = safe_candidates or route_candidates
-    if action_logits is not None and len(action_logits) >= len(legal):
-        best_idx, best_action, _best_score = max(
-            candidates,
-            key=lambda item: float(action_logits[item[0]]) + item[2],
-        )
-        return int(best_idx), best_action, "act1_route_plan"
-    if fallback_idx is not None:
-        for idx, action, _score in candidates:
-            if idx == fallback_idx:
-                return int(idx), action, "act1_route_plan_keep"
-    best_idx, best_action, _best_score = max(candidates, key=lambda item: item[2])
-    return int(best_idx), best_action, "act1_route_plan_fallback"
-
-
 _SHOP_REMOVE_PRIORITY = (
     "STRIKE_IRONCLAD",
     "DEFEND_IRONCLAD",
     "BASH",
 )
-
-
-def _choose_shop_remove_purchase_action(
-    state: dict[str, Any],
-    legal: list[dict[str, Any]],
-) -> tuple[int, dict[str, Any], str] | None:
-    """If at a shop screen with an affordable, in-stock remove_card service,
-    return a forced shop_purchase action targeting it.
-
-    Historical bug (pre-fix): legal actions from binary protocol always have
-    action="shop_purchase" with no Label field — the original check
-    `action.get("action") == "remove_card"` never matched, so this hard rule
-    silently failed (only ~14% of shops actually used remove vs the intended
-    100% when a remove offer was available and affordable). The correct path
-    is to look up state.shop.items[index].category == "remove_card" and match
-    the legal action by index.
-    """
-    if _lower_text(state.get("state_type")) != "shop":
-        return None
-    shop_items = (state.get("shop") or {}).get("items") or []
-    remove_indices: set[int] = set()
-    for item in shop_items:
-        if _lower_text(item.get("category")) != "remove_card":
-            continue
-        if not bool(item.get("can_afford")):
-            continue
-        if not bool(item.get("is_stocked")):
-            continue
-        try:
-            remove_indices.add(int(item.get("index", -1)))
-        except (TypeError, ValueError):
-            continue
-    if not remove_indices:
-        return None
-    for idx, action in enumerate(legal):
-        if _lower_text(action.get("action")) != "shop_purchase":
-            continue
-        try:
-            action_index = int(action.get("index", -1))
-        except (TypeError, ValueError):
-            continue
-        if action_index in remove_indices:
-            return int(idx), action, "shop_force_remove"
-    return None
-
-
-def _choose_shop_remove_target_action(
-    legal: list[dict[str, Any]],
-) -> tuple[int, dict[str, Any], str] | None:
-    if not legal:
-        return None
-
-    def _action_card_key(action: dict[str, Any]) -> str:
-        for key in ("card_id", "label", "name", "note"):
-            text = str(action.get(key) or "").strip()
-            if text:
-                return text.upper()
-        return ""
-
-    ranked: list[tuple[int, int, dict[str, Any]]] = []
-    for idx, action in enumerate(legal):
-        action_name = _lower_text(action.get("action"))
-        if "select" not in action_name:
-            continue
-        card_key = _action_card_key(action)
-        priority = len(_SHOP_REMOVE_PRIORITY)
-        for order, prefix in enumerate(_SHOP_REMOVE_PRIORITY):
-            if card_key.startswith(prefix):
-                priority = order
-                break
-        ranked.append((priority, idx, action))
-
-    if not ranked:
-        return None
-    ranked.sort(key=lambda item: (item[0], item[1]))
-    priority, idx, action = ranked[0]
-    source = "shop_remove_basic_fallback" if priority >= len(_SHOP_REMOVE_PRIORITY) else "shop_remove_basic"
-    return int(idx), action, source
-
-
-def _build_shop_session_snapshot(state: dict[str, Any], *, step_i: int, floor: int) -> dict[str, Any]:
-    shop_state = (state.get("shop") or {}) if isinstance(state, dict) else {}
-    player = (shop_state.get("player") or state.get("player") or {}) if isinstance(state, dict) else {}
-    offers: list[dict[str, Any]] = []
-    for item in shop_state.get("items") or []:
-        if not isinstance(item, dict):
-            continue
-        offers.append(
-            {
-                "index": int(item.get("index", -1) or -1),
-                "category": str(item.get("category") or "unknown"),
-                "id": str(item.get("id") or ""),
-                "name": str(item.get("name") or item.get("id") or item.get("category") or "unknown"),
-                "cost": int(item.get("cost", item.get("price", 0)) or 0),
-                "can_afford": bool(item.get("can_afford")),
-                "is_stocked": bool(item.get("is_stocked", True)),
-                "on_sale": bool(item.get("on_sale")),
-            }
-        )
-    return {
-        "enter_step": step_i,
-        "enter_floor": floor,
-        "enter_gold": int(player.get("gold", 0) or 0),
-        "offers": offers,
-        "actions": [],
-    }
-
-
-def _normalize_card_slug(value: Any) -> str:
-    text = _lower_text(value).replace(".title", "")
-    for old, new in ((" ", "_"), ("-", "_"), ("/", "_")):
-        text = text.replace(old, new)
-    while "__" in text:
-        text = text.replace("__", "_")
-    return text.strip("_")
-
-
-def _action_card_slug(action: dict[str, Any] | None) -> str:
-    if not isinstance(action, dict):
-        return ""
-    for key in ("card_id", "id", "label", "name", "note"):
-        slug = _normalize_card_slug(action.get(key))
-        if slug:
-            return slug
-    return ""
-
-
-def _runtime_skada_priors():
-    global _RUNTIME_SKADA_PRIORS
-    if _RUNTIME_SKADA_PRIORS is False:
-        return None
-    if _RUNTIME_SKADA_PRIORS is None:
-        try:
-            from skada.skada_priors import SkadaPriors
-            priors = SkadaPriors()
-            _RUNTIME_SKADA_PRIORS = priors if priors.loaded else False
-        except Exception:
-            _RUNTIME_SKADA_PRIORS = False
-    return _RUNTIME_SKADA_PRIORS if _RUNTIME_SKADA_PRIORS is not False else None
-
-
-def _lookup_boss_best_cards(boss_token: str) -> set[str]:
-    priors = _runtime_skada_priors()
-    if priors is None or not boss_token or boss_token == "unknown":
-        return set()
-    encounter_keys = (
-        boss_token,
-        boss_token.upper(),
-        f"{boss_token}_boss",
-        f"{boss_token.upper()}_BOSS",
-    )
-    for encounter in encounter_keys:
-        boss = priors.boss(encounter)
-        if boss is not None:
-            return {str(card).strip().lower() for card in boss.best_cards if str(card).strip()}
-    return set()
 
 
 _BOSS_CARD_PREFS: dict[str, dict[str, set[str]]] = {
@@ -892,216 +452,6 @@ _BOSS_CARD_PREFS: dict[str, dict[str, set[str]]] = {
         },
     },
 }
-
-
-def _boss_conditioned_card_bonus(
-    state: dict[str, Any],
-    action: dict[str, Any],
-) -> float:
-    action_name = _lower_text(action.get("action"))
-    if action_name not in {"select_card_reward", "shop_purchase"}:
-        return 0.0
-
-    boss_token = extract_next_boss_token(state)
-    if boss_token == "unknown":
-        return 0.0
-
-    slug = _action_card_slug(action)
-    if not slug:
-        return 0.0
-
-    score = 0.0
-    if slug in _lookup_boss_best_cards(boss_token):
-        score += 2.0
-
-    prefs = _BOSS_CARD_PREFS.get(boss_token) or {}
-    if slug in prefs.get("prefer", set()):
-        score += 1.0
-    if slug in prefs.get("avoid", set()):
-        score -= 0.75
-
-    if boss_token == "waterfall_giant":
-        if any(token in slug for token in ("barrier", "armor", "block", "shrug", "power_through", "grit")):
-            score += 0.35
-        if any(token in slug for token in ("inflame", "armaments", "barricade", "entrench")):
-            score += 0.30
-    elif boss_token == "soul_fysh":
-        if any(token in slug for token in ("anger", "pommel", "headbutt", "uppercut", "strike", "slash")):
-            score += 0.30
-        if any(token in slug for token in ("inflame", "battle_trance", "offering")):
-            score += 0.25
-    return float(score)
-
-
-def _choose_boss_conditioned_card_reward_action(
-    state: dict[str, Any],
-    legal: list[dict[str, Any]],
-    *,
-    action_logits: np.ndarray | None = None,
-    fallback_idx: int | None = None,
-    guidance_weight: float = 0.0,
-) -> tuple[int, dict[str, Any], str] | None:
-    if guidance_weight <= 0.0 or _lower_text(state.get("state_type")) != "card_reward" or not legal:
-        return None
-
-    pick_bonuses: dict[int, float] = {}
-    best_pick_bonus = 0.0
-    for idx, action in enumerate(legal):
-        if _lower_text(action.get("action")) != "select_card_reward":
-            continue
-        bonus = _boss_conditioned_card_bonus(state, action) * guidance_weight
-        pick_bonuses[idx] = bonus
-        best_pick_bonus = max(best_pick_bonus, bonus)
-
-    scored: list[tuple[float, int, dict[str, Any], float]] = []
-    for idx, action in enumerate(legal):
-        action_name = _lower_text(action.get("action"))
-        base = float(action_logits[idx]) if action_logits is not None and idx < len(action_logits) else 0.0
-        bonus = 0.0
-        if action_name == "select_card_reward":
-            bonus = pick_bonuses.get(idx, 0.0)
-        elif action_name in {"skip", "skip_card_reward"}:
-            bonus = -0.65 if best_pick_bonus >= 0.8 else -0.20 if best_pick_bonus >= 0.35 else 0.0
-        scored.append((base + bonus, idx, action, bonus))
-
-    if not scored:
-        return None
-    best_score, best_idx, best_action, best_bonus = max(scored, key=lambda item: item[0])
-    if fallback_idx is not None:
-        for score, idx, action, _bonus in scored:
-            if idx == fallback_idx and idx == best_idx:
-                return int(idx), action, "boss_card_guidance_keep"
-            if idx == fallback_idx and best_score <= score + 0.05:
-                return int(idx), action, "boss_card_guidance_keep"
-    if abs(best_bonus) < 1e-5 and fallback_idx is not None and 0 <= fallback_idx < len(legal):
-        return int(fallback_idx), legal[fallback_idx], "boss_card_guidance_keep"
-    boss_token = extract_next_boss_token(state) or "unknown"
-    return int(best_idx), best_action, f"boss_card_guidance_{boss_token}"
-
-
-def _build_card_reward_decision_details(
-    state: dict[str, Any],
-    legal: list[dict[str, Any]],
-    *,
-    action_logits: np.ndarray | None,
-    guidance_weight: float,
-    selected_idx: int | None = None,
-    source: str = "",
-) -> dict[str, Any]:
-    boss_token = extract_next_boss_token(state) or "unknown"
-    probs: np.ndarray | None = None
-    if action_logits is not None and len(action_logits) >= len(legal) and len(legal) > 0:
-        logits = np.asarray(action_logits[:len(legal)], dtype=np.float32)
-        shifted = logits - np.max(logits)
-        exp = np.exp(shifted)
-        denom = float(exp.sum())
-        if denom > 0.0:
-            probs = exp / denom
-
-    choices: list[dict[str, Any]] = []
-    for idx, action in enumerate(legal):
-        action_name = _lower_text(action.get("action"))
-        boss_bonus = 0.0
-        if action_name in {"select_card_reward", "skip", "skip_card_reward"}:
-            if action_name == "select_card_reward":
-                boss_bonus = _boss_conditioned_card_bonus(state, action) * max(0.0, guidance_weight)
-            elif guidance_weight > 0.0:
-                best_pick_bonus = 0.0
-                for candidate in legal:
-                    if _lower_text(candidate.get("action")) == "select_card_reward":
-                        best_pick_bonus = max(
-                            best_pick_bonus,
-                            _boss_conditioned_card_bonus(state, candidate) * max(0.0, guidance_weight),
-                        )
-                boss_bonus = -0.65 if best_pick_bonus >= 0.8 else -0.20 if best_pick_bonus >= 0.35 else 0.0
-        raw_logit = float(action_logits[idx]) if action_logits is not None and idx < len(action_logits) else 0.0
-        final_score = raw_logit + boss_bonus
-        choices.append(
-            {
-                "idx": int(idx),
-                "action": str(action.get("action") or ""),
-                "label": str(action.get("label") or action.get("card_id") or action.get("name") or action.get("action") or ""),
-                "boss_bonus": round(float(boss_bonus), 4),
-                "raw_logit": round(float(raw_logit), 4),
-                "final_score": round(float(final_score), 4),
-                "prob": round(float(probs[idx]), 4) if probs is not None and idx < len(probs) else None,
-                "selected": bool(selected_idx == idx),
-            }
-        )
-    choices.sort(key=lambda item: item["final_score"], reverse=True)
-    return {
-        "boss_token": boss_token,
-        "guidance_weight": round(float(guidance_weight), 4),
-        "source": source,
-        "selected_idx": int(selected_idx) if selected_idx is not None else None,
-        "choices": choices,
-    }
-
-
-def _build_shop_decision_details(
-    state: dict[str, Any],
-    legal: list[dict[str, Any]],
-    *,
-    action_logits: np.ndarray | None,
-    selected_idx: int | None = None,
-    source: str = "",
-) -> dict[str, Any]:
-    shop_snapshot = _build_shop_session_snapshot(
-        state,
-        step_i=0,
-        floor=_safe_int(((state.get("run") or {}) if isinstance(state, dict) else {}).get("floor", 0), 0),
-    )
-    offers = shop_snapshot.get("offers") or []
-    offer_by_slug: dict[str, dict[str, Any]] = {}
-    for offer in offers:
-        slug = _normalize_card_slug(offer.get("id") or offer.get("name") or offer.get("category"))
-        if slug and slug not in offer_by_slug:
-            offer_by_slug[slug] = offer
-
-    probs: np.ndarray | None = None
-    if action_logits is not None and len(action_logits) >= len(legal) and len(legal) > 0:
-        logits = np.asarray(action_logits[:len(legal)], dtype=np.float32)
-        shifted = logits - np.max(logits)
-        exp = np.exp(shifted)
-        denom = float(exp.sum())
-        if denom > 0.0:
-            probs = exp / denom
-
-    choices: list[dict[str, Any]] = []
-    for idx, action in enumerate(legal):
-        action_name = _lower_text(action.get("action"))
-        label = str(action.get("label") or action.get("name") or action.get("action") or "")
-        slug = _normalize_card_slug(action.get("card_id") or action.get("id") or label)
-        offer = offer_by_slug.get(slug)
-        if offer is None and action_name == "remove_card":
-            offer = next((item for item in offers if _lower_text(item.get("category")) == "remove_card"), None)
-        raw_logit = float(action_logits[idx]) if action_logits is not None and idx < len(action_logits) else 0.0
-        entry = {
-            "idx": int(idx),
-            "action": str(action.get("action") or ""),
-            "label": label,
-            "raw_logit": round(float(raw_logit), 4),
-            "prob": round(float(probs[idx]), 4) if probs is not None and idx < len(probs) else None,
-            "selected": bool(selected_idx == idx),
-        }
-        if offer is not None:
-            entry.update(
-                {
-                    "offer_category": str(offer.get("category") or ""),
-                    "offer_name": str(offer.get("name") or offer.get("id") or ""),
-                    "offer_cost": _safe_int(offer.get("cost", 0), 0),
-                    "can_afford": bool(offer.get("can_afford")),
-                    "is_stocked": bool(offer.get("is_stocked", True)),
-                }
-            )
-        choices.append(entry)
-    choices.sort(key=lambda item: item["raw_logit"], reverse=True)
-    return {
-        "enter_gold": int(shop_snapshot.get("enter_gold", 0) or 0),
-        "source": source,
-        "selected_idx": int(selected_idx) if selected_idx is not None else None,
-        "choices": choices,
-    }
 
 
 def _combat_round_number(state: dict[str, Any]) -> int:
@@ -1517,71 +867,6 @@ def _next_reward_claim_signature(
     return _shared_next_reward_claim_signature(state_type, state, action)
 
 
-def _combat_player_view(state: dict[str, Any]) -> dict[str, Any]:
-    battle = state.get("battle")
-    if isinstance(battle, dict):
-        player = battle.get("player")
-        if isinstance(player, dict):
-            return player
-    player = state.get("player")
-    return player if isinstance(player, dict) else {}
-
-
-def _combat_hand_summary(state: dict[str, Any], max_cards: int = 6) -> str:
-    battle = state.get("battle") or {}
-    hand = battle.get("hand") or _combat_player_view(state).get("hand") or []
-    if not isinstance(hand, list) or not hand:
-        return "-"
-    parts: list[str] = []
-    for card in hand[:max_cards]:
-        if not isinstance(card, dict):
-            continue
-        name = str(card.get("name") or card.get("label") or card.get("id") or "?")
-        cost = card.get("cost")
-        parts.append(f"{name}({cost})")
-    more = "" if len(hand) <= max_cards else f"+{len(hand) - max_cards}"
-    return ",".join(parts) + more
-
-
-def _combat_enemy_intent_summary(state: dict[str, Any], max_enemies: int = 3) -> str:
-    battle = state.get("battle") or {}
-    enemies = battle.get("enemies") or state.get("enemies") or []
-    if not isinstance(enemies, list) or not enemies:
-        return "-"
-    parts: list[str] = []
-    for enemy in enemies[:max_enemies]:
-        if not isinstance(enemy, dict):
-            continue
-        name = str(enemy.get("name") or enemy.get("id") or "?")
-        hp = _safe_int(enemy.get("hp", enemy.get("current_hp", 0)), 0)
-        block = _safe_int(enemy.get("block", 0), 0)
-        intents = enemy.get("intents") or []
-        if isinstance(intents, list) and intents:
-            intent0 = intents[0] if isinstance(intents[0], dict) else {}
-        else:
-            intent0 = {}
-        intent_type = str(intent0.get("type") or intent0.get("label") or "?")
-        dmg = _safe_int(intent0.get("damage", 0), 0)
-        hits = max(1, _safe_int(intent0.get("hits", 1), 1))
-        dmg_str = f"{dmg}x{hits}" if dmg > 0 else intent_type
-        parts.append(f"{name}[{hp}/{block}:{dmg_str}]")
-    more = "" if len(enemies) <= max_enemies else f"+{len(enemies) - max_enemies}"
-    return ",".join(parts) + more
-
-
-def _combat_enemy_group_key(state: dict[str, Any]) -> str:
-    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
-    enemies = battle.get("enemies") or state.get("enemies") or []
-    names: list[str] = []
-    for enemy in enemies:
-        if not isinstance(enemy, dict):
-            continue
-        name = str(enemy.get("id") or enemy.get("name") or "").strip().upper()
-        if name:
-            names.append(name)
-    return "+".join(names) if names else "UNKNOWN"
-
-
 def _combat_hand_summary_zh(state: dict[str, Any], max_cards: int = 6) -> str:
     battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
     player = _combat_player_view(state)
@@ -1628,107 +913,6 @@ def _combat_enemy_intent_summary_zh(state: dict[str, Any], max_enemies: int = 3)
     return "；".join(parts) + more
 
 
-def _combat_enemy_map(state: dict[str, Any]) -> dict[Any, dict[str, Any]]:
-    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
-    enemies = battle.get("enemies") or state.get("enemies") or []
-    out: dict[Any, dict[str, Any]] = {}
-    for idx, enemy in enumerate(enemies):
-        if not isinstance(enemy, dict):
-            continue
-        key = enemy.get("combat_id", enemy.get("target_id", enemy.get("entity_id", idx)))
-        out[key] = enemy
-    return out
-
-
-def _combat_enemy_change_items(
-    pre_state: dict[str, Any],
-    post_state: dict[str, Any],
-    action: dict[str, Any] | None,
-    *,
-    max_items: int = 6,
-) -> list[dict[str, Any]]:
-    pre_map = _combat_enemy_map(pre_state)
-    post_map = _combat_enemy_map(post_state)
-    target_key = None if not isinstance(action, dict) else action.get("target_id", action.get("enemy_id", action.get("target")))
-    items: list[dict[str, Any]] = []
-    for key, pre_enemy in pre_map.items():
-        post_enemy = post_map.get(key)
-        pre_hp = _safe_int(pre_enemy.get("hp", pre_enemy.get("current_hp", 0)), 0)
-        pre_blk = _safe_int(pre_enemy.get("block", 0), 0)
-        name = _trace_resolve_name((post_enemy or pre_enemy).get("name") or (post_enemy or pre_enemy).get("id"), category="encounter")
-        if post_enemy is None:
-            items.append({
-                "key": key,
-                "name": name,
-                "pre_hp": pre_hp,
-                "post_hp": 0,
-                "pre_block": pre_blk,
-                "post_block": 0,
-                "defeated": True,
-                "targeted": key == target_key,
-            })
-            continue
-        post_hp = _safe_int(post_enemy.get("hp", post_enemy.get("current_hp", 0)), 0)
-        post_blk = _safe_int(post_enemy.get("block", 0), 0)
-        if pre_hp != post_hp or pre_blk != post_blk or key == target_key:
-            items.append({
-                "key": key,
-                "name": name,
-                "pre_hp": pre_hp,
-                "post_hp": post_hp,
-                "pre_block": pre_blk,
-                "post_block": post_blk,
-                "defeated": False,
-                "targeted": key == target_key,
-            })
-    return items[:max_items]
-
-
-def _trace_enemy_change_summary(pre_state: dict[str, Any], post_state: dict[str, Any], action: dict[str, Any] | None) -> str:
-    items = _combat_enemy_change_items(pre_state, post_state, action, max_items=3)
-    parts: list[str] = []
-    for item in items:
-        if item.get("defeated"):
-            parts.append(f"{item['name']} 被击败")
-        else:
-            parts.append(
-                f"{item['name']} 血量 {item['pre_hp']}->{item['post_hp']}，"
-                f"格挡 {item['pre_block']}->{item['post_block']}"
-            )
-    return "；".join(parts) if parts else "敌方数值无明显变化"
-
-
-def _combat_step_structured_summary(
-    pre_state: dict[str, Any],
-    post_state: dict[str, Any],
-    action: dict[str, Any] | None,
-) -> dict[str, Any]:
-    pre_player = _combat_player_view(pre_state)
-    post_player = _combat_player_view(post_state)
-    target_key = None if not isinstance(action, dict) else action.get("target_id", action.get("enemy_id", action.get("target")))
-    target_enemy = _combat_enemy_map(pre_state).get(target_key)
-    return {
-        "pre_hp": _safe_int(pre_player.get("hp", pre_player.get("current_hp", 0)), 0),
-        "post_hp": _safe_int(post_player.get("hp", post_player.get("current_hp", 0)), 0),
-        "pre_block": _safe_int(pre_player.get("block", 0), 0),
-        "post_block": _safe_int(post_player.get("block", 0), 0),
-        "pre_energy": _safe_int(pre_player.get("energy", 0), 0),
-        "post_energy": _safe_int(post_player.get("energy", 0), 0),
-        "target_key": target_key,
-        "target_name": (
-            _trace_resolve_name(target_enemy.get("name") or target_enemy.get("id"), category="encounter")
-            if isinstance(target_enemy, dict)
-            else ""
-        ),
-        "enemy_changes": _combat_enemy_change_items(pre_state, post_state, action),
-        "pre_intent": _combat_enemy_intent_summary(pre_state),
-        "pre_intent_zh": _combat_enemy_intent_summary_zh(pre_state),
-        "next_intent": _combat_enemy_intent_summary(post_state),
-        "next_intent_zh": _combat_enemy_intent_summary_zh(post_state),
-        "post_state_type": _lower_text(post_state.get("state_type")),
-    }
-
-
 def _combat_action_label_zh(action: dict[str, Any] | None, state: dict[str, Any]) -> str:
     if not isinstance(action, dict):
         return "未知动作"
@@ -1753,19 +937,6 @@ def _combat_action_label_zh(action: dict[str, Any] | None, state: dict[str, Any]
     return _trace_resolve_name(label)
 
 
-def _combat_target_label_zh(action: dict[str, Any] | None, state: dict[str, Any]) -> str:
-    if not isinstance(action, dict):
-        return ""
-    target_key = action.get("target_id", action.get("enemy_id", action.get("target")))
-    if target_key in (None, ""):
-        return ""
-    enemy = _combat_enemy_map(state).get(target_key)
-    if isinstance(enemy, dict):
-        name = _trace_resolve_name(enemy.get("name") or enemy.get("id"), category="encounter")
-        return f" -> 目标「{name}」"
-    return f" -> 目标 `{target_key}`"
-
-
 def _topk_action_summary_zh(
     legal: list[dict[str, Any]],
     logits_or_probs: np.ndarray | list[float] | torch.Tensor,
@@ -1783,199 +954,6 @@ def _topk_action_summary_zh(
         label, prob = chunk.rsplit(":", 1)
         parts.append(f"{_trace_resolve_name(label, category='card')}:{prob}")
     return " | ".join(parts)
-
-
-def _combat_result_summary_zh(pre_state: dict[str, Any], post_state: dict[str, Any], action: dict[str, Any] | None) -> str:
-    pre_player = _combat_player_view(pre_state)
-    post_player = _combat_player_view(post_state)
-    pre_hp = _safe_int(pre_player.get("hp", pre_player.get("current_hp", 0)), 0)
-    post_hp = _safe_int(post_player.get("hp", post_player.get("current_hp", 0)), 0)
-    pre_blk = _safe_int(pre_player.get("block", 0), 0)
-    post_blk = _safe_int(post_player.get("block", 0), 0)
-    pre_energy = _safe_int(pre_player.get("energy", 0), 0)
-    post_energy = _safe_int(post_player.get("energy", 0), 0)
-    enemy_delta = _trace_enemy_change_summary(pre_state, post_state, action)
-    next_intent = _combat_enemy_intent_summary_zh(post_state)
-    if _lower_text(post_state.get("state_type")) not in COMBAT_SCREENS:
-        next_intent = "敌人全部击败，战斗结束"
-    return (
-        f"结果：我方生命 {pre_hp}->{post_hp}，格挡 {pre_blk}->{post_blk}，能量 {pre_energy}->{post_energy}；"
-        f"{enemy_delta}；下拍：{next_intent}"
-    )
-
-
-def _action_target_summary(action: dict[str, Any] | None) -> str:
-    if not isinstance(action, dict):
-        return ""
-    for key in ("target", "target_id", "enemy_id", "slot"):
-        value = action.get(key)
-        if value not in (None, ""):
-            return f" target={value}"
-    return ""
-
-
-def _topk_action_summary(
-    legal: list[dict[str, Any]],
-    logits_or_probs: np.ndarray | list[float] | torch.Tensor,
-    k: int = 3,
-    already_probs: bool = False,
-) -> str:
-    if not legal:
-        return "-"
-    if isinstance(logits_or_probs, torch.Tensor):
-        arr = logits_or_probs.detach().float().cpu().numpy()
-    else:
-        arr = np.asarray(logits_or_probs, dtype=np.float64)
-    arr = np.ravel(arr)
-    if arr.size == 0:
-        return "-"
-    arr = arr[:len(legal)]
-    if arr.size == 0:
-        return "-"
-    if already_probs:
-        probs = arr
-    else:
-        arr = arr - np.max(arr)
-        exp = np.exp(arr)
-        denom = np.sum(exp)
-        probs = exp / denom if denom > 0 else np.zeros_like(arr)
-    order = np.argsort(-probs)[: min(k, len(legal))]
-    parts: list[str] = []
-    for idx in order:
-        action = legal[int(idx)]
-        label = str(action.get("label") or action.get("action") or idx)
-        parts.append(f"{label}:{float(probs[int(idx)]):.2f}")
-    return " | ".join(parts)
-
-
-def _combat_action_label(action: dict[str, Any] | None) -> str:
-    if not isinstance(action, dict):
-        return "?"
-    return str(action.get("label") or action.get("action") or "?")
-
-
-def _combat_action_name(action: dict[str, Any] | None) -> str:
-    if not isinstance(action, dict):
-        return ""
-    return str(action.get("action") or action.get("type") or "").strip().lower()
-
-
-def _combat_is_end_turn_action(action: dict[str, Any] | None) -> bool:
-    return _combat_action_name(action) == "end_turn"
-
-
-def _combat_is_use_potion_action(action: dict[str, Any] | None) -> bool:
-    return _combat_action_name(action) == "use_potion"
-
-
-def _combat_action_looks_defensive(action: dict[str, Any] | None) -> bool:
-    label = _combat_action_label(action).strip().lower()
-    if not label or _combat_is_end_turn_action(action) or _combat_is_use_potion_action(action):
-        return False
-    defense_tokens = (
-        "defend",
-        "block",
-        "barrier",
-        "armor",
-        "shield",
-        "shrug",
-        "panic",
-        "ghostly",
-        "power through",
-        "flame barrier",
-        "iron wave",
-        "entrench",
-    )
-    return any(token in label for token in defense_tokens)
-
-
-def _combat_action_looks_attack(action: dict[str, Any] | None) -> bool:
-    if _combat_action_name(action) != "play_card":
-        return False
-    if _combat_action_looks_defensive(action):
-        return False
-    if any(action.get(key) not in (None, "") for key in ("target", "target_id", "enemy_id")):
-        return True
-    label = _combat_action_label(action).strip().lower()
-    attack_tokens = (
-        "strike",
-        "bash",
-        "anger",
-        "boomerang",
-        "slash",
-        "whirlwind",
-        "pummel",
-        "headbutt",
-        "uppercut",
-        "hemokinesis",
-        "carnage",
-        "bludgeon",
-        "perfected",
-        "clothesline",
-        "dropkick",
-        "pommel",
-        "twin",
-        "sword",
-        "sever",
-        "thunderclap",
-        "wild strike",
-        "body slam",
-    )
-    return any(token in label for token in attack_tokens)
-
-
-def _combat_played_card_from_action(
-    state: dict[str, Any],
-    action: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if _combat_action_name(action) != "play_card" or not isinstance(action, dict):
-        return None
-    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
-    player = _extract_player(state)
-    hand = battle.get("hand") or player.get("hand") or []
-    card_idx = _safe_int(
-        action.get("card_index", action.get("hand_index", action.get("index", -1))),
-        -1,
-    )
-    if 0 <= card_idx < len(hand) and isinstance(hand[card_idx], dict):
-        return dict(hand[card_idx])
-    action_label = str(action.get("label") or "").strip().lower()
-    if action_label:
-        for card in hand:
-            if not isinstance(card, dict):
-                continue
-            card_name = str(card.get("name") or card.get("id") or "").strip().lower()
-            if card_name and card_name in action_label:
-                return dict(card)
-    return None
-
-
-def _combat_card_type(card: dict[str, Any] | None) -> str:
-    if not isinstance(card, dict):
-        return ""
-    return str(card.get("type") or card.get("card_type") or card.get("cardType") or "").strip().lower()
-
-
-def _combat_card_effect_summary(card: dict[str, Any] | None) -> tuple[float, float, float, float, float, float, float]:
-    if not isinstance(card, dict):
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-    def _to_float(value: Any, default: float = 0.0) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-    cost = _to_float(card.get("cost_for_turn", card.get("cost", card.get("energy_cost", 0))))
-    damage = _to_float(card.get("damage", card.get("base_damage", card.get("attack_damage", 0))))
-    block = _to_float(card.get("block", card.get("base_block", 0)))
-    draw = _to_float(card.get("draw", card.get("cards_to_draw", card.get("draw_amount", 0))))
-    magic = _to_float(card.get("magic_number", card.get("magic", 0)))
-    text = _lower_text(card.get("description") or card.get("raw_description") or card.get("text") or "")
-    if draw <= 0 and "draw" in text:
-        draw = max(draw, magic)
-    discard = 1.0 if any(tok in text for tok in ("discard", "put a card from your hand")) else 0.0
-    exhaust = 1.0 if card.get("exhaust") or "exhaust" in text else 0.0
-    create = 1.0 if any(tok in text for tok in ("add ", "create ", "shuffle")) else 0.0
-    return cost, damage, block, draw, discard, exhaust, create
 
 
 def _new_combat_turn_prefix() -> dict[str, Any]:
@@ -2099,181 +1077,12 @@ def _update_combat_turn_prefix(
     return updated
 
 
-def _combat_root_topk_summary(root: Any, k: int = 5) -> str:
-    children_map = getattr(root, "children", None)
-    if not isinstance(children_map, dict) or not children_map:
-        return "-"
-    children = list(children_map.values())
-    total_visits = max(1, sum(max(0, int(getattr(child, "visit_count", 0))) for child in children))
-    ranked = sorted(
-        children,
-        key=lambda child: (
-            int(getattr(child, "visit_count", 0)),
-            float(getattr(child, "prior", 0.0)),
-            float(getattr(child, "q_value", 0.0)),
-        ),
-        reverse=True,
-    )[: min(k, len(children))]
-    parts: list[str] = []
-    for child in ranked:
-        label = _combat_action_label(getattr(child, "action", None))
-        visits = max(0, int(getattr(child, "visit_count", 0)))
-        visit_frac = visits / total_visits
-        q_value = float(getattr(child, "q_value", 0.0))
-        prior = float(getattr(child, "prior", 0.0))
-        parts.append(f"{label}:n={visits}/{visit_frac:.2f},q={q_value:.2f},p={prior:.2f}")
-    return " | ".join(parts)
-
-
-def _combat_root_action_summary(root: Any, action: dict[str, Any] | None) -> str:
-    children_map = getattr(root, "children", None)
-    if not isinstance(children_map, dict) or not children_map or not isinstance(action, dict):
-        return "chosen[missing]"
-    child = children_map.get(action_key(action))
-    if child is None:
-        for candidate in children_map.values():
-            cand_action = getattr(candidate, "action", None)
-            if (
-                isinstance(cand_action, dict)
-                and cand_action.get("action") == action.get("action")
-                and cand_action.get("label") == action.get("label")
-                and cand_action.get("target") == action.get("target")
-            ):
-                child = candidate
-                break
-    if child is None:
-        return "chosen[missing]"
-    total_visits = max(1, sum(max(0, int(getattr(node, "visit_count", 0))) for node in children_map.values()))
-    visits = max(0, int(getattr(child, "visit_count", 0)))
-    visit_frac = visits / total_visits
-    q_value = float(getattr(child, "q_value", 0.0))
-    prior = float(getattr(child, "prior", 0.0))
-    return f"chosen[n={visits}/{visit_frac:.2f},q={q_value:.2f},p={prior:.2f}]"
-
-
-def _combat_mcts_suspect_reasons(
-    *,
-    action: dict[str, Any] | None,
-    legal: list[dict[str, Any]],
-    state: dict[str, Any],
-) -> list[str]:
-    reasons: list[str] = []
-    if not isinstance(action, dict):
-        return reasons
-    player = _combat_player_view(state)
-    energy = _safe_int(player.get("energy", 0), 0)
-    has_attack_option = any(_combat_action_looks_attack(candidate) for candidate in legal)
-    has_defense_option = any(_combat_action_looks_defensive(candidate) for candidate in legal)
-    if _combat_is_end_turn_action(action) and energy > 0:
-        remaining_plays = [
-            candidate for candidate in legal
-            if not _combat_is_end_turn_action(candidate)
-            and _combat_action_name(candidate) not in {"confirm_selection", "cancel_selection"}
-        ]
-        if remaining_plays:
-            reasons.append("end_turn_with_energy")
-        if has_attack_option:
-            reasons.append("end_turn_skips_attack")
-        if has_defense_option:
-            reasons.append("end_turn_skips_block")
-    if _combat_is_use_potion_action(action):
-        reasons.append("use_potion")
-    if _combat_action_looks_defensive(action) and energy > 0 and has_attack_option:
-        reasons.append("defense_bias")
-    return reasons
-
-
 _COMBAT_HARD_STATE_WEIGHTS = {
     "potion_decision": 1.5,
     "premature_end_turn": 3.0,
     "repeat_loop_entry": 2.5,
     "order_sensitive_play": 1.75,
 }
-
-
-def _combat_hard_state_tags(
-    *,
-    state: dict[str, Any],
-    legal: list[dict[str, Any]],
-    action: dict[str, Any] | None,
-    repeat_count: int,
-    turn_prefix: dict[str, Any] | None,
-) -> list[str]:
-    tags: list[str] = []
-    if any(_combat_is_use_potion_action(candidate) for candidate in legal):
-        tags.append("potion_decision")
-    suspect_reasons = _combat_mcts_suspect_reasons(action=action, legal=legal, state=state)
-    if any(reason.startswith("end_turn_") for reason in suspect_reasons):
-        tags.append("premature_end_turn")
-    if repeat_count >= 2:
-        tags.append("repeat_loop_entry")
-    play_card_options = sum(1 for candidate in legal if _combat_action_name(candidate) == "play_card")
-    prefix_actions = _safe_int((turn_prefix or {}).get("action_count", 0), 0)
-    if (
-        _combat_action_name(action) == "play_card"
-        and play_card_options >= 2
-        and (prefix_actions > 0 or play_card_options >= 3)
-    ):
-        tags.append("order_sensitive_play")
-    return tags
-
-
-def _combat_hard_state_weight(tags: list[str]) -> float:
-    weight = 1.0
-    for tag in tags:
-        weight = max(weight, float(_COMBAT_HARD_STATE_WEIGHTS.get(tag, 1.0)))
-    return weight
-
-
-def _combat_room_conditioned_continuation_loss(
-    continuation_pred: torch.Tensor,
-    continuation_target: torch.Tensor,
-    room_type_onehot: torch.Tensor | None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Train continuation targets with explicit survival/cost semantics.
-
-    Column layout:
-    - [:, 0] win_prob
-    - [:, 1] expected_hp_loss
-    - [:, 2] expected_potion_cost
-    """
-    if room_type_onehot is None:
-        room_type_onehot = torch.zeros(
-            continuation_pred.shape[0], 3,
-            dtype=continuation_pred.dtype, device=continuation_pred.device,
-        )
-        room_type_onehot[:, 0] = 1.0
-    room_type_onehot = room_type_onehot.to(dtype=continuation_pred.dtype, device=continuation_pred.device)
-    hallway = room_type_onehot[:, 0]
-    elite = room_type_onehot[:, 1]
-    boss = room_type_onehot[:, 2]
-
-    survival_loss = F.binary_cross_entropy(
-        continuation_pred[:, 0].clamp(1e-5, 1.0 - 1e-5),
-        continuation_target[:, 0].clamp(0.0, 1.0),
-        reduction="none",
-    )
-    hp_loss = F.smooth_l1_loss(
-        continuation_pred[:, 1],
-        continuation_target[:, 1],
-        reduction="none",
-    )
-    potion_loss = F.smooth_l1_loss(
-        continuation_pred[:, 2],
-        continuation_target[:, 2],
-        reduction="none",
-    )
-
-    survival_weight = hallway * 0.9 + elite * 1.0 + boss * 1.25
-    hp_weight = hallway * 1.0 + elite * 0.75 + boss * 0.10
-    potion_weight = hallway * 1.0 + elite * 0.80 + boss * 0.15
-
-    total = (
-        survival_weight * survival_loss
-        + hp_weight * hp_loss
-        + potion_weight * potion_loss
-    ).mean()
-    return total, survival_loss.mean(), hp_loss.mean(), potion_loss.mean()
 
 
 def _resolve_counterfactual_runtime(
@@ -2379,304 +1188,14 @@ def _estimate_boss_hp_fraction(state: dict[str, Any]) -> float:
     return max(0.0, min(1.0, 1.0 - total_hp / total_max_hp))
 
 
-# ---------------------------------------------------------------------------
-# MCTS replay buffer (same as train_combat_mcts.py)
-# ---------------------------------------------------------------------------
 
-@dataclass
-class MCTSTrainingExample:
-    state_features: dict[str, np.ndarray]
-    action_features: dict[str, np.ndarray]
-    mcts_policy: np.ndarray
-    outcome: float
-
-
-class MCTSReplayBuffer:
-    def __init__(self, max_size: int = 50000):
-        self.buffer: deque[MCTSTrainingExample] = deque(maxlen=max_size)
-
-    def add(self, ex: MCTSTrainingExample):
-        self.buffer.append(ex)
-
-    def sample(self, n: int) -> list[MCTSTrainingExample]:
-        idx = np.random.choice(len(self.buffer), size=min(n, len(self.buffer)), replace=False)
-        return [self.buffer[i] for i in idx]
-
-    def __len__(self):
-        return len(self.buffer)
-
-
-# ---------------------------------------------------------------------------
-# Combat PPO rollout buffer (per-step data for PPO training of combat NN)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class CombatRolloutBuffer:
-    """Lightweight buffer for combat PPO steps.
-
-    Stores per-step combat data: state/action features, chosen action index,
-    log_prob from sampling, per-step shaped reward, value estimate, done flag.
-    GAE is computed before training.
-    """
-
-    state_features: list[dict[str, np.ndarray]] = field(default_factory=list)
-    action_features: list[dict[str, np.ndarray]] = field(default_factory=list)
-    action_indices: list[int] = field(default_factory=list)
-    log_probs: list[float] = field(default_factory=list)
-    rewards: list[float] = field(default_factory=list)
-    values: list[float] = field(default_factory=list)
-    dones: list[bool] = field(default_factory=list)
-    screen_types: list[str] = field(default_factory=list)  # encounter type per step
-    sample_weights: list[float] = field(default_factory=list)
-    hard_state_tags: list[list[str]] = field(default_factory=list)
-
-    # Computed after collection
-    advantages: list[float] = field(default_factory=list)
-    returns: list[float] = field(default_factory=list)
-
-    def add(
-        self,
-        sf: dict[str, np.ndarray],
-        af: dict[str, np.ndarray],
-        action_idx: int,
-        log_prob: float,
-        reward: float,
-        value: float,
-        done: bool,
-        screen_type: str = "",
-        sample_weight: float = 1.0,
-        hard_state_tags: list[str] | None = None,
-    ) -> None:
-        self.state_features.append(sf)
-        self.action_features.append(af)
-        self.action_indices.append(action_idx)
-        self.log_probs.append(log_prob)
-        self.rewards.append(reward)
-        self.values.append(value)
-        self.dones.append(done)
-        self.screen_types.append(screen_type)
-        self.sample_weights.append(float(sample_weight))
-        self.hard_state_tags.append(list(hard_state_tags or []))
-
-    def compute_gae(self, gamma: float = 0.99, lam: float = 0.95) -> None:
-        """Compute GAE advantages and returns.
-
-        Note: combat NN value head uses Tanh (output in [-1, 1]).
-        GAE computation is standard — the bounded output just means
-        value targets (returns) will naturally stay in a reasonable range.
-        """
-        n = len(self.rewards)
-        self.advantages = [0.0] * n
-        self.returns = [0.0] * n
-        last_gae = 0.0
-
-        for t in reversed(range(n)):
-            if self.dones[t]:
-                next_value = 0.0
-                last_gae = 0.0
-            elif t + 1 < n:
-                next_value = self.values[t + 1]
-            else:
-                next_value = 0.0
-
-            delta = self.rewards[t] + gamma * next_value - self.values[t]
-            last_gae = delta + gamma * lam * last_gae
-            self.advantages[t] = last_gae
-            self.returns[t] = self.advantages[t] + self.values[t]
-
-    def to_tensors(self, device: torch.device | None = None) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
-        """Convert buffer to tensors for training."""
-        n = len(self.rewards)
-
-        # Stack state tensors
-        state_tensors: dict[str, torch.Tensor] = {}
-        if n > 0:
-            for key in self.state_features[0]:
-                arrays = [s[key] for s in self.state_features]
-                arr = np.stack(arrays)
-                if arr.dtype in (np.int64, np.int32):
-                    state_tensors[key] = torch.tensor(arr, dtype=torch.long)
-                elif arr.dtype == bool:
-                    state_tensors[key] = torch.tensor(arr, dtype=torch.bool)
-                else:
-                    state_tensors[key] = torch.tensor(arr, dtype=torch.float32)
-
-        # Stack action tensors
-        action_tensors: dict[str, torch.Tensor] = {}
-        if n > 0:
-            for key in self.action_features[0]:
-                arrays = [a[key] for a in self.action_features]
-                arr = np.stack(arrays)
-                if arr.dtype in (np.int64, np.int32):
-                    action_tensors[key] = torch.tensor(arr, dtype=torch.long)
-                elif arr.dtype == bool:
-                    action_tensors[key] = torch.tensor(arr, dtype=torch.bool)
-                else:
-                    action_tensors[key] = torch.tensor(arr, dtype=torch.float32)
-
-        result = {
-            "state_tensors": state_tensors,
-            "action_tensors": action_tensors,
-            "actions": torch.tensor(self.action_indices, dtype=torch.long),
-            "old_log_probs": torch.tensor(self.log_probs, dtype=torch.float32),
-            "advantages": torch.tensor(self.advantages, dtype=torch.float32),
-            "returns": torch.tensor(self.returns, dtype=torch.float32),
-            "sample_weights": torch.tensor(self.sample_weights, dtype=torch.float32),
-        }
-        if device is not None:
-            for k, v in result.items():
-                if isinstance(v, dict):
-                    result[k] = {kk: vv.to(device) for kk, vv in v.items()}
-                else:
-                    result[k] = v.to(device)
-        return result
-
-    def clear(self) -> None:
-        for attr in ("state_features", "action_features", "action_indices",
-                      "log_probs", "rewards", "values", "dones",
-                      "advantages", "returns", "screen_types",
-                      "sample_weights", "hard_state_tags"):
-            getattr(self, attr).clear()
-
-    def __len__(self) -> int:
-        return len(self.rewards)
-
-
-# ---------------------------------------------------------------------------
-# Combat PPO Trainer
-# ---------------------------------------------------------------------------
-
-class CombatPPOTrainer:
-    """PPO update for the combat neural network.
-
-    Uses the same clipped surrogate + GAE approach as PPOTrainerV2,
-    adapted for the combat NN's input format (combat features, not structured state).
-    """
-
-    def __init__(
-        self,
-        network: CombatPolicyValueNetwork,
-        lr: float = 3e-4,
-        clip_epsilon: float = 0.2,
-        value_coeff: float = 0.5,
-        entropy_coeff: float = 0.05,
-        max_grad_norm: float = 1.0,
-        ppo_epochs: int = 4,
-        minibatch_size: int = 64,
-        target_kl: float = 0.0,
-    ):
-        self.network = network
-        self.optimizer = torch.optim.Adam(network.parameters(), lr=lr)
-        self.clip_epsilon = clip_epsilon
-        self.value_coeff = value_coeff
-        self.entropy_coeff = entropy_coeff
-        self.max_grad_norm = max_grad_norm
-        self.ppo_epochs = ppo_epochs
-        self.minibatch_size = minibatch_size
-        self.target_kl = target_kl
-
-    def update(self, buffer: CombatRolloutBuffer) -> dict[str, float]:
-        """Run PPO update on the combat buffer. Returns loss metrics."""
-        buffer.compute_gae()
-        device = next(self.network.parameters()).device
-        data = buffer.to_tensors(device)
-
-        state_tensors = data["state_tensors"]
-        action_tensors = data["action_tensors"]
-        old_actions = data["actions"]
-        old_log_probs = data["old_log_probs"]
-        advantages = data["advantages"]
-        returns = data["returns"]
-        sample_weights = data["sample_weights"]
-
-        # Normalize advantages
-        if len(advantages) > 1:
-            adv_std = advantages.std()
-            if adv_std > 1e-8:
-                advantages = (advantages - advantages.mean()) / (adv_std + 1e-8)
-
-        n = len(old_actions)
-        total_ploss = 0.0
-        total_vloss = 0.0
-        total_entropy = 0.0
-        total_ratio_mean = 0.0
-        total_clip_fraction = 0.0
-        total_approx_kl = 0.0
-        num_updates = 0
-        early_stop = False
-
-        for _epoch in range(self.ppo_epochs):
-            indices = torch.randperm(n, device=device)
-            for start in range(0, n, self.minibatch_size):
-                end = min(start + self.minibatch_size, n)
-                mb_idx = indices[start:end]
-
-                # Slice minibatch
-                mb_state = {k: v[mb_idx] for k, v in state_tensors.items()}
-                mb_action = {k: v[mb_idx] for k, v in action_tensors.items()}
-                mb_old_actions = old_actions[mb_idx]
-                mb_old_log_probs = old_log_probs[mb_idx]
-                mb_advantages = advantages[mb_idx]
-                mb_returns = returns[mb_idx]
-                mb_sample_weights = sample_weights[mb_idx]
-                mb_sample_weights = mb_sample_weights / mb_sample_weights.mean().clamp_min(1e-6)
-
-                # Forward
-                logits, values = self.network(mb_state, mb_action)
-
-                # Compute new log_probs from Categorical
-                mask = mb_action["action_mask"].float()
-                logits_masked = logits + (1.0 - mask) * (-1e9)
-                dist = torch.distributions.Categorical(logits=logits_masked)
-                new_log_probs = dist.log_prob(mb_old_actions)
-                entropy = dist.entropy().mean()
-
-                # PPO clipped ratio
-                ratio = (new_log_probs - mb_old_log_probs).exp()
-                surr1 = ratio * mb_advantages
-                surr2 = ratio.clamp(1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * mb_advantages
-                policy_loss = -(torch.min(surr1, surr2) * mb_sample_weights).mean()
-                clip_fraction = ((ratio - 1.0).abs() > self.clip_epsilon).float().mean()
-
-                # Value loss (clamp returns to [-1, 1] to match Tanh output)
-                mb_returns_clamped = mb_returns.clamp(-1.0, 1.0)
-                value_loss = F.mse_loss(values, mb_returns_clamped, reduction="none")
-                value_loss = (value_loss * mb_sample_weights).mean()
-
-                # Combined loss
-                entropy = (dist.entropy() * mb_sample_weights).mean()
-                loss = policy_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
-                self.optimizer.step()
-
-                total_ploss += policy_loss.item()
-                total_vloss += value_loss.item()
-                total_entropy += entropy.item()
-                total_ratio_mean += ratio.mean().item()
-                total_clip_fraction += clip_fraction.item()
-                approx_kl = (mb_old_log_probs - new_log_probs).mean().abs()
-                total_approx_kl += approx_kl.item()
-                num_updates += 1
-
-                if self.target_kl > 0 and approx_kl.item() > self.target_kl:
-                    early_stop = True
-                    break
-            if early_stop:
-                break
-
-        num_updates = max(num_updates, 1)
-        return {
-            "combat_ppo_ploss": total_ploss / num_updates,
-            "combat_ppo_vloss": total_vloss / num_updates,
-            "combat_entropy": total_entropy / num_updates,
-            "combat_ppo_ratio_mean": total_ratio_mean / num_updates,
-            "combat_ppo_clip_fraction": total_clip_fraction / num_updates,
-            "combat_ppo_approx_kl": total_approx_kl / num_updates,
-            "combat_ppo_early_stop": float(early_stop),
-        }
+from combat_ppo import (
+    MCTSTrainingExample,
+    MCTSReplayBuffer,
+    CombatRolloutBuffer,
+    CombatPPOTrainer,
+    mcts_train_step,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -4957,69 +3476,6 @@ def collect_unified_episode(
     return ppo_buffer, mcts_examples, stats
 
 
-# ---------------------------------------------------------------------------
-# MCTS train step (from train_combat_mcts.py)
-# ---------------------------------------------------------------------------
-
-def mcts_train_step(
-    network: CombatPolicyValueNetwork,
-    optimizer: torch.optim.Optimizer,
-    batch: list[MCTSTrainingExample],
-    device: torch.device | None = None,
-    use_amp: bool = False,
-) -> dict[str, float]:
-    if device is None:
-        device = next(network.parameters()).device
-
-    state_tensors = {}
-    action_tensors = {}
-    for k in batch[0].state_features:
-        arr = np.stack([ex.state_features[k] for ex in batch])
-        if arr.dtype in (np.int64, np.int32):
-            state_tensors[k] = torch.tensor(arr, dtype=torch.long, device=device)
-        elif arr.dtype == bool:
-            state_tensors[k] = torch.tensor(arr, dtype=torch.bool, device=device)
-        else:
-            state_tensors[k] = torch.tensor(arr, dtype=torch.float32, device=device)
-    for k in batch[0].action_features:
-        arr = np.stack([ex.action_features[k] for ex in batch])
-        if arr.dtype in (np.int64, np.int32):
-            action_tensors[k] = torch.tensor(arr, dtype=torch.long, device=device)
-        elif arr.dtype == bool:
-            action_tensors[k] = torch.tensor(arr, dtype=torch.bool, device=device)
-        else:
-            action_tensors[k] = torch.tensor(arr, dtype=torch.float32, device=device)
-
-    target_policy = torch.tensor(np.stack([ex.mcts_policy for ex in batch]),
-                                  dtype=torch.float32, device=device)
-    target_value = torch.tensor([ex.outcome for ex in batch],
-                                 dtype=torch.float32, device=device)
-
-    if use_amp:
-        with torch.amp.autocast("cuda", dtype=torch.float16):
-            logits, value = network.forward(state_tensors, action_tensors)
-            logits_safe = logits.float().clamp(min=-30.0)
-            log_probs = F.log_softmax(logits_safe, dim=-1)
-            mask = action_tensors["action_mask"].float()
-            policy_loss = -(target_policy * (log_probs * mask)).sum(dim=-1).mean()
-            value_loss = F.mse_loss(value.float(), target_value)
-            loss = policy_loss + value_loss
-    else:
-        logits, value = network.forward(state_tensors, action_tensors)
-        logits_safe = logits.clamp(min=-30.0)
-        log_probs = F.log_softmax(logits_safe, dim=-1)
-        mask = action_tensors["action_mask"].float()
-        policy_loss = -(target_policy * (log_probs * mask)).sum(dim=-1).mean()
-        value_loss = F.mse_loss(value, target_value)
-        loss = policy_loss + value_loss
-
-    optimizer.zero_grad()
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(network.parameters(), 1.0)
-    optimizer.step()
-
-    return {"mcts_ploss": policy_loss.item(), "mcts_vloss": value_loss.item()}
-
 
 # ---------------------------------------------------------------------------
 # Main
@@ -5908,7 +4364,7 @@ def main() -> int:
             logger.warning("Multi-process collector ORT export failed, workers will use PyTorch CPU: %s", mp_ort_err)
             mp_ppo_onnx_path = None
         try:
-            from export_actor_onnx import export_from_training_snapshot
+            from tools.export_actor_onnx import export_from_training_snapshot
             mp_combat_onnx_path = str(output_dir / "combat_actor_worker.onnx")
             export_from_training_snapshot(
                 ppo_net.state_dict(),
@@ -6033,7 +4489,7 @@ def main() -> int:
     _skada_priors_obj = None
     if args.skada_prior_weight > 0 or args.skada_boss_weights:
         try:
-            from skada.skada_priors import SkadaPriors
+            from data.skada.skada_priors import SkadaPriors
             _skada_priors_obj = SkadaPriors(args.skada_db)
             if _skada_priors_obj.loaded:
                 logger.info("Skada priors loaded: %d cards, %d relics, %d synergies, %d bosses",
@@ -6168,7 +4624,7 @@ def main() -> int:
             if should_reload_worker_ort:
                 try:
                     import copy
-                    from export_actor_onnx import export_from_training_snapshot
+                    from tools.export_actor_onnx import export_from_training_snapshot
 
                     if mp_ppo_onnx_path:
                         _next_ppo_onnx_path = str(output_dir / f"ppo_actor_worker_iter{iteration:05d}.onnx")
@@ -6275,7 +4731,7 @@ def main() -> int:
                 _ort_refresh_interval = 25
                 if args.local_ort and use_pipe_transport and iteration % _ort_refresh_interval == 0:
                     import os
-                    from export_actor_onnx import export_from_training_snapshot
+                    from tools.export_actor_onnx import export_from_training_snapshot
                     _onnx_path = str(output_dir / f"actor_v{iteration:05d}.onnx")
                     try:
                         _export_ms = export_from_training_snapshot(

@@ -56,11 +56,11 @@ from rl_reward_shaping import (
     compute_problem_vector, problem_score, survival_margin,
     economy_score, potential, boss_readiness_score, extract_next_boss_token,
 )
-from nn_hooks import NNInternalsCollector, format_internals_for_broadcast
-from training_monitor import TrainingMetricsMonitor
+from tools.nn_hooks import NNInternalsCollector, format_internals_for_broadcast
+from tools.training_monitor import TrainingMetricsMonitor
 from full_run_env import create_full_run_client
 from sts2_singleplayer_env import adapt_v1_state_for_combat_policy
-from demo_action_candidates import _combat_candidate_actions, _non_combat_candidate_actions
+from tools.demo_action_candidates import _combat_candidate_actions, _non_combat_candidate_actions
 from checkpoint_compat import get_combat_model_state
 
 import io

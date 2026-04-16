@@ -18,7 +18,7 @@ Usage as CLI:
     python STS2AI/Python/skada/query_skada.py export-card-priors IRONCLAD
 
 Usage as module:
-    from skada.query_skada import SkadaQuery
+    from data.skada.query_skada import SkadaQuery
     sq = SkadaQuery()
     tier = sq.card_tier_list("IRONCLAD", top_n=20)
 """
