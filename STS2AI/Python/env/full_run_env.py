@@ -1,4 +1,4 @@
-"""Full-run environment clients (HTTP, pipe, binary-pipe) for driving complete STS2 games."""
+"""游戏环境客户端：HTTP（Godot）和 Pipe（无头模拟器）两种后端的统一接口。"""
 from __future__ import annotations
 
 import argparse

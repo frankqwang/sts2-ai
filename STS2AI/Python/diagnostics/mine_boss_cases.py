@@ -1,4 +1,4 @@
-"""Mine boss encounter cases — deck state, HP, turns, and outcome per boss fight."""
+"""Boss 案例挖掘：从训练数据中提取 boss 战典型案例。"""
 from __future__ import annotations
 
 import argparse

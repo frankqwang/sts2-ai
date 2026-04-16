@@ -1,25 +1,4 @@
-"""Non-combat Segment Collector for semi-MDP training.
-
-Collects macro-transitions that span from one non-combat decision point
-to the next, accumulating all intermediate rewards (PBRS, fight summary,
-milestones, counterfactual scores) into a single segment.
-
-Usage in rollout loop:
-    collector = NonCombatSegmentCollector()
-
-    # When non-combat decision is made:
-    collector.open_segment(state_np, actions_np, action_idx, log_prob, value, screen_idx)
-
-    # Accumulate rewards during segment:
-    collector.add_reward(shaped_reward, tag="pbrs", steps=1)
-    collector.add_reward(fight_feedback, tag="fight_summary", steps=combat_steps)
-    collector.add_reward(milestone_r, tag="milestone", steps=1)
-    collector.add_reward(cf_reward, tag="counterfactual", steps=0)
-
-    # At next non-combat decision or episode end:
-    segment = collector.close_segment(done=False)
-    buffer.add(segment)
-"""
+"""非战斗段收集器：从 episode 中提取非战斗训练段。"""
 
 from __future__ import annotations
 

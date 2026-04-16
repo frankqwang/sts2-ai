@@ -1,4 +1,4 @@
-"""Integration tests that verify deterministic replay and save/load parity across simulator backends."""
+"""模拟器一致性测试：对比 Sim 和 Spectator 后端行为。"""
 from __future__ import annotations
 
 

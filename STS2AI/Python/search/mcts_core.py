@@ -1,14 +1,4 @@
-"""MCTS core algorithm for STS2 combat.
-
-Implements Monte Carlo Tree Search with:
-- PUCT selection (AlphaZero-style)
-- Neural network policy prior + value estimation
-- Determinization for hidden information (draw pile order)
-- Dirichlet noise at root for exploration during training
-
-The forward model is pluggable — accepts any object implementing
-the CombatForwardModel protocol.
-"""
+"""MCTS 核心：蒙特卡洛树搜索的节点、选择、扩展、回溯。"""
 
 from __future__ import annotations
 

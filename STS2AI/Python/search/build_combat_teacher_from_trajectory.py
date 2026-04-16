@@ -1,22 +1,4 @@
-"""Build combat-teacher samples by replaying evaluate_ai trajectory JSONL.
-
-This bypasses the in-builder full-run progression (which reliably stalls on
-most seeds at floor 2–6 when driven purely by FullRunPolicyNetworkV2).
-
-Inputs are `full_run_trajectory.v1` JSONL files produced by evaluate_ai's
-`--save-trajectory-dir` + `--trajectory-seeds` flags. For each trajectory we:
-
-1. Reset the sim with the recorded seed.
-2. Replay every recorded chosen_action in order against the live sim.
-3. When we reach a combat/elite/boss state at `floor >= min_sample_floor`,
-   run the full-turn solver on the live state and emit teacher samples
-   exactly like `build_act1_combat_teacher_v2_dataset.py`.
-4. Dedupe by sample_id and write out JSONL + manifest + teacher_eval.
-
-The replay is deterministic against the sim's seed, so solver samples come
-from the true states the evaluate_ai run visited, including diverse bosses /
-elites that the live-progression builder cannot reach.
-"""
+"""轨迹 Teacher 构建：从离线轨迹回放构建 teacher 数据。"""
 
 from __future__ import annotations
 

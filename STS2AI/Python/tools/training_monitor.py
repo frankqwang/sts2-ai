@@ -1,16 +1,4 @@
-"""Stream training metrics from metrics.jsonl to WebSocket overlay.
-
-Tails a metrics.jsonl file via polling and broadcasts new entries
-to connected overlay clients. Can run standalone or integrated
-with demo_play.py.
-
-Usage (standalone):
-    python training_monitor.py --metrics-file path/to/metrics.jsonl --port 8765
-
-Usage (integrated with demo_play.py):
-    monitor = TrainingMetricsMonitor("path/to/metrics.jsonl", broadcaster)
-    monitor.start()  # runs in daemon thread
-"""
+"""训练监控：通过 WebSocket 推送训练指标到可视化面板。"""
 from __future__ import annotations
 
 import json

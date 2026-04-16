@@ -1,4 +1,5 @@
-﻿from __future__ import annotations
+﻿"""[ARCHIVED] Original combat-teacher dataset builder (replaced by v2 pipeline)."""
+from __future__ import annotations
 
 
 import argparse

@@ -1,12 +1,4 @@
-"""Export combat actor model to ONNX for C# ORT CPU inference.
-
-Usage:
-    python export_actor_onnx.py --checkpoint checkpoints/act1/wizardly_baseline_iter1000.pt --output actor_combat.onnx
-    python export_actor_onnx.py --checkpoint checkpoints/act1/wizardly_baseline_iter1000.pt --output actor_combat.onnx --dump-fixtures fixtures/
-
-The exported model takes flat tensor inputs (not dict) and returns (logits, value).
-Batch dimension is dynamic (default batch=1 for C# per-env inference).
-"""
+"""ONNX 导出：将战斗网络导出为 ONNX 供 C# ORT 推理。"""
 
 from __future__ import annotations
 

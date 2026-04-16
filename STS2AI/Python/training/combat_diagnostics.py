@@ -1,11 +1,4 @@
-"""Combat diagnostic and trace functions — logging, summaries, and MCTS analysis.
-
-Extracted from train_hybrid.py. These functions are purely diagnostic:
-they produce log output, Chinese/English summaries, and MCTS suspect analysis,
-but do NOT affect training logic or action selection.
-
-Used by train_hybrid.py's collect_unified_episode() for trace recording.
-"""
+"""战斗诊断日志：手牌/敌人摘要、动作分析、MCTS 可疑原因、中文 trace。"""
 
 from __future__ import annotations
 

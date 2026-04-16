@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Evaluate an LLM-based non-combat policy by playing full games against Godot or headless sim."""
 from __future__ import annotations
 
 import argparse

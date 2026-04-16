@@ -1,7 +1,4 @@
-"""4-way combat-by-combat comparison across baseline / w02 / v4 / v6.
-
-Variant of compare_trajectory_combats.py that aligns 4 policies.
-"""
+"""四路战斗对比：对比四种不同策略的战斗表现。"""
 
 from __future__ import annotations
 

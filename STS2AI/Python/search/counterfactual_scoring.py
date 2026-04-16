@@ -1,13 +1,4 @@
-"""Screen-local counterfactual scoring for non-combat decisions.
-
-Fused from original implementation + codex/reward branch best practices:
-  - Boss archetype-aware problem weights (from codex)
-  - Full screen coverage: card_reward, shop, rest_site, relic, map, event (from codex)
-  - state_utility with deck/gold override for hypothetical evaluation (from codex)
-  - Dispersion guard + z-score normalization (from original)
-  - Conservative clip=0.12 (from codex, per gpt-design guidance)
-  - Modular file structure with CLI flag control (from original)
-"""
+"""反事实评分：比较实际动作和替代动作的价值差异。"""
 
 from __future__ import annotations
 

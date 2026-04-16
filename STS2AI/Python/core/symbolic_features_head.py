@@ -1,29 +1,4 @@
-"""SymbolicFeaturesHead — cross-attention over static symbol sets from source_knowledge.sqlite.
-
-Per-entity cross-attention that gives the RL policy a zero-shot prior over rare
-cards/relics/monsters/potions via the structured symbols (powers, commands, tags,
-intents) stored in `tools/python/data/source_knowledge.sqlite`.
-
-For each entity in a forward pass:
-  - query = the existing (learned) entity embedding from EntityEmbeddings
-  - key/value = per-symbol learned embeddings for the symbols attached to THIS entity
-  - output = projected attention pooling → (B, L, proj_dim) concatenated into the
-    existing encoder input alongside base embed + aux features
-
-The output projection layer is **zero-initialized** so that the head contributes
-exactly 0 at construction time. This means loading a baseline checkpoint into a
-retrieval-enabled model produces bit-identical forward output at iter 0; training
-then grows the symbolic contribution from zero.
-
-Owned by the PPO network (FullRunPolicyNetworkV2). The combat network
-(CombatPolicyValueNetwork) receives a reference to the same instance via its
-`symbolic_head=` kwarg so both brains share one learned head. Optimizer ownership
-is separated at train_hybrid.py construction time — only the PPO optimizer steps
-these params; combat's backward still accumulates gradients on them via autograd.
-
-See plan at C:/Users/Administrator/.claude/plans/async-snacking-tome.md §5 for
-the full design rationale and the discarded multi-hot alternative.
-"""
+"""符号特征头：sqlite-backed cross-attention，给稀有实体提供零样本先验。"""
 
 from __future__ import annotations
 

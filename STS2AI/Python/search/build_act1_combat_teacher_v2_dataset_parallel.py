@@ -1,3 +1,4 @@
+"""并行 Act1 Teacher 数据构建：多进程版本。"""
 from __future__ import annotations
 
 import sys

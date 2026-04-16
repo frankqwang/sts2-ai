@@ -1,4 +1,5 @@
 ﻿#!/usr/bin/env python3
+"""[ARCHIVED] Build boss-leaf evaluation dataset by rolling out past boss encounters."""
 from __future__ import annotations
 
 

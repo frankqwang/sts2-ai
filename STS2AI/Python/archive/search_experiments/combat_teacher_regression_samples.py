@@ -1,4 +1,5 @@
-﻿from __future__ import annotations
+﻿"""[ARCHIVED] Hardcoded regression test samples for combat-teacher motif detection."""
+from __future__ import annotations
 
 from typing import Any
 

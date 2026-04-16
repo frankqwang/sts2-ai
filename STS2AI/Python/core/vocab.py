@@ -1,19 +1,4 @@
-"""Game entity vocabulary for encoder_v2.
-
-Builds and loads ID-to-index mappings for cards, relics, potions, and monsters
-by scanning the C# source model definitions. Also extracts static card
-properties (cost, type, rarity) for use as auxiliary features alongside learned
-embeddings.
-
-Usage:
-    # Generate vocab from source (run once or whenever game data changes)
-    python vocab.py --repo-root /path/to/sts2
-
-    # In code
-    from core.vocab import load_vocab
-    v = load_vocab()
-    idx = v.card_to_idx["strike_ironclad"]
-"""
+"""词表管理：卡牌/遗物/药水/怪物的 ID <-> 索引映射。"""
 
 from __future__ import annotations
 

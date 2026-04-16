@@ -1,12 +1,4 @@
-"""Combat MCTS agent — wires together MCTS search + Combat NN + Forward Model.
-
-This is the combat decision-maker. Given a combat state + legal actions,
-it runs MCTS search guided by the neural network and returns the best action.
-
-Usage:
-    agent = CombatMCTSAgent.from_checkpoint("combat_best.pt")
-    action = agent.choose_action(state, legal_actions, forward_model)
-"""
+"""战斗 MCTS 代理：包装 MCTS 搜索为战斗动作选择器。"""
 
 from __future__ import annotations
 

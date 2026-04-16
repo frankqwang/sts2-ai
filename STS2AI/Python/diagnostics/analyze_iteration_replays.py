@@ -1,4 +1,4 @@
-"""Parse per-iteration replay .txt logs and extract structured episode summaries."""
+"""迭代回放分析：对比不同训练迭代的游戏回放。"""
 from __future__ import annotations
 
 import argparse

@@ -1,4 +1,4 @@
-"""Mine per-combat case patterns (damage, block, HP loss) and correlate with episode outcomes."""
+"""模式挖掘：从游戏数据中提取决策模式。"""
 from __future__ import annotations
 
 import argparse

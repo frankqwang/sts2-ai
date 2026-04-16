@@ -1,16 +1,4 @@
-"""Save high-quality episode data for offline RL / behavioral cloning.
-
-When an episode reaches a threshold floor (default >=14, i.e. boss fight),
-the full trajectory of (state_tensor, action_tensor, action_idx, reward,
-screen_type) is saved as a .pt file.
-
-Usage:
-    saver = EpisodeDataSaver(output_dir="STS2AI/Artifacts/offline_data", min_floor=14)
-    # During episode collection, call per-step:
-    saver.add_step(state_dict, actions_dict, action_idx, reward, screen_type, log_prob, value)
-    # At episode end:
-    saver.finish_episode(floor, outcome, combats_won, stats)
-"""
+"""回合数据存储：保存高质量离线 RL 轨迹到磁盘。"""
 
 from __future__ import annotations
 

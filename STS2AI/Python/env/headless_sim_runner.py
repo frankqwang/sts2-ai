@@ -1,4 +1,4 @@
-"""Launch and manage headless STS2 simulator processes (dotnet build + start)."""
+"""无头模拟器启动器：管理 headless_sim_host 进程的启动和停止。"""
 from __future__ import annotations
 
 import argparse

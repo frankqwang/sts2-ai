@@ -1,3 +1,4 @@
+"""[ARCHIVED] Behavioral cloning featurizer and dataset builder for combat actions."""
 from __future__ import annotations
 
 import json

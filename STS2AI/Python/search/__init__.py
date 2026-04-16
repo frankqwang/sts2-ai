@@ -1,1 +1,1 @@
-"""Search and combat-planning modules for STS2AI."""
+"""搜索和求解包：MCTS、回合求解器、Teacher 数据构建。"""

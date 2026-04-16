@@ -1,3 +1,4 @@
+"""Teacher 数据集：战斗 teacher 训练数据的加载和采样。"""
 from __future__ import annotations
 
 import json

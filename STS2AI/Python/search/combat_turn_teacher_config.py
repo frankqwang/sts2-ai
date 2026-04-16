@@ -1,3 +1,4 @@
+"""Teacher 配置：战斗 teacher 的超参数和模式设置。"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields, replace

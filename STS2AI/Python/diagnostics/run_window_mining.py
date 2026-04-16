@@ -1,4 +1,4 @@
-"""Orchestrator that runs all diagnostics mining scripts in sequence on a training window."""
+"""窗口挖掘运行器：批量运行训练窗口分析。"""
 from __future__ import annotations
 
 import argparse

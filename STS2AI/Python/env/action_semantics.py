@@ -1,4 +1,4 @@
-"""Action semantics helpers — classify, auto-progress, and rerank full-run actions."""
+"""动作语义：合法动作的类型判断和自动推进规则。"""
 from __future__ import annotations
 
 from dataclasses import dataclass

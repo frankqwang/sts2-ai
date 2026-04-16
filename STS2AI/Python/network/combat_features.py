@@ -1,31 +1,4 @@
-"""Combat feature engineering — state and action featurization for combat NN.
-
-Converts raw game state dicts into fixed-size numpy arrays consumed by
-CombatPolicyValueNetwork. Separated from the network definition so that
-network architecture code (combat_nn.py) stays focused and readable.
-
-Feature schema:
-  State features:
-    scalars         (18d)  — hp, block, energy, round, pile sizes, 8 core powers
-    extra_scalars   (14d)  — v2 extended powers (intangible, barricade, etc.)
-    room_type_onehot (3d)  — hallway / elite / boss
-    hand_ids/aux/mask       — up to 12 hand cards
-    enemy_ids/aux/mask      — up to 5 enemies
-    turn_prefix_ids/aux/mask/scalars — last 4 played cards + 32d turn summary
-    deck/pile (optional)    — full deck and draw/discard/exhaust piles
-
-  Action features:
-    action_type_ids         — play_card / end_turn / use_potion / ...
-    target_card_ids         — vocab index of played card
-    target_enemy_ids        — vocab index of target enemy
-    action_family_ids       — 4-family hierarchy (play / potion / end / selection)
-    action_aux (13d)        — remaining energy, damage, block, draw, kill flags, etc.
-    action_mask             — legal action mask
-
-  Value composition:
-    compose_room_conditioned_value() — room-type-aware aggregation of
-    win-prob, hp-loss, potion-cost into a single V(s) in [-1, 1].
-"""
+"""战斗特征工程：状态/动作特征构建 + 房间条件价值聚合。"""
 
 from __future__ import annotations
 

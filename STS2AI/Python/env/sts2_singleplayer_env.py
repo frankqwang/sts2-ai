@@ -1,4 +1,4 @@
-"""HTTP client for the STS2 MCP singleplayer automation API (state/act/wait)."""
+"""单人游戏环境：完整一局游戏的 Gym-like 接口。"""
 from __future__ import annotations
 
 import json

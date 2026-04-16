@@ -1,4 +1,4 @@
-"""Lifecycle manager for launching and tearing down headless sim host processes."""
+"""模拟器生命周期管理：多进程环境下的进程池和端口分配。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

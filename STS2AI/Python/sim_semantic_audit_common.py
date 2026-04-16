@@ -1,4 +1,4 @@
-"""Shared helpers and seed/state definitions for simulator semantic audit scripts."""
+"""审计脚本共享库：diagnostics/ 下多个审计工具的公共函数。"""
 from __future__ import annotations
 
 

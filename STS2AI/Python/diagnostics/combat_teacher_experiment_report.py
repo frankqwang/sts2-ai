@@ -1,4 +1,4 @@
-"""Generate comparison report and charts for combat-teacher experiment results."""
+"""Teacher 实验报告：生成 teacher 训练实验的对比报告。"""
 from __future__ import annotations
 
 import argparse

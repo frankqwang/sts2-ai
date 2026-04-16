@@ -1,4 +1,4 @@
-"""Render matplotlib charts of combat-teacher training metrics over iterations."""
+"""战斗训练趋势渲染：可视化战斗训练指标变化。"""
 from __future__ import annotations
 
 import argparse

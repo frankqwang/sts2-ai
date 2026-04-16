@@ -1,12 +1,4 @@
-"""Semi-MDP Segment Buffer for non-combat PPO training.
-
-A "segment" spans from one non-combat decision point to the next,
-potentially crossing one or more combat encounters. This naturally
-propagates combat outcomes back to the non-combat decision that led to them.
-
-GAE uses gamma^seg_len instead of gamma per step, which compresses
-the effective horizon and improves credit assignment.
-"""
+"""半 MDP 段缓冲区：非战斗 segment 的 GAE 计算和存储。"""
 
 from __future__ import annotations
 

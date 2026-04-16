@@ -1,4 +1,4 @@
-"""Backend-agnostic adapter for advancing full-run game state across HTTP and pipe backends."""
+"""后端适配层：屏蔽 HTTP/Pipe 差异，提供统一的状态推进接口。"""
 from __future__ import annotations
 
 from dataclasses import dataclass

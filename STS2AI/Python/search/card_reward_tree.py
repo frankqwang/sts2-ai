@@ -1,3 +1,4 @@
+"""卡牌奖励树：卡牌选择的树搜索。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

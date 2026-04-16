@@ -1,4 +1,4 @@
-"""Standalone combat-only PPO training loop using headless simulator combat encounters."""
+"""战斗专项训练：跳过非战斗阶段，只训练战斗策略。"""
 from __future__ import annotations
 
 

@@ -1,14 +1,4 @@
-"""Forward hook collector for extracting NN internals without modifying training code.
-
-Registers PyTorch forward hooks on combat_nn and ppo_net model instances
-to capture attention weights, intermediate representations, and auxiliary
-predictions for real-time visualization.
-
-Usage:
-    collector = NNInternalsCollector(combat_net, ppo_net)
-    # ... run inference ...
-    internals = collector.get_and_clear()
-"""
+"""NN 钩子：PyTorch forward hook，用于可视化网络内部状态。"""
 from __future__ import annotations
 
 import torch

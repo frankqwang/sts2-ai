@@ -1,21 +1,4 @@
-"""State and action feature engineering for the full-run RL architecture.
-
-Converts raw STS2 game state dicts into structured numpy tensors consumed by
-FullRunPolicyNetworkV2. Separated from the NN module definitions (rl_encoder_v2.py)
-so that network architecture code stays focused and readable.
-
-Key entry points:
-  build_structured_state()   - raw state dict -> StructuredState dataclass
-  build_structured_actions() - raw actions list -> StructuredActions dataclass
-
-Auxiliary feature builders:
-  _card_aux_features()       - per-card feature vector (cost, type, rarity, tags)
-  _enemy_aux_features()      - per-enemy feature vector (40d: hp, intents, powers)
-  _compute_route_features()  - BFS-based map lookahead features
-
-Caching layer:
-  _cached_card_encoding(), _cached_card_idx(), _cached_monster_idx(), etc.
-"""
+"""全局状态特征工程：build_structured_state/actions + 实体特征编码。"""
 
 from __future__ import annotations
 

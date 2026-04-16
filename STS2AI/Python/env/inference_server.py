@@ -1,26 +1,4 @@
-"""Batch inference server for multi-process NN evaluation.
-
-Central GPU inference server that batches requests from multiple worker
-processes, doing a single forward pass per batch instead of one per request.
-
-Architecture:
-    Main Process (GPU)          Worker Processes (CPU + pipe IPC)
-    ┌─────────────────┐         ┌──────────────────────────┐
-    │ InferenceServer  │◄──req──│ InferenceClient          │
-    │  combat_net      │──res──►│   .combat_inference()    │
-    │  ppo_net         │        │   .ppo_inference()       │
-    │  batch+forward   │        │   (blocks until result)  │
-    └─────────────────┘         └──────────────────────────┘
-
-Usage:
-    # Main process
-    server = InferenceServer(ppo_net, combat_net, device, num_workers=8)
-    server.start()
-
-    # Worker process
-    client = InferenceClient(worker_id, server.request_queue, server.get_result_queue(worker_id))
-    logits, value = client.combat_inference(state_features, action_features)
-"""
+"""GPU 推理服务器：多 worker 共享的批量推理守护线程。"""
 from __future__ import annotations
 
 import logging

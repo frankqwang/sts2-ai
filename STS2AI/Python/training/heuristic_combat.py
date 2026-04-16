@@ -1,4 +1,4 @@
-"""Rule-based combat fallback used for debugging and baseline runs."""
+"""规则战斗策略：基于手工规则的战斗动作选择（fallback）。"""
 
 from __future__ import annotations
 

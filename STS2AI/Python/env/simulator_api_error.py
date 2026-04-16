@@ -1,4 +1,4 @@
-"""Structured error type raised by HTTP and pipe simulator transports."""
+"""模拟器错误定义：API 异常类。"""
 from __future__ import annotations
 
 

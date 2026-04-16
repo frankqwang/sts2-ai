@@ -1,1 +1,1 @@
-"""Core training modules for STS2AI."""
+"""核心工具包：词表、标签、奖励塑形等基础设施。"""

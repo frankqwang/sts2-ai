@@ -1,4 +1,4 @@
-"""Compare AI training deck builds against Skada community win-rate statistics."""
+"""训练 vs Skada 构建对比：对比 AI 和人类的牌组构建。"""
 from __future__ import annotations
 
 import argparse

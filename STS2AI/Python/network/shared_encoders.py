@@ -1,17 +1,4 @@
-"""Neural network encoder modules — shared building blocks for all policy networks.
-
-This file contains ONLY nn.Module definitions used by both CombatPolicyValueNetwork
-and FullRunPolicyNetworkV2. Feature engineering (state/action building, entity feature
-extraction) lives in state_features.py.
-
-Modules:
-  EntityEmbeddings    - Learned embedding tables for cards, relics, potions, monsters, etc.
-  SetEncoder          - Multi-head self-attention + masked mean pooling for variable-length sets
-  SharedTrunk         - 2-layer MLP combining scalar + set representations
-  ScreenHead          - Cross-attention head (trunk queries screen-specific entities)
-  SimpleScreenHead    - Lightweight MLP for fixed-option screens (rest, event)
-  BilinearActionScorer - Bilinear state-action scoring with masking
-"""
+"""共享 NN 模块：EntityEmbeddings、SetEncoder、BilinearActionScorer 等。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Analyze card-reward selection sources, overrides, and boss-specific pick distributions."""
+"""卡牌奖励调试分析：分析卡牌选择的调试数据。"""
 import argparse
 import json
 from collections import Counter, defaultdict

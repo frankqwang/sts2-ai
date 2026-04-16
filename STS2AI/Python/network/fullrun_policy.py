@@ -1,23 +1,4 @@
-"""V2 Policy Network: entity embeddings + attention + pointer action scoring.
-
-Architecture:
-  Entity Embeddings (card/relic/potion/monster/node)
-          ↓
-  Set Encoders (deck, relics, potions — self-attention + pool)
-          ↓
-  Shared Trunk (concat scalars + set reprs → MLP → trunk_repr)
-          ↓
-  Screen Heads (cross-attention: trunk queries screen entities)
-          ↓
-  ├─ Value Head: V(s) = MLP(trunk, screen_ctx)
-  └─ Action Scorer: bilinear(state_repr, action_embed) per legal action
-
-Compared to V1 (flat 300-dim features → MLP):
-  - Learns entity-level representations (specific cards, relics, enemies)
-  - Attention captures set interactions (card synergies, build coherence)
-  - Pointer-style action scoring: same card embedding whether in hand, reward, or shop
-  - Variable-length action masking (no fixed 15-slot padding waste)
-"""
+"""全局策略网络：FullRunPolicyNetworkV2 + PPOTrainerV2。"""
 
 from __future__ import annotations
 

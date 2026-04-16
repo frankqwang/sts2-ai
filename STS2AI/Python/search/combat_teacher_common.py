@@ -1,3 +1,4 @@
+"""Teacher 公共库：战斗 teacher 数据集的共享工具函数。"""
 from __future__ import annotations
 
 

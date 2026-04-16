@@ -1,36 +1,4 @@
-"""Combat neural network — CombatPolicyValueNetwork and CombatNNEvaluator.
-
-This file contains ONLY the network architecture and MCTS evaluation wrapper.
-Feature engineering (state/action featurization) lives in combat_features.py.
-
-Network architecture:
-  Hand cards  -> self-attention -> hand_repr
-  Enemies     -> self-attention -> enemy_repr
-  Scalars     -> concat
-  Turn prefix -> encoder
-  -- state_encoder MLP -> state_repr (128-d)
-
-  Policy path:
-    state + actions -> joint self-attention -> BilinearScorer -> base_logits
-    -> structured_action_logits (stop/continue -> family -> within-family)
-    -> optional deck_delta, teacher fusion -> final logits
-
-  Value path:
-    state_repr -> value_head -> base_value in [-1, 1]
-    state_repr -> continuation_head -> (win_prob, hp_loss, potion_cost)
-    -> compose_room_conditioned_value() -> final V(s)
-
-  Gates (all learnable scalars):
-    action_aux_gate (0.1)    - action hand-crafted features strength
-    turn_prefix_gate (0.0)   - intra-turn card history
-    main_state/action_context_gate (0.0) - joint state-action attention
-    stop_continue_gate (0.1) - end-turn vs continue decision
-    action_family_gate (0.1) - play/potion/selection family bias
-    resource_gate (0.1)      - potion vs non-potion resource bias
-    teacher_action_context_gate (0.0) - teacher path attention (can freeze)
-    deck_delta_gate (0.0)    - deck-conditioned action scoring
-    adapter_alpha/beta (0.0) - residual adapter for fine-tuning
-"""
+"""战斗策略-价值网络：CombatPolicyValueNetwork + CombatNNEvaluator。"""
 
 from __future__ import annotations
 

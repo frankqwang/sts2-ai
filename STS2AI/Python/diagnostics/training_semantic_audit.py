@@ -1,4 +1,4 @@
-"""Semantic audit of training runs — compares baseline vs candidate checkpoints on fixed seeds."""
+"""训练语义审计：检查训练产物的语义正确性。"""
 from __future__ import annotations
 # --- wizardly cleanup 2026-04-08: tools/python subdir sys.path bootstrap ---
 # Moved out of tools/python/ root; bootstrap below re-adds the parent dir so

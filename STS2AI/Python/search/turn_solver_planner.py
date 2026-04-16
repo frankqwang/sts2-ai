@@ -1,22 +1,4 @@
-"""TurnSolverPlanner: adapter that drives `CombatTurnSolver` from
-`evaluate_ai.py`'s `_select_action_nn` hook.
-
-Usage in `evaluate_ai.py`:
-    from search.turn_solver_planner import build_turn_solver_planner
-    planner = build_turn_solver_planner(combat_net=combat_net,
-                                        vocab=vocab, device=device,
-                                        mode="boss",
-                                        max_player_actions=12)
-    # then pass `turn_planner=planner` to evaluate_batch / run_single_game.
-
-The planner has a `select_action(pipe_getter, state, legal)` method matching
-the existing `combat_turn_planner.TurnPlanner` interface, and a `_mode`
-attribute (`always` / `boss` / `elite` / `boss_elite`).
-
-Caching: once the solver finds a full turn line, the cached actions are
-returned for subsequent decisions in the same turn (until the cache is
-exhausted, the next state hash diverges, or end_turn is reached).
-"""
+"""求解器规划器：集成回合求解和 NN 价值估计。"""
 
 from __future__ import annotations
 

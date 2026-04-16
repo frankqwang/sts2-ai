@@ -1,3 +1,4 @@
+"""战斗安全遮罩：规则化安全检查 + logits 重排序。"""
 from __future__ import annotations
 
 from typing import Any

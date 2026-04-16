@@ -1,15 +1,4 @@
-"""Action selection strategies — NN inference, teacher override, MCTS integration.
-
-Extracted from evaluate_ai.py. Contains the core action selection logic:
-  _select_action_nn()     — main NN-based action selection with safety reranking
-  _select_action_random() — random baseline
-  _select_action_heuristic() — rule-based heuristic
-  _build_ppo_tensors()    — tensor conversion for PPO network
-  _build_combat_tensors() — tensor conversion for combat network
-  _probe_direct_lethal_indices() — lethal detection for safety
-  CombatMctsTrace, CombatTeacherOverride — dataclasses for MCTS/teacher info
-  CombatMctsTacticalBlendEvaluator — blended MCTS evaluator
-"""
+"""推理动作选择：NN/Teacher/MCTS 策略路由 + 致死检测。"""
 
 from __future__ import annotations
 

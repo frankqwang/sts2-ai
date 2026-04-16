@@ -1,4 +1,4 @@
-"""Analyze deck-building and shop patterns correlated with episode win/loss outcomes."""
+"""构建结果分析：分析不同牌组构建的游戏结果。"""
 from __future__ import annotations
 
 import argparse

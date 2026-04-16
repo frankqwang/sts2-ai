@@ -1,3 +1,4 @@
+"""公共状态 trace：记录游戏状态的公开信息用于调试。"""
 from __future__ import annotations
 
 import hashlib

@@ -1,4 +1,4 @@
-"""Classify episode failures into categories (boss death, early death, stall, loop, etc.)."""
+"""失败分类：自动归类 episode 失败原因。"""
 from __future__ import annotations
 
 import argparse

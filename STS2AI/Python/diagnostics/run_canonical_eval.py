@@ -1,35 +1,4 @@
-"""Canonical combat-teacher evaluation wrapper.
-
-Runs evaluate_ai.py with the flags that match `train_hybrid.py` rollout
-behaviour. Purpose: stop the train-vs-eval drift that silently invalidated
-earlier comparisons (where training had combat_safety_rerank_weight=1.0 but
-evaluation ran with --combat-safety-rerank OFF by default).
-
-All experiments should use this wrapper so side-by-side numbers are fair.
-
-Usage:
-  python STS2AI/Python/diagnostics/run_canonical_eval.py \\
-    --checkpoint <path> \\
-    --output-dir <dir> \\
-    --num-games 50 \\
-    [--name v8a]        # tag appears in output filename
-    [--no-rerank]       # A/B mode for debugging rerank contribution
-
-Canonical flags (matching train config):
-  --combat-safety-rerank          ON  (training used weight=1.0)
-  --seed-suite regression
-  --transport pipe-binary
-  --auto-launch
-  --game-timeout / --max-steps    evaluate_ai defaults (120s / 800 steps)
-
-Not set here (intentionally — these are separate research tracks, not part
-of the canonical "fair eval" baseline):
-  --combat-turn-solver            (extra rerank via solver; training didn't use)
-  --combat-turn-planner           (ditto)
-  --combat-teacher-checkpoint     (teacher head rerank — future experiment)
-  --lethal-probe                  (lethal detection patch — future experiment)
-  --combat-bc-model               (separate BC model — not in play)
-"""
+"""标准评估运行：用固定配置跑标准化评估。"""
 
 from __future__ import annotations
 

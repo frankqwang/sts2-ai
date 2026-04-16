@@ -1,3 +1,4 @@
+"""Teacher 训练：离线战斗 teacher 的 loss 计算和训练循环。"""
 from __future__ import annotations
 
 

@@ -1,4 +1,4 @@
-"""Render a multi-panel matplotlib training dashboard (win rate, floor, combat stats)."""
+"""训练仪表盘：渲染综合训练指标看板。"""
 from __future__ import annotations
 
 import argparse

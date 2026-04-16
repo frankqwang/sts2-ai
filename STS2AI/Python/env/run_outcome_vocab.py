@@ -1,3 +1,4 @@
+"""结局词表：胜利/死亡/放弃等结局类型的标准化。"""
 from __future__ import annotations
 
 from typing import Any

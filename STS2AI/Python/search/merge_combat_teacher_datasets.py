@@ -1,9 +1,4 @@
-"""Merge multiple combat-teacher JSONL datasets into one, dedup by sample_id.
-
-Keeps the first occurrence (earlier `--source` arguments win on duplicates).
-Re-assigns train/holdout split using `stable_split(sample_id)`.
-Writes a manifest + summary beside the output JSONL.
-"""
+"""合并 teacher 数据集：多个 teacher 数据文件的合并去重。"""
 
 from __future__ import annotations
 

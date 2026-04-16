@@ -1,14 +1,4 @@
-"""Diff combat behaviour between policies on the same seeds.
-
-Input: three trajectory JSONL dirs (baseline / w02 / v4) that share the same seeds.
-Output: per-seed, per-combat summary — for each combat encountered we print
-  - floor / enemy composition / initial HP
-  - total turns / chosen cards / potions used
-  - final player HP / damage dealt / damage taken
-  - outcome (win / flee / death)
-
-Then a diff view for each policy pair showing which combats differ in outcome.
-"""
+"""轨迹战斗对比：对比不同轨迹的战斗细节。"""
 
 from __future__ import annotations
 

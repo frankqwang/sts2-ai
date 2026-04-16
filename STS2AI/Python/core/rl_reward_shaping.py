@@ -1,20 +1,4 @@
-"""Reward shaping v5 — problem-vector + semi-MDP + screen-aware.
-
-Architecture:
-  1. problem_vector: 9-dim deck capability assessment, weighted by act
-  2. survival_margin: threshold-based HP utility (not linear)
-  3. economy_score: buying-power thresholds (not raw gold)
-  4. milestone_reward: floor/act/elite/boss clear bonuses
-  5. fight_summary: excess-hp-loss penalty (not raw hp loss)
-  6. combat PBRS: unchanged from v4
-
-Key changes from v4:
-  - REMOVED: raw gold reward, raw potion reward, deck_size<=12 bonus
-  - REPLACED: linear HP → threshold survival_margin
-  - REPLACED: single deck_score → problem_vector with act-specific weights
-  - ADDED: milestone events (floor advance, act clear, elite clear)
-  - ADDED: fight_summary with excess-hp-loss model
-"""
+"""奖励塑形：PBRS 势函数 + 里程碑奖励 + 战斗局部奖励。"""
 
 from __future__ import annotations
 

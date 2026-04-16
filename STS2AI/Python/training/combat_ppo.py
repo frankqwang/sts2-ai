@@ -1,12 +1,4 @@
-"""Combat training infrastructure — buffers, PPO trainer, and MCTS train step.
-
-Extracted from train_hybrid.py for modularity. Contains:
-  MCTSTrainingExample  — dataclass for MCTS training samples
-  MCTSReplayBuffer     — MCTS experience replay buffer
-  CombatRolloutBuffer  — combat PPO step collection with GAE computation
-  CombatPPOTrainer     — PPO gradient update for the combat neural network
-  mcts_train_step()    — MCTS behavior cloning gradient step
-"""
+"""战斗 PPO 训练器：CombatRolloutBuffer + CombatPPOTrainer + mcts_train_step。"""
 
 from __future__ import annotations
 

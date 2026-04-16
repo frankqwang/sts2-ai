@@ -1,35 +1,4 @@
-"""Symbolic feature extraction from source_knowledge.sqlite.
-
-Reads the checked-in sqlite database (built by tools/python/data/build_source_database.py)
-and produces:
-
-  1. A global symbol vocabulary — the union of every C# class / tag / intent name
-     appearing in any *_json column across cards / relics / monsters / potions.
-     Sorted alphabetically, with reserved indices 0=<pad>, 1=<unk>.
-
-  2. Per-entity padded symbol id tables — for each card/relic/monster/potion in
-     the vocab, the (sorted) list of symbol indices it references, padded with 0.
-
-These tables are consumed by SymbolicFeaturesHead (core/symbolic_features_head.py)
-to seed a cross-attention pathway that gives the RL policy a zero-shot prior over
-rare entities it has barely seen during training.
-
-The database has NO natural-language text — every row is structured JSON arrays
-of C# symbol names — so multi-hot / symbol-attention is the right shape. See
-docs/HANDOFF_2026-04-09.md §7.2.D and the plan at
-C:/Users/Administrator/.claude/plans/async-snacking-tome.md.
-
-Design notes:
-- Pure python + sqlite3 + numpy. No torch dependency.
-- Deterministic: builder functions sort every list before returning.
-- Special vocab tokens (`<pad>`, `<unk>`) get all-zero id rows and all-False masks.
-- Missing ids (should be zero in practice — we verified 100% sqlite ↔ vocab overlap)
-  also get all-zero/False rows so downstream attention ignores them.
-- SHA1 drift check: on build we compute the sqlite file's SHA1 and compare against
-  the value in `source_knowledge.manifest.json`. If the manifest lacks a sha1 field
-  we write one back (first-run upgrade). If the sha differs we log a warning —
-  this is the cheap "did someone regenerate the DB but forget to retrain?" detector.
-"""
+"""源码知识特征：从 source_knowledge.sqlite 提取实体符号特征。"""
 
 from __future__ import annotations
 

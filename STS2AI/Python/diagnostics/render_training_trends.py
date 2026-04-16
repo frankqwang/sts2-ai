@@ -1,4 +1,4 @@
-"""Render per-iteration training trend line charts (floor, win rate, loss curves)."""
+"""训练趋势渲染：可视化整体训练指标变化。"""
 from __future__ import annotations
 
 import argparse

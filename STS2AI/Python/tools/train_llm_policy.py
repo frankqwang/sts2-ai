@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Train a local LLM (GGUF or HuggingFace) on SFT dialogue and preference-pair data."""
 from __future__ import annotations
 
 import argparse

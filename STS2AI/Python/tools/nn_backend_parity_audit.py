@@ -1,3 +1,4 @@
+"""NN 后端一致性审计：对比不同后端的神经网络输出。"""
 from __future__ import annotations
 
 

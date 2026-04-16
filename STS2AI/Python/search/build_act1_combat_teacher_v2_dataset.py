@@ -1,3 +1,4 @@
+"""Act1 Teacher 数据构建：从游戏 trace 构建第一幕战斗 teacher 数据。"""
 from __future__ import annotations
 
 import sys

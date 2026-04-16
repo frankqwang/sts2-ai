@@ -1,23 +1,4 @@
-"""Named pipe client for high-speed IPC with STS2 simulator.
-
-~50x faster than HTTP for small JSON messages (no TCP handshake/headers).
-Protocol: 4-byte little-endian length prefix + UTF-8 JSON payload.
-
-Uses Windows overlapped I/O for reads with proper timeout support.
-Previous implementation used os.fdopen().read() which holds the GIL
-and cannot be interrupted by threading timeout.
-
-Usage:
-    from env.pipe_client import PipeClient
-
-    pipe = PipeClient(port=15527)
-    pipe.connect()
-    result = pipe.call("reset", {"seed": "TEST1", "character_id": "IRONCLAD"})
-    result = pipe.call("step", {"action": "choose_map_node", "index": 0})
-    state_id = pipe.call("save_state")["state_id"]
-    pipe.call("load_state", {"state_id": state_id})
-    pipe.close()
-"""
+"""JSON 管道通信：与 C# 模拟器的 JSON 文本协议（调试用）。"""
 from __future__ import annotations
 
 import ctypes

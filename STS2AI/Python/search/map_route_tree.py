@@ -1,3 +1,4 @@
+"""地图路线树：地图节点选择的树搜索。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

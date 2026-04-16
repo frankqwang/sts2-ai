@@ -1,16 +1,4 @@
-"""AI demo player with real-time decision visualization overlay.
-
-Supports two runtime modes:
-1. Front-UI mode over STS2MCP HTTP singleplayer/full-run endpoints.
-2. Legacy simulator mode over named pipe/full-run-sim-server.
-
-Recommended for recording:
-    Godot.exe --path . -- --mcp-port 15600 --mcp-decision-overlay-file STS2AI/Artifacts/demo_overlay/live_overlay.json
-
-    python STS2AI/Python/demo_play.py --checkpoint STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt \\
-                                      --transport http --port 15600 \\
-                                      --decision-overlay-file STS2AI/Artifacts/demo_overlay/live_overlay.json
-"""
+"""实时可视化演示：连接游戏客户端，展示 AI 决策过程。"""
 from __future__ import annotations
 
 

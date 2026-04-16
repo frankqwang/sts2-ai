@@ -1,4 +1,4 @@
-"""Mine map-route and shop-visit patterns, comparing top vs bottom performers."""
+"""路线和商店模式挖掘：分析路线选择和商店购买模式。"""
 from __future__ import annotations
 
 import argparse

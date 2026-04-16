@@ -1,4 +1,4 @@
-"""Pipe-backed combat training environment for isolated combat encounter rollouts."""
+"""战斗训练环境：封装单场战斗的 step/reset 接口。"""
 from __future__ import annotations
 
 

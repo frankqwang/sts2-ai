@@ -1,18 +1,4 @@
-"""Relic tag extraction from C# source — semantic classification of every relic.
-
-Scans each relic's .cs file to extract functional tags based on:
-- DynamicVar types (BlockVar, CardsVar, EnergyVar, HealVar, GoldVar, PowerVar<T>)
-- Trigger methods (BeforeCombatStart, ModifyHandDraw, AfterPlayerTurnStart, ...)
-- PowerCmd.Apply<T> calls
-- RelicRarity
-
-Usage:
-    python relic_tags.py --repo-root /path/to/sts2
-
-    from core.relic_tags import load_relic_tags, RELIC_FUNCTIONAL_TAGS
-    tags = load_relic_tags()
-    tags["bag_of_preparation"]  # ["draw", "combat_start", "common"]
-"""
+"""遗物功能标签：遗物效果分类标签。"""
 
 from __future__ import annotations
 

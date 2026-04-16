@@ -1,42 +1,4 @@
-"""Shared full-run agent wrapper.
-
-Purpose: collapse the action-selection logic that used to live in three places
-(evaluate_ai.py / train_hybrid rollout / build_act1_combat_teacher_v2_dataset.py)
-into one class, so downstream tools all play the game the same way. Concretely:
-
-  - auto_progress (UI prompts: confirm/skip/claim)     ← rule
-  - RepeatLoopTracker (escape argmax dead-loops)       ← rule
-  - _select_action_nn (combat/noncombat NN + rerank)   ← NN
-
-Before this wrapper, the live builder (search/build_act1_combat_teacher_v2_dataset.py)
-reimplemented only a stripped-down NN argmax path, which caused most seeds to
-stall at floor 2-6 on noncombat screens. evaluate_ai used the fuller pipeline
-and reached boss fine. Sharing through `FullRunAgent` means there's literally
-one place to change behaviour.
-
-Usage:
-    from core.full_run_agent import FullRunAgent, AgentConfig, load_agent_config
-
-    cfg = load_agent_config("STS2AI/Python/configs/inference_config.toml")
-    agent = FullRunAgent(
-        ppo_net=ppo_net,
-        combat_net=combat_net,
-        vocab=vocab,
-        device=device,
-        cfg=cfg,
-    )
-
-    state = client.reset(...)
-    while not state.get("terminal"):
-        legal = [a for a in state.get("legal_actions", []) if a.get("is_enabled") is not False]
-        pick = agent.select_action(state, legal)
-        next_state = client.act(pick["action"])
-        agent.after_step(before_state=state, before_legal=legal, action=pick["action"], next_state=next_state)
-        state = next_state
-
-This file deliberately does NOT reimplement the auto_progress / NN / rerank
-logic. It imports them from evaluate_ai so there's exactly one copy.
-"""
+"""全局运行代理：组装 PPO + Combat 网络的推理 agent。"""
 
 from __future__ import annotations
 

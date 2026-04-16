@@ -1,22 +1,4 @@
-"""Card base damage / block knowledge (Ironclad first).
-
-WHY THIS EXISTS: the sim exposes only `{id, cost, label, name, type, ...}`
-for each card in hand — it does NOT expose `damage`/`block` fields. Every
-"damage-aware" feature in the stack (action_aux[1] in the NN, kills_target,
-prevented_lethal, combat_safety rerank, turn_lethal_projection) was therefore
-reading `card.get("damage", 0)` and always getting 0. 5 of 13 dims of the
-action_aux feature were dead signal; the model had to recover damage from
-the card-id embedding alone.
-
-This module adds a Python-side lookup keyed by canonical card id and
-applies live state modifiers (strength / vulnerable / weak) so downstream
-code can compute a realistic damage estimate.
-
-Unknown cards fall through to 0 and the caller's legacy fallback kicks in
-(usually `6` for attack-type cards). Entries here should be base values
-(unupgraded). Upgraded handling is left for a later pass; most Ironclad
-upgrades are +2~+5 damage which is within the rerank tolerance.
-"""
+"""卡牌基础属性：手工维护的伤害/格挡/命中数查找表（Ironclad）。"""
 
 from __future__ import annotations
 

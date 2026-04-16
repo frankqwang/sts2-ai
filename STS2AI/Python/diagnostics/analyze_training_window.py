@@ -1,4 +1,4 @@
-"""Aggregate training-window statistics (floor distribution, combat, shop, rewards) across iterations."""
+"""训练窗口分析：分析特定训练窗口的指标趋势。"""
 from __future__ import annotations
 
 import argparse

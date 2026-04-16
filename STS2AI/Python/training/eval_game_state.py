@@ -1,9 +1,4 @@
-"""Game state tracking — progress extraction, loop detection, auto-progress actions.
-
-Extracted from evaluate_ai.py. These functions track game state transitions,
-detect infinite loops, compute state signatures, and handle automatic progression
-through non-decision screens.
-"""
+"""游戏状态追踪：进度提取、循环检测、自动推进、奖励领取。"""
 
 from __future__ import annotations
 

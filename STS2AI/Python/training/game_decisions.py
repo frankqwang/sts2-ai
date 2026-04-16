@@ -1,10 +1,4 @@
-"""Game decision heuristics — map routing, card reward selection, shop decisions.
-
-Extracted from train_hybrid.py. These functions implement rule-based or
-heuristic-guided action selection for non-combat game screens (map, card
-rewards, shop). They are called by collect_unified_episode() when the
-PPO policy defers to hand-crafted rules.
-"""
+"""游戏决策逻辑：地图路线选择、卡牌奖励评估、商店购买策略。"""
 
 from __future__ import annotations
 

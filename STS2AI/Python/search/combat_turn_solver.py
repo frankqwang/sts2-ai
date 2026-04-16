@@ -1,3 +1,4 @@
+"""回合求解器：穷举搜索最优回合动作序列。"""
 from __future__ import annotations
 
 import argparse

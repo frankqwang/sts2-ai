@@ -1,11 +1,4 @@
-"""Vectorized episode collector for parallel env stepping.
-
-All N envs step in lockstep: parallel pipe I/O (ThreadPoolExecutor)
-+ batched NN inference (single GPU forward pass).
-
-This replaces the per-worker independent episode collection when
---vectorized is used, achieving ~3-4x throughput improvement.
-"""
+"""向量化数据收集：多环境并行 episode 收集。"""
 
 from __future__ import annotations
 

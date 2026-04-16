@@ -1,10 +1,4 @@
-"""Checkpoint key compatibility helpers.
-
-Hybrid checkpoints used to store the combat policy/value network under the
-legacy key ``mcts_model``. New checkpoints should write ``combat_model`` and
-``combat_model_config``; loaders keep accepting the old keys so existing
-artifacts remain usable.
-"""
+"""检查点兼容：不同版本 checkpoint 的加载和转换。"""
 
 from __future__ import annotations
 

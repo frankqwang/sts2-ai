@@ -1,3 +1,4 @@
+"""非战斗确定性策略：规则化的非战斗决策。"""
 from __future__ import annotations
 
 from typing import Any

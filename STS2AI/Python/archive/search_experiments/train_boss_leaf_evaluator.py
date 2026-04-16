@@ -1,4 +1,5 @@
 ﻿#!/usr/bin/env python3
+"""[ARCHIVED] Train a lightweight NN to predict post-boss-combat leaf quality."""
 from __future__ import annotations
 
 

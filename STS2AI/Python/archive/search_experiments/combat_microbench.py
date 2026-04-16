@@ -1,4 +1,5 @@
-﻿from __future__ import annotations
+﻿"""[ARCHIVED] Microbenchmark for combat-teacher sample quality and motif coverage."""
+from __future__ import annotations
 
 
 import argparse

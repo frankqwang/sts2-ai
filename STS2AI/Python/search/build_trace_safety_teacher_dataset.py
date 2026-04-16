@@ -1,3 +1,4 @@
+"""安全 Teacher 数据构建：从 trace 提取安全/不安全动作对。"""
 from __future__ import annotations
 
 import sys

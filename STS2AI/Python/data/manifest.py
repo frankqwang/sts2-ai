@@ -1,4 +1,4 @@
-"""Dataset manifest builder — stamps schema version, provenance, and summary into manifest.json."""
+"""数据清单管理：数据集版本和 SHA256 校验。"""
 from __future__ import annotations
 
 import json

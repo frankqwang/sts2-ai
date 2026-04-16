@@ -1,4 +1,4 @@
-"""Project-wide path constants (roots for checkpoints, datasets, assets, etc.)."""
+"""全局路径常量：checkpoint、数据集、产物目录等。"""
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,3 +1,4 @@
+"""[ARCHIVED] Legacy combat action normalization and legal-action enumeration helpers."""
 from __future__ import annotations
 
 from typing import Any

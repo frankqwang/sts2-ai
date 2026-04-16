@@ -1,3 +1,4 @@
+"""演示动作候选：为可视化演示提取和格式化动作候选。"""
 from __future__ import annotations
 
 

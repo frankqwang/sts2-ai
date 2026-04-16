@@ -1,3 +1,4 @@
+"""Skada 非战斗先验：基于人类数据的卡牌/商店/休息决策先验。"""
 from __future__ import annotations
 
 

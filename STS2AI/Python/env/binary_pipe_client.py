@@ -1,4 +1,4 @@
-"""Binary-protocol named-pipe client for compact IPC with the STS2 simulator."""
+"""二进制管道通信：与 C# 无头模拟器的高性能二进制协议。"""
 from __future__ import annotations
 
 import ctypes

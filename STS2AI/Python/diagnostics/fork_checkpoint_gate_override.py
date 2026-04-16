@@ -1,22 +1,4 @@
-"""Fork a hybrid checkpoint and override specific gate scalars in combat_model.
-
-Why: `action_aux_gate` (and its 7 siblings) in CombatPolicyValueNetwork starts
-at 0.1 / 0.0 and barely moves in a few training iters, so the lethal-aware
-per-action features (kills_target, prevented_lethal, ...) only contribute ~10%
-to the action representation. Simply editing the nn.Parameter init does NOT
-help when we resume from an existing checkpoint — the old gate value loads
-back. This script lets us fork a checkpoint and stamp the gate to any value,
-then resume training from the forked file.
-
-Usage:
-  python STS2AI/Python/diagnostics/fork_checkpoint_gate_override.py \
-     --input  STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175.pt \
-     --output STS2AI/Assets/checkpoints/act1/retrieval_final_iter2175_gate10.pt \
-     --set action_aux_gate=1.0
-
-Any `--set key=val` may be repeated. Supports both scalar (single-element)
-and vector gates. Unknown keys cause an error unless --allow-missing is given.
-"""
+"""检查点 gate 覆盖：分叉 checkpoint 并修改 gate 值做消融实验。"""
 
 from __future__ import annotations
 

@@ -1,24 +1,4 @@
-"""Card tag extraction from C# source — semantic classification of every card.
-
-Scans each card's .cs file to extract functional tags based on:
-- DynamicVar types (DamageVar, BlockVar, PowerVar<T>, CardsVar, EnergyVar, ...)
-- CardKeyword (Exhaust, Retain, Innate, Ethereal, ...)
-- CardTag (Strike, Defend, Shiv, ...)
-- TargetType (Self, AnyEnemy, AllEnemies, ...)
-- OnPlay method body (PowerCmd.Apply<T>, CardPileCmd.Draw, DamageCmd.Attack, ...)
-
-Produces a card_tags.json mapping slug → list of tags, plus a TAG_VOCAB
-listing all possible tags and their indices.
-
-Usage:
-    # Generate card_tags.json from source
-    python card_tags.py --repo-root /path/to/sts2
-
-    # In code
-    from core.card_tags import load_card_tags, TAG_VOCAB
-    tags = load_card_tags()  # dict[str, list[str]]
-    tag_indices = tags["offering"]  # e.g. ["draw", "energy_gen", "exhaust", "hp_loss", "self_target"]
-"""
+"""卡牌功能标签：从源码提取的 32 维功能标签（攻击/防御/抽牌等）。"""
 
 from __future__ import annotations
 
