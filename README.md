@@ -90,49 +90,33 @@ STS2AI/Python/
 
 ## networkV2 —— 并行下一代架构（实验线）
 
-`STS2AI/Python/networkV2/` 是与上面 `network/` 并行的**下一代网络架构**，采用分层 schema + 多 time-scale memory + 统一 combat/non-combat 路由设计。目前作为实验线迭代，不影响 main_attention 主线。
+`STS2AI/Python/networkV2/` 是与 `network/` 并行的**下一代网络架构**，采用分层 schema + 三层时间尺度 memory + 统一 combat/non-combat 路由设计。作为实验线独立迭代，不影响 main_attention 主线 checkpoint/evaluate。
 
-```
-networkV2/
-├── s0_bridge          (sim 通信占位)
-├── s1_schema          数据类：entities / actions / memory / token_banks / primitives
-├── s2_config          (保留)
-├── s3_state_tracker   CombatStateTracker：维护 TurnPrefix/CombatMemory/RunBuildMemory
-├── s4_compiler        obs → token banks 编译：runtime/action/bank_assembler/memory/mechanism/modifier + noncombat/
-├── s5_net             UnifiedNet：共享 tokenizer/decision_core + combat/non-combat 双分支 + 多 head（policy/value/leaf/run_eval）
-├── s6_training        batch + losses(CombatLoss + NonCombatLoss) + UnifiedPPOTrainer + 两个训练入口
-└── s7_diagnostics     rollout dumper / 诊断
-```
+**核心特点**：
+- 三层时间记忆：TurnPrefix（本回合）/ CombatMemory（本战斗）/ RunBuildMemory（整局）
+- UnifiedPPOTrainer 按 `decision_domain` 拆子批路由，combat/non-combat 独立 loss
+- 多 head 全监督（value / leaf_evaluator / run_evaluator 各 4 个 head），无饥饿 head
+- Relic/Potion 静态语义规则表（`core/relic_rules.py`）
 
-### 三层时间尺度记忆
-- **TurnPrefixMemory** — 本回合：每步动作累积（cards_played / damage_dealt / potions_used ...）
-- **CombatMemory** — 本战斗：turn_index / HP 窗口 / 敌方 HP 窗口 / intent 历史 / behavior_history（move_id 切换代理 phase）/ reshuffle_count / block_efficiency ...
-- **RunBuildMemory** — 整局：deck profile（frontload/block/draw/scaling/aoe/heal/x_cost 等密度）+ 跨战斗历史（enemy_types_seen / room_type_history / event_history）+ 资源压力
+**快速训练**：
 
-### 多 head 输出（已全部接监督，无饥饿 head）
-- `values.fight_win / expected_hp_loss / survival_2turn / tempo` — 战斗价值
-- `leaf.leaf_score / transition_risk / survival_margin / resource_retention` — 叶子节点评估
-- `run_eval.run_win_prob / boss_readiness / resource_health / deck_quality` — 非战斗整局评估
-
-### 关键设计决策
-- **`fight_win` 用 GAE returns 做目标**（非自蒸馏）：非终局哨值 `-1` → loss fallback 到 returns；终局用 0/1 硬标签
-- **UnifiedPPOTrainer 按 domain 拆子批**：combat 样本走 `CombatLoss`，non-combat 样本走 `NonCombatLoss`，避免整批被 combat head 强制路由
-- **action token 扩展到 30 维**：包含 combat family + non-combat family（rest/shop/card_reward/map/event）+ 语义 role（heal/setup/resource/terminal/build/buff）
-- **Relic/Potion 语义编码**：`core/relic_rules.py` 提供 trigger-tag + effect-tag + value 的静态规则表（Ironclad 核心 relic + 通用 potion）
-- **PlayedAction 效果差分**：tracker `on_step` 接 prev/next 两帧，damage/block/drawn/energy/exhaust/retain 用状态 diff 计算（bridge 的 legal_action 本身不带这些量）
-- **行为历史**：`CombatMemory.behavior_history` 用敌人 `next_move_id` 变化检测 phase 切换代理
-- **PPO 稳定性**：advantages 在 train_step 入口全局归一化；value warmup N 轮；KL 早停
-
-### 训练入口
 ```powershell
-# 纯战斗训练（沙盒 encounters）
-python -m networkV2.s6_training.train_combat_v2 --builds STS2AI/Assets/builds/combat_sandbox_builds.json
+# 整局训练（推荐）
+python -m networkV2.s6_training.train_full_run_v2 --d-model 384 --n-heads 8 --num-workers 4
 
-# Full-run 训练（整局 rollout，UnifiedNet + UnifiedPPOTrainer 按 domain 路由）
-python -m networkV2.s6_training.train_full_run_v2 --d-model 384 --n-heads 8
+# 纯战斗训练
+python -m networkV2.s6_training.train_combat_v2 --builds STS2AI/Assets/builds/combat_sandbox_builds.json
 ```
 
-详细设计见 `STS2AI/docs/design/networkV2Final.md`。
+**文档入口**：
+
+| 文档 | 用途 |
+|---|---|
+| [docs/networkV2_guide.md](STS2AI/docs/networkV2_guide.md) | **使用指南**：训练命令、参数、日志解读、诊断、FAQ |
+| [docs/design/networkV2Final.md](STS2AI/docs/design/networkV2Final.md) | **架构设计**：数据流、9 类 schema、token bank、网络层次 |
+| [docs/design/HANDOFF.md](STS2AI/docs/design/HANDOFF.md) | **接手指引**：项目状态快照、已知问题、下一步计划 |
+| [docs/design/nonCombat.md](STS2AI/docs/design/nonCombat.md) | 非战斗 domain（shop/rest/event/map）的特征/网络设计 |
+| [docs/design/proto_bridge_usage.md](STS2AI/docs/design/proto_bridge_usage.md) | proto-pipe 通信协议和 bridge 用法 |
 
 ## 前置准备
 所有环境、ai相关代码都在STS2AI里。
