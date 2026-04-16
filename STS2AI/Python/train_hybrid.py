@@ -117,6 +117,10 @@ from training.combat_diagnostics import (
     _combat_player_view,
     _combat_result_summary_zh,
     _combat_room_conditioned_continuation_loss,
+    _topk_action_summary_zh,
+    _combat_hand_summary_zh,
+    _combat_enemy_intent_summary_zh,
+    _combat_action_label_zh,
     _combat_root_action_summary,
     _combat_root_topk_summary,
     _combat_step_structured_summary,
@@ -866,95 +870,6 @@ def _next_reward_claim_signature(
     return _shared_next_reward_claim_signature(state_type, state, action)
 
 
-def _combat_hand_summary_zh(state: dict[str, Any], max_cards: int = 6) -> str:
-    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
-    player = _combat_player_view(state)
-    hand = battle.get("hand") or player.get("hand") or []
-    parts: list[str] = []
-    for card in hand[:max_cards]:
-        if not isinstance(card, dict):
-            continue
-        name = _trace_resolve_name(card.get("name") or card.get("id"), category="card")
-        cost = card.get("cost_for_turn", card.get("cost", "?"))
-        parts.append(f"{name}({cost})")
-    if not parts:
-        return "-"
-    more = "" if len(hand) <= max_cards else f" +{len(hand) - max_cards}"
-    return "，".join(parts) + more
-
-
-def _combat_enemy_intent_summary_zh(state: dict[str, Any], max_enemies: int = 3) -> str:
-    battle = state.get("battle") if isinstance(state.get("battle"), dict) else {}
-    enemies = battle.get("enemies") or state.get("enemies") or []
-    parts: list[str] = []
-    for enemy in enemies[:max_enemies]:
-        if not isinstance(enemy, dict):
-            continue
-        name = _trace_resolve_name(enemy.get("name") or enemy.get("id"), category="encounter")
-        hp = _safe_int(enemy.get("hp", enemy.get("current_hp", 0)), 0)
-        block = _safe_int(enemy.get("block", 0), 0)
-        intents = enemy.get("intents") or []
-        if isinstance(intents, list) and intents:
-            intent0 = intents[0] if isinstance(intents[0], dict) else {}
-        else:
-            intent0 = {}
-        intent_type = str(intent0.get("type") or intent0.get("label") or "?")
-        dmg = _safe_int(intent0.get("damage", 0), 0)
-        hits = max(1, _safe_int(intent0.get("hits", 1), 1))
-        if dmg > 0:
-            intent_desc = f"攻击 {dmg}x{hits}"
-        else:
-            intent_desc = _trace_pretty_token(intent_type)
-        parts.append(f"{name} {hp}/{block}，意图 {intent_desc}")
-    if not parts:
-        return "-"
-    more = "" if len(enemies) <= max_enemies else f" +{len(enemies) - max_enemies}"
-    return "；".join(parts) + more
-
-
-def _combat_action_label_zh(action: dict[str, Any] | None, state: dict[str, Any]) -> str:
-    if not isinstance(action, dict):
-        return "未知动作"
-    action_name = _combat_action_name(action)
-    label = _combat_action_label(action)
-    if action_name == "play_card":
-        label = _trace_resolve_name(label, category="card")
-        return f"打出「{label}」"
-    if action_name == "use_potion":
-        player = _combat_player_view(state)
-        potions = player.get("potions") or []
-        slot = action.get("slot")
-        potion_name = None
-        for potion in potions:
-            if isinstance(potion, dict) and potion.get("slot") == slot:
-                potion_name = potion.get("name") or potion.get("id")
-                break
-        potion_label = _trace_resolve_name(potion_name or label)
-        return f"使用药水「{potion_label}」"
-    if action_name == "end_turn":
-        return "结束回合"
-    return _trace_resolve_name(label)
-
-
-def _topk_action_summary_zh(
-    legal: list[dict[str, Any]],
-    logits_or_probs: np.ndarray | list[float] | torch.Tensor,
-    k: int = 3,
-    already_probs: bool = False,
-) -> str:
-    raw = _topk_action_summary(legal, logits_or_probs, k=k, already_probs=already_probs)
-    if raw == "-" or not raw:
-        return raw
-    parts: list[str] = []
-    for chunk in raw.split(" | "):
-        if ":" not in chunk:
-            parts.append(_trace_resolve_name(chunk))
-            continue
-        label, prob = chunk.rsplit(":", 1)
-        parts.append(f"{_trace_resolve_name(label, category='card')}:{prob}")
-    return " | ".join(parts)
-
-
 def _new_combat_turn_prefix() -> dict[str, Any]:
     return {
         "action_count": 0,
@@ -1211,6 +1126,11 @@ def _mp_episode_worker(
     mcts_state_dict: dict[str, Any],
 ):
     """Worker process: owns one env + one CPU model snapshot."""
+    import sys
+    from pathlib import Path
+    _python_root = str(Path(__file__).resolve().parent)
+    if _python_root not in sys.path:
+        sys.path.insert(0, _python_root)
     import logging
     logging.basicConfig(level=logging.WARNING)
     log = logging.getLogger(f"worker-{worker_id}")
