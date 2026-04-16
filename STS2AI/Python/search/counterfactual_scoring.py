@@ -1,4 +1,13 @@
-"""反事实评分：比较实际动作和替代动作的价值差异。"""
+"""非战斗决策的画面局部反事实评分。
+
+融合原始实现 + codex/reward 分支最佳实践：
+  - Boss 原型感知的问题权重（来自 codex）
+  - 全画面覆盖：card_reward、shop、rest_site、relic、map、event（来自 codex）
+  - 带牌组/金币覆盖的 state_utility 用于假设评估（来自 codex）
+  - 离散度守卫 + z-score 归一化（来自原始实现）
+  - 保守 clip=0.12（来自 codex）
+  - 带 CLI 标志控制的模块化文件结构（来自原始实现）
+"""
 
 from __future__ import annotations
 

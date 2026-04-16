@@ -1,4 +1,15 @@
-"""推理动作选择：NN/Teacher/MCTS 策略路由 + 致死检测。"""
+"""动作选择策略 —— NN 推理、教师覆盖、MCTS 集成。
+
+从 evaluate_ai.py 提取。包含核心动作选择逻辑：
+  _select_action_nn()     — 主要的基于 NN 的动作选择（含安全重排序）
+  _select_action_random() — 随机基线
+  _select_action_heuristic() — 基于规则的启发式
+  _build_ppo_tensors()    — PPO 网络的张量转换
+  _build_combat_tensors() — 战斗网络的张量转换
+  _probe_direct_lethal_indices() — 安全性致死检测
+  CombatMctsTrace, CombatTeacherOverride — MCTS/教师信息数据类
+  CombatMctsTacticalBlendEvaluator — 混合 MCTS 评估器
+"""
 
 from __future__ import annotations
 

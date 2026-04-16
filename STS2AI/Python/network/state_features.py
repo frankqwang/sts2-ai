@@ -1,4 +1,19 @@
-"""全局状态特征工程：build_structured_state/actions + 实体特征编码。"""
+"""全局状态/动作特征工程：将原始游戏状态 dict 转为结构化 numpy 张量供 FullRunPolicyNetworkV2 消费。
+
+从 NN 模块定义（shared_encoders.py）中分离出来，让网络架构代码保持专注和可读。
+
+主要入口：
+  build_structured_state()   — 原始状态 dict -> StructuredState 数据类
+  build_structured_actions() — 原始动作列表 -> StructuredActions 数据类
+
+辅助特征构建器：
+  _card_aux_features()       — 卡牌特征向量（费用、类型、稀有度、标签）
+  _enemy_aux_features()      — 敌人特征向量（40 维：HP、意图、能力）
+  _compute_route_features()  — BFS 地图前瞻特征
+
+缓存层：
+  _cached_card_encoding()、_cached_card_idx()、_cached_monster_idx() 等。
+"""
 
 from __future__ import annotations
 

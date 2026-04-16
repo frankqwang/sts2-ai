@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""Policy-guided turn-level combat planner v1.
+"""策略引导的回合级战斗规划器 v1。
 
-Searches complete turn sequences (all actions from turn start to end_turn),
-not individual card plays. Uses current combat NN policy as proposal
-distribution and evaluates afterstates (next player decision point).
+搜索完整的回合序列（从回合开始到 end_turn 的所有动作），而非单张出牌。
+使用当前战斗 NN 策略作为提议分布，并评估后续状态（下一个玩家决策点）。
 
-Architecture:
-  - TurnPlanner: top-level controller with plan caching
-  - PolicyBeamCandidateGenerator: beam search over complete turn sequences
-  - AfterstateEvaluator: abstract base for scoring afterstates
-  - RolloutCombatEvaluator: rollout to combat end for ground-truth scoring
-  - ActionSequence / CandidateAfterstate: data structures
+架构：
+  - TurnPlanner：带规划缓存的顶层控制器
+  - PolicyBeamCandidateGenerator：完整回合序列的束搜索
+  - AfterstateEvaluator：后续状态评分的抽象基类
+  - RolloutCombatEvaluator：rollout 到战斗结束的真实评分
+  - ActionSequence / CandidateAfterstate：数据结构
 
-Usage in evaluate_ai.py:
+在 evaluate_ai.py 中使用：
   --combat-turn-planner --planner-mode boss_elite
 """
 from __future__ import annotations

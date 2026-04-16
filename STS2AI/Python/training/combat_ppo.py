@@ -1,4 +1,12 @@
-"""战斗 PPO 训练器：CombatRolloutBuffer + CombatPPOTrainer + mcts_train_step。"""
+"""战斗训练基础设施 —— 缓冲区、PPO 训练器和 MCTS 训练步。
+
+从 train_hybrid.py 提取以实现模块化。包含：
+  MCTSTrainingExample  — MCTS 训练样本数据类
+  MCTSReplayBuffer     — MCTS 经验回放缓冲区
+  CombatRolloutBuffer  — 战斗 PPO 步骤收集及 GAE 计算
+  CombatPPOTrainer     — 战斗神经网络的 PPO 梯度更新
+  mcts_train_step()    — MCTS 行为克隆梯度步
+"""
 
 from __future__ import annotations
 

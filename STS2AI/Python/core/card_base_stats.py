@@ -1,4 +1,19 @@
-"""卡牌基础属性：手工维护的伤害/格挡/命中数查找表（Ironclad）。"""
+"""卡牌基础伤害/格挡知识（先做 Ironclad）。
+
+为什么需要这个模块：sim 对手牌中的每张卡仅暴露
+`{id, cost, label, name, type, ...}` —— 不暴露 `damage`/`block` 字段。
+整个栈中所有"伤害感知"特征（NN 中的 action_aux[1]、kills_target、
+prevented_lethal、combat_safety rerank、turn_lethal_projection）此前都在
+读 `card.get("damage", 0)` 并且总是得到 0。action_aux 特征 13 维中有 5 维
+是死信号；模型只能通过 card-id 嵌入来恢复伤害信息。
+
+本模块添加一个以规范化卡牌 ID 为键的 Python 端查找表，并应用实时状态修正
+（力量/易伤/虚弱），使下游代码能计算出合理的伤害估计。
+
+未知卡牌回落到 0，调用方的遗留回退逻辑生效（攻击类卡牌通常为 `6`）。
+此处条目应为基础值（未升级）。升级处理留待后续；大多数 Ironclad 升级
+为 +2~+5 伤害，在 rerank 容差范围内。
+"""
 
 from __future__ import annotations
 

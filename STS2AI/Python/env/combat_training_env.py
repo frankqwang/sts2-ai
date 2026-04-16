@@ -1,4 +1,4 @@
-"""战斗训练环境：封装单场战斗的 step/reset 接口。"""
+"""基于管道的战斗训练环境，用于隔离的战斗遭遇 rollout。"""
 from __future__ import annotations
 
 

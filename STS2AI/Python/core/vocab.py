@@ -1,4 +1,17 @@
-"""词表管理：卡牌/遗物/药水/怪物的 ID <-> 索引映射。"""
+"""encoder_v2 的游戏实体词表。
+
+通过扫描 C# 源码模型定义，构建和加载卡牌、遗物、药水和怪物的 ID 到索引映射。
+还提取静态卡牌属性（费用、类型、稀有度），用作学习嵌入之外的辅助特征。
+
+用法：
+    # 从源码生成词表（运行一次，或在游戏数据变更时运行）
+    python vocab.py --repo-root /path/to/sts2
+
+    # 在代码中使用
+    from core.vocab import load_vocab
+    v = load_vocab()
+    idx = v.card_to_idx["strike_ironclad"]
+"""
 
 from __future__ import annotations
 

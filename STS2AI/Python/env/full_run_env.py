@@ -1,4 +1,4 @@
-"""游戏环境客户端：HTTP（Godot）和 Pipe（无头模拟器）两种后端的统一接口。"""
+"""全局运行环境客户端（HTTP、pipe、binary-pipe），用于驱动完整的 STS2 游戏。"""
 from __future__ import annotations
 
 import argparse

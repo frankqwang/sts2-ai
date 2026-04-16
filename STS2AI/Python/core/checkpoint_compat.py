@@ -1,4 +1,9 @@
-"""检查点兼容：不同版本 checkpoint 的加载和转换。"""
+"""检查点键兼容辅助函数。
+
+混合检查点过去将战斗策略/价值网络存储在旧键 ``mcts_model`` 下。新检查点
+应写入 ``combat_model`` 和 ``combat_model_config``；加载器继续接受旧键，
+使现有制品保持可用。
+"""
 
 from __future__ import annotations
 

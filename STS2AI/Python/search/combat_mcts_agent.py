@@ -1,4 +1,12 @@
-"""战斗 MCTS 代理：包装 MCTS 搜索为战斗动作选择器。"""
+"""战斗 MCTS 代理 —— 将 MCTS 搜索 + 战斗 NN + 前向模型组装在一起。
+
+这是战斗决策器。给定战斗状态 + 合法动作，运行由神经网络引导的 MCTS 搜索
+并返回最佳动作。
+
+用法：
+    agent = CombatMCTSAgent.from_checkpoint("combat_best.pt")
+    action = agent.choose_action(state, legal_actions, forward_model)
+"""
 
 from __future__ import annotations
 

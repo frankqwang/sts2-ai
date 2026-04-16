@@ -1,4 +1,4 @@
-"""后端适配层：屏蔽 HTTP/Pipe 差异，提供统一的状态推进接口。"""
+"""后端无关的适配器，跨 HTTP 和 pipe 后端统一推进全局运行游戏状态。"""
 from __future__ import annotations
 
 from dataclasses import dataclass

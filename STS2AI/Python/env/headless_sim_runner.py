@@ -1,4 +1,4 @@
-"""无头模拟器启动器：管理 headless_sim_host 进程的启动和停止。"""
+"""启动和管理无头 STS2 模拟器进程（dotnet build + start）。"""
 from __future__ import annotations
 
 import argparse

@@ -1,4 +1,17 @@
-"""共享 NN 模块：EntityEmbeddings、SetEncoder、BilinearActionScorer 等。"""
+"""共享神经网络编码器模块：所有策略网络的公共构建块。
+
+本文件只包含 nn.Module 定义，被 CombatPolicyValueNetwork 和
+FullRunPolicyNetworkV2 共同使用。特征工程（状态/动作构建、实体特征提取）
+在 state_features.py。
+
+模块清单：
+  EntityEmbeddings    — 实体嵌入表（卡牌、遗物、药水、怪物等的 learned embedding）
+  SetEncoder          — 多头自注意力 + 遮罩均值池化，编码变长集合
+  SharedTrunk         — 两层 MLP，拼接标量和集合表示
+  ScreenHead          — Cross-attention 头（主干查询画面实体）
+  SimpleScreenHead    — 轻量 MLP（固定选项画面：休息、事件）
+  BilinearActionScorer — 双线性状态-动作评分 + 遮罩
+"""
 
 from __future__ import annotations
 

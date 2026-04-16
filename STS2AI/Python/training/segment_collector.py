@@ -1,4 +1,24 @@
-"""非战斗段收集器：从 episode 中提取非战斗训练段。"""
+"""半马尔可夫训练的非战斗段收集器。
+
+收集从一个非战斗决策点到下一个的宏观转移，将所有中间奖励
+（PBRS、战斗摘要、里程碑、反事实评分）累积到单个段中。
+
+在 rollout 循环中的用法：
+    collector = NonCombatSegmentCollector()
+
+    # 做出非战斗决策时：
+    collector.open_segment(state_np, actions_np, action_idx, log_prob, value, screen_idx)
+
+    # 在段期间累积奖励：
+    collector.add_reward(shaped_reward, tag="pbrs", steps=1)
+    collector.add_reward(fight_feedback, tag="fight_summary", steps=combat_steps)
+    collector.add_reward(milestone_r, tag="milestone", steps=1)
+    collector.add_reward(cf_reward, tag="counterfactual", steps=0)
+
+    # 在下一个非战斗决策或 episode 结束时：
+    segment = collector.close_segment(done=False)
+    buffer.add(segment)
+"""
 
 from __future__ import annotations
 

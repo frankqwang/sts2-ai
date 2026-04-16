@@ -1,4 +1,4 @@
-"""单人游戏环境：完整一局游戏的 Gym-like 接口。"""
+"""STS2 MCP 单人自动化 API 的 HTTP 客户端（state/act/wait）。"""
 from __future__ import annotations
 
 import json

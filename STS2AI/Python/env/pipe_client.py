@@ -1,4 +1,22 @@
-"""JSON 管道通信：与 C# 模拟器的 JSON 文本协议（调试用）。"""
+"""命名管道客户端，用于与 STS2 模拟器的高速 IPC 通信。
+
+比 HTTP 快约 50 倍（无 TCP 握手/头部开销），适用于小型 JSON 消息。
+协议：4 字节小端长度前缀 + UTF-8 JSON 负载。
+
+使用 Windows overlapped I/O 进行读取，支持正确的超时处理。
+先前实现使用 os.fdopen().read()，会持有 GIL 且无法被线程超时中断。
+
+用法：
+    from env.pipe_client import PipeClient
+
+    pipe = PipeClient(port=15527)
+    pipe.connect()
+    result = pipe.call("reset", {"seed": "TEST1", "character_id": "IRONCLAD"})
+    result = pipe.call("step", {"action": "choose_map_node", "index": 0})
+    state_id = pipe.call("save_state")["state_id"]
+    pipe.call("load_state", {"state_id": state_id})
+    pipe.close()
+"""
 from __future__ import annotations
 
 import ctypes

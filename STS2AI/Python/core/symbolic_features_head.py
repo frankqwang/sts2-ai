@@ -1,4 +1,24 @@
-"""符号特征头：sqlite-backed cross-attention，给稀有实体提供零样本先验。"""
+"""SymbolicFeaturesHead —— 基于 source_knowledge.sqlite 的静态符号集 cross-attention。
+
+逐实体 cross-attention，通过 `tools/python/data/source_knowledge.sqlite` 中存储的
+结构化符号（powers、commands、tags、intents）为 RL 策略提供对稀有卡牌/遗物/怪物/
+药水的零样本先验。
+
+对前向传播中的每个实体：
+  - query = 来自 EntityEmbeddings 的现有（已学习的）实体嵌入
+  - key/value = 附属于该实体的逐符号学习嵌入
+  - output = 投影注意力池化 → (B, L, proj_dim)，与基础 embed + 辅助特征
+    一起拼接到现有编码器输入中
+
+输出投影层**零初始化**，因此在构建时该头的贡献恰好为 0。这意味着将基线
+checkpoint 加载到启用了检索的模型中，在第 0 次迭代时产生完全一致的前向输出；
+训练过程再从零开始增长符号贡献。
+
+由 PPO 网络 (FullRunPolicyNetworkV2) 拥有。战斗网络 (CombatPolicyValueNetwork)
+通过 `symbolic_head=` 参数接收同一实例的引用，使两个大脑共享一个学习头。
+优化器归属在 train_hybrid.py 构建时分离 —— 只有 PPO 优化器更新这些参数；
+战斗的反向传播仍通过 autograd 在这些参数上累积梯度。
+"""
 
 from __future__ import annotations
 

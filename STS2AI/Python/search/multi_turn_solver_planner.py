@@ -1,4 +1,46 @@
-"""多回合求解器：跨回合的前瞻规划。"""
+"""MultiTurnSolverPlanner：基于 CombatTurnSolver 构建的跨回合前瞻。
+
+================================================================================
+仅限研究（2026-04-07 冻结，请勿用于生产）
+================================================================================
+
+本模块**仅限研究**。生产冠军使用单回合求解器
+(`turn_solver_planner.py::TurnSolverPlanner`)，而非此多回合版本。
+
+仅限研究的原因：
+  - n=200 队列：P4（本文件）= 2.5% act1_clear；P3（单回合）= 4.0%
+  - 运行时间：P4 = 20.92 s/game；P3 = 6.29 s/game（慢 3.3 倍）
+  - 按 Boss 分桶：P4 在 ceremonial_beast 上差于 P3（17.4% vs 34.8%）；
+    P4 发现 1 个 P3 错过的 the_kin 胜利 → 未来按 Boss 专家信号，
+    非当前生产杠杆。
+
+评分契约（R6 合规，2026-04-07 冻结）：
+  - 关键不变量：cross_value = cand.line_components_score + gamma * solution2.root_value
+                             = components_only(turn1) + 0.9 * full_value(turn2)
+  - 不要将 leaf1 加到 turn 1 —— leaf1 是"turn 2 开始时价值"的近似值，
+    而 solution2.root_value 已经显式计算了该量。两者相加 = 重复计算。
+
+将本文件从研究推向生产的硬性门槛：
+  1. 跨回合 act1_clear >= P3（当前 2.5% < 4.0%）
+  2. 运行时间 < 2x P3（当前 3.3x）
+  3. 无按 Boss 分桶严格差于 P3（ceremonial_beast 不通过）
+
+================================================================================
+
+单回合求解器找到当前回合的最佳动作序列。本规划器在 Boss 决策点进行 2 回合
+前瞻：
+
+  1. 从当前状态运行单回合求解器。获取前 K 个候选首动作（按
+     per_action_score），而非仅取最佳。
+  2. 对每个前 K 候选，模拟以该动作开头的完整序列。在 end_turn 后模拟敌人
+     回合。
+  3. 从"下一回合开始"状态再次运行单回合求解器，获取其 root_value。
+  4. 候选的跨回合得分：
+        cross_value = cand.line_components_score + gamma * solution2.root_value
+  5. 选择跨回合得分最高的候选并返回其首动作；缓存剩余序列。
+
+这本质上是"回合级深度 2 alpha 剪枝"，使用单回合求解器作为叶节点评估器。
+"""
 
 from __future__ import annotations
 

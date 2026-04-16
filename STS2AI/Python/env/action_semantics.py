@@ -1,4 +1,4 @@
-"""动作语义：合法动作的类型判断和自动推进规则。"""
+"""动作语义辅助函数 —— 全局运行动作的分类、自动推进和重排序。"""
 from __future__ import annotations
 
 from dataclasses import dataclass

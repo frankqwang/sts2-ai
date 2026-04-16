@@ -1,4 +1,4 @@
-"""二进制管道通信：与 C# 无头模拟器的高性能二进制协议。"""
+"""二进制协议命名管道客户端，用于与 STS2 模拟器的紧凑 IPC 通信。"""
 from __future__ import annotations
 
 import ctypes

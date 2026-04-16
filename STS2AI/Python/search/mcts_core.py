@@ -1,4 +1,13 @@
-"""MCTS 核心：蒙特卡洛树搜索的节点、选择、扩展、回溯。"""
+"""STS2 战斗的 MCTS 核心算法。
+
+实现蒙特卡洛树搜索，包含：
+- PUCT 选择（AlphaZero 风格）
+- 神经网络策略先验 + 价值估计
+- 隐藏信息的确定化（抽牌堆顺序）
+- 训练时根节点的 Dirichlet 噪声用于探索
+
+前向模型是可插拔的 —— 接受任何实现 CombatForwardModel 协议的对象。
+"""
 
 from __future__ import annotations
 

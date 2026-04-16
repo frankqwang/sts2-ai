@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Unified PPO + MCTS hybrid training loop.
+"""统一的 PPO + MCTS 混合训练循环。
 
-Trains both brains simultaneously in shared episodes:
-- Non-combat screens → PPO inference + data collection
-- Combat screens → MCTS search + data collection
+在共享 episode 中同时训练两个大脑：
+- 非战斗画面 → PPO 推理 + 数据收集
+- 战斗画面 → MCTS 搜索 + 数据收集
 
-Usage:
-    # Single env (testing):
+用法：
+    # 单环境（测试）：
     python train_hybrid.py --pipe --num-envs 1 --start-port 15527 --max-iterations 5
 
-    # 8 parallel envs (production):
+    # 8 并行环境（生产）：
     python train_hybrid.py --pipe --num-envs 8 --start-port 15527 --max-iterations 500
 
-    # Resume from checkpoints:
+    # 从检查点恢复：
     python train_hybrid.py --pipe --num-envs 8 --resume-ppo ppo_best.pt --resume-combat combat_best.pt
 
-    # Or use the launch script:
-    .\\scripts\\start-mcts-training.ps1  (update to call train_hybrid.py)
+    # 或使用启动脚本：
+    .\\scripts\\start-mcts-training.ps1  (更新为调用 train_hybrid.py)
 """
 
 from __future__ import annotations

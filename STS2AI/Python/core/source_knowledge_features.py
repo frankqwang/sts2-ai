@@ -1,4 +1,31 @@
-"""源码知识特征：从 source_knowledge.sqlite 提取实体符号特征。"""
+"""从 source_knowledge.sqlite 提取符号特征。
+
+读取已签入的 sqlite 数据库（由 tools/python/data/build_source_database.py 构建），
+产出：
+
+  1. 全局符号词表 —— 卡牌/遗物/怪物/药水各表中所有 *_json 列出现的
+     C# 类名 / 标签 / 意图名的并集。按字母排序，保留索引 0=<pad>、1=<unk>。
+
+  2. 逐实体填充的符号 ID 表 —— 对词表中每张卡牌/遗物/怪物/药水，提供其
+     引用的（已排序的）符号索引列表，用 0 填充。
+
+这些表被 SymbolicFeaturesHead (core/symbolic_features_head.py) 消费，用于构建
+cross-attention 通道，为 RL 策略提供对训练中很少见到的稀有实体的零样本先验。
+
+数据库中没有自然语言文本 —— 每行都是 C# 符号名称的结构化 JSON 数组 ——
+因此 multi-hot / symbol-attention 是正确的形式。
+
+设计要点：
+- 纯 python + sqlite3 + numpy，无 torch 依赖。
+- 确定性：构建函数在返回前对所有列表排序。
+- 特殊词表 token（`<pad>`、`<unk>`）获得全零 ID 行和全 False mask。
+- 缺失 ID（实际应为零 —— 已验证 sqlite ↔ vocab 100% 重叠）也获得全零/False
+  行，这样下游注意力会忽略它们。
+- SHA1 漂移检查：构建时计算 sqlite 文件的 SHA1 并与
+  `source_knowledge.manifest.json` 中的值对比。若 manifest 缺少 sha1 字段则回写
+  （首次运行升级）。若 SHA 不同则记录警告 —— 这是"有人重新生成了 DB 但忘记
+  重新训练？"的轻量检测器。
+"""
 
 from __future__ import annotations
 

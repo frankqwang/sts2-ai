@@ -1,4 +1,29 @@
-"""战斗特征工程：状态/动作特征构建 + 房间条件价值聚合。"""
+"""战斗特征工程：将原始游戏状态 dict 转为固定大小 numpy 数组供 CombatPolicyValueNetwork 消费。
+
+从网络定义中分离出来，让网络架构代码（combat_network.py）保持专注和可读。
+
+特征 schema：
+  状态特征：
+    scalars         (18维)  — hp、格挡、能量、回合、牌堆大小、8 种核心能力
+    extra_scalars   (14维)  — v2 扩展能力（无形、壁垒等）
+    room_type_onehot (3维)  — 走廊 / 精英 / Boss
+    hand_ids/aux/mask       — 最多 12 张手牌
+    enemy_ids/aux/mask      — 最多 5 个敌人
+    turn_prefix_ids/aux/mask/scalars — 最近打出的 4 张牌 + 32 维回合摘要
+    deck/pile（可选）        — 完整牌组和抽牌堆/弃牌堆/消耗堆
+
+  动作特征：
+    action_type_ids         — play_card / end_turn / use_potion / ...
+    target_card_ids         — 打出卡牌的词表索引
+    target_enemy_ids        — 目标敌人的词表索引
+    action_family_ids       — 4 族层级（打牌 / 药水 / 结束 / 选择）
+    action_aux (13维)       — 剩余能量、伤害、格挡、抽牌、击杀标记等
+    action_mask             — 合法动作遮罩
+
+  价值组合：
+    compose_room_conditioned_value() — 根据房间类型加权聚合
+    胜率、HP 损失、药水消耗为单一 V(s) ∈ [-1, 1]。
+"""
 
 from __future__ import annotations
 

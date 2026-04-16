@@ -1,4 +1,16 @@
-"""回合数据存储：保存高质量离线 RL 轨迹到磁盘。"""
+"""保存高质量 episode 数据用于离线 RL / 行为克隆。
+
+当 episode 达到阈值层数（默认 >=14，即 Boss 战），完整的
+(state_tensor, action_tensor, action_idx, reward, screen_type)
+轨迹被保存为 .pt 文件。
+
+用法：
+    saver = EpisodeDataSaver(output_dir="STS2AI/Artifacts/offline_data", min_floor=14)
+    # 在 episode 收集期间，每步调用：
+    saver.add_step(state_dict, actions_dict, action_idx, reward, screen_type, log_prob, value)
+    # 在 episode 结束时：
+    saver.finish_episode(floor, outcome, combats_won, stats)
+"""
 
 from __future__ import annotations
 

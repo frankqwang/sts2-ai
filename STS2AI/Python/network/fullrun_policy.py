@@ -1,4 +1,23 @@
-"""全局策略网络：FullRunPolicyNetworkV2 + PPOTrainerV2。"""
+"""全局策略网络：实体嵌入 + 注意力 + 指针式动作评分。
+
+架构：
+  实体嵌入 (卡牌/遗物/药水/怪物/地图节点)
+          ↓
+  集合编码器 (牌组、遗物、药水 — self-attention + 池化)
+          ↓
+  共享主干 (拼接标量 + 集合表示 → MLP → trunk_repr)
+          ↓
+  画面头 (cross-attention: 主干查询画面实体)
+          ↓
+  ├─ 价值头: V(s) = MLP(trunk, screen_ctx)
+  └─ 动作评分器: bilinear(state_repr, action_embed) 对每个合法动作评分
+
+相比 V1（扁平 300 维特征 → MLP）的改进：
+  - 学习实体级别的表示（特定卡牌、遗物、敌人）
+  - 注意力捕捉集合交互（卡牌协同、构建一致性）
+  - 指针式动作评分：同一张卡无论在手牌、奖励还是商店中用相同嵌入
+  - 变长动作遮罩（不需要固定 15 槽位的填充浪费）
+"""
 
 from __future__ import annotations
 

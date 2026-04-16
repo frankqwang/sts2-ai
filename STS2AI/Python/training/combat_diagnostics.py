@@ -1,4 +1,10 @@
-"""战斗诊断日志：手牌/敌人摘要、动作分析、MCTS 可疑原因、中文 trace。"""
+"""战斗诊断和追踪函数 —— 日志、摘要和 MCTS 分析。
+
+从 train_hybrid.py 提取。这些函数纯粹用于诊断：它们产出日志输出、
+中英文摘要和 MCTS 可疑分析，但不影响训练逻辑或动作选择。
+
+由 train_hybrid.py 的 collect_unified_episode() 用于追踪记录。
+"""
 
 from __future__ import annotations
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Training health monitor — detects anomalies in training metrics.
+"""训练健康监控器 —— 检测训练指标中的异常。
 
-Reusable across all training modes (PPO, MCTS, Hybrid).
-Operates on metrics JSONL entries (list of dicts).
+可复用于所有训练模式（PPO、MCTS、Hybrid）。
+基于 metrics JSONL 条目（dict 列表）运行。
 
-Usage:
-    # Offline analysis
+用法：
+    # 离线分析
     python training_health.py artifacts/hybrid_training/hybrid_*/metrics.jsonl
     python training_health.py artifacts/rl_training/ppo_*/metrics.jsonl
 
-    # Programmatic use in training loops
+    # 在训练循环中编程使用
     from training_health import TrainingHealthMonitor
     monitor = TrainingHealthMonitor()
     alerts = monitor.check_all(entries)

@@ -1,4 +1,36 @@
-"""战斗策略-价值网络：CombatPolicyValueNetwork + CombatNNEvaluator。"""
+"""战斗策略-价值网络：CombatPolicyValueNetwork + CombatNNEvaluator。
+
+本文件只包含网络架构和 MCTS 评估包装器。
+特征工程（状态/动作特征化）在 combat_features.py。
+
+网络架构：
+  手牌      -> self-attention -> hand_repr
+  敌人      -> self-attention -> enemy_repr
+  标量特征  -> concat
+  回合前缀  -> encoder
+  -- state_encoder MLP -> state_repr (128维)
+
+  策略路径：
+    state + actions -> 联合 self-attention -> BilinearScorer -> base_logits
+    -> 层次动作 logits（停止/继续 -> 动作族 -> 族内动作）
+    -> 可选 deck_delta、teacher 融合 -> 最终 logits
+
+  价值路径：
+    state_repr -> value_head -> base_value ∈ [-1, 1]
+    state_repr -> continuation_head -> (胜率, HP损失, 药水消耗)
+    -> compose_room_conditioned_value() -> 最终 V(s)
+
+  Gate（全部是可学习标量）：
+    action_aux_gate (0.1)    — 手工动作特征的混入强度
+    turn_prefix_gate (0.0)   — 回合内已打牌序列
+    main_state/action_context_gate (0.0) — 联合 state-action 注意力
+    stop_continue_gate (0.1) — 结束回合 vs 继续的决策
+    action_family_gate (0.1) — play/potion/selection 族偏好
+    resource_gate (0.1)      — 药水 vs 非药水资源偏好
+    teacher_action_context_gate (0.0) — teacher 路径注意力（可冻结）
+    deck_delta_gate (0.0)    — 牌组条件动作评分
+    adapter_alpha/beta (0.0) — 残差适配器（微调用）
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,16 @@
-"""实时可视化演示：连接游戏客户端，展示 AI 决策过程。"""
+"""AI 演示播放器，带实时决策可视化叠加层。
+
+支持两种运行模式：
+1. 前端 UI 模式：通过 STS2MCP HTTP singleplayer/full-run 端点。
+2. 旧版模拟器模式：通过命名管道/full-run-sim-server。
+
+推荐录制方式：
+    Godot.exe --path . -- --mcp-port 15600 --mcp-decision-overlay-file STS2AI/Artifacts/demo_overlay/live_overlay.json
+
+    python STS2AI/Python/demo_play.py --checkpoint STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt \\
+                                      --transport http --port 15600 \\
+                                      --decision-overlay-file STS2AI/Artifacts/demo_overlay/live_overlay.json
+"""
 from __future__ import annotations
 
 

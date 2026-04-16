@@ -1,4 +1,42 @@
-"""全局运行代理：组装 PPO + Combat 网络的推理 agent。"""
+"""共享的全局运行代理封装。
+
+目的：将原先分散在三个地方（evaluate_ai.py / train_hybrid rollout /
+build_act1_combat_teacher_v2_dataset.py）的动作选择逻辑合并为一个类，
+使下游工具以完全相同的方式进行游戏。具体来说：
+
+  - auto_progress（UI 提示：确认/跳过/领取）   ← 规则
+  - RepeatLoopTracker（逃离 argmax 死循环）    ← 规则
+  - _select_action_nn（战斗/非战斗 NN + rerank）← NN
+
+在有此封装之前，实时数据构建器
+(search/build_act1_combat_teacher_v2_dataset.py) 只重新实现了精简的 NN argmax
+路径，导致大多数种子在第 2-6 层的非战斗界面卡住。evaluate_ai 使用了更完整
+的流水线，可以顺利打到 Boss。通过 `FullRunAgent` 共享意味着只需在一个地方
+修改行为。
+
+用法：
+    from core.full_run_agent import FullRunAgent, AgentConfig, load_agent_config
+
+    cfg = load_agent_config("STS2AI/Python/configs/inference_config.toml")
+    agent = FullRunAgent(
+        ppo_net=ppo_net,
+        combat_net=combat_net,
+        vocab=vocab,
+        device=device,
+        cfg=cfg,
+    )
+
+    state = client.reset(...)
+    while not state.get("terminal"):
+        legal = [a for a in state.get("legal_actions", []) if a.get("is_enabled") is not False]
+        pick = agent.select_action(state, legal)
+        next_state = client.act(pick["action"])
+        agent.after_step(before_state=state, before_legal=legal, action=pick["action"], next_state=next_state)
+        state = next_state
+
+本文件刻意不重新实现 auto_progress / NN / rerank 逻辑。它从 evaluate_ai
+导入，确保只有一份副本。
+"""
 
 from __future__ import annotations
 

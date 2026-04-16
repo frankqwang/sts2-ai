@@ -1,4 +1,20 @@
-"""奖励塑形：PBRS 势函数 + 里程碑奖励 + 战斗局部奖励。"""
+"""奖励塑形 v5 —— 问题向量 + 半马尔可夫 + 屏幕感知。
+
+架构：
+  1. problem_vector：9 维牌组能力评估，按幕加权
+  2. survival_margin：基于阈值的 HP 效用（非线性）
+  3. economy_score：购买力阈值（非原始金币数）
+  4. milestone_reward：层/幕/精英/Boss 通关奖励
+  5. fight_summary：超额 HP 损失惩罚（非原始 HP 损失）
+  6. combat PBRS：与 v4 相同
+
+相对 v4 的关键变更：
+  - 移除：原始金币奖励、原始药水奖励、deck_size<=12 奖励
+  - 替换：线性 HP → 阈值 survival_margin
+  - 替换：单一 deck_score → 带幕特定权重的 problem_vector
+  - 新增：里程碑事件（层推进、幕通关、精英通关）
+  - 新增：带超额 HP 损失模型的 fight_summary
+"""
 
 from __future__ import annotations
 

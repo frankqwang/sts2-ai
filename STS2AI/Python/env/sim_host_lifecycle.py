@@ -1,4 +1,4 @@
-"""模拟器生命周期管理：多进程环境下的进程池和端口分配。"""
+"""无头模拟器宿主进程的启动和销毁生命周期管理器。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -1,4 +1,26 @@
-"""GPU 推理服务器：多 worker 共享的批量推理守护线程。"""
+"""多进程 NN 评估的批量推理服务器。
+
+中心化 GPU 推理服务器，将多个 worker 进程的请求批量合并，对每个 batch
+执行一次前向传播，而非每个请求一次。
+
+架构：
+    主进程 (GPU)                Worker 进程 (CPU + pipe IPC)
+    ┌─────────────────┐         ┌──────────────────────────┐
+    │ InferenceServer  │◄──req──│ InferenceClient          │
+    │  combat_net      │──res──►│   .combat_inference()    │
+    │  ppo_net         │        │   .ppo_inference()       │
+    │  batch+forward   │        │   (阻塞直到收到结果)      │
+    └─────────────────┘         └──────────────────────────┘
+
+用法：
+    # 主进程
+    server = InferenceServer(ppo_net, combat_net, device, num_workers=8)
+    server.start()
+
+    # Worker 进程
+    client = InferenceClient(worker_id, server.request_queue, server.get_result_queue(worker_id))
+    logits, value = client.combat_inference(state_features, action_features)
+"""
 from __future__ import annotations
 
 import logging

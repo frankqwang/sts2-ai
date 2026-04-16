@@ -1,4 +1,21 @@
-"""求解器规划器：集成回合求解和 NN 价值估计。"""
+"""TurnSolverPlanner：驱动 `CombatTurnSolver` 的适配器，
+从 `evaluate_ai.py` 的 `_select_action_nn` 钩子调用。
+
+在 `evaluate_ai.py` 中使用：
+    from search.turn_solver_planner import build_turn_solver_planner
+    planner = build_turn_solver_planner(combat_net=combat_net,
+                                        vocab=vocab, device=device,
+                                        mode="boss",
+                                        max_player_actions=12)
+    # 然后将 turn_planner=planner 传给 evaluate_batch / run_single_game。
+
+规划器有一个 `select_action(pipe_getter, state, legal)` 方法，匹配现有的
+`combat_turn_planner.TurnPlanner` 接口，以及一个 `_mode` 属性
+（`always` / `boss` / `elite` / `boss_elite`）。
+
+缓存：一旦求解器找到完整回合序列，缓存的动作会在同一回合的后续决策中返回
+（直到缓存耗尽、下一个状态哈希发生偏离或到达 end_turn）。
+"""
 
 from __future__ import annotations
 

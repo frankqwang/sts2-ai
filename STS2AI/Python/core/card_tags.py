@@ -1,4 +1,24 @@
-"""卡牌功能标签：从源码提取的 32 维功能标签（攻击/防御/抽牌等）。"""
+"""从 C# 源码提取卡牌标签 —— 每张卡牌的语义分类。
+
+扫描每张卡的 .cs 文件，基于以下内容提取功能标签：
+- DynamicVar 类型（DamageVar、BlockVar、PowerVar<T>、CardsVar、EnergyVar 等）
+- CardKeyword（Exhaust、Retain、Innate、Ethereal 等）
+- CardTag（Strike、Defend、Shiv 等）
+- TargetType（Self、AnyEnemy、AllEnemies 等）
+- OnPlay 方法体（PowerCmd.Apply<T>、CardPileCmd.Draw、DamageCmd.Attack 等）
+
+产出 card_tags.json，映射 slug → 标签列表，以及 TAG_VOCAB
+列出所有可能的标签及其索引。
+
+用法：
+    # 从源码生成 card_tags.json
+    python card_tags.py --repo-root /path/to/sts2
+
+    # 在代码中使用
+    from core.card_tags import load_card_tags, TAG_VOCAB
+    tags = load_card_tags()  # dict[str, list[str]]
+    tag_indices = tags["offering"]  # 例如 ["draw", "energy_gen", "exhaust", "hp_loss", "self_target"]
+"""
 
 from __future__ import annotations
 

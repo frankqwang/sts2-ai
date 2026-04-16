@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Evaluate STS2 AI agent on fixed-seed games for reproducible benchmarking.
+"""在固定种子游戏上评估 STS2 AI 代理，用于可复现的基准测试。
 
-Loads a hybrid checkpoint (PPO + Combat NN) and runs N games sequentially
-against a single Godot instance, collecting per-game statistics.  Optionally
-compares against random and/or heuristic baselines.
+加载混合检查点（PPO + 战斗 NN），针对单个 Godot 实例顺序运行 N 局游戏，
+收集每局统计数据。可选地与随机和/或启发式基线进行对比。
 
-Usage:
-    # Evaluate latest checkpoint
+用法：
+    # 评估最新检查点
     python evaluate_ai.py --checkpoint path/to/hybrid_XXXXX.pt --port 15527 --num-games 50
 
-    # Compare with baselines
-    python evaluate_ai.py --checkpoint path.pt --port 15527 --num-games 50 \
+    # 与基线对比
+    python evaluate_ai.py --checkpoint path.pt --port 15527 --num-games 50 \\
         --baseline random --baseline heuristic
 
-    # Custom timeout and character
-    python evaluate_ai.py --checkpoint path.pt --port 15527 --num-games 20 \
+    # 自定义超时和角色
+    python evaluate_ai.py --checkpoint path.pt --port 15527 --num-games 20 \\
         --game-timeout 180 --character SILENT
 """
 

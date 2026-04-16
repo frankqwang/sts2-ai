@@ -1,4 +1,11 @@
-"""向量化数据收集：多环境并行 episode 收集。"""
+"""并行环境步进的向量化 episode 收集器。
+
+所有 N 个环境同步步进：并行管道 I/O（ThreadPoolExecutor）
++ 批量 NN 推理（单次 GPU 前向传播）。
+
+当使用 --vectorized 时替代逐 worker 独立的 episode 收集，
+实现约 3-4 倍的吞吐量提升。
+"""
 
 from __future__ import annotations
 

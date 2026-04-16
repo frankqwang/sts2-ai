@@ -1,4 +1,18 @@
-"""遗物功能标签：遗物效果分类标签。"""
+"""从 C# 源码提取遗物标签 —— 每个遗物的语义分类。
+
+扫描每个遗物的 .cs 文件，基于以下内容提取功能标签：
+- DynamicVar 类型（BlockVar、CardsVar、EnergyVar、HealVar、GoldVar、PowerVar<T>）
+- 触发方法（BeforeCombatStart、ModifyHandDraw、AfterPlayerTurnStart 等）
+- PowerCmd.Apply<T> 调用
+- RelicRarity
+
+用法：
+    python relic_tags.py --repo-root /path/to/sts2
+
+    from core.relic_tags import load_relic_tags, RELIC_FUNCTIONAL_TAGS
+    tags = load_relic_tags()
+    tags["bag_of_preparation"]  # ["draw", "combat_start", "common"]
+"""
 
 from __future__ import annotations
 
