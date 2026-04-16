@@ -28,7 +28,8 @@ namespace HeadlessSim;
 internal enum HostProtocol
 {
 	Json,
-	Binary
+	Binary,
+	Proto
 }
 
 internal enum BinaryOpcode : byte
@@ -240,7 +241,12 @@ internal static class BinaryProtocol
 
 	public static string PipeName(int port, HostProtocol protocol)
 	{
-		return protocol == HostProtocol.Binary ? $"sts2_mcts_bin_{port}" : $"sts2_mcts_{port}";
+		return protocol switch
+		{
+			HostProtocol.Binary => $"sts2_mcts_bin_{port}",
+			HostProtocol.Proto => $"sts2_mcts_proto_{port}",
+			_ => $"sts2_mcts_{port}"
+		};
 	}
 
 	public static byte[] BuildHandshakeResponse()

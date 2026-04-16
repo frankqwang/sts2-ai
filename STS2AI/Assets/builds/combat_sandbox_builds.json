@@ -1,0 +1,184 @@
+[
+  {
+    "name": "starter_basic",
+    "notes": "Pure starter deck, no upgrades",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}],
+      "potions": []
+    }
+  },
+  {
+    "name": "early_strength",
+    "notes": "Early game with Inflame + Pommel Strike",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH", "upgraded": true},
+        {"id": "INFLAME"},
+        {"id": "POMMEL_STRIKE"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}],
+      "potions": [{"id": "STRENGTH_POTION"}]
+    }
+  },
+  {
+    "name": "block_turtle",
+    "notes": "Defensive build with Shrug It Off + Flame Barrier",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH"},
+        {"id": "SHRUG_IT_OFF"}, {"id": "SHRUG_IT_OFF"},
+        {"id": "FLAME_BARRIER"},
+        {"id": "TRUE_GRIT"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}, {"id": "ANCHOR"}],
+      "potions": []
+    }
+  },
+  {
+    "name": "heavy_hitter",
+    "notes": "Damage focused with Carnage + Bludgeon",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH", "upgraded": true},
+        {"id": "ANGER"},
+        {"id": "BLUDGEON"},
+        {"id": "POMMEL_STRIKE"},
+        {"id": "INFLAME"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}, {"id": "VAJRA"}],
+      "potions": [{"id": "FIRE_POTION"}]
+    }
+  },
+  {
+    "name": "draw_engine",
+    "notes": "Draw-heavy with Battle Trance + Offering",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH"},
+        {"id": "BATTLE_TRANCE"},
+        {"id": "OFFERING"},
+        {"id": "POMMEL_STRIKE"}, {"id": "POMMEL_STRIKE"},
+        {"id": "SHRUG_IT_OFF"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}, {"id": "BAG_OF_MARBLES"}],
+      "potions": []
+    }
+  },
+  {
+    "name": "scaling_demon",
+    "notes": "Scaling with Demon Form + survival tools",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH"},
+        {"id": "DEMON_FORM"},
+        {"id": "FLAME_BARRIER"},
+        {"id": "SHRUG_IT_OFF"},
+        {"id": "TRUE_GRIT"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}],
+      "potions": [{"id": "BLOCK_POTION"}]
+    }
+  },
+  {
+    "name": "exhaust_feel_no_pain",
+    "notes": "Exhaust synergy build",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH"},
+        {"id": "FEEL_NO_PAIN"},
+        {"id": "TRUE_GRIT", "upgraded": true},
+        {"id": "SHRUG_IT_OFF"},
+        {"id": "IRON_WAVE"},
+        {"id": "ARMAMENTS"},
+        {"id": "SECOND_WIND"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}, {"id": "BRONZE_SCALES"}],
+      "potions": []
+    }
+  },
+  {
+    "name": "vulnerable_exploit",
+    "notes": "Vulnerable-focused with Uppercut + Bash",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH", "upgraded": true},
+        {"id": "UPPERCUT"},
+        {"id": "POMMEL_STRIKE"},
+        {"id": "HEADBUTT"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}, {"id": "BAG_OF_MARBLES"}],
+      "potions": [{"id": "WEAK_POTION"}]
+    }
+  },
+  {
+    "name": "lean_aggro",
+    "notes": "Thin deck, fast cycling",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH", "upgraded": true},
+        {"id": "INFLAME"},
+        {"id": "POMMEL_STRIKE", "upgraded": true},
+        {"id": "SHRUG_IT_OFF", "upgraded": true}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}, {"id": "VAJRA"}, {"id": "LANTERN"}],
+      "potions": [{"id": "FIRE_POTION"}, {"id": "STRENGTH_POTION"}]
+    }
+  },
+  {
+    "name": "mid_balanced",
+    "notes": "Balanced mid-game build",
+    "source": {"character": "IRONCLAD", "ascension": 0},
+    "build": {
+      "deck": [
+        {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"}, {"id": "STRIKE_IRONCLAD"},
+        {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"}, {"id": "DEFEND_IRONCLAD"},
+        {"id": "BASH", "upgraded": true},
+        {"id": "INFLAME"},
+        {"id": "ANGER"},
+        {"id": "SHRUG_IT_OFF"},
+        {"id": "POMMEL_STRIKE"},
+        {"id": "BATTLE_TRANCE"},
+        {"id": "FLAME_BARRIER"}
+      ],
+      "relics": [{"id": "BURNING_BLOOD"}, {"id": "ORICHALCUM"}],
+      "potions": [{"id": "ENERGY_POTION"}]
+    }
+  }
+]

@@ -231,7 +231,7 @@ internal static class Program
 		{
 			using (pipe)
 			{
-				if (options.Protocol == HostProtocol.Binary)
+				if (options.Protocol is HostProtocol.Binary or HostProtocol.Proto)
 				{
 					await WritePipeMessageAsync(
 						pipe,
@@ -261,6 +261,10 @@ internal static class Program
 				{
 					await WritePipeMessageAsync(pipe, BinaryProtocol.BuildHandshakeResponse(), cancellationToken);
 				}
+				else if (options.Protocol == HostProtocol.Proto)
+				{
+					await WritePipeMessageAsync(pipe, ProtoStateBuilder.BuildHandshakeResponse(), cancellationToken);
+				}
 				else
 				{
 					await WritePipeMessageAsync(pipe, JsonSerializer.Serialize(new { ok = true }, JsonOptions), cancellationToken);
@@ -276,14 +280,21 @@ internal static class Program
 						break;
 					}
 
-					if (options.Protocol == HostProtocol.Binary)
+					if (options.Protocol is HostProtocol.Binary or HostProtocol.Proto)
 					{
 						byte[] responseBytes;
 						try
 						{
 							using CancellationTokenSource requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 							requestCts.CancelAfter(options.RequestTimeout);
-							responseBytes = await ProcessBinaryRequestAsync(service, binarySession!, requestBytes).WaitAsync(requestCts.Token);
+							if (options.Protocol == HostProtocol.Proto)
+							{
+								responseBytes = await ProcessProtoRequestAsync(service, requestBytes).WaitAsync(requestCts.Token);
+							}
+							else
+							{
+								responseBytes = await ProcessBinaryRequestAsync(service, binarySession!, requestBytes).WaitAsync(requestCts.Token);
+							}
 						}
 						catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 						{
@@ -295,7 +306,7 @@ internal static class Program
 						}
 						catch (Exception ex)
 						{
-							Console.Error.WriteLine($"HeadlessSim: binary request error opcode={SafeParseOpcode(requestBytes)}: {ex}");
+							Console.Error.WriteLine($"HeadlessSim: {options.Protocol} request error opcode={SafeParseOpcode(requestBytes)}: {ex}");
 							responseBytes = BinaryProtocol.BuildErrorResponse(
 								SafeParseOpcode(requestBytes),
 								GetBinaryErrorStatus(ex),
@@ -467,6 +478,241 @@ internal static class Program
 			FullRunSimulationDiagnostics.Increment($"request.{opcode.ToString().ToLowerInvariant()}.count");
 			FullRunSimulationDiagnostics.Increment("request.binary.count");
 		}
+	}
+
+	// ================================================================
+	// Proto protocol request router — reuses Binary request parsing,
+	// returns proto-serialized state payloads.
+	// ================================================================
+
+	private static async Task<byte[]> ProcessProtoRequestAsync(
+		FullRunTrainingEnvService service,
+		byte[] requestBytes)
+	{
+		long requestStart = Stopwatch.GetTimestamp();
+		BinaryOpcode opcode = BinaryProtocol.ParseOpcode(requestBytes);
+		RequestStateCache cache = new RequestStateCache();
+		try
+		{
+			return opcode switch
+			{
+				BinaryOpcode.Reset => await ProcessProtoResetAsync(service, requestBytes, cache),
+				BinaryOpcode.State => ProcessProtoState(service, cache),
+				BinaryOpcode.Step => await ProcessProtoStepAsync(service, requestBytes, cache),
+				BinaryOpcode.BatchStep => await ProcessProtoBatchStepAsync(service, requestBytes, cache),
+				// Non-state responses: identical format, delegate to Binary/Proto builders
+				BinaryOpcode.SaveState => ProtoStateBuilder.BuildSaveStateResponse(
+					service.SaveState(), service.StateCacheCount),
+				BinaryOpcode.ExportState => ProcessProtoExportState(service, requestBytes),
+				BinaryOpcode.LoadState => await ProcessProtoLoadStateAsync(service, requestBytes, cache),
+				BinaryOpcode.ImportState => await ProcessProtoImportStateAsync(service, requestBytes, cache),
+				BinaryOpcode.DeleteState => ProcessProtoDeleteState(service, requestBytes),
+				BinaryOpcode.PerfStats => ProtoStateBuilder.BuildPerfStatsResponse(FullRunSimulationDiagnostics.Snapshot()),
+				BinaryOpcode.ResetPerfStats => ProcessProtoResetPerfStats(),
+				BinaryOpcode.StepLocalPolicy => await ProcessProtoStepLocalPolicyAsync(service, cache),
+				BinaryOpcode.LoadOrtModel => ProcessBinaryLoadOrtModel(requestBytes),
+				BinaryOpcode.RunCombatLocal => await ProcessProtoRunCombatLocalAsync(service, requestBytes, cache),
+				BinaryOpcode.SkipCombat => await ProcessProtoSkipCombatAsync(service, cache),
+				BinaryOpcode.SearchCombatMcts => await ProcessBinarySearchCombatMctsAsync(service, requestBytes, cache),
+				_ => ProtoStateBuilder.BuildErrorResponse(opcode, BinaryStatus.ProtocolError, "unknown_method", $"Unknown opcode: {(byte)opcode}")
+			};
+		}
+		finally
+		{
+			double elapsedMs = (Stopwatch.GetTimestamp() - requestStart) * 1000.0 / Stopwatch.Frequency;
+			FullRunSimulationDiagnostics.RecordTiming($"request.{opcode.ToString().ToLowerInvariant()}.total_ms", elapsedMs);
+			FullRunSimulationDiagnostics.RecordTiming("request.proto_total_ms", elapsedMs);
+			FullRunSimulationDiagnostics.Increment($"request.{opcode.ToString().ToLowerInvariant()}.count");
+			FullRunSimulationDiagnostics.Increment("request.proto.count");
+		}
+	}
+
+	private static async Task<byte[]> ProcessProtoResetAsync(
+		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+	{
+		FullRunSimulationResetRequest request = BinaryProtocol.ParseResetRequest(requestBytes);
+		FullRunSimulationStateSnapshot snapshot;
+		using (FullRunSimulationDiagnostics.Measure("request.reset.runtime_ms"))
+		{
+			snapshot = await service.ResetAsync(request);
+		}
+		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
+		{
+			return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.Reset, snapshot);
+		}
+	}
+
+	private static byte[] ProcessProtoState(FullRunTrainingEnvService service, RequestStateCache cache)
+	{
+		FullRunSimulationStateSnapshot snapshot;
+		using (FullRunSimulationDiagnostics.Measure("request.get_state.runtime_ms"))
+		{
+			snapshot = GetSnapshot(service, cache);
+		}
+		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
+		{
+			return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.State, snapshot);
+		}
+	}
+
+	private static async Task<byte[]> ProcessProtoStepAsync(
+		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+	{
+		FullRunSimulationActionRequest action = BinaryProtocol.ParseActionRequest(requestBytes);
+		FullRunSimulationStepResult result;
+		using (FullRunSimulationDiagnostics.Measure("request.step.runtime_ms"))
+		{
+			result = await service.StepAsync(action);
+		}
+		FullRunSimulationStateSnapshot snapshot = result.State ?? GetSnapshot(service, cache);
+		// Auto-advance through non-decision states (same logic as binary)
+		int autoAdvanceCount = 0;
+		const int maxAutoAdvance = 50;
+		while (!IsDecisionState(snapshot) && autoAdvanceCount < maxAutoAdvance)
+		{
+			autoAdvanceCount++;
+			FullRunSimulationDiagnostics.Increment("step.auto_advance");
+			if (snapshot.LegalActions.Count == 0)
+			{
+				var waitResult = await service.StepAsync(new FullRunSimulationActionRequest { Action = "wait" });
+				snapshot = waitResult.State ?? GetSnapshot(service, cache);
+			}
+			else
+			{
+				var la = snapshot.LegalActions[0];
+				var autoAction = new FullRunSimulationActionRequest
+				{
+					Action = la.Action ?? "",
+					Index = la.Index,
+					Col = la.Col,
+					Row = la.Row,
+					Slot = la.Slot,
+					TargetId = la.TargetId,
+					Target = la.Target,
+					CardIndex = la.CardIndex,
+					Value = la.Label,
+				};
+				var autoResult = await service.StepAsync(autoAction);
+				snapshot = autoResult.State ?? GetSnapshot(service, cache);
+			}
+		}
+		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
+		{
+			return ProtoStateBuilder.BuildStepResponse(result, snapshot);
+		}
+	}
+
+	private static async Task<byte[]> ProcessProtoBatchStepAsync(
+		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+	{
+		List<FullRunSimulationActionRequest> actions = BinaryProtocol.ParseBatchActionRequest(requestBytes);
+		FullRunSimulationBatchStepResult result;
+		using (FullRunSimulationDiagnostics.Measure("request.batch_step.runtime_ms"))
+		{
+			result = await service.BatchStepAsync(actions);
+		}
+		FullRunSimulationStateSnapshot snapshot = result.State ?? GetSnapshot(service, cache);
+		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
+		{
+			return ProtoStateBuilder.BuildBatchStepResponse(result, snapshot);
+		}
+	}
+
+	private static byte[] ProcessProtoExportState(FullRunTrainingEnvService service, byte[] requestBytes)
+	{
+		// TODO: ExportState not yet implemented on FullRunTrainingEnvService
+		throw new NotImplementedException("ExportState not yet available in proto mode");
+	}
+
+	private static async Task<byte[]> ProcessProtoLoadStateAsync(
+		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+	{
+		string stateId = BinaryProtocol.ParseStateIdRequest(BinaryOpcode.LoadState, requestBytes);
+		using (FullRunSimulationDiagnostics.Measure("request.load_state.runtime_ms"))
+		{
+			service.LoadState(stateId);
+		}
+		FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
+		return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.LoadState, snapshot);
+	}
+
+	private static async Task<byte[]> ProcessProtoImportStateAsync(
+		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+	{
+		// TODO: ImportState not yet implemented on FullRunTrainingEnvService
+		throw new NotImplementedException("ImportState not yet available in proto mode");
+	}
+
+	private static byte[] ProcessProtoDeleteState(FullRunTrainingEnvService service, byte[] requestBytes)
+	{
+		bool clearAll = BinaryProtocol.ParseDeleteClearAll(requestBytes, out string? stateId);
+		bool deleted;
+		if (clearAll) { service.ClearStateCache(); deleted = true; }
+		else if (stateId != null) { deleted = service.DeleteState(stateId); }
+		else { deleted = false; }
+		return ProtoStateBuilder.BuildDeleteStateResponse(deleted, service.StateCacheCount);
+	}
+
+	private static byte[] ProcessProtoResetPerfStats()
+	{
+		FullRunSimulationDiagnostics.Reset();
+		return ProtoStateBuilder.BuildResetPerfStatsResponse();
+	}
+
+	private static async Task<byte[]> ProcessProtoSkipCombatAsync(
+		FullRunTrainingEnvService service, RequestStateCache cache)
+	{
+		FullRunSimulationStepResult skipResult = await service.StepAsync(
+			new FullRunSimulationActionRequest { Action = "skip_combat" });
+		FullRunSimulationStateSnapshot snapshot = skipResult.State ?? GetSnapshot(service, cache);
+		return ProtoStateBuilder.BuildStepResponse(skipResult, snapshot);
+	}
+
+	private static async Task<byte[]> ProcessProtoStepLocalPolicyAsync(
+		FullRunTrainingEnvService service, RequestStateCache cache)
+	{
+		// 委托给 binary 版本的 StepLocalPolicy 逻辑 — ORT 推理和 state 序列化无关
+		// 但需要用 proto 编码 state 响应，所以不能直接转发
+		if (_ortPolicy == null)
+		{
+			return ProtoStateBuilder.BuildErrorResponse(
+				BinaryOpcode.StepLocalPolicy, BinaryStatus.SimulatorError,
+				"no_ort_model", "No ORT model loaded. Call load_ort_model first.");
+		}
+		FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
+		// 使用 ORT 策略选择 action，然后 step
+		int actionIndex = _ortPolicy.SelectAction(snapshot, null, _ortRng).Item1;
+		if (actionIndex < 0 || actionIndex >= snapshot.LegalActions.Count)
+		{
+			return ProtoStateBuilder.BuildErrorResponse(
+				BinaryOpcode.StepLocalPolicy, BinaryStatus.SimulatorError,
+				"invalid_action_index", $"ORT policy returned invalid action index: {actionIndex}");
+		}
+		var la = snapshot.LegalActions[actionIndex];
+		var action = new FullRunSimulationActionRequest
+		{
+			Action = la.Action ?? "",
+			Index = la.Index,
+			Col = la.Col,
+			Row = la.Row,
+			Slot = la.Slot,
+			TargetId = la.TargetId,
+			Target = la.Target,
+			CardIndex = la.CardIndex,
+			Value = la.Label,
+		};
+		FullRunSimulationStepResult result = await service.StepAsync(action);
+		FullRunSimulationStateSnapshot nextSnapshot = result.State ?? GetSnapshot(service, cache);
+		return ProtoStateBuilder.BuildStepResponse(result, nextSnapshot);
+	}
+
+	private static async Task<byte[]> ProcessProtoRunCombatLocalAsync(
+		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+	{
+		// RunCombatLocal 的响应格式比较特殊（timing 等），直接复用 binary 实现
+		// 因为 state payload 只在最终结果中，用 BinarySessionState 临时包装
+		BinarySessionState tempSession = new BinarySessionState();
+		return await ProcessBinaryRunCombatLocalAsync(service, tempSession, requestBytes, cache);
 	}
 
 	private static async Task<byte[]> ProcessBinaryResetAsync(
@@ -1897,7 +2143,8 @@ internal static class Program
 						{
 							"json" => HostProtocol.Json,
 							"bin" or "binary" => HostProtocol.Binary,
-							_ => throw new InvalidOperationException($"Unknown protocol '{values[i + 1]}'. Expected 'json' or 'bin'.")
+							"proto" or "protobuf" => HostProtocol.Proto,
+							_ => throw new InvalidOperationException($"Unknown protocol '{values[i + 1]}'. Expected 'json', 'bin', or 'proto'.")
 						};
 						i++;
 						break;

@@ -135,9 +135,13 @@
     <Compile Include="..\Runtime\HeadlessSim\CombatFeatureEncoder.cs" Link="Host\CombatFeatureEncoder.cs" />
     <Compile Include="..\Runtime\HeadlessSim\CombatMcts.cs" Link="Host\CombatMcts.cs" />
     <Compile Include="..\Runtime\HeadlessSim\OrtCombatEvaluator.cs" Link="Host\OrtCombatEvaluator.cs" />
+    <Protobuf Include="..\..\..\proto\game_state.proto" GrpcServices="None" />
+    <Compile Include="..\Runtime\HeadlessSim\ProtoStateBuilder.cs" Link="Host\ProtoStateBuilder.cs" />
     <Compile Include="..\Runtime\HeadlessSim\Program.cs" Link="Host\Program.cs" />
     <Compile Include="..\Runtime\GodotSharpStub\src\**\*.cs" Link="GodotSharpStub\%(RecursiveDir)%(Filename)%(Extension)" />
 
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+    <PackageReference Include="Grpc.Tools" Version="2.68.1" PrivateAssets="All" />
     <PackageReference Include="JetBrains.Annotations" Version="2023.3.0" />
     <PackageReference Include="MonoMod.Backports" Version="1.1.2" />
     <PackageReference Include="Sentry" Version="5.0.0" />

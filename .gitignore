@@ -150,8 +150,9 @@ Tests/**/obj/
 
 # Local tooling / trainer outputs
 .vscode/
-.claude/worktrees/
-.claude/settings.local.json
+.claude/
+STS2AI/Python/checkpoints/
+STS2AI/Python/runs/
 
 # Ad-hoc workspace for diagnostics / temporary state dumps
 # (kept git-clean so we can `rm -rf artifacts/_tmp` without fear)

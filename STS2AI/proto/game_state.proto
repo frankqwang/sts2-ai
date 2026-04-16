@@ -1,0 +1,316 @@
+syntax = "proto3";
+
+package sts2ai;
+
+option csharp_namespace = "STS2AI.Bridge";
+
+// ============================================================
+// STS2 Game Bridge Protocol
+//
+// C# 游戏端序列化 → Python 训练端反序列化
+// 覆盖战斗和非战斗所有状态。
+// ============================================================
+
+// --- 顶层 GameState ---
+
+message GameState {
+  string state_type = 1;          // "monster"/"elite"/"boss"/"map"/"shop"/"event"/"rest_site"/"card_reward"/"game_over" ...
+  bool terminal = 2;
+  string run_outcome = 3;         // "victory" / "defeat" / ""
+  RunInfo run = 4;
+  PlayerState player = 5;
+  BattleState battle = 6;         // 仅战斗时有
+  MapState map = 7;               // 仅地图时有
+  ShopState shop = 8;
+  EventState event = 9;
+  RestSiteState rest_site = 10;
+  CardRewardState card_reward = 11;
+  CombatRewardsState combat_rewards = 12;
+  CardSelectState card_select = 13;
+  RelicSelectState relic_select = 14;
+  TreasureState treasure = 15;
+  repeated LegalAction legal_actions = 20;
+  string encounter_id = 21;
+}
+
+message RunInfo {
+  int32 act = 1;
+  int32 floor = 2;
+}
+
+// --- Player ---
+
+message PlayerState {
+  int32 hp = 1;
+  int32 max_hp = 2;
+  int32 block = 3;
+  int32 gold = 4;
+  int32 energy = 5;
+  int32 max_energy = 6;
+  int32 draw_pile_count = 7;
+  int32 discard_pile_count = 8;
+  int32 exhaust_pile_count = 9;
+  int32 play_pile_count = 10;
+  int32 open_potion_slots = 11;
+  repeated CardInfo deck = 20;
+  repeated RelicInfo relics = 21;
+  repeated PotionInfo potions = 22;
+  int32 max_potions = 23;
+  int32 stars = 24;               // 战斗时玩家星数
+  repeated Power powers = 30;     // 仅战斗时填充
+}
+
+message CardInfo {
+  int32 index = 1;
+  string id = 2;
+  string name = 3;
+  int32 cost = 4;
+  string card_type = 5;           // "ATTACK"/"SKILL"/"POWER"/"STATUS"/"CURSE"/"QUEST"
+  string rarity = 6;              // "basic"/"common"/"uncommon"/"rare"/"ancient"
+  bool is_upgraded = 7;
+  int32 upgrades = 8;
+}
+
+message RelicInfo {
+  int32 index = 1;
+  string id = 2;
+  string name = 3;
+}
+
+message PotionInfo {
+  int32 index = 1;
+  string id = 2;
+  string name = 3;
+}
+
+message Power {
+  string id = 1;
+  int32 amount = 2;
+}
+
+// --- Battle ---
+
+message BattleState {
+  int32 round_number = 1;
+  string turn_side = 2;            // "player" / "enemy"
+  bool is_play_phase = 3;
+  bool can_end_turn = 4;
+  int32 energy = 5;
+  int32 max_energy = 6;
+  PlayerState player = 7;          // 含 powers
+  repeated HandCard hand = 10;
+  repeated Enemy enemies = 11;
+  repeated string draw_pile_cards = 20;
+  repeated string discard_pile_cards = 21;
+  repeated string exhaust_pile_cards = 22;
+}
+
+message HandCard {
+  int32 index = 1;
+  string id = 2;
+  string name = 3;
+  int32 cost = 4;
+  string card_type = 5;
+  string rarity = 6;
+  string target_type = 7;         // "None"/"Self"/"AnyEnemy"/"AllEnemies"/...
+  bool is_upgraded = 8;
+  bool can_play = 9;
+  bool requires_target = 10;
+  repeated int32 valid_target_ids = 11;
+}
+
+message Enemy {
+  string id = 1;
+  int32 combat_id = 2;
+  string name = 3;
+  int32 hp = 4;
+  int32 max_hp = 5;
+  int32 block = 6;
+  bool is_alive = 7;
+  bool is_hittable = 8;
+  bool intends_to_attack = 9;
+  string next_move_id = 10;
+  repeated Power powers = 11;
+  repeated Intent intents = 12;
+}
+
+message Intent {
+  string type = 1;                // "attack"/"defend"/"buff"/"debuff"/"escape"/"sleep"
+  string label = 2;
+  int32 damage = 3;               // 单次伤害
+  int32 total_damage = 4;         // 总伤害
+  int32 hits = 5;                 // 攻击次数
+}
+
+// --- Map ---
+
+message MapState {
+  repeated MapOption next_options = 1;
+  repeated MapNode nodes = 2;
+  MapNode boss = 3;
+}
+
+message MapOption {
+  int32 index = 1;
+  int32 col = 2;
+  int32 row = 3;
+  string point_type = 4;          // "monster"/"elite"/"boss"/"rest_site"/"shop"/"event"/"treasure"
+  string label = 5;
+}
+
+message MapNode {
+  int32 col = 1;
+  int32 row = 2;
+  string type = 3;
+  repeated MapEdge children = 4;
+}
+
+message MapEdge {
+  int32 col = 1;
+  int32 row = 2;
+}
+
+// --- Shop ---
+
+message ShopState {
+  bool is_open = 1;
+  bool can_proceed = 2;
+  repeated ShopItem items = 3;
+}
+
+message ShopItem {
+  int32 index = 1;
+  string category = 2;            // "card"/"relic"/"potion"/"remove_card"
+  int32 cost = 3;
+  bool can_afford = 4;
+  bool is_stocked = 5;
+  bool on_sale = 6;
+  string id = 7;
+  string name = 8;
+}
+
+// --- Event ---
+
+message EventState {
+  string event_id = 1;
+  bool in_dialogue = 2;
+  bool is_finished = 3;
+  repeated EventOption options = 4;
+}
+
+message EventOption {
+  int32 index = 1;
+  string text = 2;
+  string label = 3;
+  bool is_locked = 4;
+  bool is_chosen = 5;
+  bool is_proceed = 6;
+}
+
+// --- Rest Site ---
+
+message RestSiteState {
+  repeated RestOption options = 1;
+  bool can_proceed = 2;
+}
+
+message RestOption {
+  int32 index = 1;
+  string id = 2;                  // "rest"/"smith"/"recall"/"dig"/"lift"/"toke"
+  string name = 3;
+  bool is_enabled = 4;
+}
+
+// --- Card Reward ---
+
+message CardRewardState {
+  bool can_skip = 1;
+  repeated HandCard cards = 2;    // 复用 HandCard message
+}
+
+// --- Combat Rewards ---
+
+message CombatRewardsState {
+  bool can_proceed = 1;
+  repeated RewardItem items = 2;
+}
+
+message RewardItem {
+  int32 index = 1;
+  string type = 2;                // "gold"/"potion"/"relic"/"card"
+  string label = 3;
+  string id = 4;
+  bool claimable = 5;
+}
+
+// --- Card Select ---
+
+message CardSelectState {
+  string screen_type = 1;         // "card_select" / "hand_select" / ...
+  int32 selected_count = 2;
+  bool can_confirm = 3;
+  bool can_cancel = 4;
+  repeated HandCard cards = 5;            // 可选卡牌
+  repeated HandCard selected_cards = 6;   // 已选卡牌
+}
+
+// --- Relic Select ---
+
+message RelicSelectState {
+  bool can_skip = 1;
+  repeated RelicInfo relics = 2;
+}
+
+// --- Treasure ---
+
+message TreasureState {
+  bool can_proceed = 1;
+  repeated RelicInfo relics = 2;
+}
+
+// --- Legal Actions ---
+
+message LegalAction {
+  string action = 1;              // "play_card"/"end_turn"/"choose_map_node"/...
+  int32 index = 2;
+  int32 card_index = 3;
+  int32 target_id = 4;
+  int32 col = 5;
+  int32 row = 6;
+  int32 slot = 7;
+  string label = 8;
+  string card_id = 9;
+}
+
+// --- gRPC Service ---
+
+service GameBridge {
+  // 获取当前 game state
+  rpc GetState(Empty) returns (GameState);
+
+  // 执行一个 action，返回新的 game state
+  rpc TakeAction(ActionRequest) returns (GameState);
+
+  // 重置环境（开新局/新战斗）
+  rpc Reset(ResetRequest) returns (GameState);
+
+  // 健康检查
+  rpc Ping(Empty) returns (PingResponse);
+}
+
+message Empty {}
+
+message ActionRequest {
+  LegalAction action = 1;
+}
+
+message ResetRequest {
+  string mode = 1;                // "full_run" / "combat_sandbox"
+  string build_spec = 2;          // JSON string for combat sandbox builds
+  string seed = 3;
+}
+
+message PingResponse {
+  string version = 1;
+  bool ready = 2;
+}
