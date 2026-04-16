@@ -15,7 +15,7 @@ import json
 from collections import Counter
 from typing import Any
 
-from combat_safety import (
+from training.combat_safety import (
     _alive_enemies,
     _enemy_attack_damage,
     _estimate_block_for_action,

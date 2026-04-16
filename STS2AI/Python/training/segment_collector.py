@@ -28,7 +28,7 @@ from typing import Any
 
 import numpy as np
 
-from rl_segment_buffer import Segment
+from training.rl_segment_buffer import Segment
 
 logger = logging.getLogger(__name__)
 

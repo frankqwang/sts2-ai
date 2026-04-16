@@ -80,7 +80,7 @@ from core.rl_reward_shaping import (
     _extract_player,
     _safe_int,
 )
-from combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_safety
+from training.combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_safety
 
 # Combat hard-safety mask (R1 self-kill + R2 Phase-2-attack) feature flag.
 # Status 2026-04-15: LAB FEATURE, DISABLED BY DEFAULT. Apples-to-apples 5-iter
@@ -94,9 +94,9 @@ from combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_
 # its unit tests are retained so a future diagnosis round can re-enable
 # and instrument it. Flip this to True to re-arm.
 _COMBAT_UNSAFE_MASK_ENABLED = False
-from rl_segment_buffer import SegmentRolloutBuffer, Segment
+from training.rl_segment_buffer import SegmentRolloutBuffer, Segment
 
-from combat_diagnostics import (
+from training.combat_diagnostics import (
     _action_target_summary,
     _combat_action_label,
     _combat_action_looks_attack,
@@ -129,7 +129,7 @@ from combat_diagnostics import (
     _trace_resolve_name,
 )
 
-from game_decisions import (
+from training.game_decisions import (
     _action_card_slug,
     _boss_conditioned_card_bonus,
     _build_card_reward_decision_details,
@@ -148,7 +148,7 @@ from game_decisions import (
     _runtime_skada_priors,
     _score_act1_route_plan,
 )
-from segment_collector import NonCombatSegmentCollector
+from training.segment_collector import NonCombatSegmentCollector
 from search.counterfactual_scoring import compute_counterfactual_reward
 from core.combat_nn import (
     CombatPolicyValueNetwork,
@@ -162,8 +162,8 @@ from full_run_env import ApiBackedFullRunClient, PipeBackedFullRunClient, create
 from headless_sim_runner import DEFAULT_DLL_PATH, stop_process
 from ipc.sim_host_lifecycle import SimHostLifecycleManager, transport_launch_protocol
 from sts2ai_paths import ARTIFACTS_ROOT, DATASETS_ROOT, MAINLINE_CHECKPOINT, REPO_ROOT
-from training_health import TrainingHealthMonitor
-from episode_data_saver import EpisodeDataSaver
+from training.training_health import TrainingHealthMonitor
+from training.episode_data_saver import EpisodeDataSaver
 from runtime.run_outcome_vocab import (
     RUN_OUTCOME_DEATH,
     RUN_OUTCOME_VICTORY,
@@ -1189,7 +1189,7 @@ def _estimate_boss_hp_fraction(state: dict[str, Any]) -> float:
 
 
 
-from combat_ppo import (
+from training.combat_ppo import (
     MCTSTrainingExample,
     MCTSReplayBuffer,
     CombatRolloutBuffer,
@@ -5053,7 +5053,7 @@ def main() -> int:
                     _merge_episode(ep_ppo, ep_mcts, ep_stats)
             elif args.vectorized:
                 # Vectorized: all envs step in lockstep (parallel pipe I/O + batch NN)
-                from vectorized_collector import collect_vectorized_episodes
+                from training.vectorized_collector import collect_vectorized_episodes
                 vec_clients = [env_clients[p] for p in env_ports]
                 vec_ppo, vec_combat, vec_stats = collect_vectorized_episodes(
                     ppo_net=ppo_net,

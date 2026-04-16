@@ -51,10 +51,10 @@ from combat_nn import (
 from rl_policy_v2 import FullRunPolicyNetworkV2
 from checkpoint_compat import get_combat_model_config, get_combat_model_state
 
-from eval_game_state import (
+from training.eval_game_state import (
     RepeatLoopTracker, _choose_auto_progress_action, _choose_claimable_reward_action, _combat_loop_progress_signature, _compute_delta, _extract_progress, _is_selection_screen, _legal_action_name_set, _loop_progress_signature, _next_reward_claim_signature, _reward_claim_signature, _reward_item_claimable,
 )
-from eval_action_selection import (
+from training.eval_action_selection import (
     CombatMctsTacticalBlendEvaluator, CombatMctsTrace, CombatTeacherOverride, _build_combat_tensors, _build_ppo_tensors, _probe_direct_lethal_indices, _select_action_combat_teacher, _select_action_combat_teacher_rerank, _select_action_heuristic, _select_action_nn, _select_action_random,
 )
 from rl_encoder_v2 import (
@@ -72,8 +72,8 @@ from rl_reward_shaping import (
     compute_problem_vector,
     extract_next_boss_token,
 )
-from heuristic_combat import heuristic_combat_action
-from combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_safety
+from training.heuristic_combat import heuristic_combat_action
+from training.combat_safety import compute_combat_unsafe_mask, rerank_combat_logits_with_safety
 
 # Combat hard-safety mask feature flag — kept in sync with train_hybrid.py's
 # `_COMBAT_UNSAFE_MASK_ENABLED`. See that module for the status note.

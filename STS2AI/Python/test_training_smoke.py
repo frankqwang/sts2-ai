@@ -304,7 +304,7 @@ class _FakeCombatTurnEnv:
 
 class TestCombatSafetyRerank:
     def test_rerank_prefers_finishing_low_hp_attacker(self):
-        from combat_safety import rerank_combat_logits_with_safety
+        from training.combat_safety import rerank_combat_logits_with_safety
 
         state = _make_teacher_combat_state(
             [
@@ -350,7 +350,7 @@ class TestCombatSafetyRerank:
         assert int(np.argmax(reranked)) == 1
 
     def test_rerank_prefers_defend_over_bloodletting_in_danger(self):
-        from combat_safety import rerank_combat_logits_with_safety
+        from training.combat_safety import rerank_combat_logits_with_safety
 
         state = _make_teacher_combat_state(
             [
@@ -391,7 +391,7 @@ class TestCombatSafetyRerank:
         assert int(np.argmax(reranked)) in {1, 2}
 
     def test_heuristic_prefers_block_in_high_pressure_turn(self):
-        from heuristic_combat import heuristic_combat_action
+        from training.heuristic_combat import heuristic_combat_action
 
         state = _make_teacher_combat_state(
             [
@@ -797,7 +797,7 @@ class TestQualityGate:
             elapsed_s: float
             total_reward: float
 
-        from training_health import quality_check
+        from training.training_health import quality_check
 
         results = [
             FakeResult(steps=100, max_floor=5, outcome="death", elapsed_s=10, total_reward=-0.5),
@@ -817,7 +817,7 @@ class TestQualityGate:
             elapsed_s: float
             total_reward: float
 
-        from training_health import quality_check
+        from training.training_health import quality_check
 
         results = [
             FakeResult(steps=3, max_floor=1, outcome="death", elapsed_s=1, total_reward=-1.0),
@@ -837,7 +837,7 @@ class TestQualityGate:
             elapsed_s: float
             total_reward: float
 
-        from training_health import quality_check
+        from training.training_health import quality_check
 
         results = [
             FakeResult(steps=100, max_floor=5, outcome="death", elapsed_s=10, total_reward=float("nan")),
@@ -1667,7 +1667,7 @@ class TestSegmentBuffer:
     """Phase 2: Semi-MDP segment buffer."""
 
     def test_segment_gae_basic(self):
-        from rl_segment_buffer import SegmentRolloutBuffer, Segment
+        from training.rl_segment_buffer import SegmentRolloutBuffer, Segment
         buf = SegmentRolloutBuffer()
         # 3 segments: short, long, terminal
         buf.add(Segment(state={}, actions={}, action_idx=0, log_prob=-1.0,
@@ -1685,7 +1685,7 @@ class TestSegmentBuffer:
         assert buf.advantages[2] > 0
 
     def test_segment_gae_discount_capping(self):
-        from rl_segment_buffer import SegmentRolloutBuffer, Segment
+        from training.rl_segment_buffer import SegmentRolloutBuffer, Segment
         buf = SegmentRolloutBuffer()
         buf.add(Segment(state={}, actions={}, action_idx=0, log_prob=-1.0,
                         value=0.5, reward_sum=0.1, seg_len=100, done=True, screen_type_idx=4))
@@ -1694,7 +1694,7 @@ class TestSegmentBuffer:
         assert len(buf.advantages) == 1
 
     def test_segment_stats(self):
-        from rl_segment_buffer import SegmentRolloutBuffer, Segment
+        from training.rl_segment_buffer import SegmentRolloutBuffer, Segment
         buf = SegmentRolloutBuffer()
         buf.add(Segment(state={}, actions={}, action_idx=0, log_prob=-1.0,
                         value=0.5, reward_sum=0.1, seg_len=3, done=False, screen_type_idx=4))
@@ -1709,7 +1709,7 @@ class TestSegmentCollector:
     """Phase 2B: Segment collector."""
 
     def test_open_close(self):
-        from segment_collector import NonCombatSegmentCollector
+        from training.segment_collector import NonCombatSegmentCollector
         col = NonCombatSegmentCollector()
         assert not col.is_open
         col.open_segment(state={}, actions={}, action_idx=0, log_prob=-1.0,
@@ -1724,7 +1724,7 @@ class TestSegmentCollector:
         assert seg.seg_len == 6
 
     def test_close_without_open(self):
-        from segment_collector import NonCombatSegmentCollector
+        from training.segment_collector import NonCombatSegmentCollector
         col = NonCombatSegmentCollector()
         seg = col.close_segment(done=False)
         assert seg is None
