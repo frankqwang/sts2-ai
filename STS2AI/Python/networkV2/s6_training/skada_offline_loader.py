@@ -358,22 +358,31 @@ def _build_campfire_sample(
     run_state: SkadaRunState,
     floor_data: dict[str, Any],
 ) -> TrainingSample | None:
-    """campfire 决策(STS2 实际类型:校验报告统计出的分布)。
+    """campfire 决策 — 简化为 SMITH vs HEAL 二分类。
 
-    实际出现过的 choice:SMITH / HEAL / MEND / CLONE / COOK / HATCH / LIFT / DIG
-    注:STS2 没有 "REST"(skada 没记录过这个值),也没有 "TOKE"(STS1)。
-    HEAL(堕罗用语,泛指 rest 回血 25%)在 STS2 里是 HEAL 而非 REST。
+    业务现实:
+      - SMITH(升级)和 HEAL(回血)是**默认两个可用选项**(绝大多数 run)
+      - MEND / CLONE / COOK / HATCH / LIFT / DIG 等**需要特定遗物解锁才会出现**
+        (skada 里这些合计 <5% 样本)
+      - 不加 skada-wide 的 option 池当 candidate 会污染 token(因为这些选项
+        在玩家当前 run 根本不会出现,当成 "可选" 让网络学反而误导)
 
-    第一级决策(选类型),不含 SMITH 具体升哪张(那是二级,暂不建 sample)。
+    处理:
+      - choice ∈ {SMITH, HEAL}  → 产二分类 sample(candidates 含 HEAL + SMITH)
+      - choice 其他值 → 跳过(需要 relic-unlock 上下文才能正确建模,后续扩展)
+
+    同时每个 option 加 event_kind 区分(SMITH=upgrade_card / HEAL=gain_hp),
+    让 bank_assembler 的 9 维 event_kind one-hot 把两个 option token 区分开。
     """
     choice = str(floor_data.get("campfire_choice", "") or "").upper()
-    if not choice:
+    # 只产 SMITH/HEAL 二分类 sample
+    if choice not in ("SMITH", "HEAL"):
         return None
-    # 基于 skada 实际数据的完整选项池
-    options = ["HEAL", "SMITH", "MEND", "CLONE", "COOK", "HATCH", "LIFT", "DIG"]
-    if choice not in options:
-        # 遇到新类型自动加,避免 chosen=-1
-        options = list(dict.fromkeys(options + [choice]))
+
+    options = [
+        ("HEAL",  "gain_hp"),       # 回血
+        ("SMITH", "upgrade_card"),  # 升级
+    ]
     candidates = [
         ActionCandidate(
             action_type="campfire_" + opt.lower(),
@@ -381,10 +390,11 @@ def _build_campfire_sample(
             label=opt,
             family="rest",
             target_scope="none",
+            event_kind=kind,   # 关键:给每个 option 独立语义 → token 可区分
         )
-        for i, opt in enumerate(options)
+        for i, (opt, kind) in enumerate(options)
     ]
-    chosen = options.index(choice)
+    chosen = 0 if choice == "HEAL" else 1
     return _make_training_sample(
         run_state, candidates, chosen,
         decision_domain="rest", room_type="rest",
