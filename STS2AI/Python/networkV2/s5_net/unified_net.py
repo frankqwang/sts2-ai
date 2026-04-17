@@ -32,6 +32,7 @@ from networkV2.s5_net.action_contextualizer import ActionContextualizer
 from networkV2.s5_net.option_contextualizer import OptionContextualizer
 from networkV2.s5_net.decision_core import DecisionCore
 from networkV2.s5_net.heads.policy_head import PolicyHead
+from networkV2.s5_net.heads.multi_domain_policy_head import MultiDomainPolicyHead
 from networkV2.s5_net.heads.value_heads import ValueHeads, ValueOutputs
 from networkV2.s5_net.heads.leaf_evaluator import LeafEvaluator, LeafOutputs
 from networkV2.s5_net.heads.run_evaluator import RunEvaluator, RunEvalOutputs
@@ -83,7 +84,10 @@ class UnifiedNet(nn.Module):
         self.build_encoder = BuildMemoryEncoder(
             d, config.n_build_slots, n_iters=config.build_n_iters, n_heads=nh_half)
         self.decision_core = DecisionCore(d, nh, n_layers=config.decision_n_layers, dropout=drop)
+        # 保留原 policy_head 供 checkpoint 兼容加载(warm start 给 multi_domain_policy_head)。
+        # 实际前向走 multi_domain_policy_head,per-domain 独立 bilinear scorer。
         self.policy_head = PolicyHead(d)
+        self.multi_domain_policy_head = MultiDomainPolicyHead(d)
 
         # Shared world context injection
         self.shared_world_proj = nn.Sequential(nn.Linear(d * 2, d), nn.GELU())
@@ -126,6 +130,12 @@ class UnifiedNet(nn.Module):
             n_enc = int(getattr(config, "n_encounters", 128))
             self.encounter_embed = nn.Embedding(n_enc, d)
             nn.init.normal_(self.encounter_embed.weight, mean=0.0, std=0.3)
+            with torch.no_grad():
+                # UNKNOWN slot（index 0）显式置零，和 encounter_vocab.py 的注释对齐：
+                # "0 = UNKNOWN / 非战斗（safe fallback，embedding 0 初始化）"。
+                # 配合 _apply_encounter_conditioning 的 per-sample mask，这个 slot
+                # 在 forward 永远不会被读取 → 梯度为零 → 永远保持零。
+                self.encounter_embed.weight[0].zero_()
             self.encounter_gate = nn.Parameter(torch.tensor(1.0))
         else:
             self.encounter_embed = None
@@ -136,13 +146,24 @@ class UnifiedNet(nn.Module):
         decision_repr: torch.Tensor,
         encounter_idx: torch.Tensor | None,
     ) -> torch.Tensor:
-        """给 decision_repr 加上 encounter-specific bias。"""
+        """给 decision_repr 加上 encounter-specific bias。
+
+        encounter_idx == 0 (UNKNOWN / 非战斗 / 未在 catalog) → per-sample 零注入。
+        保证 non-combat 样本和 UNKNOWN encounter 不被共享 learnable bias 污染；
+        历史 bug：原实现只守 `is None`，全 0 tensor 会被当真实 encounter 条件化，
+        导致所有非战斗 step 共享一个被训练的随机偏置向量（std=0.3, gate=1.0 量级约 0.3）。
+        """
         if not self.enable_encounter_conditioning or encounter_idx is None:
             return decision_repr
         idx = encounter_idx.to(device=decision_repr.device, dtype=torch.long)
         idx = idx.clamp(min=0, max=self.encounter_embed.num_embeddings - 1)
+        if not bool((idx != 0).any()):
+            # 整 batch 全 UNKNOWN → 无需查 embedding（短路 + 节省 embed[0] 写回梯度）
+            return decision_repr
         boss_bias = self.encounter_embed(idx)
-        return decision_repr + self.encounter_gate * boss_bias
+        # Per-sample mask：idx=0 的样本不加 bias，idx>0 正常加
+        valid = (idx != 0).to(decision_repr.dtype).unsqueeze(-1)
+        return decision_repr + self.encounter_gate * boss_bias * valid
 
     def forward(
         self,
@@ -218,7 +239,7 @@ class UnifiedNet(nn.Module):
         decision_repr, action_refined = self.decision_core(action_hyp)
         decision_repr = self._apply_encounter_conditioning(decision_repr, encounter_idx)
 
-        logits = self.policy_head(decision_repr, action_refined)
+        logits = self.multi_domain_policy_head(decision_repr, action_refined, domain="combat")
         values = self.value_heads(decision_repr)
         leaf = self.leaf_evaluator(decision_repr, board_enc, cm_enc, mech_enc, mod_enc, power_enc)
 
@@ -238,7 +259,8 @@ class UnifiedNet(nn.Module):
         decision_repr, option_refined = self.decision_core(option_hyp)
         decision_repr = self._apply_encounter_conditioning(decision_repr, encounter_idx)
 
-        logits = self.policy_head(decision_repr, option_refined)
+        # Per-domain policy head(decision_domain 已 route 到 card_reward/shop/route/rest/event/selection 之一)
+        logits = self.multi_domain_policy_head(decision_repr, option_refined, domain=domain)
         run_eval = self.run_evaluator(decision_repr, build_bt, inv_bt, objective_bt, forecast_bt)
 
         return UnifiedNetOutput(

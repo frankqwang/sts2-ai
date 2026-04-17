@@ -822,11 +822,21 @@ class BankAssembler:
         # route_risk / route_value: map 节点的 [0,1] 威胁 / 价值，不走 _DMG/_BLK 归一化
         # （原先复用 damage_est/block_est 再 × 30/50 是字段语义黑客，见 route_compiler.py U8 修复）
         route_axes = [float(a.route_risk), float(a.route_value)]
-        # 合计 15 + 3 + 5 + 6 + 1 + 3 + 9 + 2 = 44 维（<= tokenizer max_numeric_dim=48）
+        # ---- Skada priors 通道 (4) ----
+        # 把"玩家群体统计先验"直接喂进 token,让 token-level 就带社群智慧。
+        # loader 从 skada_analytics.sqlite 查 cards/relics 表填。combat action 默认 0。
+        skada_prior_axes = [
+            float(a.pick_rate_prior),
+            float(a.win_rate_delta_prior),
+            float(a.deck_win_rate_prior),
+            float(a.synergy_prior),
+        ]
+        # 合计 15 + 3 + 5 + 6 + 1 + 3 + 9 + 2 + 4 = 48 维（= tokenizer max_numeric_dim=48）
         return Token(
             numeric=(
                 combat_axes + target_axes + family_axes + role_axes
                 + extra_axes + noncombat_axes + event_kind_axes + route_axes
+                + skada_prior_axes
             ),
             token_type=TK_ACTION_CANDIDATE,
             owner_id=a.source_card_id or a.source_potion_id or a.action_type,

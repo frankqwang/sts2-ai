@@ -117,6 +117,15 @@ class ActionCandidate:
     route_risk: float = 0.0   # [0,1]：该节点的潜在威胁（boss=1, elite=0.7, rest=0）
     route_value: float = 0.0  # [0,1]：该节点的潜在价值（rest=0.7, shop=0.6, boss=0）
 
+    # Skada community priors（social inductive bias,from skada_analytics.sqlite）
+    # 只在 non-combat option 上填;combat 动作默认 0.0(不适用)。
+    # loader 构造 option 时查 SkadaPriors,让 token-level 就含"玩家群体行为"先验。
+    # 关键价值:冷启动就有 baseline,不用靠 long-horizon reward 从零学"好卡"先验。
+    pick_rate_prior: float = 0.0       # [0,1]  全群体选卡率
+    win_rate_delta_prior: float = 0.0  # [-0.5, 0.5] 选 vs 跳的胜率差(近似)
+    deck_win_rate_prior: float = 0.0   # [0,1]  拿过这张卡的 run 胜率均值
+    synergy_prior: float = 0.0         # [-1, 1] 与当前 deck 的 synergy 提升
+
     @property
     def is_play_card(self) -> bool:
         return self.action_type == "play_card"
