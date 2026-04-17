@@ -24,6 +24,9 @@ icudt_godot.dat
 /STS2AI/ENV/Sim/Host/bin/
 /STS2AI/Python/STS2AI
 
+STS2AI\Python\data\skada\runs
+STS2AI/Python/data/skada/runs
+
 # System files
 **/.DS_Store
 Thumbs.db
