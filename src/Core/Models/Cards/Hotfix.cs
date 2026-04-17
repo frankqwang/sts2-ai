@@ -13,6 +13,8 @@ public sealed class Hotfix : CardModel
 {
 	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromPower<FocusPower>());
 
+	public override IEnumerable<CardKeyword> CanonicalKeywords => new global::_003C_003Ez__ReadOnlySingleElementList<CardKeyword>(CardKeyword.Exhaust);
+
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new PowerVar<FocusPower>(2m));
 
 	public Hotfix()
@@ -28,6 +30,6 @@ public sealed class Hotfix : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars["FocusPower"].UpgradeValueBy(1m);
+		RemoveKeyword(CardKeyword.Exhaust);
 	}
 }

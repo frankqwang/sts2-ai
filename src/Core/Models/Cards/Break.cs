@@ -22,7 +22,7 @@ public sealed class Break : CardModel
 	});
 
 	public Break()
-		: base(2, CardType.Attack, CardRarity.Ancient, TargetType.AnyEnemy)
+		: base(1, CardType.Attack, CardRarity.Ancient, TargetType.AnyEnemy)
 	{
 	}
 
@@ -37,7 +37,7 @@ public sealed class Break : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars.Damage.UpgradeValueBy(5m);
+		base.DynamicVars.Damage.UpgradeValueBy(10m);
 		base.DynamicVars.Vulnerable.UpgradeValueBy(2m);
 	}
 }

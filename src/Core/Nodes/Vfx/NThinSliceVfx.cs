@@ -1,9 +1,11 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.TestSupport;
@@ -13,6 +15,8 @@ namespace MegaCrit.Sts2.Core.Nodes.Vfx;
 public partial class NThinSliceVfx : Node2D
 {
 	private const string _scenePath = "res://scenes/vfx/thin_slice_vfx.tscn";
+
+	private CancellationTokenSource? _cts;
 
 	private GpuParticles2D _slash;
 
@@ -28,7 +32,12 @@ public partial class NThinSliceVfx : Node2D
 		{
 			return null;
 		}
-		Vector2 vfxSpawnPosition = NCombatRoom.Instance.GetCreatureNode(target).VfxSpawnPosition;
+		NCreature nCreature = NCombatRoom.Instance?.GetCreatureNode(target);
+		if (nCreature == null)
+		{
+			return null;
+		}
+		Vector2 vfxSpawnPosition = nCreature.VfxSpawnPosition;
 		NThinSliceVfx nThinSliceVfx = PreloadManager.Cache.GetScene("res://scenes/vfx/thin_slice_vfx.tscn").Instantiate<NThinSliceVfx>(PackedScene.GenEditState.Disabled);
 		nThinSliceVfx._vfxColor = vfxColor;
 		Vector2 vector = new Vector2(Rng.Chaotic.NextFloat(-50f, 50f), Rng.Chaotic.NextFloat(-50f, 50f));
@@ -47,6 +56,12 @@ public partial class NThinSliceVfx : Node2D
 		_sparkle.Emitting = true;
 		SetColor();
 		TaskHelper.RunSafely(SelfDestruct());
+	}
+
+	public override void _ExitTree()
+	{
+		_cts?.Cancel();
+		_cts?.Dispose();
 	}
 
 	private void SetColor()
@@ -88,7 +103,13 @@ public partial class NThinSliceVfx : Node2D
 
 	private async Task SelfDestruct()
 	{
-		await Task.Delay(1000);
-		this.QueueFreeSafely();
+		_cts?.Cancel();
+		_cts?.Dispose();
+		_cts = new CancellationTokenSource();
+		await Task.Delay(1000, _cts.Token);
+		if (!_cts.IsCancellationRequested)
+		{
+			this.QueueFreeSafely();
+		}
 	}
 }

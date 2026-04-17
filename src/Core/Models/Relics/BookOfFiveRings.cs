@@ -66,7 +66,7 @@ public sealed class BookOfFiveRings : RelicModel
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[2]
 	{
 		new CardsVar(5),
-		new HealVar(15m)
+		new HealVar(20m)
 	});
 
 	public override bool IsAllowed(IRunState runState)

@@ -23,6 +23,8 @@ public sealed class TheLost : MonsterModel
 
 	private int EyeLasersDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 5, 4);
 
+	private int DebilitatingSmogStrengthStealAmount => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 2, 2);
+
 	public override DamageSfxType TakeDamageSfxType => DamageSfxType.Stone;
 
 	public override async Task AfterAddedToRoom()
@@ -45,8 +47,8 @@ public sealed class TheLost : MonsterModel
 	{
 		SfxCmd.Play(CastSfx);
 		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0.5f);
-		await PowerCmd.Apply<StrengthPower>(targets, -2m, base.Creature, null);
-		await PowerCmd.Apply<StrengthPower>(base.Creature, 2m, base.Creature, null);
+		await PowerCmd.Apply<StrengthPower>(targets, -DebilitatingSmogStrengthStealAmount, base.Creature, null);
+		await PowerCmd.Apply<StrengthPower>(base.Creature, DebilitatingSmogStrengthStealAmount, base.Creature, null);
 	}
 
 	private async Task EyeLasersMove(IReadOnlyList<Creature> targets)

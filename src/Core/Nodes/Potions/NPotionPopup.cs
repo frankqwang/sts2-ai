@@ -41,6 +41,8 @@ public partial class NPotionPopup : Control
 
 	private bool _markedForRemoval;
 
+	private Player? _subscribedPlayer;
+
 	private PotionModel? Potion => _holder.Potion?.Model;
 
 	public bool IsUsable => _useButton.IsEnabled;
@@ -121,7 +123,7 @@ public partial class NPotionPopup : Control
 				{
 					Log.Warn("NCapstoneContainer.Instance was null when creating potion popup");
 				}
-				RefreshUseButton();
+				RefreshButtons();
 				break;
 			case PotionUsage.AnyTime:
 				_useButton.Enable();
@@ -132,6 +134,8 @@ public partial class NPotionPopup : Control
 			default:
 				throw new ArgumentOutOfRangeException("Usage");
 			}
+			_subscribedPlayer = Potion.Owner;
+			_subscribedPlayer.CanRemovePotionsChanged += RefreshButtons;
 			if (!Potion.Owner.CanRemovePotions)
 			{
 				_useButton.Disable();
@@ -154,23 +158,18 @@ public partial class NPotionPopup : Control
 				this.TryGrabFocus();
 			}
 		}
+		string locKey;
 		if (Potion == null)
 		{
-			_useButton.SetLocKey("POTION_POPUP.drink");
+			locKey = "POTION_POPUP.drink";
 		}
 		else
 		{
 			TargetType targetType = Potion.TargetType;
-			bool flag = ((targetType == TargetType.AnyEnemy || targetType == TargetType.TargetedNoCreature) ? true : false);
-			if (flag || Potion.CanThrowAtAlly())
-			{
-				_useButton.SetLocKey("POTION_POPUP.throw");
-			}
-			else
-			{
-				_useButton.SetLocKey("POTION_POPUP.drink");
-			}
+			bool flag = (((uint)(targetType - 2) <= 1u || targetType == TargetType.TargetedNoCreature) ? true : false);
+			locKey = ((!flag && !Potion.CanThrowAtAlly()) ? "POTION_POPUP.drink" : "POTION_POPUP.throw");
 		}
+		_useButton.SetLocKey(locKey);
 		_tween?.Kill();
 		base.Modulate = Colors.Transparent;
 		_popupContainer.Position += Vector2.Up * 25f;
@@ -228,7 +227,7 @@ public partial class NPotionPopup : Control
 		if (inputEvent is InputEventMouseButton { ButtonIndex: var buttonIndex } inputEventMouseButton)
 		{
 			bool flag = (((ulong)(buttonIndex - 1) <= 1uL) ? true : false);
-			if (flag && inputEventMouseButton.IsReleased())
+			if (flag && inputEventMouseButton.IsReleased() && !GetGlobalRect().HasPoint(GetGlobalMousePosition()))
 			{
 				Remove();
 			}
@@ -260,11 +259,8 @@ public partial class NPotionPopup : Control
 			NHoverTipSet.shouldBlockHoverTips = false;
 			NHoverTipSet.Remove(_hoverTipBounds);
 			DisconnectSignals();
-			Callable.From(delegate
-			{
-				_useButton.Disable();
-				_discardButton.Disable();
-			}).CallDeferred();
+			_useButton.Disable();
+			_discardButton.Disable();
 			_tween?.Kill();
 			_tween = CreateTween().SetParallel();
 			_tween.TweenProperty(this, "modulate", Colors.Transparent, 0.10000000149011612).SetTrans(Tween.TransitionType.Sine);
@@ -279,6 +275,10 @@ public partial class NPotionPopup : Control
 		CombatManager.Instance.TurnStarted -= OnTurnStarted;
 		CombatManager.Instance.PlayerEndedTurn -= OnPlayerEndTurnStatusChanged;
 		CombatManager.Instance.PlayerUnendedTurn -= OnPlayerEndTurnStatusChanged;
+		if (_subscribedPlayer != null)
+		{
+			_subscribedPlayer.CanRemovePotionsChanged -= RefreshButtons;
+		}
 		if (NOverlayStack.Instance != null)
 		{
 			NOverlayStack.Instance.Changed -= Remove;
@@ -291,36 +291,53 @@ public partial class NPotionPopup : Control
 
 	private void OnTurnStarted(CombatState _)
 	{
-		RefreshUseButton();
+		RefreshButtons();
 	}
 
 	private void OnPlayerEndTurnStatusChanged(Player _, bool __)
 	{
-		RefreshUseButton();
+		RefreshButtons();
 	}
 
 	private void OnPlayerEndTurnStatusChanged(Player _)
 	{
-		RefreshUseButton();
+		RefreshButtons();
 	}
 
 	private void OnCombatStateChanged(CombatState _)
 	{
-		RefreshUseButton();
+		RefreshButtons();
 	}
 
-	private void RefreshUseButton()
+	private void RefreshButtons()
 	{
-		if (!_markedForRemoval)
+		if (_markedForRemoval)
 		{
-			Creature creature = Potion?.Owner.Creature;
-			if (creature != null && CombatManager.Instance.IsInProgress && creature.CombatState?.CurrentSide == creature.Side && !InACardSelectScreen && !CombatManager.Instance.PlayerActionsDisabled)
-			{
-				_useButton.Enable();
-			}
-			else
+			return;
+		}
+		Creature creature = Potion?.Owner.Creature;
+		_discardButton.Enable();
+		PotionModel? potion = Potion;
+		if (potion != null && potion.Usage == PotionUsage.AnyTime)
+		{
+			_useButton.Enable();
+		}
+		else if (creature != null && CombatManager.Instance.IsInProgress && creature.CombatState?.CurrentSide == creature.Side && creature.IsAlive && !InACardSelectScreen && !CombatManager.Instance.PlayerActionsDisabled)
+		{
+			_useButton.Enable();
+		}
+		else
+		{
+			_useButton.Disable();
+		}
+		PotionModel potion2 = Potion;
+		if (potion2 != null)
+		{
+			Player owner = potion2.Owner;
+			if (owner != null && !owner.CanRemovePotions)
 			{
 				_useButton.Disable();
+				_discardButton.Disable();
 			}
 		}
 	}

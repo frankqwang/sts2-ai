@@ -12,15 +12,17 @@ public partial class NVerticalPopup : Control
 {
 	private static readonly string _scenePath = SceneHelper.GetScenePath("ui/vertical_popup");
 
+	private bool _nodesAreSet;
+
 	private Callable? _yesCallable;
 
 	private Callable? _noCallable;
 
 	public static IEnumerable<string> AssetPaths => new global::_003C_003Ez__ReadOnlySingleElementList<string>(_scenePath);
 
-	public MegaLabel TitleLabel { get; private set; }
+	private MegaLabel TitleLabel { get; set; }
 
-	public MegaRichTextLabel BodyLabel { get; private set; }
+	private MegaRichTextLabel BodyLabel { get; set; }
 
 	public NPopupYesNoButton YesButton { get; private set; }
 
@@ -28,26 +30,38 @@ public partial class NVerticalPopup : Control
 
 	public override void _Ready()
 	{
-		TitleLabel = GetNode<MegaLabel>("Header");
-		BodyLabel = GetNode<MegaRichTextLabel>("Description");
-		YesButton = GetNode<NPopupYesNoButton>("YesButton");
-		NoButton = GetNode<NPopupYesNoButton>("NoButton");
+		EnsureNodesAreSet();
+	}
+
+	private void EnsureNodesAreSet()
+	{
+		if (!_nodesAreSet)
+		{
+			TitleLabel = GetNode<MegaLabel>("Header");
+			BodyLabel = GetNode<MegaRichTextLabel>("Description");
+			YesButton = GetNode<NPopupYesNoButton>("YesButton");
+			NoButton = GetNode<NPopupYesNoButton>("NoButton");
+			_nodesAreSet = true;
+		}
 	}
 
 	public void SetText(LocString title, LocString body)
 	{
+		EnsureNodesAreSet();
 		TitleLabel.SetTextAutoSize(title.GetFormattedText());
 		BodyLabel.Text = "[center]" + body.GetFormattedText() + "[/center]";
 	}
 
 	public void SetText(string title, string body)
 	{
+		EnsureNodesAreSet();
 		TitleLabel.SetTextAutoSize(title);
 		BodyLabel.Text = "[center]" + body + "[/center]";
 	}
 
 	public void InitYesButton(LocString yesButton, Action<NButton> onPressed)
 	{
+		EnsureNodesAreSet();
 		_yesCallable = Callable.From(onPressed);
 		YesButton.IsYes = true;
 		YesButton.SetText(yesButton.GetFormattedText());
@@ -57,6 +71,7 @@ public partial class NVerticalPopup : Control
 
 	public void InitNoButton(LocString noButton, Action<NButton> onPressed)
 	{
+		EnsureNodesAreSet();
 		_noCallable = Callable.From(onPressed);
 		NoButton.Visible = true;
 		NoButton.IsYes = false;

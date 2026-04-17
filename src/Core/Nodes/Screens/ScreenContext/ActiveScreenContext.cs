@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
+using MegaCrit.Sts2.Core.Nodes.Screens.Timeline;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 
@@ -56,6 +57,10 @@ public class ActiveScreenContext
 			NMainMenuSubmenuStack submenuStack = mainMenu.SubmenuStack;
 			if (submenuStack.SubmenusOpen)
 			{
+				if (submenuStack.Peek() is NTimelineScreen { CurrentUnlockScreen: not null } nTimelineScreen)
+				{
+					return nTimelineScreen.CurrentUnlockScreen;
+				}
 				return submenuStack.Peek();
 			}
 			return NGame.Instance.MainMenu;

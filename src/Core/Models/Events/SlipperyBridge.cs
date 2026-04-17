@@ -64,7 +64,7 @@ public sealed class SlipperyBridge : EventModel
 		new DynamicVar("HpLoss", CurrentHpLoss)
 	});
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		if (runState.TotalFloor > 6)
 		{

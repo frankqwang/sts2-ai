@@ -15,7 +15,7 @@ public sealed class Regalite : RelicModel
 
 	public override async Task AfterCardEnteredCombat(CardModel card)
 	{
-		if (card.Owner == base.Owner && card.VisualCardPool.IsColorless)
+		if (card.Owner == base.Owner)
 		{
 			await CreatureCmd.GainBlock(base.Owner.Creature, base.DynamicVars.Block, null, fast: true);
 		}

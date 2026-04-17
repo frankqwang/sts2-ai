@@ -25,7 +25,7 @@ public sealed class LiquidMemories : PotionModel
 		CardModel cardModel = (await CardSelectCmd.FromSimpleGrid(choiceContext, PileType.Discard.GetPile(base.Owner).Cards, base.Owner, new CardSelectorPrefs(base.SelectionScreenPrompt, 1))).FirstOrDefault();
 		if (cardModel != null)
 		{
-			cardModel.EnergyCost.SetThisTurnOrUntilPlayed(0);
+			cardModel.SetToFreeThisTurn();
 			await CardPileCmd.Add(cardModel, PileType.Hand);
 		}
 	}

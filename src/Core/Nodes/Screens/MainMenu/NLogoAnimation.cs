@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Audio.Debug;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
@@ -28,6 +29,8 @@ public partial class NLogoAnimation : Control, IScreenContext
 
 	private bool _cancelled;
 
+	private bool _skeletonReady;
+
 	public static string[] AssetPaths => new string[1] { "res://scenes/screens/main_menu/logo_animation.tscn" };
 
 	public Control? DefaultFocusedControl => null;
@@ -44,22 +47,27 @@ public partial class NLogoAnimation : Control, IScreenContext
 		_logoSpineNode = GetNode<Node2D>("Container/SpineSprite");
 		_spineSprite = new MegaSprite(_logoSpineNode);
 		_logoSpineNode.Visible = false;
-		Rect2 bounds = _spineSprite.GetSkeleton().GetBounds();
-		float num = Math.Min(base.Size.X * 0.33f / bounds.Size.X, base.Size.Y * 0.33f / bounds.Size.Y);
-		_logoSpineNode.Scale = num * Vector2.One;
-		_logoSpineNode.Position = -bounds.Size * _logoSpineNode.Scale * 0.5f;
+		MegaSkeleton skeleton = _spineSprite.GetSkeleton();
+		if (skeleton != null)
+		{
+			_skeletonReady = true;
+			Rect2 bounds = skeleton.GetBounds();
+			float num = Math.Min(base.Size.X * 0.33f / bounds.Size.X, base.Size.Y * 0.33f / bounds.Size.Y);
+			_logoSpineNode.Scale = num * Vector2.One;
+			_logoSpineNode.Position = -bounds.Size * _logoSpineNode.Scale * 0.5f;
+		}
 	}
 
 	public async Task PlayAnimation(CancellationToken token)
 	{
-		if (token.IsCancellationRequested)
+		if (token.IsCancellationRequested || !_skeletonReady)
 		{
 			_cancelled = true;
 			return;
 		}
 		_tween = CreateTween();
 		_tween.TweenInterval(1.0);
-		await ToSignal(_tween, Tween.SignalName.Finished);
+		await _tween.AwaitFinished(this);
 		if (token.IsCancellationRequested)
 		{
 			_cancelled = true;
@@ -73,7 +81,7 @@ public partial class NLogoAnimation : Control, IScreenContext
 		_tween.TweenProperty(_logoSpineNode, "position:y", _logoSpineNode.Position.Y, 0.5).From(_logoSpineNode.Position.Y - 800f).SetEase(Tween.EaseType.Out)
 			.SetTrans(Tween.TransitionType.Back);
 		_tween.TweenProperty(_logoContainer, "modulate", Colors.White, 0.5);
-		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		await this.AwaitProcessFrame();
 		while (!_spineSprite.GetAnimationState().GetCurrent(0).IsComplete())
 		{
 			if (token.IsCancellationRequested)
@@ -82,10 +90,10 @@ public partial class NLogoAnimation : Control, IScreenContext
 				_tween.Kill();
 				_tween = CreateTween().SetParallel();
 				_tween.TweenProperty(_logoContainer, "modulate", StsColors.transparentWhite, 0.25).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
-				await ToSignal(_tween, Tween.SignalName.Finished);
+				await _tween.AwaitFinished(this);
 				break;
 			}
-			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			await this.AwaitProcessFrame();
 		}
 		if (!_cancelled)
 		{
@@ -94,7 +102,7 @@ public partial class NLogoAnimation : Control, IScreenContext
 			_tween.TweenProperty(_bg, "modulate", _logoBgColor, 2.0).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic);
 			_tween.Chain();
 			_tween.TweenInterval(1.0);
-			await ToSignal(_tween, Tween.SignalName.Finished);
+			await _tween.AwaitFinished(this);
 		}
 	}
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Platform.Null;
@@ -25,14 +26,14 @@ public static class LeaderboardManager
 		}
 	}
 
-	public static Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name)
+	public static Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name, CancellationToken cancelToken = default(CancellationToken))
 	{
-		return _strategy.GetOrCreateLeaderboard(name);
+		return _strategy.GetOrCreateLeaderboard(name, cancelToken);
 	}
 
-	public static Task<ILeaderboardHandle?> GetLeaderboard(string name)
+	public static Task<ILeaderboardHandle?> GetLeaderboard(string name, CancellationToken cancelToken = default(CancellationToken))
 	{
-		return _strategy.GetLeaderboard(name);
+		return _strategy.GetLeaderboard(name, cancelToken);
 	}
 
 	public static Task UploadLocalScore(ILeaderboardHandle handle, int score, IReadOnlyList<ulong> userIds)
@@ -40,14 +41,14 @@ public static class LeaderboardManager
 		return _strategy.UploadLocalScore(handle, score, userIds);
 	}
 
-	public static Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handle, LeaderboardQueryType type, int startIndex, int resultCount)
+	public static Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handle, LeaderboardQueryType type, int startIndex, int resultCount, CancellationToken cancelToken = default(CancellationToken))
 	{
-		return _strategy.QueryLeaderboard(handle, type, startIndex, resultCount);
+		return _strategy.QueryLeaderboard(handle, type, startIndex, resultCount, cancelToken);
 	}
 
-	public static Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handle, IReadOnlyList<ulong> userIds)
+	public static Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handle, IReadOnlyList<ulong> userIds, CancellationToken cancelToken = default(CancellationToken))
 	{
-		return _strategy.QueryLeaderboardForUsers(handle, userIds);
+		return _strategy.QueryLeaderboardForUsers(handle, userIds, cancelToken);
 	}
 
 	public static int GetLeaderboardEntryCount(ILeaderboardHandle handle)

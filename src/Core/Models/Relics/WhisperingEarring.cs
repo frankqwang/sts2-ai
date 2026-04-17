@@ -11,6 +11,7 @@ using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Random;
 
 namespace MegaCrit.Sts2.Core.Models.Relics;
@@ -34,7 +35,7 @@ public sealed class WhisperingEarring : RelicModel
 		return amount + base.DynamicVars.Energy.BaseValue;
 	}
 
-	public override async Task BeforePlayPhaseStart(PlayerChoiceContext choiceContext, Player player)
+	public override async Task BeforePlayPhaseStartLate(PlayerChoiceContext choiceContext, Player player)
 	{
 		if (player != base.Owner)
 		{
@@ -56,6 +57,10 @@ public sealed class WhisperingEarring : RelicModel
 				{
 					break;
 				}
+				if (CombatManager.Instance.IsPlayerReadyToEndTurn(player))
+				{
+					break;
+				}
 				CardPile pile = PileType.Hand.GetPile(base.Owner);
 				CardModel card = pile.Cards.FirstOrDefault((CardModel c) => c.CanPlay());
 				if (card == null)
@@ -73,7 +78,7 @@ public sealed class WhisperingEarring : RelicModel
 			}
 		}
 		LocString line = (flag ? new LocString("relics", "WHISPERING_EARRING.warning") : new LocString("relics", "WHISPERING_EARRING.approval"));
-		TalkCmd.Play(line, base.Owner.Creature);
+		TalkCmd.Play(line, base.Owner.Creature, VfxColor.Purple);
 	}
 
 	private Creature? GetTarget(CardModel card, CombatState combatState)

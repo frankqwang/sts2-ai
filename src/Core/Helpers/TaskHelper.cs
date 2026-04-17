@@ -20,7 +20,7 @@ public static class TaskHelper
 		}
 		catch (Exception ex)
 		{
-			if (!(ex is TaskCanceledException))
+			if (!(ex is OperationCanceledException))
 			{
 				Log.Error(ex.ToString());
 				SentryService.CaptureException(ex);

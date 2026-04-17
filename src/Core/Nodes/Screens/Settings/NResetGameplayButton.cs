@@ -38,9 +38,12 @@ public partial class NResetGameplayButton : NSettingsButton
 		prefsSave.FastMode = FastModeType.Normal;
 		prefsSave.ShowRunTimer = false;
 		prefsSave.ShowCardIndices = false;
+		prefsSave.PhobiaMode = false;
 		prefsSave.IsLongPressEnabled = false;
 		prefsSave.UploadData = true;
 		prefsSave.TextEffectsEnabled = true;
+		prefsSave.ShowMultiplayerDrawings = true;
+		NGame.Instance?.EmitSignal(NGame.SignalName.PhobiaModeToggled);
 		NSettingsPanel ancestorOfType = this.GetAncestorOfType<NSettingsPanel>();
 		foreach (IResettableSettingNode item in ancestorOfType.GetChildrenRecursive<IResettableSettingNode>())
 		{

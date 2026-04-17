@@ -28,9 +28,13 @@ public interface IRunState : ICardScope, IPlayerCollection
 
 	MapCoord? CurrentMapCoord { get; }
 
+	GameMode GameMode { get; }
+
 	MapPoint? CurrentMapPoint { get; }
 
-	RunLocation CurrentLocation { get; }
+	RunLocation RunLocation { get; }
+
+	MapLocation MapLocation { get; }
 
 	int ActFloor { get; set; }
 
@@ -82,9 +86,11 @@ public interface IRunState : ICardScope, IPlayerCollection
 
 	void AppendToMapPointHistory(MapPointType mapPointType, RoomType initialRoomType, ModelId? modelId);
 
-	MapPointHistoryEntry? GetHistoryEntryFor(RunLocation location);
+	MapPointHistoryEntry? GetHistoryEntryFor(MapLocation location);
 
 	IEnumerable<AbstractModel> IterateHookListeners(CombatState? childCombatState);
+
+	int GetAndIncrementNextRoomId();
 
 	static IRunState GetFrom(IEnumerable<Creature> creatures)
 	{
@@ -98,7 +104,12 @@ public interface IRunState : ICardScope, IPlayerCollection
 		{
 			return creature2.PetOwner.RunState;
 		}
-		Log.Warn("No player or pet creature found in creatures list! If you're calling a developer console command or you're in a test, this is okay, but it's probably a bug outside of tests. Falling back to null run state.");
+		Creature creature3 = creatures.FirstOrDefault((Creature c) => c.CombatState != null);
+		if (creature3 != null)
+		{
+			return creature3.CombatState.RunState;
+		}
+		Log.Warn("Unable to extract RunState from creatures list! If you're in a test, this is okay, but it's probably a bug outside of tests. Falling back to null run state.");
 		return NullRunState.Instance;
 	}
 }

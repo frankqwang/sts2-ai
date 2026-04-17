@@ -31,6 +31,8 @@ public partial class NTopBar : Control
 
 	private Control _modifiersContainer;
 
+	private Control _achievementLock;
+
 	private Control _ascensionIcon;
 
 	private MegaLabel _ascensionLabel;
@@ -84,6 +86,7 @@ public partial class NTopBar : Control
 		Portrait = GetNode<NTopBarPortrait>("%TopBarPortrait");
 		PortraitTip = GetNode<NTopBarPortraitTip>("%TopBarPortraitTip");
 		Timer = GetNode<NRunTimer>("%TimerContainer");
+		_achievementLock = GetNode<Control>("%AchievementLock");
 		_ascensionIcon = GetNode<Control>("%AscensionIcon");
 		_ascensionLabel = GetNode<MegaLabel>("%AscensionLabel");
 		_ascensionHsv = (ShaderMaterial)_ascensionIcon.Material;
@@ -112,6 +115,7 @@ public partial class NTopBar : Control
 			_ascensionIcon.Visible = true;
 			_ascensionLabel.SetTextAutoSize(runState.AscensionLevel.ToString());
 		}
+		_achievementLock.Visible = runState.GameMode.AreAchievementsAndEpochsLocked();
 		_modifiersContainer.Visible = runState.Modifiers.Count > 0;
 		foreach (ModifierModel modifier in runState.Modifiers)
 		{
@@ -225,6 +229,14 @@ public partial class NTopBar : Control
 			FloorIcon.FocusNeighborRight = BossIcon.GetPath();
 			BossIcon.FocusNeighborLeft = FloorIcon.GetPath();
 			BossIcon.FocusNeighborRight = BossIcon.GetPath();
+			if (PortraitTip.ShowTip)
+			{
+				PortraitTip.FocusNeighborRight = Hp.GetPath();
+				PortraitTip.FocusNeighborLeft = PortraitTip.GetPath();
+				PortraitTip.FocusNeighborTop = PortraitTip.GetPath();
+				PortraitTip.FocusNeighborBottom = PortraitTip.GetPath();
+				Hp.FocusNeighborLeft = PortraitTip.GetPath();
+			}
 		}
 	}
 }

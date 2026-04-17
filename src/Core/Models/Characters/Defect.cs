@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.PotionPools;
 using MegaCrit.Sts2.Core.Models.RelicPools;
 using MegaCrit.Sts2.Core.Models.Relics;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 
 namespace MegaCrit.Sts2.Core.Models.Characters;
 
@@ -32,7 +33,7 @@ public sealed class Defect : CharacterModel
 
 	public override PotionPoolModel PotionPool => ModelDb.PotionPool<DefectPotionPool>();
 
-	public Vector2 EyelineOffset => new Vector2(34f, -30f);
+	public static Vector2 EyelineOffset => new Vector2(34f, -30f);
 
 	public override IEnumerable<CardModel> StartingDeck => new global::_003C_003Ez__ReadOnlyArray<CardModel>(new CardModel[10]
 	{
@@ -59,6 +60,8 @@ public sealed class Defect : CharacterModel
 	public override int BaseOrbSlotCount => 3;
 
 	public override Color DialogueColor => new Color("13446B");
+
+	public override VfxColor SpeechBubbleColor => VfxColor.Blue;
 
 	public override Color MapDrawingColor => new Color("0D638C");
 

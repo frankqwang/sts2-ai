@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
@@ -147,6 +148,7 @@ public sealed partial class NDeckUpgradeSelectScreen : NCardGridSelectionScreen
 			if (UseSingleSelection)
 			{
 				GetViewport().GuiReleaseFocus();
+				_grid.FocusBehaviorRecursive = FocusBehaviorRecursiveEnum.Disabled;
 				_upgradeSinglePreviewContainer.Visible = true;
 				_upgradeSinglePreviewContainer.MouseFilter = MouseFilterEnum.Stop;
 				_singlePreview.Card = card;
@@ -154,6 +156,7 @@ public sealed partial class NDeckUpgradeSelectScreen : NCardGridSelectionScreen
 				_singlePreviewConfirmButton.Enable();
 				_grid.SetCanScroll(canScroll: false);
 				_closeButton.Disable();
+				ActiveScreenContext.Instance.Update();
 			}
 			else
 			{
@@ -162,6 +165,7 @@ public sealed partial class NDeckUpgradeSelectScreen : NCardGridSelectionScreen
 					return;
 				}
 				GetViewport().GuiReleaseFocus();
+				_grid.FocusBehaviorRecursive = FocusBehaviorRecursiveEnum.Disabled;
 				_upgradeMultiPreviewContainer.Visible = true;
 				_upgradeMultiPreviewContainer.MouseFilter = MouseFilterEnum.Stop;
 				_multiPreviewCancelButton.Enable();
@@ -178,6 +182,7 @@ public sealed partial class NDeckUpgradeSelectScreen : NCardGridSelectionScreen
 					_grid.SetCanScroll(canScroll: false);
 					_closeButton.Disable();
 				}
+				ActiveScreenContext.Instance.Update();
 			}
 		}
 		else
@@ -217,6 +222,7 @@ public sealed partial class NDeckUpgradeSelectScreen : NCardGridSelectionScreen
 			_multiPreviewCancelButton.Disable();
 			_multiPreviewConfirmButton.Disable();
 		}
+		_grid.FocusBehaviorRecursive = FocusBehaviorRecursiveEnum.Inherited;
 		_grid.SetCanScroll(canScroll: true);
 		if (_prefs.Cancelable)
 		{
@@ -228,6 +234,7 @@ public sealed partial class NDeckUpgradeSelectScreen : NCardGridSelectionScreen
 		}
 		_grid.GetCardHolder(_selectedCards.Last())?.TryGrabFocus();
 		_selectedCards.Clear();
+		ActiveScreenContext.Instance.Update();
 	}
 
 	private void ConfirmSelection(NButton _)

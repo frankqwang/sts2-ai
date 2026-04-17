@@ -25,6 +25,6 @@ public sealed class SerpentForm : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars["SerpentFormPower"].UpgradeValueBy(1m);
+		base.DynamicVars["SerpentFormPower"].UpgradeValueBy(2m);
 	}
 }

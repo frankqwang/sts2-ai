@@ -133,9 +133,11 @@ public partial class NCreditsScreen : Control, IScreenContext
 		GetNode<MegaLabel>("%ptbHeader").Text = new LocString("credits", "LOC_PTB.header").GetRawText();
 		GetNode<MegaRichTextLabel>("%ptbNames").Text = new LocString("credits", "LOC_PTB.names").GetRawText();
 		GetNode<MegaLabel>("%zhsHeader").Text = new LocString("credits", "LOC_ZHS.header").GetRawText();
-		GetNode<MegaRichTextLabel>("%zhsNames").Text = new LocString("credits", "LOC_ZHS.names").GetRawText();
+		(string, string) tuple = SplitTwoColumn(new LocString("credits", "LOC_ZHS.names").GetRawText());
+		GetNode<MegaRichTextLabel>("%zhsRoles").Text = tuple.Item1;
+		GetNode<MegaRichTextLabel>("%zhsNames").Text = tuple.Item2;
 		GetNode<MegaLabel>("%fraHeader").Text = new LocString("credits", "LOC_FRA.header").GetRawText();
-		(string, string) tuple = SplitTwoColumn(new LocString("credits", "LOC_FRA.names").GetRawText());
+		tuple = SplitTwoColumn(new LocString("credits", "LOC_FRA.names").GetRawText());
 		GetNode<MegaRichTextLabel>("%fraRoles").Text = tuple.Item1;
 		GetNode<MegaRichTextLabel>("%fraNames").Text = tuple.Item2;
 		GetNode<MegaLabel>("%deuHeader").Text = new LocString("credits", "LOC_DEU.header").GetRawText();

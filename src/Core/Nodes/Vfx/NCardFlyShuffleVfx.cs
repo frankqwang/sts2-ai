@@ -6,6 +6,7 @@ using Godot;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.TestSupport;
@@ -118,7 +119,7 @@ public partial class NCardFlyShuffleVfx : Control
 		}
 		_fadeOutTween = CreateTween();
 		_fadeOutTween.TweenProperty(this, "modulate:a", 0f, 0.800000011920929);
-		await Task.Delay(800);
+		await _fadeOutTween.AwaitFinished(this);
 		this.QueueFreeSafely();
 	}
 

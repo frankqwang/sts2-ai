@@ -85,8 +85,7 @@ public abstract partial class NCardPlay : Node
 				Vector2 size = GetViewport().GetVisibleRect().Size;
 				Holder.SetTargetPosition(new Vector2(size.X / 2f, size.Y - Holder.Size.Y));
 			}
-			Cleanup();
-			EmitSignal(SignalName.Finished, true);
+			Cleanup(isFinished: true);
 			NCombatRoom.Instance?.Ui.Hand.TryGrabFocus();
 		}
 		else
@@ -100,8 +99,7 @@ public abstract partial class NCardPlay : Node
 		if (!_isTryingToPlayCard)
 		{
 			ClearTarget();
-			Cleanup();
-			EmitSignal(SignalName.Finished, false);
+			Cleanup(isFinished: false);
 			OnCancelPlayCard();
 		}
 	}
@@ -110,11 +108,15 @@ public abstract partial class NCardPlay : Node
 	{
 	}
 
-	protected virtual void Cleanup()
+	protected virtual void Cleanup(bool isFinished)
 	{
 		HideTargetingVisuals();
 		HideEvokingOrbs();
-		this.QueueFreeSafely();
+		if (GodotObject.IsInstanceValid(this))
+		{
+			EmitSignal(SignalName.Finished, isFinished);
+			this.QueueFreeSafely();
+		}
 	}
 
 	protected void OnCreatureHover(NCreature creature)

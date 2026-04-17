@@ -62,6 +62,8 @@ public partial class NRewardsScreen : Control, IOverlayScreen, IScreenContext
 
 	private bool _isTerminal;
 
+	private bool _skipDisallowed;
+
 	private readonly TaskCompletionSource _closedCompletionSource = new TaskCompletionSource();
 
 	private static readonly LocString _waitingLoc = new LocString("gameplay_ui", "MULTIPLAYER_WAITING");
@@ -195,6 +197,15 @@ public partial class NRewardsScreen : Control, IOverlayScreen, IScreenContext
 		TaskHelper.RunSafely(RelicFtueCheck());
 	}
 
+	public void DisallowSkipping()
+	{
+		_skipDisallowed = true;
+		if (_proceedButton.IsSkip)
+		{
+			_proceedButton.Disable();
+		}
+	}
+
 	private async Task RelicFtueCheck()
 	{
 		if (SaveManager.Instance.SeenFtue("obtain_relic_ftue"))
@@ -250,6 +261,7 @@ public partial class NRewardsScreen : Control, IOverlayScreen, IScreenContext
 				_fadeTween.TweenProperty(GetNode<Control>("Rewards"), "modulate:a", 0f, 0.25);
 				NOverlayStack.Instance.HideBackstop();
 				_proceedButton.UpdateText(NProceedButton.ProceedLoc);
+				TryEnableProceedButton();
 				_proceedButton.SetPulseState(isPulsing: true);
 				_rewardsContainer.FocusMode = FocusModeEnum.None;
 				IsComplete = true;
@@ -363,7 +375,7 @@ public partial class NRewardsScreen : Control, IOverlayScreen, IScreenContext
 
 	private void TryEnableProceedButton()
 	{
-		if (Hook.ShouldProceedToNextMapPoint(_runState) && !_proceedButton.IsEnabled)
+		if ((!_skipDisallowed || !_proceedButton.IsSkip) && Hook.ShouldProceedToNextMapPoint(_runState) && !_proceedButton.IsEnabled)
 		{
 			if (_isTerminal && _rewardButtons.Count == 0)
 			{

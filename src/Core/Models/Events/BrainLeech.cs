@@ -34,7 +34,7 @@ public sealed class BrainLeech : EventModel
 		new IntVar("FromCardChoiceCount", 5m)
 	});
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		return runState.CurrentActIndex < 2;
 	}

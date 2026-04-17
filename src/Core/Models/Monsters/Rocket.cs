@@ -36,7 +36,7 @@ public sealed class Rocket : MonsterModel
 		}
 	}
 
-	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 199, 189);
+	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 209, 199);
 
 	public override int MaxInitialHp => MinInitialHp;
 
@@ -45,6 +45,8 @@ public sealed class Rocket : MonsterModel
 	private int PrecisionBeamDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 20, 18);
 
 	private int LaserDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 35, 31);
+
+	private int ChargeUpStrengthGain => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 3, 2);
 
 	protected override MonsterMoveStateMachine GenerateMoveStateMachine()
 	{
@@ -119,7 +121,7 @@ public sealed class Rocket : MonsterModel
 	private async Task ChargeUpMove(IReadOnlyList<Creature> targets)
 	{
 		await Background.PlayRightSideChargeUpAnim(0.7f);
-		await PowerCmd.Apply<StrengthPower>(base.Creature, 2m, base.Creature, null);
+		await PowerCmd.Apply<StrengthPower>(base.Creature, ChargeUpStrengthGain, base.Creature, null);
 	}
 
 	private async Task LaserMove(IReadOnlyList<Creature> targets)

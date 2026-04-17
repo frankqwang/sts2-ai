@@ -50,9 +50,9 @@ public partial class NSweepingBeamVfx : Node2D
 		{
 			Vector2 vfxSpawnPosition = nCreature.VfxSpawnPosition;
 			Player player = owner.Player;
-			if (player != null && player.Character is Defect defect)
+			if (player != null && player.Character is Defect)
 			{
-				vfxSpawnPosition += defect.EyelineOffset;
+				vfxSpawnPosition += Defect.EyelineOffset;
 			}
 			Array<Vector2> array = new Array<Vector2>();
 			foreach (Creature target in targets)

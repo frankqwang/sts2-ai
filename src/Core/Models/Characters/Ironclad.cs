@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.PotionPools;
 using MegaCrit.Sts2.Core.Models.RelicPools;
 using MegaCrit.Sts2.Core.Models.Relics;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 
 namespace MegaCrit.Sts2.Core.Models.Characters;
 
@@ -55,6 +56,8 @@ public sealed class Ironclad : CharacterModel
 	public override Color EnergyLabelOutlineColor => new Color("801212FF");
 
 	public override Color DialogueColor => new Color("590700");
+
+	public override VfxColor SpeechBubbleColor => VfxColor.Red;
 
 	public override Color MapDrawingColor => new Color("CB282B");
 

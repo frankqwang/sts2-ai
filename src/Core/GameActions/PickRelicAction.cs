@@ -11,7 +11,7 @@ public class PickRelicAction : GameAction
 {
 	private readonly Player _player;
 
-	private readonly int _relicIndex;
+	private readonly int? _relicIndex;
 
 	public override ulong OwnerId => _player.NetId;
 
@@ -19,7 +19,7 @@ public class PickRelicAction : GameAction
 
 	public TreasureRoomRelicSynchronizer? TestSynchronizer { get; set; }
 
-	public PickRelicAction(Player player, int relicIndex)
+	public PickRelicAction(Player player, int? relicIndex)
 	{
 		_player = player;
 		_relicIndex = relicIndex;

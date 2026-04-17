@@ -8,7 +8,7 @@ public interface IStartRunLobbyListener
 {
 	void PlayerConnected(LobbyPlayer player);
 
-	void PlayerChanged(LobbyPlayer player);
+	void PlayerChanged(LobbyPlayer player, bool isRandomCharacterResolution);
 
 	void AscensionChanged();
 

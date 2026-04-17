@@ -28,7 +28,7 @@ public class TreasureRoom : AbstractRoom
 		}
 	}
 
-	public override async Task Enter(IRunState? runState, bool isRestoringRoomStackBase)
+	public override async Task EnterInternal(IRunState? runState, bool isRestoringRoomStackBase)
 	{
 		if (isRestoringRoomStackBase)
 		{
@@ -46,6 +46,7 @@ public class TreasureRoom : AbstractRoom
 
 	public override Task Exit(IRunState? runState)
 	{
+		RunManager.Instance.TreasureRoomRelicSynchronizer.OnRoomExited();
 		return Task.CompletedTask;
 	}
 

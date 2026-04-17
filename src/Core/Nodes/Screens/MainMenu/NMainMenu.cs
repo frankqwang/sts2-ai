@@ -177,7 +177,7 @@ public partial class NMainMenu : Control, IScreenContext
 		ActiveScreenContext.Instance.Update();
 		RefreshButtons();
 		CheckCommandLineArgs();
-		if (SaveManager.Instance.SettingsSave.ModSettings == null && ModManager.AllMods.Count > 0)
+		if (SaveManager.Instance.SettingsSave.ModSettings == null && ModManager.Mods.Count > 0)
 		{
 			NModalContainer.Instance.Add(NConfirmModLoadingPopup.Create());
 		}
@@ -436,7 +436,7 @@ public partial class NMainMenu : Control, IScreenContext
 				RunHistoryUtilities.CreateRunHistoryEntry(saveData, victory: false, isAbandoned: true, saveData.PlatformType);
 				if (saveData.DailyTime.HasValue)
 				{
-					int score = ScoreUtility.CalculateScore(saveData, won: false);
+					int score = ScoreUtility.CalculateDailyScore(saveData, saveData.Players.First().NetId, isVictory: false);
 					TaskHelper.RunSafely(DailyRunUtility.UploadScore(saveData.DailyTime.Value, score, saveData.Players));
 				}
 			}

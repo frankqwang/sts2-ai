@@ -106,21 +106,25 @@ public partial class NMonsterDeathVfx : Node2D
 		{
 			NCreature nCreature = _creatureNodes[i];
 			NCreatureVisuals visuals = nCreature.Visuals;
-			MegaSprite spineBody = visuals.SpineBody;
-			Vector2 scale = visuals.Body.Scale;
+			Vector2 scale = visuals.GetCurrentBody().Scale;
 			Vector2 vector = nCreature.Entity.Monster?.ExtraDeathVfxPadding ?? MonsterModel.defaultDeathVfxPadding;
-			if (visuals.HasSpineAnimation)
+			if (visuals != null && visuals.HasSpineAnimation && !visuals.IsUsingPhobiaModeBody)
 			{
-				Vector2 scale2 = instance.SceneContainer.Scale;
-				Rect2 bounds = spineBody.GetSkeleton().GetBounds();
-				Rect2 rect2 = new Rect2(bounds.Position * scale * scale2, bounds.Size * scale * scale2);
-				Vector2 vector2 = new Vector2(Math.Min(rect2.Position.X, rect2.End.X), Math.Min(rect2.Position.Y, rect2.End.Y));
-				Vector2 vector3 = new Vector2(Math.Max(rect2.Position.X, rect2.End.X), Math.Max(rect2.Position.Y, rect2.End.Y));
-				Vector2 vector4 = vector3 - vector2;
-				Vector2 vector5 = vector4 * vector;
-				Vector2 vector6 = (vector5 - vector4) * 0.5f;
-				Rect2 rect3 = new Rect2(visuals.Body.GlobalPosition + vector2 - vector6, vector5);
-				rect = (rect.HasValue ? new Rect2?(rect.Value.Merge(rect3)) : new Rect2?(rect3));
+				MegaSprite spineBody = visuals.SpineBody;
+				MegaSkeleton skeleton = spineBody.GetSkeleton();
+				if (skeleton != null)
+				{
+					Vector2 scale2 = instance.SceneContainer.Scale;
+					Rect2 bounds = skeleton.GetBounds();
+					Rect2 rect2 = new Rect2(bounds.Position * scale * scale2, bounds.Size * scale * scale2);
+					Vector2 vector2 = new Vector2(Math.Min(rect2.Position.X, rect2.End.X), Math.Min(rect2.Position.Y, rect2.End.Y));
+					Vector2 vector3 = new Vector2(Math.Max(rect2.Position.X, rect2.End.X), Math.Max(rect2.Position.Y, rect2.End.Y));
+					Vector2 vector4 = vector3 - vector2;
+					Vector2 vector5 = vector4 * vector;
+					Vector2 vector6 = (vector5 - vector4) * 0.5f;
+					Rect2 rect3 = new Rect2(visuals.GetCurrentBody().GlobalPosition + vector2 - vector6, vector5);
+					rect = (rect.HasValue ? new Rect2?(rect.Value.Merge(rect3)) : new Rect2?(rect3));
+				}
 			}
 			else
 			{
@@ -142,13 +146,13 @@ public partial class NMonsterDeathVfx : Node2D
 		Vector2 vector10 = base.GlobalPosition - size * 0.5f;
 		foreach (NCreature creatureNode in _creatureNodes)
 		{
-			if (GodotObject.IsInstanceValid(creatureNode.Visuals.Body))
+			if (GodotObject.IsInstanceValid(creatureNode.Visuals.GetCurrentBody()))
 			{
-				Vector2 globalPosition = creatureNode.Visuals.Body.GlobalPosition;
-				creatureNode.Visuals.Body.Reparent(node);
-				if (GodotObject.IsInstanceValid(creatureNode.Visuals.Body))
+				Vector2 globalPosition = creatureNode.Visuals.GetCurrentBody().GlobalPosition;
+				creatureNode.Visuals.GetCurrentBody().Reparent(node);
+				if (GodotObject.IsInstanceValid(creatureNode.Visuals.GetCurrentBody()))
 				{
-					creatureNode.Visuals.Body.Position = globalPosition - vector10;
+					creatureNode.Visuals.GetCurrentBody().Position = globalPosition - vector10;
 				}
 			}
 		}

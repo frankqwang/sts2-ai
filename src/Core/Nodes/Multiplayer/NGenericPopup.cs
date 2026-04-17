@@ -34,14 +34,10 @@ public partial class NGenericPopup : Control, IScreenContext
 		return PreloadManager.Cache.GetScene(_scenePath).Instantiate<NGenericPopup>(PackedScene.GenEditState.Disabled);
 	}
 
-	public override void _Ready()
+	public Task<bool> WaitForConfirmation(LocString body, LocString header, LocString? noButton, LocString yesButton)
 	{
 		_verticalPopup = GetNode<NVerticalPopup>("VerticalPopup");
 		_confirmationCompletionSource = new TaskCompletionSource<bool>();
-	}
-
-	public Task<bool> WaitForConfirmation(LocString body, LocString header, LocString? noButton, LocString yesButton)
-	{
 		_verticalPopup.SetText(header, body);
 		_verticalPopup.InitYesButton(yesButton, OnYesButtonPressed);
 		if (noButton != null)

@@ -197,22 +197,18 @@ public class AssetLoadingSession
 				case 3:
 					_finalizing.Enqueue(result);
 					continue;
-				case 2:
-					Log.Error("Failed loading asset: " + result);
-					_assetCache?.MarkAssetFailed(result);
-					continue;
 				case 0:
+				case 2:
 				{
-					Log.Warn("InvalidResource status for " + result + ", falling back to sync load");
+					Log.Warn($"Threaded load status {threadLoadStatus} for {result}, falling back to sync load");
 					Resource resource = ResourceLoader.Load<Resource>(result, null, ResourceLoader.CacheMode.Reuse);
 					if (resource != null)
 					{
 						AddToCache(resource, result);
+						continue;
 					}
-					else
-					{
-						Log.Error("Failed to load resource synchronously: " + result);
-					}
+					Log.Error("Failed to load resource synchronously: " + result);
+					_assetCache?.MarkAssetFailed(result);
 					continue;
 				}
 				case 1:

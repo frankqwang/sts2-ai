@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Exceptions;
@@ -33,7 +34,13 @@ public class GodotFileIo : ISaveStore
 		using Godot.FileAccess fileAccess = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
 		if (fileAccess == null)
 		{
-			return null;
+			Error openError = Godot.FileAccess.GetOpenError();
+			if (openError == Error.FileNotFound)
+			{
+				Log.Warn("Tried to read file at " + path + ", but there was no such file");
+				return null;
+			}
+			throw new SaveException($"Failed to open file for reading. path='{path}' error={openError}");
 		}
 		string asText = fileAccess.GetAsText();
 		fileAccess.Close();
@@ -63,12 +70,7 @@ public class GodotFileIo : ISaveStore
 	public int GetFileSize(string path)
 	{
 		path = GetFullPath(path);
-		using Godot.FileAccess fileAccess = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
-		if (fileAccess == null)
-		{
-			return 0;
-		}
-		return (int)fileAccess.GetLength();
+		return (int)Godot.FileAccess.GetSize(path);
 	}
 
 	public void SetLastModifiedTime(string path, DateTimeOffset time)
@@ -100,10 +102,14 @@ public class GodotFileIo : ISaveStore
 		{
 			throw new SaveException($"Failed to open file for writing. path='{text}' error={Godot.FileAccess.GetOpenError()}");
 		}
-		fileAccess.StoreBuffer(bytes);
-		fileAccess.Close();
-		RenameFile(text, path);
-		Log.Info($"Wrote {bytes.Length} bytes to path={path} save_dir={SaveDir}");
+		if (fileAccess.StoreBuffer(bytes))
+		{
+			fileAccess.Close();
+			RenameFile(text, path);
+			Log.Info($"Wrote {bytes.Length} bytes to path={path} save_dir={SaveDir}");
+			return;
+		}
+		throw new SaveException($"Failed to write {bytes.Length} bytes to path={path} save_dir={SaveDir}. Error: {fileAccess.GetError()}");
 	}
 
 	public Task WriteFileAsync(string path, string content)
@@ -137,7 +143,11 @@ public class GodotFileIo : ISaveStore
 
 	public void DeleteFile(string path)
 	{
-		DirAccess.RemoveAbsolute(GetFullPath(path));
+		Error error = DirAccess.RemoveAbsolute(GetFullPath(path));
+		if (error != Error.Ok)
+		{
+			Log.Error($"Error deleting path {path}: {error}");
+		}
 	}
 
 	public void RenameFile(string sourcePath, string destinationPath)
@@ -148,9 +158,24 @@ public class GodotFileIo : ISaveStore
 		}
 		sourcePath = GetFullPath(sourcePath);
 		destinationPath = GetFullPath(destinationPath);
-		Error error = DirAccess.RenameAbsolute(sourcePath, destinationPath);
-		if (error != Error.Ok)
+		for (int i = 1; i <= 4; i++)
 		{
+			Error error = DirAccess.RenameAbsolute(sourcePath, destinationPath);
+			if (error == Error.Ok)
+			{
+				break;
+			}
+			if (Godot.FileAccess.FileExists(destinationPath))
+			{
+				Log.Warn($"Rename reported error={error} but destination exists, treating as success. source={sourcePath}");
+				break;
+			}
+			if (i < 4)
+			{
+				Log.Warn($"Rename failed (attempt {i}/{4}), retrying. error={error} source={sourcePath}");
+				Thread.Sleep(50);
+				continue;
+			}
 			throw new SaveException($"Failed to rename file. error={error} source={sourcePath} destination={destinationPath} source_exists={Godot.FileAccess.FileExists(sourcePath)} destination_exists={Godot.FileAccess.FileExists(destinationPath)}");
 		}
 	}
@@ -186,19 +211,23 @@ public class GodotFileIo : ISaveStore
 		using DirAccess dirAccess = DirAccess.Open(directoryPath);
 		dirAccess.IncludeHidden = true;
 		string[] files = dirAccess.GetFiles();
-		foreach (string path in files)
+		foreach (string text in files)
 		{
-			dirAccess.Remove(path);
+			Error error = dirAccess.Remove(text);
+			if (error != Error.Ok)
+			{
+				throw new InvalidOperationException($"Got error {error} trying to delete file {text} in directory {directoryPath}");
+			}
 		}
 		string[] directories = dirAccess.GetDirectories();
-		foreach (string text in directories)
+		foreach (string text2 in directories)
 		{
-			DeleteDirectory(directoryPath + "/" + text);
+			DeleteDirectory(directoryPath + "/" + text2);
 		}
-		Error error = dirAccess.Remove("");
-		if (error != Error.Ok)
+		Error error2 = dirAccess.Remove("");
+		if (error2 != Error.Ok)
 		{
-			throw new InvalidOperationException($"Got error {error} trying to delete directory {directoryPath}");
+			throw new InvalidOperationException($"Got error {error2} trying to delete directory {directoryPath}");
 		}
 	}
 
@@ -215,8 +244,12 @@ public class GodotFileIo : ISaveStore
 		{
 			if (text.EndsWith(".tmp"))
 			{
-				Log.Info("Cleaned up orphaned " + text + " in " + directoryPath);
-				dirAccess.Remove(text);
+				Log.Info("Cleaning up orphaned " + text + " in " + directoryPath);
+				Error error = dirAccess.Remove(text);
+				if (error != Error.Ok)
+				{
+					Log.Warn($"Couldn't delete temporary file {text} in {directoryPath}, error={error}");
+				}
 			}
 		}
 	}
@@ -231,7 +264,7 @@ public class GodotFileIo : ISaveStore
 		using Godot.FileAccess fileAccess = Godot.FileAccess.Open(fullPath, Godot.FileAccess.ModeFlags.Read);
 		if (fileAccess == null)
 		{
-			Log.Warn("Failed to open source for backup copy. path=" + fullPath);
+			Log.Warn($"Failed to open source for backup copy. path={fullPath} error={Godot.FileAccess.GetOpenError()}");
 			return;
 		}
 		byte[] buffer = fileAccess.GetBuffer((long)fileAccess.GetLength());
@@ -239,10 +272,13 @@ public class GodotFileIo : ISaveStore
 		using Godot.FileAccess fileAccess2 = Godot.FileAccess.Open(text, Godot.FileAccess.ModeFlags.Write);
 		if (fileAccess2 == null)
 		{
-			Log.Warn("Failed to open backup for writing. path=" + text);
+			Log.Warn($"Failed to open backup for writing. path={text} error={Godot.FileAccess.GetOpenError()}");
 			return;
 		}
-		fileAccess2.StoreBuffer(buffer);
+		if (!fileAccess2.StoreBuffer(buffer))
+		{
+			Log.Warn($"Copying backup from {fullPath} to {text} failed: {fileAccess2.GetError()}");
+		}
 		fileAccess2.Close();
 	}
 

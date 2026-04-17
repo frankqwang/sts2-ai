@@ -42,8 +42,13 @@ public sealed partial class NSimpleCardSelectScreen : NCardGridSelectionScreen
 	public static NSimpleCardSelectScreen Create(IReadOnlyList<CardModel> cards, CardSelectorPrefs prefs)
 	{
 		NSimpleCardSelectScreen nSimpleCardSelectScreen = PreloadManager.Cache.GetScene(ScenePath).Instantiate<NSimpleCardSelectScreen>(PackedScene.GenEditState.Disabled);
+		List<CardModel> list = cards.ToList();
+		if (prefs.Comparison != null)
+		{
+			list.Sort(prefs.Comparison);
+		}
 		nSimpleCardSelectScreen.Name = "NSimpleCardSelectScreen";
-		nSimpleCardSelectScreen._cards = cards.ToList();
+		nSimpleCardSelectScreen._cards = list;
 		nSimpleCardSelectScreen._cardResults = null;
 		nSimpleCardSelectScreen._prefs = prefs;
 		return nSimpleCardSelectScreen;
@@ -52,9 +57,14 @@ public sealed partial class NSimpleCardSelectScreen : NCardGridSelectionScreen
 	public static NSimpleCardSelectScreen Create(IReadOnlyList<CardCreationResult> cards, CardSelectorPrefs prefs)
 	{
 		NSimpleCardSelectScreen nSimpleCardSelectScreen = PreloadManager.Cache.GetScene(ScenePath).Instantiate<NSimpleCardSelectScreen>(PackedScene.GenEditState.Disabled);
+		List<CardCreationResult> list = cards.ToList();
+		if (prefs.Comparison != null)
+		{
+			list.Sort((CardCreationResult c1, CardCreationResult c2) => prefs.Comparison(c1.Card, c2.Card));
+		}
 		nSimpleCardSelectScreen.Name = "NSimpleCardSelectScreen";
-		nSimpleCardSelectScreen._cards = cards.Select((CardCreationResult r) => r.Card).ToList();
-		nSimpleCardSelectScreen._cardResults = cards.ToList();
+		nSimpleCardSelectScreen._cardResults = list;
+		nSimpleCardSelectScreen._cards = nSimpleCardSelectScreen._cardResults.Select((CardCreationResult r) => r.Card).ToList();
 		nSimpleCardSelectScreen._prefs = prefs;
 		return nSimpleCardSelectScreen;
 	}

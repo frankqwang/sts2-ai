@@ -1,8 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
-using MegaCrit.Sts2.Core.Entities.Ascension;
-using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models.Encounters;
@@ -126,14 +124,8 @@ public sealed class Overgrowth : ActModel
 
 	public override MapPointTypeCounts GetMapPointTypes(Rng mapRng)
 	{
-		int num = mapRng.NextGaussianInt(7, 1, 6, 7);
-		if (AscensionHelper.HasAscension(AscensionLevel.Gloom))
-		{
-			num--;
-		}
-		return new MapPointTypeCounts(mapRng)
-		{
-			NumOfRests = num
-		};
+		int restCount = mapRng.NextGaussianInt(7, 1, 6, 7);
+		int unknownCount = MapPointTypeCounts.StandardRandomUnknownCount(mapRng);
+		return new MapPointTypeCounts(unknownCount, restCount);
 	}
 }

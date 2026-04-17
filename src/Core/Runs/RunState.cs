@@ -5,7 +5,9 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Map;
+using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Models.Singleton;
@@ -50,10 +52,13 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 			{
 				_visitedMapCoords.Clear();
 				ActFloor = 0;
+				NextRoomId = 0;
 				_currentActIndex = value;
 			}
 		}
 	}
+
+	public int NextRoomId { get; private set; }
 
 	public ActModel Act => Acts[CurrentActIndex];
 
@@ -85,7 +90,9 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		}
 	}
 
-	public RunLocation CurrentLocation => new RunLocation(CurrentMapCoord, CurrentActIndex);
+	public RunLocation RunLocation => new RunLocation(MapLocation, CurrentRoom?.Id);
+
+	public MapLocation MapLocation => new MapLocation(CurrentMapCoord, CurrentActIndex);
 
 	public int ActFloor { get; set; }
 
@@ -113,6 +120,8 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		}
 	}
 
+	public GameMode GameMode { get; init; }
+
 	public int AscensionLevel { get; init; }
 
 	public RunRngSet Rng { get; init; }
@@ -131,11 +140,11 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 
 	public MultiplayerScalingModel MultiplayerScalingModel { get; private set; }
 
-	public static RunState CreateForNewRun(IReadOnlyList<Player> players, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, int ascensionLevel, string seed)
+	public static RunState CreateForNewRun(IReadOnlyList<Player> players, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, GameMode gameMode, int ascensionLevel, string seed)
 	{
 		RunRngSet runRngSet = new RunRngSet(seed);
 		RunOddsSet odds = new RunOddsSet(runRngSet.UnknownMapPoint);
-		RunState result = CreateShared(players, acts, modifiers, 0, runRngSet, odds, new RelicGrabBag(refreshAllowed: true), ascensionLevel);
+		RunState result = CreateShared(players, acts, modifiers, gameMode, 0, runRngSet, odds, new RelicGrabBag(refreshAllowed: true), ascensionLevel);
 		foreach (Player player in players)
 		{
 			player.InitializeSeed(seed);
@@ -152,7 +161,7 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		List<SerializablePlayer> players = save.Players;
 		List<Player> players2 = players.Select(Player.FromSerializable).ToList();
 		RunRngSet runRngSet = RunRngSet.FromSave(save.SerializableRng);
-		RunState runState = CreateShared(players2, save.Acts.Select(ActModel.FromSave).ToList(), save.Modifiers.Select(ModifierModel.FromSerializable).ToList(), save.CurrentActIndex, runRngSet, RunOddsSet.FromSerializable(save.SerializableOdds, runRngSet.UnknownMapPoint), RelicGrabBag.FromSerializable(save.SerializableSharedRelicGrabBag), save.Ascension);
+		RunState runState = CreateShared(players2, save.Acts.Select(ActModel.FromSave).ToList(), save.Modifiers.Select(ModifierModel.FromSerializable).ToList(), save.GameMode, save.CurrentActIndex, runRngSet, RunOddsSet.FromSerializable(save.SerializableOdds, runRngSet.UnknownMapPoint), RelicGrabBag.FromSerializable(save.SerializableSharedRelicGrabBag), save.Ascension);
 		runState._visitedMapCoords.AddRange(save.VisitedMapCoords);
 		runState._visitedEventIds.UnionWith(save.EventsSeen);
 		runState._mapPointHistory.AddRange(new global::_003C_003Ez__ReadOnlyArray<List<MapPointHistoryEntry>>(save.MapPointHistory.ToArray()));
@@ -160,14 +169,14 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		return runState;
 	}
 
-	public static RunState CreateForTest(IReadOnlyList<Player>? players = null, IReadOnlyList<ActModel>? acts = null, IReadOnlyList<ModifierModel>? modifiers = null, int ascensionLevel = 0, string? seed = null)
+	public static RunState CreateForTest(IReadOnlyList<Player>? players = null, IReadOnlyList<ActModel>? acts = null, IReadOnlyList<ModifierModel>? modifiers = null, GameMode gameMode = GameMode.Standard, int ascensionLevel = 0, string? seed = null)
 	{
 		if (seed == null)
 		{
 			seed = SeedHelper.GetRandomSeed();
 		}
 		RunRngSet runRngSet = new RunRngSet(seed);
-		RunState runState = CreateShared(players ?? new global::_003C_003Ez__ReadOnlySingleElementList<Player>(Player.CreateForNewRun<Deprived>(MegaCrit.Sts2.Core.Unlocks.UnlockState.all, 1uL)), (acts ?? ActModel.GetDefaultList()).Select((ActModel a) => a.ToMutable()).ToList(), modifiers ?? Array.Empty<ModifierModel>(), 0, runRngSet, new RunOddsSet(runRngSet.UnknownMapPoint), new RelicGrabBag(refreshAllowed: true), ascensionLevel);
+		RunState runState = CreateShared(players ?? new global::_003C_003Ez__ReadOnlySingleElementList<Player>(Player.CreateForNewRun<Deprived>(MegaCrit.Sts2.Core.Unlocks.UnlockState.all, 1uL)), (acts ?? ActModel.GetDefaultList()).Select((ActModel a) => a.ToMutable()).ToList(), modifiers ?? Array.Empty<ModifierModel>(), gameMode, 0, runRngSet, new RunOddsSet(runRngSet.UnknownMapPoint), new RelicGrabBag(refreshAllowed: true), ascensionLevel);
 		foreach (Player player in runState.Players)
 		{
 			player.InitializeSeed(seed);
@@ -175,9 +184,9 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		return runState;
 	}
 
-	private static RunState CreateShared(IReadOnlyList<Player> players, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, int currentActIndex, RunRngSet rng, RunOddsSet odds, RelicGrabBag sharedRelicGrabBag, int ascensionLevel)
+	private static RunState CreateShared(IReadOnlyList<Player> players, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, GameMode gameMode, int currentActIndex, RunRngSet rng, RunOddsSet odds, RelicGrabBag sharedRelicGrabBag, int ascensionLevel)
 	{
-		RunState runState = new RunState(players, acts, modifiers, currentActIndex, rng, odds, sharedRelicGrabBag, ascensionLevel);
+		RunState runState = new RunState(players, acts, modifiers, gameMode, currentActIndex, rng, odds, sharedRelicGrabBag, ascensionLevel);
 		foreach (Player player in players)
 		{
 			player.RunState = runState;
@@ -191,7 +200,7 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		return runState;
 	}
 
-	private RunState(IReadOnlyList<Player> players, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, int currentActIndex, RunRngSet rng, RunOddsSet odds, RelicGrabBag sharedRelicGrabBag, int ascensionLevel)
+	private RunState(IReadOnlyList<Player> players, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, GameMode gameMode, int currentActIndex, RunRngSet rng, RunOddsSet odds, RelicGrabBag sharedRelicGrabBag, int ascensionLevel)
 	{
 		foreach (ActModel act in acts)
 		{
@@ -200,6 +209,7 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		_players.AddRange(players);
 		Acts = acts;
 		Modifiers = modifiers;
+		GameMode = gameMode;
 		CurrentActIndex = currentActIndex;
 		Rng = rng;
 		Odds = odds;
@@ -294,6 +304,7 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 			return false;
 		}
 		_visitedMapCoords.Add(coord);
+		NextRoomId = 0;
 		return true;
 	}
 
@@ -341,7 +352,7 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		_mapPointHistory[CurrentActIndex].Add(mapPointHistoryEntry);
 	}
 
-	public MapPointHistoryEntry? GetHistoryEntryFor(RunLocation location)
+	public MapPointHistoryEntry? GetHistoryEntryFor(MapLocation location)
 	{
 		if (location.actIndex >= _mapPointHistory.Count || !location.coord.HasValue || location.coord?.row >= _mapPointHistory[location.actIndex].Count)
 		{
@@ -388,13 +399,17 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 				yield return item;
 			}
 		}
+		foreach (AbstractModel item2 in ModHelper.IterateAllRunStateSubscribers(this))
+		{
+			yield return item2;
+		}
 		if (childCombatState == null)
 		{
 			yield break;
 		}
-		foreach (AbstractModel item2 in childCombatState.IterateHookListeners())
+		foreach (AbstractModel item3 in childCombatState.IterateHookListeners())
 		{
-			yield return item2;
+			yield return item3;
 		}
 	}
 
@@ -437,6 +452,15 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		Acts = list;
 	}
 
+	public void RemoveStaleVisitedMapCoords(ActMap map)
+	{
+		int num = _visitedMapCoords.RemoveAll((MapCoord coord) => !map.HasPoint(coord));
+		if (num > 0)
+		{
+			Log.Error($"Removed {num} stale visited map coord(s) that don't exist in the current map");
+		}
+	}
+
 	public void ClearVisitedMapCoordsDebug()
 	{
 		_visitedMapCoords.Clear();
@@ -455,6 +479,13 @@ public class RunState : IRunState, ICardScope, IPlayerCollection
 		}
 		array[num] = modifier;
 		Modifiers = new global::_003C_003Ez__ReadOnlyArray<ModifierModel>(array);
+	}
+
+	public int GetAndIncrementNextRoomId()
+	{
+		int nextRoomId = NextRoomId;
+		NextRoomId++;
+		return nextRoomId;
 	}
 
 	private static bool Contains(AbstractModel model)

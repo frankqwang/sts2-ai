@@ -62,7 +62,7 @@ public sealed class BeltBuckle : RelicModel
 	public override async Task AfterPotionProcured(PotionModel potion)
 	{
 		RefreshStatus();
-		if (CombatManager.Instance.IsInProgress)
+		if (CombatManager.Instance.IsInProgress && base.Owner.Potions.Any())
 		{
 			await RemoveDexterity();
 		}

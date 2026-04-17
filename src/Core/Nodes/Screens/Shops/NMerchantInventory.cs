@@ -43,6 +43,10 @@ public partial class NMerchantInventory : Control, IScreenContext
 
 	private ColorRect _backstop;
 
+	private Control _inputBlocker;
+
+	private bool _isInputBlocked;
+
 	private NMerchantSlot? _lastSlot;
 
 	public MerchantInventory? Inventory { get; private set; }
@@ -55,6 +59,10 @@ public partial class NMerchantInventory : Control, IScreenContext
 	{
 		get
 		{
+			if (_isInputBlocked)
+			{
+				return _inputBlocker;
+			}
 			NMerchantSlot lastSlot = _lastSlot;
 			if (lastSlot != null)
 			{
@@ -87,6 +95,7 @@ public partial class NMerchantInventory : Control, IScreenContext
 			Close();
 		}));
 		_backButton.Disable();
+		_inputBlocker = GetNode<Control>("%InputBlocker");
 		NGame.Instance.SetScreenShakeTarget(this);
 	}
 
@@ -166,7 +175,10 @@ public partial class NMerchantInventory : Control, IScreenContext
 		}
 		TaskHelper.RunSafely(DoOpenAnimation());
 		base.MouseFilter = MouseFilterEnum.Stop;
-		_backButton.Enable();
+		if (!_isInputBlocked)
+		{
+			_backButton.Enable();
+		}
 		foreach (NMerchantCard cardSlot in GetCardSlots())
 		{
 			cardSlot.OnInventoryOpened();
@@ -222,7 +234,7 @@ public partial class NMerchantInventory : Control, IScreenContext
 	{
 		UpdateNavigation();
 		NMerchantSlot lastSlot = GetAllSlots().FirstOrDefault((NMerchantSlot s) => s.Entry == entry);
-		if (lastSlot != null)
+		if (lastSlot != null && !_isInputBlocked)
 		{
 			(from s in GetAllSlots()
 				where s.Visible && s != lastSlot
@@ -443,6 +455,28 @@ public partial class NMerchantInventory : Control, IScreenContext
 		}
 	}
 
+	public void BlockInput()
+	{
+		_isInputBlocked = true;
+		_inputBlocker.MouseFilter = MouseFilterEnum.Stop;
+		NHotkeyManager.Instance.AddBlockingScreen(_inputBlocker);
+		if (_backButton.IsEnabled)
+		{
+			_backButton.Disable();
+		}
+	}
+
+	public void UnblockInput()
+	{
+		_isInputBlocked = false;
+		_inputBlocker.MouseFilter = MouseFilterEnum.Ignore;
+		NHotkeyManager.Instance.RemoveBlockingScreen(_inputBlocker);
+		if (!_backButton.IsEnabled)
+		{
+			_backButton.Enable();
+		}
+	}
+
 	private Control? GetClosestVisible(int idx, List<NMerchantSlot> row)
 	{
 		NMerchantSlot nMerchantSlot = row[Math.Min(idx, row.Count - 1)];
@@ -483,9 +517,12 @@ public partial class NMerchantInventory : Control, IScreenContext
 			if (_characterCardContainer != null && NControllerManager.Instance.IsUsingController && _inventoryTween != null && _inventoryTween.IsRunning())
 			{
 				float num = 80f - _slotsContainer.Position.Y;
-				MerchantHand.PointAtTarget(_characterCardContainer.GetChild<NMerchantCard>(0).GlobalPosition + Vector2.Down * num);
+				MerchantHand.PointAtTarget(_characterCardContainer.GetChild<NMerchantCard>(0), Vector2.Down * num);
 			}
-			_backButton.Enable();
+			if (!_isInputBlocked)
+			{
+				_backButton.Enable();
+			}
 		}
 		else
 		{

@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.ControllerInput;
 using MegaCrit.Sts2.Core.Debug;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.Debug;
+using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Saves;
 
 namespace MegaCrit.Sts2.Core.Nodes.CommonUi;
@@ -323,7 +324,7 @@ public partial class NInputManager : Node
 
 	private void ProcessDebugKeyInput(InputEvent inputEvent)
 	{
-		if (!(inputEvent is InputEventKey inputEventKey) || NDevConsole.Instance.Visible || !NGame.IsTrailerMode)
+		if (!(inputEvent is InputEventKey inputEventKey) || PlatformUtil.IsPlatformOverlayOpen() || NDevConsole.Instance.Visible || !NGame.IsTrailerMode)
 		{
 			return;
 		}
@@ -343,7 +344,7 @@ public partial class NInputManager : Node
 
 	private void ProcessShortcutKeyInput(InputEvent inputEvent)
 	{
-		if (NGame.Instance.Transition.InTransition || !(inputEvent is InputEventKey inputEventKey))
+		if (NGame.Instance.Transition.InTransition || PlatformUtil.IsPlatformOverlayOpen() || !(inputEvent is InputEventKey inputEventKey))
 		{
 			return;
 		}
@@ -363,7 +364,7 @@ public partial class NInputManager : Node
 
 	public override void _UnhandledInput(InputEvent inputEvent)
 	{
-		if (NGame.Instance.Transition.InTransition)
+		if (NGame.Instance.Transition.InTransition || PlatformUtil.IsPlatformOverlayOpen())
 		{
 			return;
 		}

@@ -194,6 +194,10 @@ public static class CardPileCmd
 			throw new InvalidOperationException("You are not allowed to added generated cards to a non combat pile");
 		}
 		CombatState combatState = list[0].Owner.Creature.CombatState;
+		if (combatState == null)
+		{
+			return Array.Empty<CardPileAddResult>();
+		}
 		List<CardPileAddResult> results = new List<CardPileAddResult>();
 		foreach (CardModel card in list)
 		{
@@ -251,7 +255,7 @@ public static class CardPileCmd
 				throw new InvalidOperationException(card5.Id.Entry + " has no owner.");
 			}
 			Creature creature = card5.Owner.Creature;
-			if ((card5.IsInCombat && creature.CombatState == null) || creature.IsDead)
+			if (card5.HasBeenRemovedFromState || creature.IsDead || (card5.IsInCombat && creature.CombatState == null))
 			{
 				CardPileAddResult item = new CardPileAddResult
 				{
@@ -262,10 +266,6 @@ public static class CardPileCmd
 				};
 				results.Add(item);
 				continue;
-			}
-			if (card5.HasBeenRemovedFromState)
-			{
-				throw new InvalidOperationException(card5.Id.Entry + " has already been removed from its containing state. If this is intentional, make sure to add it back to the state before adding it to a pile.");
 			}
 			if (newPile.Type == PileType.Deck)
 			{
@@ -352,12 +352,12 @@ public static class CardPileCmd
 				if (cards2 != null)
 				{
 					num = ((cards2.Count >= 10) ? 1 : 0);
-					goto IL_054b;
+					goto IL_053c;
 				}
 			}
 			num = 0;
-			goto IL_054b;
-			IL_054b:
+			goto IL_053c;
+			IL_053c:
 			bool isFullHandAdd = (byte)num != 0;
 			if (isFullHandAdd)
 			{
@@ -386,7 +386,7 @@ public static class CardPileCmd
 				{
 					if (oldPile == null)
 					{
-						goto IL_0662;
+						goto IL_0653;
 					}
 					switch (oldPile.Type)
 					{
@@ -396,22 +396,22 @@ public static class CardPileCmd
 					case PileType.Deck:
 						break;
 					default:
-						goto IL_0662;
+						goto IL_0653;
 					}
 					flag5 = true;
-					goto IL_0665;
+					goto IL_0656;
 				}
-				goto IL_0669;
+				goto IL_065a;
 			}
-			goto IL_06f3;
-			IL_0665:
+			goto IL_06e4;
+			IL_0656:
 			flag4 = flag5;
-			goto IL_0669;
-			IL_06f3:
+			goto IL_065a;
+			IL_06e4:
 			CardModel card2 = card;
 			if (oldPile != null)
 			{
-				card.RemoveFromCurrentPile();
+				card.RemoveFromCurrentPile(skipVisuals);
 			}
 			else if (targetPile.Type == PileType.Deck)
 			{
@@ -445,7 +445,7 @@ public static class CardPileCmd
 				cardNode?.UpdateVisuals(targetPile.Type, CardPreviewMode.Normal);
 			}
 			continue;
-			IL_0669:
+			IL_065a:
 			bool flag6 = flag4;
 			if (flag6)
 			{
@@ -465,10 +465,10 @@ public static class CardPileCmd
 			{
 				cardNodes.Add(cardNode);
 			}
-			goto IL_06f3;
-			IL_0662:
+			goto IL_06e4;
+			IL_0653:
 			flag5 = false;
-			goto IL_0665;
+			goto IL_0656;
 		}
 		Tween tween = null;
 		if (cardNodes.Count != 0)
@@ -860,8 +860,13 @@ public static class CardPileCmd
 		}
 		foreach (CardModel item in cards)
 		{
-			item.ExhaustOnNextPlay = forceExhaust;
-			await CardCmd.AutoPlay(choiceContext, item, null);
+			if (!item.Owner.Creature.IsDead)
+			{
+				item.ExhaustOnNextPlay = forceExhaust;
+				await CardCmd.AutoPlay(choiceContext, item, null);
+				continue;
+			}
+			break;
 		}
 	}
 
@@ -905,10 +910,14 @@ public static class CardPileCmd
 		CardPileAddResult[] statusCards = new CardPileAddResult[count];
 		for (int i = 0; i < count; i++)
 		{
-			CardModel card = target.CombatState.CreateCard<T>(player);
-			CardPileAddResult[] array = statusCards;
-			int num = i;
-			array[num] = await AddGeneratedCardToCombat(card, pileType, addedByPlayer, position);
+			CombatState? combatState = target.CombatState;
+			CardModel cardModel = ((combatState != null) ? combatState.CreateCard<T>(player) : null);
+			if (cardModel != null)
+			{
+				CardPileAddResult[] array = statusCards;
+				int num = i;
+				array[num] = await AddGeneratedCardToCombat(cardModel, pileType, addedByPlayer, position);
+			}
 		}
 		if (LocalContext.IsMe(player))
 		{

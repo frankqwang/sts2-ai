@@ -36,8 +36,9 @@ public partial class NMapEraseButton : NButton
 		ConnectSignals();
 		_drawingToolHolder = (Control)GetParent();
 		_icon = GetNode<TextureRect>("Icon");
-		NControllerManager.Instance.Connect(NControllerManager.SignalName.ControllerDetected, Callable.From(OnControllerUpdated));
-		NControllerManager.Instance.Connect(NControllerManager.SignalName.MouseDetected, Callable.From(OnControllerUpdated));
+		NControllerManager instance = NControllerManager.Instance;
+		instance.Connect(NControllerManager.SignalName.ControllerDetected, Callable.From(OnControllerUpdated));
+		instance.Connect(NControllerManager.SignalName.MouseDetected, Callable.From(OnControllerUpdated));
 		OnControllerUpdated();
 	}
 

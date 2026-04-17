@@ -34,6 +34,7 @@ using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Screens.Capstones;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs.History;
@@ -158,36 +159,7 @@ public class RunManager : IRunLobbyListener
 
 	public Dictionary<int, SerializableActMap>? SavedMapsToLoad { get; set; }
 
-	public bool ShouldIgnoreUnlocks
-	{
-		get
-		{
-			if (IsInProgress)
-			{
-				return !IsSinglePlayerOrFakeMultiplayer;
-			}
-			return false;
-		}
-	}
-
 	private RunState? State { get; set; }
-
-	private GameMode GameMode
-	{
-		get
-		{
-			RunState? state = State;
-			if (state != null && state.Modifiers.Count > 0)
-			{
-				if (!DailyTime.HasValue)
-				{
-					return GameMode.Custom;
-				}
-				return GameMode.Daily;
-			}
-			return GameMode.Standard;
-		}
-	}
 
 	public event Action<RunState>? RunStarted;
 
@@ -282,19 +254,6 @@ public class RunManager : IRunLobbyListener
 		InitializeNewRun();
 	}
 
-	public async Task StartPreparedSinglePlayerRun(RunState runState, bool doTransition = false)
-	{
-		using (new NetLoadingHandle(NetService))
-		{
-			await PreloadManager.LoadRunAssets(runState.Players.Select((Player p) => p.Character));
-			await PreloadManager.LoadActAssets(runState.Acts[0]);
-			await FinalizeStartingRelics();
-			Launch();
-			NGame.Instance?.RootSceneContainer?.SetCurrentScene(NRun.Create(runState));
-			await EnterAct(0, doTransition);
-		}
-	}
-
 	private void InitializeShared(INetGameService netService, PeerInputSynchronizer inputSynchronizer, bool shouldSave, DateTimeOffset? dailyTime, long startTime, long runTime, long winTime)
 	{
 		if (State == null)
@@ -304,6 +263,7 @@ public class RunManager : IRunLobbyListener
 		NetService = netService;
 		ulong netId = NetService.NetId;
 		ChecksumTracker = new ChecksumTracker(NetService, State);
+		ChecksumTracker.IsEnabled = !TestMode.IsOn && NetService.Type.IsMultiplayer();
 		RunLocationTargetedBuffer = new RunLocationTargetedMessageBuffer(NetService);
 		FlavorSynchronizer = new FlavorSynchronizer(NetService, State, netId);
 		ActionQueueSet = new ActionQueueSet(State.Players);
@@ -319,7 +279,7 @@ public class RunManager : IRunLobbyListener
 		TreasureRoomRelicSynchronizer = new TreasureRoomRelicSynchronizer(State, netId, ActionQueueSynchronizer, State.SharedRelicGrabBag, State.Rng.TreasureRoomRelics);
 		CombatReplayWriter = new CombatReplayWriter(PlayerChoiceSynchronizer, ActionQueueSet, ActionQueueSynchronizer, ChecksumTracker);
 		CombatReplayWriter.IsEnabled = !TestMode.IsOn;
-		ActionExecutor.AfterActionExecuted += SendPostActionChecksum;
+		ActionExecutor.JustBeforeActionFinishedExecuting += SendPostActionChecksum;
 		ChecksumTracker.StateDiverged += StateDiverged;
 		ActionExecutor.Pause();
 		IsAbandoned = false;
@@ -338,7 +298,7 @@ public class RunManager : IRunLobbyListener
 	{
 		if (netService.Type.IsMultiplayer())
 		{
-			RunLobby = new RunLobby(GameMode, netService, this, state, state.Players.Select((Player p) => p.NetId));
+			RunLobby = new RunLobby(state.GameMode, netService, this, state, state.Players.Select((Player p) => p.NetId));
 			RunLobby.RemotePlayerDisconnected += RemotePlayerDisconnected;
 		}
 		CombatStateSynchronizer = new CombatStateSynchronizer(NetService, RunLobby, state);
@@ -368,7 +328,7 @@ public class RunManager : IRunLobbyListener
 		{
 			act.ValidateRoomsAfterLoad(State.Rng.UpFront);
 		}
-		AfterLocationChanged();
+		AfterMapLocationChanged();
 		MapDrawingsToLoad = save.MapDrawings;
 		SavedMapsToLoad = null;
 		for (int i = 0; i < save.Acts.Count; i++)
@@ -393,7 +353,7 @@ public class RunManager : IRunLobbyListener
 	{
 		if (CombatManager.Instance.IsInProgress && ((!(action is EndPlayerTurnAction) && !(action is ReadyToBeginEnemyTurnAction)) || 1 == 0))
 		{
-			ChecksumTracker.GenerateChecksum($"after executing action {action}", action);
+			ChecksumTracker.GenerateChecksum($"finished action execution {action}", action);
 		}
 	}
 
@@ -421,6 +381,7 @@ public class RunManager : IRunLobbyListener
 			}).ToList(),
 			Modifiers = runState.Modifiers.Select((ModifierModel m) => m.ToSerializable()).ToList(),
 			DailyTime = save.DailyTime,
+			GameMode = runState.GameMode,
 			CurrentActIndex = runState.CurrentActIndex,
 			EventsSeen = runState.VisitedEventIds.ToList(),
 			SerializableOdds = runState.Odds.ToSerializable(),
@@ -475,6 +436,7 @@ public class RunManager : IRunLobbyListener
 			DailyTime = DailyTime,
 			CurrentActIndex = State.CurrentActIndex,
 			EventsSeen = State.VisitedEventIds.ToList(),
+			GameMode = State.GameMode,
 			SerializableOdds = State.Odds.ToSerializable(),
 			SerializableSharedRelicGrabBag = State.SharedRelicGrabBag.ToSerializable(),
 			Players = State.Players.Select((Player p) => p.ToSerializable()).ToList(),
@@ -556,7 +518,7 @@ public class RunManager : IRunLobbyListener
 		{
 			return false;
 		}
-		if (GameMode != GameMode.Standard)
+		if (State.GameMode != GameMode.Standard)
 		{
 			return false;
 		}
@@ -593,6 +555,7 @@ public class RunManager : IRunLobbyListener
 			}
 		}
 		State.Map = map;
+		State.RemoveStaleVisitedMapCoords(map);
 		NMapScreen.Instance?.SetMap(map, State.Rng.Seed, clearDrawings: true);
 	}
 
@@ -633,10 +596,10 @@ public class RunManager : IRunLobbyListener
 			return Task.CompletedTask;
 		}
 		MapPoint point = State.Map.GetPoint(coord);
-		return EnterMapPointInternal(coord.row + 1, point.PointType, coord, preFinishedRoom, saveGame);
+		return EnterMapPointInternal(coord.row + 1, point.PointType, preFinishedRoom, saveGame);
 	}
 
-	public async Task EnterMapPointInternal(int actFloor, MapPointType pointType, MapCoord? coord, AbstractRoom? preFinishedRoom, bool saveGame)
+	public async Task EnterMapPointInternal(int actFloor, MapPointType pointType, AbstractRoom? preFinishedRoom, bool saveGame)
 	{
 		if (State == null)
 		{
@@ -697,7 +660,7 @@ public class RunManager : IRunLobbyListener
 			{
 				NRun.Instance.GlobalUi.MapScreen.IsTraveling = false;
 			}
-			AfterLocationChanged();
+			AfterMapLocationChanged();
 			await FadeIn();
 		}
 	}
@@ -938,6 +901,7 @@ public class RunManager : IRunLobbyListener
 				State.Act.MarkRoomVisited(room.RoomType);
 			}
 		}
+		RunLocationTargetedBuffer.OnLocationChanged(State.RunLocation);
 		if (!(room is CombatRoom))
 		{
 			ActionExecutor.Unpause();
@@ -965,6 +929,7 @@ public class RunManager : IRunLobbyListener
 		{
 			return;
 		}
+		ActionExecutor.Pause();
 		CombatStateSynchronizer.StartSync();
 		using (new NetLoadingHandle(NetService))
 		{
@@ -977,12 +942,13 @@ public class RunManager : IRunLobbyListener
 				ClearScreens();
 			}
 			await CombatStateSynchronizer.WaitForSync();
-			State.CurrentMapPointHistoryEntry.Rooms.Add(new MapPointRoomHistoryEntry
+			State.CurrentMapPointHistoryEntry?.Rooms.Add(new MapPointRoomHistoryEntry
 			{
 				RoomType = room.RoomType,
 				ModelId = room.ModelId
 			});
 			await EnterRoomInternal(room);
+			ActiveScreenContext.Instance.Update();
 			if (fadeToBlack)
 			{
 				await FadeIn();
@@ -1073,7 +1039,7 @@ public class RunManager : IRunLobbyListener
 			State.CurrentActIndex = actIndex;
 			State.ClearVisitedMapCoordsDebug();
 			State.Odds.UnknownMapPoint.ResetToBase();
-			AfterLocationChanged();
+			AfterMapLocationChanged();
 			await PreloadManager.LoadActAssets(State.Act);
 			await GenerateMap();
 			NMapScreen.Instance?.SetTravelEnabled(enabled: false);
@@ -1135,10 +1101,10 @@ public class RunManager : IRunLobbyListener
 		}
 	}
 
-	private void AfterLocationChanged()
+	private void AfterMapLocationChanged()
 	{
-		MapSelectionSynchronizer.OnRunLocationChanged(State.CurrentLocation);
-		RunLocationTargetedBuffer.OnRunLocationChanged(State.CurrentLocation);
+		MapSelectionSynchronizer.OnLocationChanged(State.MapLocation);
+		RunLocationTargetedBuffer.OnLocationChanged(State.RunLocation);
 	}
 
 	public void Abandon()
@@ -1203,7 +1169,7 @@ public class RunManager : IRunLobbyListener
 		if (NetService.Type != NetGameType.Replay)
 		{
 			Log.Info("Abandoning run and returning to main menu because our state diverged from host's");
-			WriteReplay(stopRecording: true);
+			WriteReplay(stopRecording: false);
 		}
 	}
 
@@ -1219,17 +1185,20 @@ public class RunManager : IRunLobbyListener
 		{
 			return;
 		}
+		ShouldSave = false;
 		IsCleaningUp = true;
 		try
 		{
 			_runHistoryWasUploaded = false;
 			ActionQueueSet.Reset();
+			CardSelectCmd.Reset();
 			NAudioManager.Instance?.StopAllLoops();
 			NOverlayStack.Instance?.Clear();
 			NCapstoneContainer.Instance?.CleanUp();
 			NMapScreen.Instance?.CleanUp();
 			NModalContainer.Instance?.Clear();
 			CombatManager.Instance.Reset(graceful);
+			ActionExecutor.JustBeforeActionFinishedExecuting -= SendPostActionChecksum;
 			CombatReplayWriter.Dispose();
 			ActionQueueSynchronizer.Dispose();
 			PlayerChoiceSynchronizer.Dispose();
@@ -1315,12 +1284,12 @@ public class RunManager : IRunLobbyListener
 			NetGameType type = NetService.Type;
 			if ((uint)(type - 1) <= 1u)
 			{
-				int score2 = ScoreUtility.CalculateScore(serializableRun, isVictory);
+				int score2 = ScoreUtility.CalculateDailyScore(serializableRun, me.NetId, isVictory);
 				TaskHelper.RunSafely(DailyRunUtility.UploadScore(DailyTime.Value, score2, serializableRun.Players));
 			}
 			else if (NetService.Type == NetGameType.Client)
 			{
-				TaskHelper.RunSafely(DailyRunUtility.UploadScore(DailyTime.Value, -99999, serializableRun.Players));
+				TaskHelper.RunSafely(DailyRunUtility.UploadScore(DailyTime.Value, -999999999, serializableRun.Players));
 			}
 		}
 		return serializableRun;

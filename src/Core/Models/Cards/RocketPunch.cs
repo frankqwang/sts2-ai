@@ -33,6 +33,10 @@ public sealed class RocketPunch : CardModel
 
 	public override Task AfterCardGeneratedForCombat(CardModel card, bool addedByPlayer)
 	{
+		if (!addedByPlayer)
+		{
+			return Task.CompletedTask;
+		}
 		if (card.Owner != base.Owner)
 		{
 			return Task.CompletedTask;
@@ -41,7 +45,7 @@ public sealed class RocketPunch : CardModel
 		{
 			return Task.CompletedTask;
 		}
-		base.EnergyCost.SetThisTurnOrUntilPlayed(0);
+		base.EnergyCost.SetUntilPlayed(0);
 		return Task.CompletedTask;
 	}
 

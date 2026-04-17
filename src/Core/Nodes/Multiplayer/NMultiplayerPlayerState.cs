@@ -352,8 +352,8 @@ public partial class NMultiplayerPlayerState : Control
 		_energyCount.SetTextAutoSize(Player.PlayerCombatState.Energy.ToString());
 		_starCount.SetTextAutoSize(Player.PlayerCombatState.Stars.ToString());
 		_cardCount.SetTextAutoSize(Player.PlayerCombatState.Hand.Cards.Count.ToString());
-		_energyCount.AddThemeColorOverride(ThemeConstants.Label.fontColor, (Player.PlayerCombatState.Energy == 0) ? StsColors.red : StsColors.cream);
-		_energyCount.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, (Player.PlayerCombatState.Energy == 0) ? StsColors.unplayableEnergyCostOutline : Player.Character.EnergyLabelOutlineColor);
+		_energyCount.AddThemeColorOverride(ThemeConstants.Label.FontColor, (Player.PlayerCombatState.Energy == 0) ? StsColors.red : StsColors.cream);
+		_energyCount.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, (Player.PlayerCombatState.Energy == 0) ? StsColors.unplayableEnergyCostOutline : Player.Character.EnergyLabelOutlineColor);
 		Material material = ((Player.PlayerCombatState.Energy == 0) ? PreloadManager.Cache.GetMaterial("res://materials/ui/energy_orb_dark.tres") : null);
 		_energyImage.Material = material;
 		_energyImage.Modulate = ((Player.PlayerCombatState.Energy == 0) ? Colors.DarkGray : Colors.White);

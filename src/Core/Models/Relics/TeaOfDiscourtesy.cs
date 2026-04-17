@@ -31,7 +31,7 @@ public sealed class TeaOfDiscourtesy : RelicModel
 		new DynamicVar("DazedCount", 2m)
 	});
 
-	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromCard<Dazed>());
+	protected override IEnumerable<IHoverTip> ExtraHoverTips => HoverTipFactory.FromCardWithCardHoverTips<Dazed>();
 
 	[SavedProperty]
 	private int CombatsLeft

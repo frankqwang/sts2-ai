@@ -16,6 +16,7 @@ using MegaCrit.Sts2.Core.DevConsole.ConsoleCommands;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
@@ -36,9 +37,12 @@ public partial class NSendFeedbackScreen : Control, IScreenContext
 
 	private static readonly string _url = System.Environment.GetEnvironmentVariable("STS2_FEEDBACK_URL") ?? "https://feedback.sts2.megacrit.com/feedback";
 
-	private static readonly System.Net.Http.HttpClient _httpClient = new System.Net.Http.HttpClient();
+	private static readonly System.Net.Http.HttpClient _httpClient = new System.Net.Http.HttpClient
+	{
+		Timeout = TimeSpan.FromSeconds(10L)
+	};
 
-	private const int _maxDescriptionChars = 500;
+	private const int _maxDescriptionChars = 8000;
 
 	private NBackButton _backButton;
 
@@ -51,6 +55,8 @@ public partial class NSendFeedbackScreen : Control, IScreenContext
 	private NButton _sendButton;
 
 	private MegaLabel _sendLabel;
+
+	private MegaLabel _categoryLabel;
 
 	private NFeedbackCategoryDropdown _categoryDropdown;
 
@@ -104,6 +110,7 @@ public partial class NSendFeedbackScreen : Control, IScreenContext
 		_emojiLabel = GetNode<MegaLabel>("%EmojiLabel");
 		_sendButton = GetNode<NButton>("%SendButton");
 		_sendLabel = _sendButton.GetNode<MegaLabel>("Label");
+		_categoryLabel = GetNode<MegaLabel>("%CategoryLabel");
 		_categoryDropdown = GetNode<NFeedbackCategoryDropdown>("%CategoryDropdown");
 		_successBackstop = GetNode<Control>("%SuccessBackstop");
 		_successPanel = GetNode<Control>("%SuccessPanel");
@@ -164,16 +171,18 @@ public partial class NSendFeedbackScreen : Control, IScreenContext
 	public void Relocalize()
 	{
 		_descriptionInput.PlaceholderText = new LocString("settings_ui", "FEEDBACK_DESCRIPTION_PLACEHOLDER").GetFormattedText();
+		_categoryLabel.SetTextAutoSize(new LocString("settings_ui", "FEEDBACK_CATEGORY_LABEL").GetFormattedText());
 		_emojiLabel.SetTextAutoSize(new LocString("settings_ui", "FEEDBACK_EMOJI_LABEL").GetFormattedText());
 		_sendLabel.SetTextAutoSize(new LocString("settings_ui", "FEEDBACK_SEND_BUTTON_LABEL").GetFormattedText());
 		_descriptionInput.RefreshFont();
+		_categoryLabel.RefreshFont();
 		_emojiLabel.RefreshFont();
 		_sendLabel.RefreshFont();
 	}
 
 	private void OnDescriptionChanged()
 	{
-		if (_descriptionInput.Text.Length > 500)
+		if (_descriptionInput.Text.Length > 8000)
 		{
 			_descriptionInput.Text = _descriptionText;
 			_descriptionInput.SetCaretLine(_descriptionCaretLine);
@@ -223,18 +232,21 @@ public partial class NSendFeedbackScreen : Control, IScreenContext
 
 	public void Open()
 	{
-		Log.Info("Feedback screen opened");
-		if (Time.GetTicksMsec() - _lastClosedMsec > 60000)
+		if (!base.Visible)
 		{
-			ClearInput();
+			Log.Info("Feedback screen opened");
+			if (Time.GetTicksMsec() - _lastClosedMsec > 60000)
+			{
+				ClearInput();
+			}
+			base.Visible = true;
+			_flower.SetState(NSendFeedbackFlower.State.None);
+			_successBackstop.Visible = false;
+			base.MouseFilter = MouseFilterEnum.Stop;
+			NHotkeyManager.Instance.AddBlockingScreen(this);
+			ActiveScreenContext.Instance.Update();
+			_backButton.Enable();
 		}
-		base.Visible = true;
-		_flower.SetState(NSendFeedbackFlower.State.None);
-		_successBackstop.Visible = false;
-		base.MouseFilter = MouseFilterEnum.Stop;
-		NHotkeyManager.Instance.AddBlockingScreen(this);
-		ActiveScreenContext.Instance.Update();
-		_backButton.Enable();
 	}
 
 	private void Close()
@@ -284,7 +296,9 @@ public partial class NSendFeedbackScreen : Control, IScreenContext
 			uniqueId = SaveManager.Instance.Progress.UniqueId,
 			commit = (text ?? "unknown"),
 			platformBranch = PlatformUtil.GetPlatformBranch(),
-			sessionId = SentryService.SessionId
+			sessionId = SentryService.SessionId,
+			isModded = (ModManager.IsRunningModded() || ModManager.HasHarmonyPatches()),
+			isFullConsole = SaveManager.Instance.SettingsSave.FullConsole
 		};
 		byte[] screenshotBytes = _screenshotBytes;
 		int currentProfileId = SaveManager.Instance.CurrentProfileId;
@@ -335,12 +349,16 @@ public partial class NSendFeedbackScreen : Control, IScreenContext
 				sentryMessage = $"Response status code {response.StatusCode}";
 				Log.Warn($"Feedback attempt {attempt + 1}/{4} failed: {response.StatusCode}");
 			}
-			catch (HttpRequestException ex)
+			catch (Exception ex) when (((ex is HttpRequestException || ex is TaskCanceledException) ? 1 : 0) != 0)
 			{
-				string text = $"Feedback attempt {attempt + 1}/{4} network error: {ExceptionMessageWithInner(ex)} {ex.HttpRequestError}";
-				if (ex.HttpRequestError != HttpRequestError.NameResolutionError)
+				if (cancellationToken.IsCancellationRequested)
 				{
-					sentryMessage = "HttpRequestException: " + ExceptionMessageWithInner(ex);
+					throw;
+				}
+				string text = $"Feedback attempt {attempt + 1}/{4} network error: {ExceptionMessageWithInner(ex)}";
+				if (ex is HttpRequestException { HttpRequestError: not HttpRequestError.NameResolutionError })
+				{
+					sentryMessage = ex.GetType().Name + ": " + ExceptionMessageWithInner(ex);
 				}
 				Log.Warn(text);
 			}

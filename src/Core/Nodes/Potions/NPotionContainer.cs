@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Ftue;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 
@@ -52,10 +53,7 @@ public partial class NPotionContainer : Control
 		_potionErrorBg = GetNode<Control>("PotionErrorBg");
 		_potionShortcutButton = GetNode<NButton>("PotionShortcutButton");
 		_potionErrorBg.Modulate = Colors.Transparent;
-		_potionShortcutButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(delegate
-		{
-			_potionHolders.GetChild<Control>(0).TryGrabFocus();
-		}));
+		_potionShortcutButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnPotionShortcutPressed));
 		CombatManager.Instance.CombatSetUp += OnCombatSetUp;
 		ConnectPlayerEvents();
 	}
@@ -64,6 +62,7 @@ public partial class NPotionContainer : Control
 	{
 		DisconnectPlayerEvents();
 		_player = null;
+		_potionShortcutButton.Disconnect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnPotionShortcutPressed));
 		CombatManager.Instance.CombatSetUp -= OnCombatSetUp;
 	}
 
@@ -178,12 +177,12 @@ public partial class NPotionContainer : Control
 		}
 	}
 
-	public void OnPotionUseCanceled(PotionModel potion)
+	public void OnPotionUseOrDiscardCanceled(PotionModel potion)
 	{
 		NPotionHolder nPotionHolder = _holders.FirstOrDefault((NPotionHolder n) => n.Potion?.Model == potion);
 		if (nPotionHolder != null)
 		{
-			nPotionHolder.CancelPotionUse();
+			nPotionHolder.CancelPotionUseOrDiscard();
 			return;
 		}
 		Log.Error($"Tried to cancel potion use for potion {potion} but a holder for it does not exist in the player's belt!");
@@ -268,6 +267,23 @@ public partial class NPotionContainer : Control
 		foreach (NPotionHolder holder in _holders)
 		{
 			await TaskHelper.RunSafely(holder.ShineOnStartOfCombat());
+		}
+	}
+
+	private void OnPotionShortcutPressed(NButton _)
+	{
+		Viewport viewport = GetViewport();
+		if (viewport == null)
+		{
+			_potionHolders.GetChild<Control>(0).TryGrabFocus();
+		}
+		else if (viewport.GuiGetFocusOwner() != null && NRun.Instance.GlobalUi.TopBar.IsAncestorOf(viewport.GuiGetFocusOwner()))
+		{
+			ActiveScreenContext.Instance.FocusOnDefaultControl();
+		}
+		else
+		{
+			_potionHolders.GetChild<Control>(0).TryGrabFocus();
 		}
 	}
 }

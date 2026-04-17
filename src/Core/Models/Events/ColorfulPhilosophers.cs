@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Events;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models.CardPools;
@@ -24,6 +25,11 @@ public sealed class ColorfulPhilosophers : EventModel
 	});
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new CardsVar(3));
+
+	public override bool IsAllowed(IRunState runState)
+	{
+		return runState.Players.All((Player p) => p.UnlockState.CharacterCardPools.Count() > 1);
+	}
 
 	protected override IReadOnlyList<EventOption> GenerateInitialOptions()
 	{

@@ -92,6 +92,12 @@ public class HookPlayerChoiceContext : PlayerChoiceContext
 		return task.IsCompleted;
 	}
 
+	public async Task<bool> WaitForPauseOrCompletionWithoutAssigningTask(Task task)
+	{
+		await TaskHelper.WhenAny(task, _pausedCompletionSource.Task);
+		return task.IsCompleted;
+	}
+
 	private async Task ExecuteTaskThenInvokeExecutionFinished(Task task)
 	{
 		await task;
@@ -100,14 +106,6 @@ public class HookPlayerChoiceContext : PlayerChoiceContext
 
 	public override async Task SignalPlayerChoiceBegun(PlayerChoiceOptions options)
 	{
-		if (Task == null)
-		{
-			await _taskAssignedCompletionSource.Task;
-			if (Task == null)
-			{
-				throw new InvalidOperationException("HookPlayerChoiceContext was never passed a task to await!");
-			}
-		}
 		if (_gameAction != null)
 		{
 			if (ActionExecutor.CurrentlyRunningAction != _gameAction)
@@ -123,12 +121,20 @@ public class HookPlayerChoiceContext : PlayerChoiceContext
 				throw new InvalidOperationException($"HookPlayerChoiceContext is assigned a model {Source} with no owner, but the model has requested a player choice! This is not supported");
 			}
 			_gameAction = ActionQueueSynchronizer.GenerateHookAction(Owner.NetId, _gameActionType);
+			_pausedCompletionSource.SetResult();
+			if (Task == null)
+			{
+				await _taskAssignedCompletionSource.Task;
+				if (Task == null)
+				{
+					throw new InvalidOperationException("HookPlayerChoiceContext was never passed a task to await!");
+				}
+			}
 			_gameAction.SetChoiceContext(this);
 			if (_gameAction.OwnerId == _localPlayerId)
 			{
 				ActionQueueSynchronizer.RequestEnqueueHookAction(_gameAction);
 			}
-			_pausedCompletionSource.SetResult();
 			await _gameAction.ExecutionStartedTask;
 		}
 		ActionQueueSet.PauseActionForPlayerChoice(_gameAction, options);

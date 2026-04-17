@@ -111,9 +111,9 @@ public sealed class MendRestSiteOption : RestSiteOption
 				targetManager.Disconnect(NTargetManager.SignalName.NodeUnhovered, Callable.From<Node>(OnNodeUnhovered));
 				if (usingController)
 				{
-					foreach (NRestSiteCharacter item in NRestSiteRoom.Instance?.characterAnims ?? new List<NRestSiteCharacter>())
+					foreach (NRestSiteCharacter characterAnim in NRestSiteRoom.Instance.characterAnims)
 					{
-						item.Hitbox.SetFocusMode(Control.FocusModeEnum.None);
+						characterAnim.Hitbox.SetFocusMode(Control.FocusModeEnum.None);
 					}
 				}
 			}

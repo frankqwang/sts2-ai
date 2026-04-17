@@ -130,7 +130,7 @@ public partial class NMultiplayerPlayerStateContainer : Control
 			return;
 		}
 		float y = relicInventory.GetChild<Control>(0).Size.Y;
-		float num = relicInventory.GetThemeConstant(ThemeConstants.FlowContainer.vSeparation, "FlowContainer");
+		float num = relicInventory.GetThemeConstant(ThemeConstants.FlowContainer.VSeparation, "FlowContainer");
 		base.Position = relicInventory.Position + (float)lineCount * (y + num) * Vector2.Down;
 	}
 

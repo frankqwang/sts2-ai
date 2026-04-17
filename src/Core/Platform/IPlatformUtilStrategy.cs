@@ -8,6 +8,8 @@ internal interface IPlatformUtilStrategy
 {
 	bool SupportsInviteDialog { get; }
 
+	bool IsPlatformOverlayOpen { get; }
+
 	string GetPlayerName(ulong playerId);
 
 	ulong GetLocalPlayerId();

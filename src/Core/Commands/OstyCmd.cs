@@ -50,11 +50,11 @@ public static class OstyCmd
 			{
 				osty = await PlayerCmd.AddPet<Osty>(summoner);
 				NCreature ostyNode = NCombatRoom.Instance?.GetCreatureNode(osty);
-				if (ostyNode != null)
+				if (ostyNode != null && source is CardModel)
 				{
 					ostyNode.Modulate = Colors.Transparent;
 					Tween tween = ostyNode.CreateTween();
-					tween.TweenProperty(ostyNode, "modulate:a", 1, 0.3499999940395355).From(0);
+					tween.TweenProperty(ostyNode, "modulate", Colors.White, 0.3499999940395355).SetDelay(0.10000000149011612);
 					ostyNode.StartReviveAnim();
 				}
 				await PowerCmd.Apply<DieForYouPower>(osty, 1m, null, null);

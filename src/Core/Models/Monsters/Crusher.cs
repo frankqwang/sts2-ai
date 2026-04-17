@@ -57,7 +57,7 @@ public sealed class Crusher : MonsterModel
 		}
 	}
 
-	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 209, 199);
+	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 219, 209);
 
 	public override int MaxInitialHp => MinInitialHp;
 
@@ -68,6 +68,8 @@ public sealed class Crusher : MonsterModel
 	private int BugStingDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 7, 6);
 
 	private int BugStingTimes => 2;
+
+	private int AdaptStrengthGain => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 3, 2);
 
 	private int GuardedStrikeDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 14, 12);
 
@@ -145,7 +147,7 @@ public sealed class Crusher : MonsterModel
 	private async Task AdaptMove(IReadOnlyList<Creature> targets)
 	{
 		await Background.PlayAttackAnim(NKaiserCrabBossBackground.ArmSide.Left, "buff", 0.8f);
-		await PowerCmd.Apply<StrengthPower>(base.Creature, 2m, base.Creature, null);
+		await PowerCmd.Apply<StrengthPower>(base.Creature, AdaptStrengthGain, base.Creature, null);
 	}
 
 	private async Task EnlargingStrikeMove(IReadOnlyList<Creature> targets)

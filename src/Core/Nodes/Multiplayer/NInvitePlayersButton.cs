@@ -1,5 +1,6 @@
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;
+using MegaCrit.Sts2.Core.ControllerInput;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
@@ -19,6 +20,8 @@ public partial class NInvitePlayersButton : NButton
 	private Control _container;
 
 	private StartRunLobby? _startRunLobby;
+
+	protected override string[] Hotkeys => new string[1] { MegaInput.viewMap };
 
 	public override void _Ready()
 	{

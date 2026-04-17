@@ -19,7 +19,7 @@ public sealed class VexingPuzzlebox : RelicModel
 		{
 			Flash();
 			CardModel cardModel = CardFactory.GetDistinctForCombat(base.Owner, base.Owner.Character.CardPool.GetUnlockedCards(base.Owner.UnlockState, base.Owner.RunState.CardMultiplayerConstraint), 1, base.Owner.RunState.Rng.CombatCardGeneration).First();
-			cardModel.EnergyCost.SetThisCombat(0);
+			cardModel.SetToFreeThisTurn();
 			await CardPileCmd.AddGeneratedCardToCombat(cardModel, PileType.Hand, addedByPlayer: true);
 		}
 	}

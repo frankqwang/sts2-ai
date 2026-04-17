@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
@@ -20,19 +21,20 @@ public static class PlayerCmd
 
 	public const string goldLargeSfx = "event:/sfx/ui/gold/gold_3";
 
-	public static Task GainEnergy(decimal amount, Player player)
+	public static async Task GainEnergy(decimal amount, Player player)
 	{
-		if (amount <= 0m)
+		if (!(amount <= 0m) && !CombatManager.Instance.IsEnding)
 		{
-			return Task.CompletedTask;
+			CombatState combatState = player.Creature.CombatState;
+			IEnumerable<AbstractModel> modifiers;
+			decimal finalAmount = Hook.ModifyEnergyGain(combatState, player, amount, out modifiers);
+			await Hook.AfterModifyingEnergyGain(combatState, modifiers);
+			if (finalAmount > 0m)
+			{
+				SfxCmd.Play("event:/sfx/ui/gain_energy");
+				player.PlayerCombatState.GainEnergy(finalAmount);
+			}
 		}
-		if (CombatManager.Instance.IsEnding)
-		{
-			return Task.CompletedTask;
-		}
-		SfxCmd.Play("event:/sfx/ui/gain_energy");
-		player.PlayerCombatState.GainEnergy(amount);
-		return Task.CompletedTask;
 	}
 
 	public static Task LoseEnergy(decimal amount, Player player)

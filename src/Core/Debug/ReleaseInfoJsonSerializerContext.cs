@@ -16,6 +16,8 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 
 	private JsonTypeInfo<DateTime>? _DateTime;
 
+	private JsonTypeInfo<int>? _Int32;
+
 	private JsonTypeInfo<string>? _String;
 
 	private static readonly JsonSerializerOptions s_defaultOptions = new JsonSerializerOptions
@@ -29,6 +31,8 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 	public JsonTypeInfo<ReleaseInfo> ReleaseInfo => _ReleaseInfo ?? (_ReleaseInfo = (JsonTypeInfo<ReleaseInfo>)base.Options.GetTypeInfo(typeof(ReleaseInfo)));
 
 	public JsonTypeInfo<DateTime> DateTime => _DateTime ?? (_DateTime = (JsonTypeInfo<DateTime>)base.Options.GetTypeInfo(typeof(DateTime)));
+
+	public JsonTypeInfo<int> Int32 => _Int32 ?? (_Int32 = (JsonTypeInfo<int>)base.Options.GetTypeInfo(typeof(int)));
 
 	public JsonTypeInfo<string> String => _String ?? (_String = (JsonTypeInfo<string>)base.Options.GetTypeInfo(typeof(string)));
 
@@ -48,7 +52,8 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 					Commit = (string)args[0],
 					Version = (string)args[1],
 					Date = (DateTime)args[2],
-					Branch = (string)args[3]
+					Branch = (string)args[3],
+					MainAssemblyHash = (int)args[4]
 				},
 				PropertyMetadataInitializer = (JsonSerializerContext _) => ReleaseInfoPropInit(options),
 				ConstructorParameterMetadataInitializer = ReleaseInfoCtorParamInit,
@@ -64,7 +69,7 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 
 	private static JsonPropertyInfo[] ReleaseInfoPropInit(JsonSerializerOptions options)
 	{
-		JsonPropertyInfo[] array = new JsonPropertyInfo[4];
+		JsonPropertyInfo[] array = new JsonPropertyInfo[5];
 		JsonPropertyInfoValues<string> propertyInfo = new JsonPropertyInfoValues<string>
 		{
 			IsProperty = true,
@@ -159,12 +164,34 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 		array[3].IsRequired = true;
 		array[3].IsGetNullable = false;
 		array[3].IsSetNullable = false;
+		JsonPropertyInfoValues<int> propertyInfo5 = new JsonPropertyInfoValues<int>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(ReleaseInfo),
+			Converter = null,
+			Getter = (object obj) => ((ReleaseInfo)obj).MainAssemblyHash,
+			Setter = delegate
+			{
+				throw new InvalidOperationException("Setting init-only properties is not supported in source generation mode.");
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "MainAssemblyHash",
+			JsonPropertyName = "main_assembly_hash",
+			AttributeProviderFactory = () => typeof(ReleaseInfo).GetProperty("MainAssemblyHash", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(int), Array.Empty<Type>(), null)
+		};
+		array[4] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo5);
+		array[4].IsRequired = true;
 		return array;
 	}
 
 	private static JsonParameterInfoValues[] ReleaseInfoCtorParamInit()
 	{
-		return new JsonParameterInfoValues[4]
+		return new JsonParameterInfoValues[5]
 		{
 			new JsonParameterInfoValues
 			{
@@ -197,6 +224,14 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 				Position = 3,
 				IsNullable = false,
 				IsMemberInitializer = true
+			},
+			new JsonParameterInfoValues
+			{
+				Name = "MainAssemblyHash",
+				ParameterType = typeof(int),
+				Position = 4,
+				IsNullable = false,
+				IsMemberInitializer = true
 			}
 		};
 	}
@@ -206,6 +241,16 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<DateTime> jsonTypeInfo))
 		{
 			jsonTypeInfo = JsonMetadataServices.CreateValueInfo<DateTime>(options, JsonMetadataServices.DateTimeConverter);
+		}
+		jsonTypeInfo.OriginatingResolver = this;
+		return jsonTypeInfo;
+	}
+
+	private JsonTypeInfo<int> Create_Int32(JsonSerializerOptions options)
+	{
+		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<int> jsonTypeInfo))
+		{
+			jsonTypeInfo = JsonMetadataServices.CreateValueInfo<int>(options, JsonMetadataServices.Int32Converter);
 		}
 		jsonTypeInfo.OriginatingResolver = this;
 		return jsonTypeInfo;
@@ -288,6 +333,10 @@ internal class ReleaseInfoJsonSerializerContext : JsonSerializerContext, IJsonTy
 		if (type == typeof(DateTime))
 		{
 			return Create_DateTime(options);
+		}
+		if (type == typeof(int))
+		{
+			return Create_Int32(options);
 		}
 		if (type == typeof(string))
 		{

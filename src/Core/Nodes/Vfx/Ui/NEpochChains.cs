@@ -4,6 +4,8 @@ using Godot.Collections;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Utilities;
 
+namespace MegaCrit.Sts2.Core.Nodes.Vfx.Ui;
+
 public partial class NEpochChains : TextureRect
 {
 	[Signal]

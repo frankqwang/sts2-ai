@@ -1,8 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
-using MegaCrit.Sts2.Core.Entities.Ascension;
-using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models.Encounters;
 using MegaCrit.Sts2.Core.Models.Events;
@@ -98,17 +96,8 @@ public sealed class Glory : ActModel
 
 	public override MapPointTypeCounts GetMapPointTypes(Rng mapRng)
 	{
-		Rng rng = new Rng(mapRng.Seed, mapRng.Counter);
-		MapPointTypeCounts mapPointTypeCounts = new MapPointTypeCounts(rng);
-		int num = mapRng.NextInt(5, 7);
-		if (AscensionHelper.HasAscension(AscensionLevel.Gloom))
-		{
-			num--;
-		}
-		return new MapPointTypeCounts(mapRng)
-		{
-			NumOfUnknowns = mapPointTypeCounts.NumOfUnknowns - 1,
-			NumOfRests = num
-		};
+		int restCount = mapRng.NextInt(5, 7);
+		int unknownCount = MapPointTypeCounts.StandardRandomUnknownCount(mapRng) - 1;
+		return new MapPointTypeCounts(unknownCount, restCount);
 	}
 }

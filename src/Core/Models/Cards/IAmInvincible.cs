@@ -14,7 +14,7 @@ public sealed class IAmInvincible : CardModel
 {
 	public override bool GainsBlock => true;
 
-	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new BlockVar(9m, ValueProp.Move));
+	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new BlockVar(10m, ValueProp.Move));
 
 	public IAmInvincible()
 		: base(1, CardType.Skill, CardRarity.Rare, TargetType.Self)

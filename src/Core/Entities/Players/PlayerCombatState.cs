@@ -131,7 +131,7 @@ public class PlayerCombatState
 		{
 			throw new ArgumentException("Must not be negative.", "amount");
 		}
-		Energy = (int)Math.Max((decimal)Energy - amount, 0m);
+		Energy = (int)Math.Clamp((decimal)Energy - amount, 0m, 999999999m);
 	}
 
 	public void GainEnergy(decimal amount)
@@ -140,7 +140,7 @@ public class PlayerCombatState
 		{
 			throw new ArgumentException("Must not be negative.", "amount");
 		}
-		Energy = (int)Math.Max((decimal)Energy + amount, 0m);
+		Energy = (int)Math.Clamp((decimal)Energy + amount, 0m, 999999999m);
 	}
 
 	public bool HasEnoughResourcesFor(CardModel card, out UnplayableReason reason)
@@ -226,7 +226,7 @@ public class PlayerCombatState
 	{
 		if (!_pets.Contains(pet))
 		{
-			throw new InvalidOperationException("Player does not have pet " + pet.Name);
+			throw new InvalidOperationException("Player does not have pet " + pet.LogName);
 		}
 		if (Hook.ShouldCreatureBeRemovedFromCombatAfterDeath(pet.CombatState, pet))
 		{

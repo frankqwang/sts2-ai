@@ -30,7 +30,7 @@ public sealed class Crossbow : RelicModel
 		List<CardModel> list = CardFactory.GetDistinctForCombat(base.Owner, readOnlyList, 1, base.Owner.RunState.Rng.CombatCardGeneration).ToList();
 		foreach (CardModel item in list)
 		{
-			item.EnergyCost.SetThisTurnOrUntilPlayed(0);
+			item.SetToFreeThisTurn();
 		}
 		await CardPileCmd.AddGeneratedCardsToCombat(list, PileType.Hand, addedByPlayer: true);
 	}

@@ -17,7 +17,7 @@ public sealed class EternalArmor : CardModel
 		HoverTipFactory.Static(StaticHoverTip.Block)
 	});
 
-	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new PowerVar<PlatingPower>(7m));
+	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new PowerVar<PlatingPower>(9m));
 
 	public EternalArmor()
 		: base(3, CardType.Power, CardRarity.Rare, TargetType.Self)
@@ -31,6 +31,6 @@ public sealed class EternalArmor : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars["PlatingPower"].UpgradeValueBy(2m);
+		base.DynamicVars["PlatingPower"].UpgradeValueBy(3m);
 	}
 }

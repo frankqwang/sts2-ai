@@ -167,7 +167,7 @@ public abstract class EncounterModel : AbstractModel
 		}
 	}
 
-	public virtual IEnumerable<string>? ExtraAssetPaths => null;
+	public virtual IEnumerable<string> ExtraAssetPaths => Array.Empty<string>();
 
 	public virtual float GetCameraScaling()
 	{
@@ -263,10 +263,7 @@ public abstract class EncounterModel : AbstractModel
 		{
 			hashSet.Add(ScenePath);
 		}
-		if (ExtraAssetPaths != null)
-		{
-			hashSet.UnionWith(ExtraAssetPaths);
-		}
+		hashSet.UnionWith(ExtraAssetPaths);
 		foreach (var monstersWithSlot in MonstersWithSlots)
 		{
 			MonsterModel item = monstersWithSlot.Item1;

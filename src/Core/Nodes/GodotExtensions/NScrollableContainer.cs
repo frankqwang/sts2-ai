@@ -91,10 +91,15 @@ public partial class NScrollableContainer : Control
 		if (_content != null)
 		{
 			_content.Connect(CanvasItem.SignalName.ItemRectChanged, Callable.From(UpdateScrollLimitBottom));
-			_paddingTop = paddingTop;
-			_paddingBottom = paddingBottom;
-			UpdateScrollLimitBottom();
+			UpdatePadding(paddingTop, paddingBottom);
 		}
+	}
+
+	public void UpdatePadding(float paddingTop = 0f, float paddingBottom = 0f)
+	{
+		_paddingTop = paddingTop;
+		_paddingBottom = paddingBottom;
+		UpdateScrollLimitBottom();
 	}
 
 	public void DisableScrollingIfContentFits()

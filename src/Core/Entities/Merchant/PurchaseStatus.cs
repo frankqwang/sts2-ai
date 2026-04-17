@@ -5,5 +5,6 @@ public enum PurchaseStatus
 	Success,
 	FailureGold,
 	FailureSpace,
-	FailureForbidden
+	FailureForbidden,
+	FailureOutOfStock
 }

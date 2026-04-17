@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Nodes.Vfx.Ui;
 
@@ -35,8 +36,12 @@ public partial class NLowHpBorderVfx : ColorRect
 
 	private static readonly StringName _mainColorString = new StringName("main_color");
 
-	public static NLowHpBorderVfx Create()
+	public static NLowHpBorderVfx? Create()
 	{
+		if (TestMode.IsOn)
+		{
+			return null;
+		}
 		return PreloadManager.Cache.GetScene(scenePath).Instantiate<NLowHpBorderVfx>(PackedScene.GenEditState.Disabled);
 	}
 

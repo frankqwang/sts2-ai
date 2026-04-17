@@ -13,7 +13,7 @@ public sealed class DanseMacabre : CardModel
 {
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[2]
 	{
-		new PowerVar<DanseMacabrePower>(3m),
+		new PowerVar<DanseMacabrePower>(4m),
 		new EnergyVar(2)
 	});
 
@@ -32,6 +32,6 @@ public sealed class DanseMacabre : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars["DanseMacabrePower"].UpgradeValueBy(1m);
+		base.DynamicVars["DanseMacabrePower"].UpgradeValueBy(2m);
 	}
 }

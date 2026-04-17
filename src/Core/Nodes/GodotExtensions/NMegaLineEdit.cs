@@ -10,7 +10,7 @@ public partial class NMegaLineEdit : LineEdit
 {
 	public override void _Ready()
 	{
-		this.ApplyLocaleFontSubstitution(FontType.Regular, ThemeConstants.LineEdit.font);
+		this.ApplyLocaleFontSubstitution(FontType.Regular, ThemeConstants.LineEdit.Font);
 	}
 
 	public override void _GuiInput(InputEvent inputEvent)

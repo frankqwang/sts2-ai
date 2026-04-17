@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -98,7 +97,7 @@ public sealed class SovereignBlade : CardModel
 	{
 		get
 		{
-			if (CombatManager.Instance.IsInProgress)
+			if (base.IsMutable && base.Owner != null)
 			{
 				return base.Owner.Creature.HasPower<SeekingEdgePower>();
 			}

@@ -30,6 +30,8 @@ public struct CardSelectorPrefs
 
 	public bool Cancelable { get; init; }
 
+	public Comparison<CardModel>? Comparison { get; init; }
+
 	public bool UnpoweredPreviews { get; init; }
 
 	public bool PretendCardsCanBePlayed { get; init; }

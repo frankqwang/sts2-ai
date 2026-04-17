@@ -64,21 +64,7 @@ public class LoadRunLobby
 
 	public HashSet<ulong> ConnectedPlayerIds { get; } = new HashSet<ulong>();
 
-	public GameMode GameMode
-	{
-		get
-		{
-			if (Run.Modifiers.Count <= 0)
-			{
-				return GameMode.Standard;
-			}
-			if (!Run.DailyTime.HasValue)
-			{
-				return GameMode.Custom;
-			}
-			return GameMode.Daily;
-		}
-	}
+	public GameMode GameMode => Run.GameMode;
 
 	public int HandshakeTimeout { get; set; } = 10000;
 
@@ -268,13 +254,19 @@ public class LoadRunLobby
 		{
 			throw new InvalidOperationException("Can only begin run as host!");
 		}
+		if (_isBeginningRun)
+		{
+			_logger.Warn("Tried to begin run twice, ignoring second one!");
+			return;
+		}
+		_isBeginningRun = true;
 		if (!(await LobbyListener.ShouldAllowRunToBegin()))
 		{
 			SetReady(ready: false);
+			_isBeginningRun = false;
 			return;
 		}
 		NetService.SendMessage(default(LobbyBeginLoadedRunMessage));
-		_isBeginningRun = true;
 		LobbyListener.BeginRun();
 		if (NetService.Type == NetGameType.Host)
 		{
@@ -299,6 +291,7 @@ public class LoadRunLobby
 		};
 		NetService.SendMessage(message);
 		LobbyListener.PlayerReadyChanged(NetService.NetId);
+		_logger.Info($"Local player {NetService.NetId} is ready");
 		BeginRunIfAllPlayersReady();
 	}
 
@@ -307,9 +300,18 @@ public class LoadRunLobby
 		return _readyPlayers.Contains(playerId);
 	}
 
+	public bool IsAboutToBeginGame()
+	{
+		if (_connectingPlayers.Count > 0)
+		{
+			return false;
+		}
+		return !ConnectedPlayerIds.Except(_readyPlayers).Any();
+	}
+
 	private void BeginRunIfAllPlayersReady()
 	{
-		if (_connectingPlayers.Count <= 0 && (NetService.Type == NetGameType.Host || NetService.Type == NetGameType.Singleplayer) && !ConnectedPlayerIds.Except(_readyPlayers).Any())
+		if ((NetService.Type == NetGameType.Host || NetService.Type == NetGameType.Singleplayer) && IsAboutToBeginGame())
 		{
 			TaskHelper.RunSafely(TryBeginRun());
 		}
@@ -356,7 +358,7 @@ public class LoadRunLobby
 			int num = _connectingPlayers.IndexOf(connectingPlayer);
 			if (num >= 0)
 			{
-				Log.Info($"Disconnecting player {connectingPlayer.id} because they did not respond to the initial game join handshake within {HandshakeTimeout}ms");
+				_logger.Info($"Disconnecting player {connectingPlayer.id} because they did not respond to the initial game join handshake within {HandshakeTimeout}ms");
 				INetHostGameService netHostGameService = (INetHostGameService)NetService;
 				netHostGameService.DisconnectClient(connectingPlayer.id, NetError.HandshakeTimeout);
 			}

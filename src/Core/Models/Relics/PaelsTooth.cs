@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -79,7 +80,7 @@ public sealed class PaelsTooth : RelicModel
 
 	public override async Task AfterObtained()
 	{
-		IEnumerable<CardModel> enumerable = (await CardSelectCmd.FromDeckForRemoval(prefs: new CardSelectorPrefs(CardSelectorPrefs.RemoveSelectionPrompt, base.DynamicVars.Cards.IntValue), player: base.Owner, filter: (CardModel c) => c.IsUpgradable)).OrderBy((CardModel c) => c.Id.Entry);
+		IEnumerable<CardModel> enumerable = (await CardSelectCmd.FromDeckForRemoval(prefs: new CardSelectorPrefs(CardSelectorPrefs.RemoveSelectionPrompt, base.DynamicVars.Cards.IntValue), player: base.Owner, filter: (CardModel c) => c.IsUpgradable)).OrderBy<CardModel, string>((CardModel c) => c.Id.Entry, StringComparer.Ordinal);
 		foreach (CardModel item in enumerable)
 		{
 			CardModel cardModel = (CardModel)item.MutableClone();

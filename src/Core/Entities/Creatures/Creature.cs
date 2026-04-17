@@ -132,6 +132,22 @@ public class Creature
 		}
 	}
 
+	public string LogName
+	{
+		get
+		{
+			if (IsMonster)
+			{
+				return Monster.Title.GetFormattedText();
+			}
+			if (RunManager.Instance.IsSinglePlayerOrFakeMultiplayer)
+			{
+				return Player.Character.Title.GetFormattedText();
+			}
+			return "PlayerId " + Player.NetId;
+		}
+	}
+
 	public bool IsMonster => Monster != null;
 
 	public bool IsPlayer => Player != null;
@@ -359,12 +375,13 @@ public class Creature
 	{
 		bool flag = CurrentHp > 0 && amount >= (decimal)CurrentHp;
 		int currentHp = CurrentHp;
-		CurrentHp = Math.Max(CurrentHp - (int)amount, 0);
+		int num = (int)Math.Min(amount, 999999999m);
+		CurrentHp = Math.Max(CurrentHp - num, 0);
 		return new DamageResult(this, props)
 		{
 			UnblockedDamage = currentHp - CurrentHp,
 			WasTargetKilled = flag,
-			OverkillDamage = (flag ? ((int)(-((decimal)currentHp - amount))) : 0)
+			OverkillDamage = (flag ? Math.Max(num - currentHp, 0) : 0)
 		};
 	}
 
@@ -374,7 +391,7 @@ public class Creature
 		{
 			throw new ArgumentException("amount must be positive. Use LoseBlock for block loss.");
 		}
-		Block = Math.Min(Block + (int)amount, 999);
+		Block = (int)Math.Min((decimal)Block + amount, 999999999m);
 	}
 
 	public void LoseBlockInternal(decimal amount)
@@ -383,7 +400,7 @@ public class Creature
 		{
 			throw new ArgumentException("amount must be positive. Use GainBlock for block gain.");
 		}
-		Block = Math.Max(Block - (int)amount, 0);
+		Block = (int)Math.Max((decimal)Block - amount, 0m);
 	}
 
 	public void HealInternal(decimal amount)
@@ -599,7 +616,7 @@ public class Creature
 
 	public override string ToString()
 	{
-		return "Creature " + Name;
+		return "Creature " + LogName;
 	}
 
 	public double GetHpPercentRemaining()

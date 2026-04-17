@@ -11,6 +11,9 @@ public class PrefsSave : ISaveSchema
 	[JsonPropertyName("fast_mode")]
 	public FastModeType FastMode { get; set; } = FastModeType.Normal;
 
+	[JsonPropertyName("phobia_mode")]
+	public bool PhobiaMode { get; set; }
+
 	[JsonPropertyName("screenshake")]
 	public int ScreenShakeOptionIndex { get; set; } = 2;
 
@@ -31,4 +34,7 @@ public class PrefsSave : ISaveSchema
 
 	[JsonPropertyName("text_effects_enabled")]
 	public bool TextEffectsEnabled { get; set; } = true;
+
+	[JsonPropertyName("show_mp_drawings")]
+	public bool ShowMultiplayerDrawings { get; set; } = true;
 }

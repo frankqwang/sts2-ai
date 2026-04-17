@@ -88,7 +88,7 @@ public partial class NTransformPreview : Control
 		List<CardModel> cards = possibleTransformations.ToList();
 		cards.UnstableShuffle(Rng.Chaotic);
 		int cardIndex = 0;
-		while (!_cancelTokenSource.IsCancellationRequested)
+		while (!_cancelTokenSource.IsCancellationRequested && holder.CardNode != null)
 		{
 			holder.ReassignToCard(cards[cardIndex], cardPile.Type, null, ModelVisibility.Visible);
 			cardIndex++;
@@ -99,11 +99,11 @@ public partial class NTransformPreview : Control
 			}
 			if (SaveManager.Instance.PrefsSave.FastMode == FastModeType.Instant)
 			{
-				await Task.Delay(200);
+				await Task.Delay(200, _cancelTokenSource.Token);
 			}
 			else
 			{
-				await Cmd.Wait(0.2f, ignoreCombatEnd: true);
+				await Cmd.Wait(0.2f, _cancelTokenSource.Token, ignoreCombatEnd: true);
 			}
 		}
 	}

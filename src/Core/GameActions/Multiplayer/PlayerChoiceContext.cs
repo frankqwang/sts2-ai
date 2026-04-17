@@ -34,9 +34,10 @@ public abstract class PlayerChoiceContext
 
 	public void PopModel(AbstractModel model)
 	{
-		if (_modelStack == null || !_modelStack.TryPeek(out AbstractModel result) || result != model)
+		AbstractModel result = null;
+		if (_modelStack == null || !_modelStack.TryPeek(out result) || result != model)
 		{
-			Log.Error($"Tried to pop model {model} from from stack of player choice context {this} but it wasn't on the top of the stack!");
+			Log.Error($"Tried to pop model {model} from stack of player choice context {this} but {result} was on the top of the stack instead! (Stack size: {_modelStack?.Count})");
 		}
 		else
 		{

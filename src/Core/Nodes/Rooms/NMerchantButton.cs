@@ -18,7 +18,7 @@ public partial class NMerchantButton : NButton
 	[Signal]
 	public delegate void MerchantOpenedEventHandler(NMerchantButton merchantButton);
 
-	private MegaSkeleton _merchantSkeleton;
+	private MegaSkeleton? _merchantSkeleton;
 
 	private NSelectionReticle _merchantSelectionReticle;
 
@@ -55,8 +55,8 @@ public partial class NMerchantButton : NButton
 		}
 		else
 		{
-			_merchantSkeleton.SetSkinByName("default");
-			_merchantSkeleton.SetSlotsToSetupPose();
+			_merchantSkeleton?.SetSkinByName("default");
+			_merchantSkeleton?.SetSlotsToSetupPose();
 		}
 		_focusedWhileTargeting = false;
 	}
@@ -103,8 +103,8 @@ public partial class NMerchantButton : NButton
 		}
 		else
 		{
-			_merchantSkeleton.SetSkinByName("outline");
-			_merchantSkeleton.SetSlotsToSetupPose();
+			_merchantSkeleton?.SetSkinByName("outline");
+			_merchantSkeleton?.SetSlotsToSetupPose();
 			_focusedWhileTargeting = false;
 		}
 	}

@@ -14,7 +14,11 @@ public partial class NMerchantHand : Node
 
 	private Vector2 _targetPos;
 
-	private MegaBone _bone;
+	private Control? _targetNode;
+
+	private Vector2 _targetOffset;
+
+	private MegaBone? _bone;
 
 	private FastNoiseLite _noise;
 
@@ -38,7 +42,7 @@ public partial class NMerchantHand : Node
 		_noise = new FastNoiseLite();
 		_noise.NoiseType = FastNoiseLite.NoiseTypeEnum.Perlin;
 		_noise.Frequency = 1f;
-		_bone = _animController.GetSkeleton().FindBone("rotate_me");
+		_bone = _animController.GetSkeleton()?.FindBone("rotate_me");
 		_animController.GetAnimationState().SetAnimation("default");
 	}
 
@@ -50,21 +54,27 @@ public partial class NMerchantHand : Node
 
 	public override void _Process(double delta)
 	{
+		if (_targetNode != null && GodotObject.IsInstanceValid(_targetNode))
+		{
+			_targetPos = _targetNode.GlobalPosition + _targetOffset;
+		}
 		_time += (float)delta;
 		float x = _noise.GetNoise1D(_time * 0.1f) + 0.4f;
 		float y = _noise.GetNoise1D((_time + 0.25f) * 0.1f) - 0.5f;
 		_parent.GlobalPosition = _parent.GlobalPosition.Lerp(_targetPos + new Vector2(x, y) * 100f, (float)delta * 4f);
-		_bone.SetRotation(Mathf.Lerp(-10f, 10f, (_parent.Position.X - _rug.Size.X * 0.5f - 50f) * 0.01f));
+		_bone?.SetRotation(Mathf.Lerp(-10f, 10f, (_parent.Position.X - _rug.Size.X * 0.5f - 50f) * 0.01f));
 	}
 
-	public void PointAtTarget(Vector2 pos)
+	public void PointAtTarget(Control target, Vector2 offset)
 	{
 		_stopPointingToken?.Cancel();
-		_targetPos = pos - Vector2.One * 50f;
+		_targetNode = target;
+		_targetOffset = offset;
 	}
 
 	public void StopPointing(float lingerTime)
 	{
+		_targetNode = null;
 		_stopPointingToken?.Cancel();
 		_stopPointingToken = new CancellationTokenSource();
 		TaskHelper.RunSafely(WaitAndReturn(_stopPointingToken, lingerTime));

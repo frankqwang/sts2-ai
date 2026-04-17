@@ -153,7 +153,7 @@ public partial class NKaiserCrabBossVfx : Node
 	private void OnAnimationStart(GodotObject spineSprite, GodotObject animationState, GodotObject trackEntry)
 	{
 		string name = new MegaAnimationState(animationState).GetCurrent(2).GetAnimation().GetName();
-		if (name != "right/charged_loop" && name != "right/charge_up")
+		if (name != "right/charged_loop" && name != "right/charge_up" && name != "right/hurt_charged")
 		{
 			OnChargeSteamEnd();
 		}

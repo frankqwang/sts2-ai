@@ -16,10 +16,10 @@ public sealed class Seance : CardModel
 
 	public override IEnumerable<CardKeyword> CanonicalKeywords => new global::_003C_003Ez__ReadOnlySingleElementList<CardKeyword>(CardKeyword.Ethereal);
 
-	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromCard<Soul>(base.IsUpgraded));
+	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromCard<Soul>());
 
 	public Seance()
-		: base(0, CardType.Skill, CardRarity.Rare, TargetType.Self)
+		: base(1, CardType.Skill, CardRarity.Rare, TargetType.Self)
 	{
 	}
 
@@ -32,11 +32,12 @@ public sealed class Seance : CardModel
 		List<CardModel> list = (await CardSelectCmd.FromSimpleGrid(choiceContext, cardsIn, base.Owner, new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, base.DynamicVars.Cards.IntValue))).ToList();
 		foreach (CardModel item in list)
 		{
-			CardPileAddResult? cardPileAddResult = await CardCmd.TransformTo<Soul>(item);
-			if (base.IsUpgraded && cardPileAddResult.HasValue)
-			{
-				CardCmd.Upgrade(cardPileAddResult.Value.cardAdded);
-			}
+			await CardCmd.TransformTo<Soul>(item);
 		}
+	}
+
+	protected override void OnUpgrade()
+	{
+		base.EnergyCost.UpgradeBy(-1);
 	}
 }

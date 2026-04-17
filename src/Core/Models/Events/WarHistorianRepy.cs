@@ -15,7 +15,7 @@ public sealed class WarHistorianRepy : EventModel
 {
 	public override bool IsShared => true;
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		return false;
 	}
@@ -24,8 +24,8 @@ public sealed class WarHistorianRepy : EventModel
 	{
 		return new global::_003C_003Ez__ReadOnlyArray<EventOption>(new EventOption[2]
 		{
-			new EventOption(this, UnlockCage, "WAR_HISTORIAN_REPY.pages.INITIAL.options.UNLOCK_CAGE", HoverTipFactory.FromRelic<HistoryCourse>().Concat(new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromCard<LanternKey>()))),
-			new EventOption(this, UnlockChest, "WAR_HISTORIAN_REPY.pages.INITIAL.options.UNLOCK_CHEST", HoverTipFactory.FromCard<LanternKey>())
+			new EventOption(this, UnlockCage, "WAR_HISTORIAN_REPY.pages.INITIAL.options.UNLOCK_CAGE", HoverTipFactory.FromRelic<HistoryCourse>().Concat(HoverTipFactory.FromCardWithCardHoverTips<LanternKey>())),
+			new EventOption(this, UnlockChest, "WAR_HISTORIAN_REPY.pages.INITIAL.options.UNLOCK_CHEST", HoverTipFactory.FromCardWithCardHoverTips<LanternKey>())
 		});
 	}
 

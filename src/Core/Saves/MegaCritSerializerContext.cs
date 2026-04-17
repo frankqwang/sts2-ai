@@ -16,6 +16,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Badges;
 using MegaCrit.Sts2.Core.Nodes.Screens.FeedbackScreen;
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Platform.Null;
@@ -50,7 +51,8 @@ namespace MegaCrit.Sts2.Core.Saves;
 	typeof(SnakeCaseJsonStringEnumConverter<FastModeType>),
 	typeof(SnakeCaseJsonStringEnumConverter<CardCreationSource>),
 	typeof(SnakeCaseJsonStringEnumConverter<CardRarityOddsType>),
-	typeof(SnakeCaseJsonStringEnumConverter<ControllerMappingType>)
+	typeof(SnakeCaseJsonStringEnumConverter<ControllerMappingType>),
+	typeof(SnakeCaseJsonStringEnumConverter<BadgeRarity>)
 }, UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip, GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(NullLeaderboardFile))]
 [JsonSerializable(typeof(SerializableRun))]
@@ -104,6 +106,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private JsonTypeInfo<SettingsSaveMod>? _SettingsSaveMod;
 
+	private JsonTypeInfo<BadgeRarity>? _BadgeRarity;
+
 	private JsonTypeInfo<ModelId>? _ModelId;
 
 	private JsonTypeInfo<FeedbackData>? _FeedbackData;
@@ -154,6 +158,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private JsonTypeInfo<AncientStats>? _AncientStats;
 
+	private JsonTypeInfo<BadgeStats>? _BadgeStats;
+
 	private JsonTypeInfo<CardStats>? _CardStats;
 
 	private JsonTypeInfo<CharacterStats>? _CharacterStats;
@@ -197,6 +203,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 	private JsonTypeInfo<SerializableActMap>? _SerializableActMap;
 
 	private JsonTypeInfo<SerializableActModel>? _SerializableActModel;
+
+	private JsonTypeInfo<SerializableBadge>? _SerializableBadge;
 
 	private JsonTypeInfo<SerializableCard>? _SerializableCard;
 
@@ -264,6 +272,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private JsonTypeInfo<Dictionary<ulong, List<SerializableReward>>>? _DictionaryUInt64ListSerializableReward;
 
+	private JsonTypeInfo<IEnumerable<SerializableBadge>>? _IEnumerableSerializableBadge;
+
 	private JsonTypeInfo<IEnumerable<SerializableCard>>? _IEnumerableSerializableCard;
 
 	private JsonTypeInfo<IEnumerable<SerializablePotion>>? _IEnumerableSerializablePotion;
@@ -307,6 +317,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 	private JsonTypeInfo<List<AncientCharacterStats>>? _ListAncientCharacterStats;
 
 	private JsonTypeInfo<List<AncientStats>>? _ListAncientStats;
+
+	private JsonTypeInfo<List<BadgeStats>>? _ListBadgeStats;
 
 	private JsonTypeInfo<List<CardStats>>? _ListCardStats;
 
@@ -415,7 +427,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			(JsonConverter)new SnakeCaseJsonStringEnumConverter<FastModeType>(),
 			(JsonConverter)new SnakeCaseJsonStringEnumConverter<CardCreationSource>(),
 			(JsonConverter)new SnakeCaseJsonStringEnumConverter<CardRarityOddsType>(),
-			(JsonConverter)new SnakeCaseJsonStringEnumConverter<ControllerMappingType>()
+			(JsonConverter)new SnakeCaseJsonStringEnumConverter<ControllerMappingType>(),
+			(JsonConverter)new SnakeCaseJsonStringEnumConverter<BadgeRarity>()
 		},
 		IncludeFields = true,
 		ReadCommentHandling = JsonCommentHandling.Skip,
@@ -458,6 +471,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 	public JsonTypeInfo<ModSource> ModSource => _ModSource ?? (_ModSource = (JsonTypeInfo<ModSource>)base.Options.GetTypeInfo(typeof(ModSource)));
 
 	public JsonTypeInfo<SettingsSaveMod> SettingsSaveMod => _SettingsSaveMod ?? (_SettingsSaveMod = (JsonTypeInfo<SettingsSaveMod>)base.Options.GetTypeInfo(typeof(SettingsSaveMod)));
+
+	public JsonTypeInfo<BadgeRarity> BadgeRarity => _BadgeRarity ?? (_BadgeRarity = (JsonTypeInfo<BadgeRarity>)base.Options.GetTypeInfo(typeof(BadgeRarity)));
 
 	public JsonTypeInfo<ModelId> ModelId => _ModelId ?? (_ModelId = (JsonTypeInfo<ModelId>)base.Options.GetTypeInfo(typeof(ModelId)));
 
@@ -509,6 +524,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	public JsonTypeInfo<AncientStats> AncientStats => _AncientStats ?? (_AncientStats = (JsonTypeInfo<AncientStats>)base.Options.GetTypeInfo(typeof(AncientStats)));
 
+	public JsonTypeInfo<BadgeStats> BadgeStats => _BadgeStats ?? (_BadgeStats = (JsonTypeInfo<BadgeStats>)base.Options.GetTypeInfo(typeof(BadgeStats)));
+
 	public JsonTypeInfo<CardStats> CardStats => _CardStats ?? (_CardStats = (JsonTypeInfo<CardStats>)base.Options.GetTypeInfo(typeof(CardStats)));
 
 	public JsonTypeInfo<CharacterStats> CharacterStats => _CharacterStats ?? (_CharacterStats = (JsonTypeInfo<CharacterStats>)base.Options.GetTypeInfo(typeof(CharacterStats)));
@@ -552,6 +569,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 	public JsonTypeInfo<SerializableActMap> SerializableActMap => _SerializableActMap ?? (_SerializableActMap = (JsonTypeInfo<SerializableActMap>)base.Options.GetTypeInfo(typeof(SerializableActMap)));
 
 	public JsonTypeInfo<SerializableActModel> SerializableActModel => _SerializableActModel ?? (_SerializableActModel = (JsonTypeInfo<SerializableActModel>)base.Options.GetTypeInfo(typeof(SerializableActModel)));
+
+	public JsonTypeInfo<SerializableBadge> SerializableBadge => _SerializableBadge ?? (_SerializableBadge = (JsonTypeInfo<SerializableBadge>)base.Options.GetTypeInfo(typeof(SerializableBadge)));
 
 	public JsonTypeInfo<SerializableCard> SerializableCard => _SerializableCard ?? (_SerializableCard = (JsonTypeInfo<SerializableCard>)base.Options.GetTypeInfo(typeof(SerializableCard)));
 
@@ -619,6 +638,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	public JsonTypeInfo<Dictionary<ulong, List<SerializableReward>>> DictionaryUInt64ListSerializableReward => _DictionaryUInt64ListSerializableReward ?? (_DictionaryUInt64ListSerializableReward = (JsonTypeInfo<Dictionary<ulong, List<SerializableReward>>>)base.Options.GetTypeInfo(typeof(Dictionary<ulong, List<SerializableReward>>)));
 
+	public JsonTypeInfo<IEnumerable<SerializableBadge>> IEnumerableSerializableBadge => _IEnumerableSerializableBadge ?? (_IEnumerableSerializableBadge = (JsonTypeInfo<IEnumerable<SerializableBadge>>)base.Options.GetTypeInfo(typeof(IEnumerable<SerializableBadge>)));
+
 	public JsonTypeInfo<IEnumerable<SerializableCard>> IEnumerableSerializableCard => _IEnumerableSerializableCard ?? (_IEnumerableSerializableCard = (JsonTypeInfo<IEnumerable<SerializableCard>>)base.Options.GetTypeInfo(typeof(IEnumerable<SerializableCard>)));
 
 	public JsonTypeInfo<IEnumerable<SerializablePotion>> IEnumerableSerializablePotion => _IEnumerableSerializablePotion ?? (_IEnumerableSerializablePotion = (JsonTypeInfo<IEnumerable<SerializablePotion>>)base.Options.GetTypeInfo(typeof(IEnumerable<SerializablePotion>)));
@@ -662,6 +683,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 	public JsonTypeInfo<List<AncientCharacterStats>> ListAncientCharacterStats => _ListAncientCharacterStats ?? (_ListAncientCharacterStats = (JsonTypeInfo<List<AncientCharacterStats>>)base.Options.GetTypeInfo(typeof(List<AncientCharacterStats>)));
 
 	public JsonTypeInfo<List<AncientStats>> ListAncientStats => _ListAncientStats ?? (_ListAncientStats = (JsonTypeInfo<List<AncientStats>>)base.Options.GetTypeInfo(typeof(List<AncientStats>)));
+
+	public JsonTypeInfo<List<BadgeStats>> ListBadgeStats => _ListBadgeStats ?? (_ListBadgeStats = (JsonTypeInfo<List<BadgeStats>>)base.Options.GetTypeInfo(typeof(List<BadgeStats>)));
 
 	public JsonTypeInfo<List<CardStats>> ListCardStats => _ListCardStats ?? (_ListCardStats = (JsonTypeInfo<List<CardStats>>)base.Options.GetTypeInfo(typeof(List<CardStats>)));
 
@@ -1553,6 +1576,16 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		return array;
 	}
 
+	private JsonTypeInfo<BadgeRarity> Create_BadgeRarity(JsonSerializerOptions options)
+	{
+		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<BadgeRarity> jsonTypeInfo))
+		{
+			jsonTypeInfo = JsonMetadataServices.CreateValueInfo<BadgeRarity>(options, JsonMetadataServices.GetEnumConverter<BadgeRarity>(options));
+		}
+		jsonTypeInfo.OriginatingResolver = this;
+		return jsonTypeInfo;
+	}
+
 	private JsonTypeInfo<ModelId> Create_ModelId(JsonSerializerOptions options)
 	{
 		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<ModelId> jsonTypeInfo))
@@ -1668,7 +1701,7 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private static JsonPropertyInfo[] FeedbackDataPropInit(JsonSerializerOptions options)
 	{
-		JsonPropertyInfo[] array = new JsonPropertyInfo[7];
+		JsonPropertyInfo[] array = new JsonPropertyInfo[9];
 		JsonPropertyInfoValues<string> propertyInfo = new JsonPropertyInfoValues<string>
 		{
 			IsProperty = false,
@@ -1828,6 +1861,48 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		array[6] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo7);
 		array[6].IsGetNullable = false;
 		array[6].IsSetNullable = false;
+		JsonPropertyInfoValues<bool> propertyInfo8 = new JsonPropertyInfoValues<bool>
+		{
+			IsProperty = false,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(FeedbackData),
+			Converter = null,
+			Getter = (object obj) => ((FeedbackData)obj).isModded,
+			Setter = delegate(object obj, bool value)
+			{
+				Unsafe.Unbox<FeedbackData>(obj).isModded = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "isModded",
+			JsonPropertyName = "is_modded",
+			AttributeProviderFactory = () => typeof(FeedbackData).GetField("isModded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+		};
+		array[7] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo8);
+		JsonPropertyInfoValues<bool> propertyInfo9 = new JsonPropertyInfoValues<bool>
+		{
+			IsProperty = false,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(FeedbackData),
+			Converter = null,
+			Getter = (object obj) => ((FeedbackData)obj).isFullConsole,
+			Setter = delegate(object obj, bool value)
+			{
+				Unsafe.Unbox<FeedbackData>(obj).isFullConsole = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "isFullConsole",
+			JsonPropertyName = "is_full_console",
+			AttributeProviderFactory = () => typeof(FeedbackData).GetField("isFullConsole", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+		};
+		array[8] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo9);
 		return array;
 	}
 
@@ -4131,10 +4206,7 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 				ObjectWithParameterizedConstructorCreator = (object[] args) => new RunHistoryPlayer
 				{
 					Id = (ulong)args[0],
-					Character = (ModelId)args[1],
-					Deck = (IEnumerable<SerializableCard>)args[2],
-					Relics = (IEnumerable<SerializableRelic>)args[3],
-					Potions = (IEnumerable<SerializablePotion>)args[4]
+					Character = (ModelId)args[1]
 				},
 				PropertyMetadataInitializer = (JsonSerializerContext _) => RunHistoryPlayerPropInit(options),
 				ConstructorParameterMetadataInitializer = RunHistoryPlayerCtorParamInit,
@@ -4150,7 +4222,7 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private static JsonPropertyInfo[] RunHistoryPlayerPropInit(JsonSerializerOptions options)
 	{
-		JsonPropertyInfo[] array = new JsonPropertyInfo[6];
+		JsonPropertyInfo[] array = new JsonPropertyInfo[7];
 		JsonPropertyInfoValues<ulong> propertyInfo = new JsonPropertyInfoValues<ulong>
 		{
 			IsProperty = true,
@@ -4203,9 +4275,9 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			DeclaringType = typeof(RunHistoryPlayer),
 			Converter = null,
 			Getter = (object obj) => ((RunHistoryPlayer)obj).Deck,
-			Setter = delegate
+			Setter = delegate(object obj, IEnumerable<SerializableCard>? value)
 			{
-				throw new InvalidOperationException("Setting init-only properties is not supported in source generation mode.");
+				((RunHistoryPlayer)obj).Deck = value;
 			},
 			IgnoreCondition = null,
 			HasJsonInclude = false,
@@ -4226,9 +4298,9 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			DeclaringType = typeof(RunHistoryPlayer),
 			Converter = null,
 			Getter = (object obj) => ((RunHistoryPlayer)obj).Relics,
-			Setter = delegate
+			Setter = delegate(object obj, IEnumerable<SerializableRelic>? value)
 			{
-				throw new InvalidOperationException("Setting init-only properties is not supported in source generation mode.");
+				((RunHistoryPlayer)obj).Relics = value;
 			},
 			IgnoreCondition = null,
 			HasJsonInclude = false,
@@ -4249,9 +4321,9 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			DeclaringType = typeof(RunHistoryPlayer),
 			Converter = null,
 			Getter = (object obj) => ((RunHistoryPlayer)obj).Potions,
-			Setter = delegate
+			Setter = delegate(object obj, IEnumerable<SerializablePotion>? value)
 			{
-				throw new InvalidOperationException("Setting init-only properties is not supported in source generation mode.");
+				((RunHistoryPlayer)obj).Potions = value;
 			},
 			IgnoreCondition = null,
 			HasJsonInclude = false,
@@ -4264,7 +4336,30 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		array[4] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo5);
 		array[4].IsGetNullable = false;
 		array[4].IsSetNullable = false;
-		JsonPropertyInfoValues<int> propertyInfo6 = new JsonPropertyInfoValues<int>
+		JsonPropertyInfoValues<IEnumerable<SerializableBadge>> propertyInfo6 = new JsonPropertyInfoValues<IEnumerable<SerializableBadge>>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(RunHistoryPlayer),
+			Converter = null,
+			Getter = (object obj) => ((RunHistoryPlayer)obj).Badges,
+			Setter = delegate(object obj, IEnumerable<SerializableBadge>? value)
+			{
+				((RunHistoryPlayer)obj).Badges = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "Badges",
+			JsonPropertyName = "badges",
+			AttributeProviderFactory = () => typeof(RunHistoryPlayer).GetProperty("Badges", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(IEnumerable<SerializableBadge>), Array.Empty<Type>(), null)
+		};
+		array[5] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo6);
+		array[5].IsGetNullable = false;
+		array[5].IsSetNullable = false;
+		JsonPropertyInfoValues<int> propertyInfo7 = new JsonPropertyInfoValues<int>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -4284,13 +4379,13 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "max_potion_slot_count",
 			AttributeProviderFactory = () => typeof(RunHistoryPlayer).GetProperty("MaxPotionSlotCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(int), Array.Empty<Type>(), null)
 		};
-		array[5] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo6);
+		array[6] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo7);
 		return array;
 	}
 
 	private static JsonParameterInfoValues[] RunHistoryPlayerCtorParamInit()
 	{
-		return new JsonParameterInfoValues[5]
+		return new JsonParameterInfoValues[2]
 		{
 			new JsonParameterInfoValues
 			{
@@ -4305,30 +4400,6 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 				Name = "Character",
 				ParameterType = typeof(ModelId),
 				Position = 1,
-				IsNullable = false,
-				IsMemberInitializer = true
-			},
-			new JsonParameterInfoValues
-			{
-				Name = "Deck",
-				ParameterType = typeof(IEnumerable<SerializableCard>),
-				Position = 2,
-				IsNullable = false,
-				IsMemberInitializer = true
-			},
-			new JsonParameterInfoValues
-			{
-				Name = "Relics",
-				ParameterType = typeof(IEnumerable<SerializableRelic>),
-				Position = 3,
-				IsNullable = false,
-				IsMemberInitializer = true
-			},
-			new JsonParameterInfoValues
-			{
-				Name = "Potions",
-				ParameterType = typeof(IEnumerable<SerializablePotion>),
-				Position = 4,
 				IsNullable = false,
 				IsMemberInitializer = true
 			}
@@ -4617,6 +4688,136 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		};
 	}
 
+	private JsonTypeInfo<BadgeStats> Create_BadgeStats(JsonSerializerOptions options)
+	{
+		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<BadgeStats> jsonTypeInfo))
+		{
+			JsonObjectInfoValues<BadgeStats> objectInfo = new JsonObjectInfoValues<BadgeStats>
+			{
+				ObjectCreator = null,
+				ObjectWithParameterizedConstructorCreator = (object[] args) => new BadgeStats
+				{
+					Id = (string)args[0],
+					Count = (int)args[1],
+					Rarity = (BadgeRarity)args[2]
+				},
+				PropertyMetadataInitializer = (JsonSerializerContext _) => BadgeStatsPropInit(options),
+				ConstructorParameterMetadataInitializer = BadgeStatsCtorParamInit,
+				ConstructorAttributeProviderFactory = () => typeof(BadgeStats).GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Array.Empty<Type>(), null),
+				SerializeHandler = null
+			};
+			jsonTypeInfo = JsonMetadataServices.CreateObjectInfo(options, objectInfo);
+			jsonTypeInfo.NumberHandling = null;
+		}
+		jsonTypeInfo.OriginatingResolver = this;
+		return jsonTypeInfo;
+	}
+
+	private static JsonPropertyInfo[] BadgeStatsPropInit(JsonSerializerOptions options)
+	{
+		JsonPropertyInfo[] array = new JsonPropertyInfo[3];
+		JsonPropertyInfoValues<string> propertyInfo = new JsonPropertyInfoValues<string>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(BadgeStats),
+			Converter = null,
+			Getter = (object obj) => ((BadgeStats)obj).Id,
+			Setter = delegate
+			{
+				throw new InvalidOperationException("Setting init-only properties is not supported in source generation mode.");
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "Id",
+			JsonPropertyName = "id",
+			AttributeProviderFactory = () => typeof(BadgeStats).GetProperty("Id", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(string), Array.Empty<Type>(), null)
+		};
+		array[0] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo);
+		array[0].IsRequired = true;
+		array[0].IsGetNullable = false;
+		array[0].IsSetNullable = false;
+		JsonPropertyInfoValues<int> propertyInfo2 = new JsonPropertyInfoValues<int>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(BadgeStats),
+			Converter = null,
+			Getter = (object obj) => ((BadgeStats)obj).Count,
+			Setter = delegate(object obj, int value)
+			{
+				((BadgeStats)obj).Count = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "Count",
+			JsonPropertyName = "count",
+			AttributeProviderFactory = () => typeof(BadgeStats).GetProperty("Count", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(int), Array.Empty<Type>(), null)
+		};
+		array[1] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo2);
+		array[1].IsRequired = true;
+		JsonPropertyInfoValues<BadgeRarity> propertyInfo3 = new JsonPropertyInfoValues<BadgeRarity>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(BadgeStats),
+			Converter = null,
+			Getter = (object obj) => ((BadgeStats)obj).Rarity,
+			Setter = delegate(object obj, BadgeRarity value)
+			{
+				((BadgeStats)obj).Rarity = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "Rarity",
+			JsonPropertyName = "rarity",
+			AttributeProviderFactory = () => typeof(BadgeStats).GetProperty("Rarity", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(BadgeRarity), Array.Empty<Type>(), null)
+		};
+		array[2] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo3);
+		array[2].IsRequired = true;
+		return array;
+	}
+
+	private static JsonParameterInfoValues[] BadgeStatsCtorParamInit()
+	{
+		return new JsonParameterInfoValues[3]
+		{
+			new JsonParameterInfoValues
+			{
+				Name = "Id",
+				ParameterType = typeof(string),
+				Position = 0,
+				IsNullable = false,
+				IsMemberInitializer = true
+			},
+			new JsonParameterInfoValues
+			{
+				Name = "Count",
+				ParameterType = typeof(int),
+				Position = 1,
+				IsNullable = false,
+				IsMemberInitializer = true
+			},
+			new JsonParameterInfoValues
+			{
+				Name = "Rarity",
+				ParameterType = typeof(BadgeRarity),
+				Position = 2,
+				IsNullable = false,
+				IsMemberInitializer = true
+			}
+		};
+	}
+
 	private JsonTypeInfo<CardStats> Create_CardStats(JsonSerializerOptions options)
 	{
 		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<CardStats> jsonTypeInfo))
@@ -4791,7 +4992,7 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private static JsonPropertyInfo[] CharacterStatsPropInit(JsonSerializerOptions options)
 	{
-		JsonPropertyInfo[] array = new JsonPropertyInfo[9];
+		JsonPropertyInfo[] array = new JsonPropertyInfo[10];
 		JsonPropertyInfoValues<ModelId> propertyInfo = new JsonPropertyInfoValues<ModelId>
 		{
 			IsProperty = true,
@@ -4981,6 +5182,29 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			AttributeProviderFactory = () => typeof(CharacterStats).GetProperty("Playtime", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(long), Array.Empty<Type>(), null)
 		};
 		array[8] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo9);
+		JsonPropertyInfoValues<List<BadgeStats>> propertyInfo10 = new JsonPropertyInfoValues<List<BadgeStats>>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(CharacterStats),
+			Converter = null,
+			Getter = (object obj) => ((CharacterStats)obj).Badges,
+			Setter = delegate(object obj, List<BadgeStats>? value)
+			{
+				((CharacterStats)obj).Badges = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "Badges",
+			JsonPropertyName = "badges",
+			AttributeProviderFactory = () => typeof(CharacterStats).GetProperty("Badges", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(List<BadgeStats>), Array.Empty<Type>(), null)
+		};
+		array[9] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo10);
+		array[9].IsGetNullable = false;
+		array[9].IsSetNullable = false;
 		return array;
 	}
 
@@ -5627,7 +5851,7 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private static JsonPropertyInfo[] PrefsSavePropInit(JsonSerializerOptions options)
 	{
-		JsonPropertyInfo[] array = new JsonPropertyInfo[9];
+		JsonPropertyInfo[] array = new JsonPropertyInfo[11];
 		JsonPropertyInfoValues<int> propertyInfo = new JsonPropertyInfoValues<int>
 		{
 			IsProperty = true,
@@ -5670,7 +5894,28 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("FastMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(FastModeType), Array.Empty<Type>(), null)
 		};
 		array[1] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo2);
-		JsonPropertyInfoValues<int> propertyInfo3 = new JsonPropertyInfoValues<int>
+		JsonPropertyInfoValues<bool> propertyInfo3 = new JsonPropertyInfoValues<bool>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(PrefsSave),
+			Converter = null,
+			Getter = (object obj) => ((PrefsSave)obj).PhobiaMode,
+			Setter = delegate(object obj, bool value)
+			{
+				((PrefsSave)obj).PhobiaMode = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "PhobiaMode",
+			JsonPropertyName = "phobia_mode",
+			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("PhobiaMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
+		};
+		array[2] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo3);
+		JsonPropertyInfoValues<int> propertyInfo4 = new JsonPropertyInfoValues<int>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -5690,8 +5935,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "screenshake",
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("ScreenShakeOptionIndex", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(int), Array.Empty<Type>(), null)
 		};
-		array[2] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo3);
-		JsonPropertyInfoValues<bool> propertyInfo4 = new JsonPropertyInfoValues<bool>
+		array[3] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo4);
+		JsonPropertyInfoValues<bool> propertyInfo5 = new JsonPropertyInfoValues<bool>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -5711,8 +5956,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "show_run_timer",
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("ShowRunTimer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
 		};
-		array[3] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo4);
-		JsonPropertyInfoValues<bool> propertyInfo5 = new JsonPropertyInfoValues<bool>
+		array[4] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo5);
+		JsonPropertyInfoValues<bool> propertyInfo6 = new JsonPropertyInfoValues<bool>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -5732,8 +5977,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "show_card_indices",
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("ShowCardIndices", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
 		};
-		array[4] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo5);
-		JsonPropertyInfoValues<bool> propertyInfo6 = new JsonPropertyInfoValues<bool>
+		array[5] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo6);
+		JsonPropertyInfoValues<bool> propertyInfo7 = new JsonPropertyInfoValues<bool>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -5753,8 +5998,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "upload_data",
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("UploadData", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
 		};
-		array[5] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo6);
-		JsonPropertyInfoValues<bool> propertyInfo7 = new JsonPropertyInfoValues<bool>
+		array[6] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo7);
+		JsonPropertyInfoValues<bool> propertyInfo8 = new JsonPropertyInfoValues<bool>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -5774,8 +6019,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "mute_in_background",
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("MuteInBackground", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
 		};
-		array[6] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo7);
-		JsonPropertyInfoValues<bool> propertyInfo8 = new JsonPropertyInfoValues<bool>
+		array[7] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo8);
+		JsonPropertyInfoValues<bool> propertyInfo9 = new JsonPropertyInfoValues<bool>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -5795,8 +6040,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "long_press",
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("IsLongPressEnabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
 		};
-		array[7] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo8);
-		JsonPropertyInfoValues<bool> propertyInfo9 = new JsonPropertyInfoValues<bool>
+		array[8] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo9);
+		JsonPropertyInfoValues<bool> propertyInfo10 = new JsonPropertyInfoValues<bool>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -5816,7 +6061,28 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "text_effects_enabled",
 			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("TextEffectsEnabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
 		};
-		array[8] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo9);
+		array[9] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo10);
+		JsonPropertyInfoValues<bool> propertyInfo11 = new JsonPropertyInfoValues<bool>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(PrefsSave),
+			Converter = null,
+			Getter = (object obj) => ((PrefsSave)obj).ShowMultiplayerDrawings,
+			Setter = delegate(object obj, bool value)
+			{
+				((PrefsSave)obj).ShowMultiplayerDrawings = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "ShowMultiplayerDrawings",
+			JsonPropertyName = "show_mp_drawings",
+			AttributeProviderFactory = () => typeof(PrefsSave).GetProperty("ShowMultiplayerDrawings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
+		};
+		array[10] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo11);
 		return array;
 	}
 
@@ -6819,6 +7085,105 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		};
 		array[2] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo3);
 		return array;
+	}
+
+	private JsonTypeInfo<SerializableBadge> Create_SerializableBadge(JsonSerializerOptions options)
+	{
+		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<SerializableBadge> jsonTypeInfo))
+		{
+			JsonObjectInfoValues<SerializableBadge> objectInfo = new JsonObjectInfoValues<SerializableBadge>
+			{
+				ObjectCreator = null,
+				ObjectWithParameterizedConstructorCreator = (object[] args) => new SerializableBadge
+				{
+					Id = (string)args[0],
+					Rarity = (BadgeRarity)args[1]
+				},
+				PropertyMetadataInitializer = (JsonSerializerContext _) => SerializableBadgePropInit(options),
+				ConstructorParameterMetadataInitializer = SerializableBadgeCtorParamInit,
+				ConstructorAttributeProviderFactory = () => typeof(SerializableBadge).GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Array.Empty<Type>(), null),
+				SerializeHandler = null
+			};
+			jsonTypeInfo = JsonMetadataServices.CreateObjectInfo(options, objectInfo);
+			jsonTypeInfo.NumberHandling = null;
+		}
+		jsonTypeInfo.OriginatingResolver = this;
+		return jsonTypeInfo;
+	}
+
+	private static JsonPropertyInfo[] SerializableBadgePropInit(JsonSerializerOptions options)
+	{
+		JsonPropertyInfo[] array = new JsonPropertyInfo[2];
+		JsonPropertyInfoValues<string> propertyInfo = new JsonPropertyInfoValues<string>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(SerializableBadge),
+			Converter = null,
+			Getter = (object obj) => ((SerializableBadge)obj).Id,
+			Setter = delegate(object obj, string? value)
+			{
+				((SerializableBadge)obj).Id = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "Id",
+			JsonPropertyName = "id",
+			AttributeProviderFactory = () => typeof(SerializableBadge).GetProperty("Id", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(string), Array.Empty<Type>(), null)
+		};
+		array[0] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo);
+		array[0].IsRequired = true;
+		array[0].IsGetNullable = false;
+		array[0].IsSetNullable = false;
+		JsonPropertyInfoValues<BadgeRarity> propertyInfo2 = new JsonPropertyInfoValues<BadgeRarity>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(SerializableBadge),
+			Converter = null,
+			Getter = (object obj) => ((SerializableBadge)obj).Rarity,
+			Setter = delegate(object obj, BadgeRarity value)
+			{
+				((SerializableBadge)obj).Rarity = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "Rarity",
+			JsonPropertyName = "rarity",
+			AttributeProviderFactory = () => typeof(SerializableBadge).GetProperty("Rarity", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(BadgeRarity), Array.Empty<Type>(), null)
+		};
+		array[1] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo2);
+		array[1].IsRequired = true;
+		return array;
+	}
+
+	private static JsonParameterInfoValues[] SerializableBadgeCtorParamInit()
+	{
+		return new JsonParameterInfoValues[2]
+		{
+			new JsonParameterInfoValues
+			{
+				Name = "Id",
+				ParameterType = typeof(string),
+				Position = 0,
+				IsNullable = false,
+				IsMemberInitializer = true
+			},
+			new JsonParameterInfoValues
+			{
+				Name = "Rarity",
+				ParameterType = typeof(BadgeRarity),
+				Position = 1,
+				IsNullable = false,
+				IsMemberInitializer = true
+			}
+		};
 	}
 
 	private JsonTypeInfo<SerializableCard> Create_SerializableCard(JsonSerializerOptions options)
@@ -8113,7 +8478,7 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private static JsonPropertyInfo[] SerializableRewardPropInit(JsonSerializerOptions options)
 	{
-		JsonPropertyInfo[] array = new JsonPropertyInfo[9];
+		JsonPropertyInfo[] array = new JsonPropertyInfo[10];
 		JsonPropertyInfoValues<RewardType> propertyInfo = new JsonPropertyInfoValues<RewardType>
 		{
 			IsProperty = true,
@@ -8135,7 +8500,30 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("RewardType", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(RewardType), Array.Empty<Type>(), null)
 		};
 		array[0] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo);
-		JsonPropertyInfoValues<SerializableCard> propertyInfo2 = new JsonPropertyInfoValues<SerializableCard>
+		JsonPropertyInfoValues<ModelId> propertyInfo2 = new JsonPropertyInfoValues<ModelId>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(SerializableReward),
+			Converter = null,
+			Getter = (object obj) => ((SerializableReward)obj).PredeterminedModelId,
+			Setter = delegate(object obj, ModelId? value)
+			{
+				((SerializableReward)obj).PredeterminedModelId = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "PredeterminedModelId",
+			JsonPropertyName = "predetermined_model_id",
+			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("PredeterminedModelId", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(ModelId), Array.Empty<Type>(), null)
+		};
+		array[1] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo2);
+		array[1].IsGetNullable = false;
+		array[1].IsSetNullable = false;
+		JsonPropertyInfoValues<SerializableCard> propertyInfo3 = new JsonPropertyInfoValues<SerializableCard>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8155,10 +8543,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "special_card",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("SpecialCard", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(SerializableCard), Array.Empty<Type>(), null)
 		};
-		array[1] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo2);
-		array[1].IsGetNullable = false;
-		array[1].IsSetNullable = false;
-		JsonPropertyInfoValues<int> propertyInfo3 = new JsonPropertyInfoValues<int>
+		array[2] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo3);
+		JsonPropertyInfoValues<int> propertyInfo4 = new JsonPropertyInfoValues<int>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8178,8 +8564,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "gold_amount",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("GoldAmount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(int), Array.Empty<Type>(), null)
 		};
-		array[2] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo3);
-		JsonPropertyInfoValues<bool> propertyInfo4 = new JsonPropertyInfoValues<bool>
+		array[3] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo4);
+		JsonPropertyInfoValues<bool> propertyInfo5 = new JsonPropertyInfoValues<bool>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8199,8 +8585,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "was_gold_stolen_back",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("WasGoldStolenBack", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(bool), Array.Empty<Type>(), null)
 		};
-		array[3] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo4);
-		JsonPropertyInfoValues<CardCreationSource> propertyInfo5 = new JsonPropertyInfoValues<CardCreationSource>
+		array[4] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo5);
+		JsonPropertyInfoValues<CardCreationSource> propertyInfo6 = new JsonPropertyInfoValues<CardCreationSource>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8220,8 +8606,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "source",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("Source", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(CardCreationSource), Array.Empty<Type>(), null)
 		};
-		array[4] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo5);
-		JsonPropertyInfoValues<CardRarityOddsType> propertyInfo6 = new JsonPropertyInfoValues<CardRarityOddsType>
+		array[5] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo6);
+		JsonPropertyInfoValues<CardRarityOddsType> propertyInfo7 = new JsonPropertyInfoValues<CardRarityOddsType>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8241,8 +8627,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "rarity_odds",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("RarityOdds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(CardRarityOddsType), Array.Empty<Type>(), null)
 		};
-		array[5] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo6);
-		JsonPropertyInfoValues<List<ModelId>> propertyInfo7 = new JsonPropertyInfoValues<List<ModelId>>
+		array[6] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo7);
+		JsonPropertyInfoValues<List<ModelId>> propertyInfo8 = new JsonPropertyInfoValues<List<ModelId>>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8262,10 +8648,10 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "card_pools",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("CardPoolIds", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(List<ModelId>), Array.Empty<Type>(), null)
 		};
-		array[6] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo7);
-		array[6].IsGetNullable = false;
-		array[6].IsSetNullable = false;
-		JsonPropertyInfoValues<int> propertyInfo8 = new JsonPropertyInfoValues<int>
+		array[7] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo8);
+		array[7].IsGetNullable = false;
+		array[7].IsSetNullable = false;
+		JsonPropertyInfoValues<int> propertyInfo9 = new JsonPropertyInfoValues<int>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8285,8 +8671,8 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "option_count",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("OptionCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(int), Array.Empty<Type>(), null)
 		};
-		array[7] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo8);
-		JsonPropertyInfoValues<ModelId> propertyInfo9 = new JsonPropertyInfoValues<ModelId>
+		array[8] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo9);
+		JsonPropertyInfoValues<ModelId> propertyInfo10 = new JsonPropertyInfoValues<ModelId>
 		{
 			IsProperty = true,
 			IsPublic = true,
@@ -8306,9 +8692,9 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 			JsonPropertyName = "custom_description_encounter_source_id",
 			AttributeProviderFactory = () => typeof(SerializableReward).GetProperty("CustomDescriptionEncounterSourceId", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(ModelId), Array.Empty<Type>(), null)
 		};
-		array[8] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo9);
-		array[8].IsGetNullable = false;
-		array[8].IsSetNullable = false;
+		array[9] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo10);
+		array[9].IsGetNullable = false;
+		array[9].IsSetNullable = false;
 		return array;
 	}
 
@@ -9939,7 +10325,7 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 
 	private static JsonPropertyInfo[] SerializableRunPropInit(JsonSerializerOptions options)
 	{
-		JsonPropertyInfo[] array = new JsonPropertyInfo[21];
+		JsonPropertyInfo[] array = new JsonPropertyInfo[22];
 		JsonPropertyInfoValues<int> propertyInfo = new JsonPropertyInfoValues<int>
 		{
 			IsProperty = true,
@@ -10401,6 +10787,27 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		array[20] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo21);
 		array[20].IsGetNullable = false;
 		array[20].IsSetNullable = false;
+		JsonPropertyInfoValues<GameMode> propertyInfo22 = new JsonPropertyInfoValues<GameMode>
+		{
+			IsProperty = true,
+			IsPublic = true,
+			IsVirtual = false,
+			DeclaringType = typeof(SerializableRun),
+			Converter = null,
+			Getter = (object obj) => ((SerializableRun)obj).GameMode,
+			Setter = delegate(object obj, GameMode value)
+			{
+				((SerializableRun)obj).GameMode = value;
+			},
+			IgnoreCondition = null,
+			HasJsonInclude = false,
+			IsExtensionData = false,
+			NumberHandling = null,
+			PropertyName = "GameMode",
+			JsonPropertyName = "game_mode",
+			AttributeProviderFactory = () => typeof(SerializableRun).GetProperty("GameMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, typeof(GameMode), Array.Empty<Type>(), null)
+		};
+		array[21] = JsonMetadataServices.CreatePropertyInfo(options, propertyInfo22);
 		return array;
 	}
 
@@ -11233,6 +11640,22 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		return jsonTypeInfo;
 	}
 
+	private JsonTypeInfo<IEnumerable<SerializableBadge>> Create_IEnumerableSerializableBadge(JsonSerializerOptions options)
+	{
+		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<IEnumerable<SerializableBadge>> jsonTypeInfo))
+		{
+			JsonCollectionInfoValues<IEnumerable<SerializableBadge>> collectionInfo = new JsonCollectionInfoValues<IEnumerable<SerializableBadge>>
+			{
+				ObjectCreator = null,
+				SerializeHandler = null
+			};
+			jsonTypeInfo = JsonMetadataServices.CreateIEnumerableInfo<IEnumerable<SerializableBadge>, SerializableBadge>(options, collectionInfo);
+			jsonTypeInfo.NumberHandling = null;
+		}
+		jsonTypeInfo.OriginatingResolver = this;
+		return jsonTypeInfo;
+	}
+
 	private JsonTypeInfo<IEnumerable<SerializableCard>> Create_IEnumerableSerializableCard(JsonSerializerOptions options)
 	{
 		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<IEnumerable<SerializableCard>> jsonTypeInfo))
@@ -11579,6 +12002,22 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 				SerializeHandler = null
 			};
 			jsonTypeInfo = JsonMetadataServices.CreateListInfo<List<AncientStats>, AncientStats>(options, collectionInfo);
+			jsonTypeInfo.NumberHandling = null;
+		}
+		jsonTypeInfo.OriginatingResolver = this;
+		return jsonTypeInfo;
+	}
+
+	private JsonTypeInfo<List<BadgeStats>> Create_ListBadgeStats(JsonSerializerOptions options)
+	{
+		if (!TryGetTypeInfoForRuntimeCustomConverter(options, out JsonTypeInfo<List<BadgeStats>> jsonTypeInfo))
+		{
+			JsonCollectionInfoValues<List<BadgeStats>> collectionInfo = new JsonCollectionInfoValues<List<BadgeStats>>
+			{
+				ObjectCreator = () => new List<BadgeStats>(),
+				SerializeHandler = null
+			};
+			jsonTypeInfo = JsonMetadataServices.CreateListInfo<List<BadgeStats>, BadgeStats>(options, collectionInfo);
 			jsonTypeInfo.NumberHandling = null;
 		}
 		jsonTypeInfo.OriginatingResolver = this;
@@ -12333,6 +12772,10 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		{
 			return Create_SettingsSaveMod(options);
 		}
+		if (type == typeof(BadgeRarity))
+		{
+			return Create_BadgeRarity(options);
+		}
 		if (type == typeof(ModelId))
 		{
 			return Create_ModelId(options);
@@ -12433,6 +12876,10 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		{
 			return Create_AncientStats(options);
 		}
+		if (type == typeof(BadgeStats))
+		{
+			return Create_BadgeStats(options);
+		}
 		if (type == typeof(CardStats))
 		{
 			return Create_CardStats(options);
@@ -12520,6 +12967,10 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		if (type == typeof(SerializableActModel))
 		{
 			return Create_SerializableActModel(options);
+		}
+		if (type == typeof(SerializableBadge))
+		{
+			return Create_SerializableBadge(options);
 		}
 		if (type == typeof(SerializableCard))
 		{
@@ -12653,6 +13104,10 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		{
 			return Create_DictionaryUInt64ListSerializableReward(options);
 		}
+		if (type == typeof(IEnumerable<SerializableBadge>))
+		{
+			return Create_IEnumerableSerializableBadge(options);
+		}
 		if (type == typeof(IEnumerable<SerializableCard>))
 		{
 			return Create_IEnumerableSerializableCard(options);
@@ -12740,6 +13195,10 @@ internal class MegaCritSerializerContext : JsonSerializerContext, IJsonTypeInfoR
 		if (type == typeof(List<AncientStats>))
 		{
 			return Create_ListAncientStats(options);
+		}
+		if (type == typeof(List<BadgeStats>))
+		{
+			return Create_ListBadgeStats(options);
 		}
 		if (type == typeof(List<CardStats>))
 		{

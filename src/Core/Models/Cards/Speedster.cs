@@ -24,6 +24,6 @@ public sealed class Speedster : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars["SpeedsterPower"].UpgradeValueBy(1m);
+		AddKeyword(CardKeyword.Innate);
 	}
 }

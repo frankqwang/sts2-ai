@@ -145,7 +145,7 @@ public partial class NStarCounter : Control
 		if (_displayedStarCount != stars)
 		{
 			_displayedStarCount = stars;
-			_label.AddThemeColorOverride(ThemeConstants.Label.fontColor, (stars == 0) ? StsColors.red : StsColors.cream);
+			_label.AddThemeColorOverride(ThemeConstants.Label.FontColor, (stars == 0) ? StsColors.red : StsColors.cream);
 			_label.Text = $"[center]{stars}[/center]";
 			if (stars == 0)
 			{

@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Potions;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.Timeline.UnlockScreens;
 
@@ -28,6 +29,18 @@ public partial class NUnlockPotionsScreen : NUnlockScreen
 	private static readonly Vector2 _potionScale = Vector2.One * 3f;
 
 	public static IEnumerable<string> AssetPaths => new global::_003C_003Ez__ReadOnlySingleElementList<string>(_scenePath);
+
+	public override Control? DefaultFocusedControl
+	{
+		get
+		{
+			if (_potionRow.GetChildCount() != 0)
+			{
+				return _potionRow.GetChild<Control>(_potionRow.GetChildCount() / 2);
+			}
+			return null;
+		}
+	}
 
 	public static NUnlockPotionsScreen Create()
 	{
@@ -65,6 +78,7 @@ public partial class NUnlockPotionsScreen : NUnlockScreen
 			_potionTween.TweenProperty(nPotionHolder, "modulate", Colors.White, 1.0).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic);
 			num++;
 		}
+		ActiveScreenContext.Instance.FocusOnDefaultControl();
 	}
 
 	public void SetPotions(IReadOnlyList<PotionModel> potions)

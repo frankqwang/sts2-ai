@@ -56,7 +56,7 @@ public class RunLocationTargetedMessageBuffer
 		_visitedLocations.Add(CurrentLocation);
 	}
 
-	public void OnRunLocationChanged(RunLocation location)
+	public void OnLocationChanged(RunLocation location)
 	{
 		_logger.Debug($"Run location changed to {location} (previously at: {CurrentLocation}), checking if we have enqueued messages");
 		CurrentLocation = location;

@@ -11,7 +11,7 @@ namespace MegaCrit.Sts2.Core.Models.Cards;
 
 public sealed class Anticipate : CardModel
 {
-	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new PowerVar<DexterityPower>(3m));
+	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new PowerVar<DexterityPower>(2m));
 
 	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromPower<DexterityPower>());
 
@@ -28,6 +28,6 @@ public sealed class Anticipate : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars.Dexterity.UpgradeValueBy(2m);
+		base.DynamicVars.Dexterity.UpgradeValueBy(1m);
 	}
 }

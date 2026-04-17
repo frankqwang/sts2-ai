@@ -112,8 +112,7 @@ public class UsePotionAction : GameAction
 				creature = Player.RunState.GetPlayer(TargetPlayerId.Value).Creature;
 			}
 		}
-		string text = ((creature == null) ? null : (creature.IsPlayer ? $"Player {creature.Player.NetId}" : creature.Name));
-		string value = ((text != null) ? $"targeting {text} (index {Player.Creature.CombatState?.Creatures.IndexOf(creature)})" : "no target");
+		string value = ((creature != null) ? $"targeting {creature.LogName} (index {Player.Creature.CombatState?.Creatures.IndexOf(creature)})" : "no target");
 		Log.Info($"Player {potion.Owner.NetId} using potion {potion.Id.Entry} ({value})");
 		PlayerChoiceContext = new GameActionPlayerChoiceContext(this);
 		await potion.OnUseWrapper(PlayerChoiceContext, creature);
@@ -124,7 +123,7 @@ public class UsePotionAction : GameAction
 		PotionModel potionAtSlotIndex = Player.GetPotionAtSlotIndex((int)PotionIndex);
 		if (TestMode.IsOff && NRun.Instance != null && LocalContext.IsMe(Player) && potionAtSlotIndex != null)
 		{
-			NRun.Instance.GlobalUi.TopBar.PotionContainer.OnPotionUseCanceled(potionAtSlotIndex);
+			NRun.Instance.GlobalUi.TopBar.PotionContainer.OnPotionUseOrDiscardCanceled(potionAtSlotIndex);
 		}
 		potionAtSlotIndex?.AfterUsageCanceled();
 	}

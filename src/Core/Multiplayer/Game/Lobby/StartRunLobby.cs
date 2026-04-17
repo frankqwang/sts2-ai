@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Lobby;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -57,7 +58,7 @@ public class StartRunLobby
 
 	private readonly List<ConnectingPlayer> _connectingPlayers = new List<ConnectingPlayer>();
 
-	private bool _beginningRun;
+	private bool _isBeginningRun;
 
 	private readonly List<ModifierModel> _modifiers = new List<ModifierModel>();
 
@@ -317,14 +318,7 @@ public class StartRunLobby
 	private void HandleLobbyPlayerChangedCharacterMessage(LobbyPlayerChangedCharacterMessage message, ulong senderId)
 	{
 		_logger.Debug($"Received LobbyPlayerChangedCharacterMessage for {senderId} {message.character}");
-		int num = Players.FindIndex((LobbyPlayer p) => p.id == senderId);
-		if (num >= 0)
-		{
-			LobbyPlayer lobbyPlayer = Players[num];
-			lobbyPlayer.character = message.character;
-			Players[num] = lobbyPlayer;
-			LobbyListener.PlayerChanged(lobbyPlayer);
-		}
+		ChangeCharacter(senderId, message.character);
 	}
 
 	private void HandleAscensionChangedMessage(LobbyAscensionChangedMessage message, ulong _)
@@ -358,7 +352,7 @@ public class StartRunLobby
 			LobbyPlayer lobbyPlayer = Players[num];
 			lobbyPlayer.isReady = message.ready;
 			Players[num] = lobbyPlayer;
-			LobbyListener.PlayerChanged(lobbyPlayer);
+			LobbyListener.PlayerChanged(lobbyPlayer, isRandomCharacterResolution: false);
 			BeginRunIfAllPlayersReady();
 		}
 	}
@@ -368,17 +362,31 @@ public class StartRunLobby
 		_logger.Debug("Received LobbyBeginRunMessage");
 		Players.Clear();
 		Players.AddRange(message.playersInLobby);
-		List<ActModel> list = ActModel.GetRandomList(message.seed, GetUnlockState(), NetService.Type.IsMultiplayer()).ToList();
-		list[0] = GetAct(message.act1) ?? list[0];
-		_beginningRun = true;
-		LobbyListener.BeginRun(message.seed, list, message.modifiers.Select(ModifierModel.FromSerializable).ToList());
+		BeginRunLocally(message.seed, message.modifiers.Select(ModifierModel.FromSerializable).ToList());
 	}
 
-	private void BeginRun(string seed, List<ModifierModel> modifiers)
+	private void ChangeCharacter(ulong playerId, CharacterModel character, bool isRandomCharacterResolution = false)
+	{
+		int num = Players.FindIndex((LobbyPlayer p) => p.id == playerId);
+		if (num >= 0)
+		{
+			LobbyPlayer lobbyPlayer = Players[num];
+			lobbyPlayer.character = character;
+			Players[num] = lobbyPlayer;
+			LobbyListener.PlayerChanged(lobbyPlayer, isRandomCharacterResolution);
+		}
+	}
+
+	private void BeginRunForAllPlayers(string seed, List<ModifierModel> modifiers)
 	{
 		if (NetService.Type == NetGameType.Client)
 		{
 			throw new InvalidOperationException("Can only begin run as host!");
+		}
+		if (_isBeginningRun)
+		{
+			_logger.Warn("Tried to begin run twice, ignoring second one!");
+			return;
 		}
 		UpdatePreferredAscension();
 		LobbyBeginRunMessage message = new LobbyBeginRunMessage
@@ -389,15 +397,45 @@ public class StartRunLobby
 			act1 = Act1
 		};
 		NetService.SendMessage(message);
-		List<ActModel> list = ActModel.GetRandomList(seed, GetUnlockState(), NetService.Type.IsMultiplayer()).ToList();
-		list[0] = GetAct(Act1) ?? list[0];
-		_beginningRun = true;
-		LobbyListener.BeginRun(seed, list, modifiers);
+		BeginRunLocally(seed, modifiers);
 		if (NetService.Type == NetGameType.Host)
 		{
 			NetHostGameService netHostGameService = (NetHostGameService)NetService;
 			netHostGameService.NetHost.SetHostIsClosed(isClosed: true);
 		}
+	}
+
+	private void BeginRunLocally(string seed, List<ModifierModel> modifiers)
+	{
+		Rng rng = new Rng((uint)StringHelper.GetDeterministicHashCode(seed));
+		List<ActModel> list = ActModel.GetRandomList(rng, GetUnlockState(), NetService.Type.IsMultiplayer()).ToList();
+		list[0] = GetAct(Act1) ?? list[0];
+		for (int i = 0; i < Players.Count; i++)
+		{
+			LobbyPlayer lobbyPlayer = Players[i];
+			if (lobbyPlayer.character is RandomCharacter)
+			{
+				CharacterModel character = rng.NextItem(ModelDb.AllCharacters);
+				ChangeCharacter(lobbyPlayer.id, character, isRandomCharacterResolution: true);
+			}
+		}
+		if (NetService.Type == NetGameType.Singleplayer)
+		{
+			CharacterStats orCreateCharacterStats = SaveManager.Instance.Progress.GetOrCreateCharacterStats(Players[0].character.Id);
+			int num = Math.Min(Ascension, orCreateCharacterStats.MaxAscension);
+			if (Ascension != num)
+			{
+				Ascension = num;
+				LobbyListener.AscensionChanged();
+			}
+			if (MaxAscension != orCreateCharacterStats.MaxAscension)
+			{
+				MaxAscension = orCreateCharacterStats.MaxAscension;
+				LobbyListener.MaxAscensionChanged();
+			}
+		}
+		_isBeginningRun = true;
+		LobbyListener.BeginRun(seed, list, modifiers);
 	}
 
 	private static ActModel? GetAct(string act1Key)
@@ -426,7 +464,7 @@ public class StartRunLobby
 			MaxAscension = GetMaxAscensionAcrossAllCharacters();
 			SyncAscensionChange(MaxAscension);
 			LobbyListener.MaxAscensionChanged();
-			Log.Info($"{characterId} ascension set to Max: {Ascension}");
+			_logger.Info($"{characterId} ascension set to Max: {Ascension}");
 		}
 		else if (orCreateCharacterStats == null || orCreateCharacterStats.MaxAscension <= 0 || !flag)
 		{
@@ -435,11 +473,11 @@ public class StartRunLobby
 			LobbyListener.MaxAscensionChanged();
 			if (!flag)
 			{
-				Log.Info($"{characterId} has not revealed the Ascension Epoch, disabling Ascension.");
+				_logger.Info($"{characterId} has not revealed the Ascension Epoch, disabling Ascension.");
 			}
 			else
 			{
-				Log.Info($"{characterId} has no progress, disabling Ascension.");
+				_logger.Info($"{characterId} has no progress, disabling Ascension.");
 			}
 		}
 		else
@@ -447,7 +485,7 @@ public class StartRunLobby
 			MaxAscension = orCreateCharacterStats.MaxAscension;
 			SyncAscensionChange(Math.Min(orCreateCharacterStats.PreferredAscension, orCreateCharacterStats.MaxAscension));
 			LobbyListener.MaxAscensionChanged();
-			Log.Info($"{characterId} ascension set to preferred: {Ascension}");
+			_logger.Info($"{characterId} ascension set to preferred: {Ascension}");
 		}
 	}
 
@@ -458,7 +496,7 @@ public class StartRunLobby
 		{
 			num = Math.Max(num, value.MaxAscension);
 		}
-		Log.Info($"RANDOM: Returning highest Ascension across all chars: {num}");
+		_logger.Info($"RANDOM: Returning highest Ascension across all chars: {num}");
 		return num;
 	}
 
@@ -500,7 +538,7 @@ public class StartRunLobby
 				CharacterStats orCreateCharacterStats = SaveManager.Instance.Progress.GetOrCreateCharacterStats(LocalPlayer.character.Id);
 				if (orCreateCharacterStats.MaxAscension != 0 && orCreateCharacterStats.PreferredAscension != Ascension)
 				{
-					Log.Info($"Setting preferred Ascension for {LocalPlayer.character.Id} to {Ascension}");
+					_logger.Info($"Setting preferred Ascension for {LocalPlayer.character.Id} to {Ascension}");
 					orCreateCharacterStats.PreferredAscension = Ascension;
 					SaveManager.Instance.SaveProgressFile();
 				}
@@ -511,7 +549,7 @@ public class StartRunLobby
 			ProgressState progress = SaveManager.Instance.Progress;
 			if (progress.PreferredMultiplayerAscension != Ascension)
 			{
-				Log.Info($"Setting preferred multiplayer ascension to {Ascension}");
+				_logger.Info($"Setting preferred multiplayer ascension to {Ascension}");
 				progress.PreferredMultiplayerAscension = Ascension;
 				SaveManager.Instance.SaveProgressFile();
 			}
@@ -520,19 +558,12 @@ public class StartRunLobby
 
 	public void SetLocalCharacter(CharacterModel character)
 	{
-		int num = Players.FindIndex((LobbyPlayer p) => p.id == NetService.NetId);
-		if (num >= 0)
+		ChangeCharacter(NetService.NetId, character);
+		LobbyPlayerChangedCharacterMessage message = new LobbyPlayerChangedCharacterMessage
 		{
-			LobbyPlayer value = Players[num];
-			value.character = character;
-			Players[num] = value;
-			LobbyPlayerChangedCharacterMessage message = new LobbyPlayerChangedCharacterMessage
-			{
-				character = character
-			};
-			NetService.SendMessage(message);
-			LobbyListener.PlayerChanged(LocalPlayer);
-		}
+			character = character
+		};
+		NetService.SendMessage(message);
 		SetSingleplayerAscensionAfterCharacterChanged(character.Id);
 	}
 
@@ -584,7 +615,7 @@ public class StartRunLobby
 			ready = ready
 		};
 		NetService.SendMessage(message);
-		LobbyListener.PlayerChanged(LocalPlayer);
+		LobbyListener.PlayerChanged(LocalPlayer, isRandomCharacterResolution: false);
 		_logger.Info($"Local player {LocalPlayer.id} is ready");
 		BeginRunIfAllPlayersReady();
 	}
@@ -597,7 +628,7 @@ public class StartRunLobby
 			if ((uint)(type - 1) <= 1u)
 			{
 				string seed = ((NGame.Instance?.DebugSeedOverride != null) ? NGame.Instance.DebugSeedOverride : ((Seed == null) ? SeedHelper.GetRandomSeed() : SeedHelper.CanonicalizeSeed(Seed)));
-				BeginRun(seed, _modifiers);
+				BeginRunForAllPlayers(seed, _modifiers);
 			}
 		}
 	}
@@ -673,7 +704,7 @@ public class StartRunLobby
 		InitialGameInfoMessage message = InitialGameInfoMessage.Basic();
 		message.sessionState = RunSessionState.InLobby;
 		message.gameMode = GameMode;
-		if (_beginningRun)
+		if (_isBeginningRun)
 		{
 			message.connectionFailureReason = ConnectionFailureReason.RunInProgress;
 			NetService.SendMessage(message, playerId);
@@ -708,7 +739,7 @@ public class StartRunLobby
 			int num = _connectingPlayers.IndexOf(connectingPlayer);
 			if (num >= 0)
 			{
-				Log.Info($"Disconnecting player {connectingPlayer.id} because they did not respond to the initial game join handshake within {HandshakeTimeout}ms");
+				_logger.Info($"Disconnecting player {connectingPlayer.id} because they did not respond to the initial game join handshake within {HandshakeTimeout}ms");
 				INetHostGameService netHostGameService = (INetHostGameService)NetService;
 				netHostGameService.DisconnectClient(connectingPlayer.id, NetError.HandshakeTimeout);
 			}
@@ -755,7 +786,7 @@ public class StartRunLobby
 			if (_connectingPlayers[i].id == playerId)
 			{
 				_connectingPlayers[i].timeoutCancelToken.Cancel();
-				Log.Info($"Cancel handshake timeout for {playerId}");
+				_logger.Info($"Cancel handshake timeout for {playerId}");
 				_connectingPlayers.RemoveAt(i);
 				i--;
 			}

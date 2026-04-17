@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using MegaCrit.Sts2.Core.Debug;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
@@ -201,7 +202,7 @@ public class SaveManager : IProfileIdProvider
 		Log.Info($"Switching save profiles to {profileId}");
 		_currentProfileId = profileId;
 		_profileSaveManager.Profile.LastProfileId = profileId;
-		_profileSaveManager.SaveProfile();
+		SaveProfile();
 		_runHistorySaveManager.CreateRunHistoryDirectory();
 		this.ProfileIdChanged?.Invoke(profileId);
 	}
@@ -239,6 +240,11 @@ public class SaveManager : IProfileIdProvider
 			{
 				CurrentRunSaveTask = _runSaveManager.SaveRun(preFinishedRoom);
 				await CurrentRunSaveTask;
+			}
+			catch (Exception ex)
+			{
+				Log.Error($"Failed to save run: {ex}");
+				SentryService.CaptureException(ex);
 			}
 			finally
 			{
@@ -312,12 +318,28 @@ public class SaveManager : IProfileIdProvider
 
 	public void SaveSettings()
 	{
-		_settingsSaveManager.SaveSettings();
+		try
+		{
+			_settingsSaveManager.SaveSettings();
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"Failed to save settings: {ex}");
+			SentryService.CaptureException(ex);
+		}
 	}
 
 	public void SaveProfile()
 	{
-		_profileSaveManager.SaveProfile();
+		try
+		{
+			_profileSaveManager.SaveProfile();
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"Failed to save profile: {ex}");
+			SentryService.CaptureException(ex);
+		}
 	}
 
 	public ReadSaveResult<SettingsSave> InitSettingsDataForTest()
@@ -349,21 +371,41 @@ public class SaveManager : IProfileIdProvider
 
 	public async Task SyncCloudToLocal()
 	{
-		if (_saveStore is CloudSaveStore cloudSaveStore)
+		if (!(_saveStore is CloudSaveStore cloudStore))
 		{
-			Log.Info("Syncing cloud save files to the local save directory");
-			List<Task> list = new List<Task>();
-			list.Add(cloudSaveStore.SyncCloudToLocal(ProfileSaveManager.ProfilePath));
-			for (int i = 1; i <= 3; i++)
+			return;
+		}
+		Log.Info("Syncing cloud save files to the local save directory");
+		List<Task> tasks = new List<Task>();
+		foreach (Task item in EnumerateCloudSyncTasks(cloudStore))
+		{
+			tasks.Add(item);
+			if (tasks.Count >= 8)
 			{
-				list.Add(cloudSaveStore.SyncCloudToLocal(ProgressSaveManager.GetProgressPathForProfile(i)));
-				list.Add(cloudSaveStore.SyncCloudToLocal(RunSaveManager.GetRunSavePath(i, "current_run.save")));
-				list.Add(cloudSaveStore.SyncCloudToLocal(RunSaveManager.GetRunSavePath(i, "current_run_mp.save")));
-				list.Add(cloudSaveStore.SyncCloudToLocal(PrefsSaveManager.GetPrefsPath(i)));
-				list.AddRange(cloudSaveStore.SyncCloudToLocalDirectory(RunHistorySaveManager.GetHistoryPath(i)));
+				await Task.WhenAll(tasks);
+				tasks.Clear();
 			}
-			await Task.WhenAll(list);
-			CleanupStaleCurrentRunSaves();
+		}
+		if (tasks.Count > 0)
+		{
+			await Task.WhenAll(tasks);
+		}
+		CleanupStaleCurrentRunSaves();
+	}
+
+	private IEnumerable<Task> EnumerateCloudSyncTasks(CloudSaveStore cloudStore)
+	{
+		yield return cloudStore.SyncCloudToLocal(ProfileSaveManager.ProfilePath);
+		for (int i = 1; i <= 3; i++)
+		{
+			yield return cloudStore.SyncCloudToLocal(ProgressSaveManager.GetProgressPathForProfile(i));
+			yield return cloudStore.SyncCloudToLocal(RunSaveManager.GetRunSavePath(i, "current_run.save"));
+			yield return cloudStore.SyncCloudToLocal(RunSaveManager.GetRunSavePath(i, "current_run_mp.save"));
+			yield return cloudStore.SyncCloudToLocal(PrefsSaveManager.GetPrefsPath(i));
+			foreach (Task item in cloudStore.SyncCloudToLocalDirectory(RunHistorySaveManager.GetHistoryPath(i)))
+			{
+				yield return item;
+			}
 		}
 	}
 
@@ -489,7 +531,15 @@ public class SaveManager : IProfileIdProvider
 
 	public void SaveRunHistory(RunHistory history)
 	{
-		_runHistorySaveManager.SaveHistory(history);
+		try
+		{
+			_runHistorySaveManager.SaveHistory(history);
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"Failed to save run history: {ex}");
+			SentryService.CaptureException(ex);
+		}
 	}
 
 	public int GetRunHistoryCount()
@@ -534,7 +584,15 @@ public class SaveManager : IProfileIdProvider
 
 	public void SavePrefsFile()
 	{
-		_prefsSaveManager.SavePrefs();
+		try
+		{
+			_prefsSaveManager.SavePrefs();
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"Failed to save prefs: {ex}");
+			SentryService.CaptureException(ex);
+		}
 	}
 
 	public void MarkFtueAsComplete(string ftueId)

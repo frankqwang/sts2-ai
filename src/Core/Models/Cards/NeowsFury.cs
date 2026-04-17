@@ -43,5 +43,6 @@ public sealed class NeowsFury : CardModel
 	protected override void OnUpgrade()
 	{
 		base.DynamicVars.Damage.UpgradeValueBy(4m);
+		base.DynamicVars.Cards.UpgradeValueBy(1m);
 	}
 }

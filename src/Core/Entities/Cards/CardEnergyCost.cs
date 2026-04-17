@@ -221,12 +221,13 @@ public sealed class CardEnergyCost
 
 	public CardEnergyCost Clone(CardModel newCard)
 	{
+		List<LocalCostModifier> localModifiers = _localModifiers.Select((LocalCostModifier m) => m.Clone()).ToList();
 		return new CardEnergyCost(newCard, newCard.EnergyCost.Canonical, newCard.EnergyCost.CostsX)
 		{
 			_base = _base,
 			_capturedXValue = _capturedXValue,
 			WasJustUpgraded = WasJustUpgraded,
-			_localModifiers = _localModifiers.ToList()
+			_localModifiers = localModifiers
 		};
 	}
 }

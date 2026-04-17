@@ -154,8 +154,6 @@ public class NetFullCombatState : IPacketSerializable
 
 		public SerializablePlayerRngSet rngSet;
 
-		public SerializablePlayerOddsSet oddsSet;
-
 		public SerializableRelicGrabBag relicGrabBag;
 
 		public void Serialize(PacketWriter writer)
@@ -172,7 +170,6 @@ public class NetFullCombatState : IPacketSerializable
 			writer.WriteList(relics);
 			writer.WriteList(orbs);
 			writer.Write(rngSet);
-			writer.Write(oddsSet);
 			writer.Write(relicGrabBag);
 		}
 
@@ -190,7 +187,6 @@ public class NetFullCombatState : IPacketSerializable
 			relics = reader.ReadList<RelicState>();
 			orbs = reader.ReadList<OrbState>();
 			rngSet = reader.Read<SerializablePlayerRngSet>();
-			oddsSet = reader.Read<SerializablePlayerOddsSet>();
 			relicGrabBag = reader.Read<SerializableRelicGrabBag>();
 		}
 
@@ -243,6 +239,8 @@ public class NetFullCombatState : IPacketSerializable
 
 		public int afflictionCount;
 
+		public int? energyCost;
+
 		public List<CardKeyword>? keywords;
 
 		public void Serialize(PacketWriter writer)
@@ -253,6 +251,11 @@ public class NetFullCombatState : IPacketSerializable
 			{
 				writer.WriteModelEntry(affliction);
 				writer.WriteInt(afflictionCount);
+			}
+			writer.WriteBool(energyCost.HasValue);
+			if (energyCost.HasValue)
+			{
+				writer.WriteInt(energyCost.Value);
 			}
 			writer.WriteBool(keywords != null);
 			if (keywords == null)
@@ -276,6 +279,10 @@ public class NetFullCombatState : IPacketSerializable
 			}
 			if (reader.ReadBool())
 			{
+				energyCost = reader.ReadInt();
+			}
+			if (reader.ReadBool())
+			{
 				keywords = new List<CardKeyword>();
 				int num = reader.ReadInt(3);
 				for (int i = 0; i < num; i++)
@@ -287,13 +294,34 @@ public class NetFullCombatState : IPacketSerializable
 
 		public static CardState From(CardModel card)
 		{
-			return new CardState
+			CardState result = new CardState
 			{
 				card = card.ToSerializable(),
 				affliction = card.Affliction?.Id,
-				afflictionCount = (card.Affliction?.Amount ?? 0),
-				keywords = ((card.Keywords.Count > 0) ? card.Keywords.ToList() : null)
+				afflictionCount = (card.Affliction?.Amount ?? 0)
 			};
+			if (card.Keywords.Count > 0)
+			{
+				result.keywords = new List<CardKeyword>();
+				CardKeyword[] values = Enum.GetValues<CardKeyword>();
+				foreach (CardKeyword item in values)
+				{
+					if (card.Keywords.Contains(item))
+					{
+						result.keywords.Add(item);
+					}
+				}
+			}
+			else
+			{
+				result.keywords = null;
+			}
+			int withModifiers = card.EnergyCost.GetWithModifiers(CostModifiers.All);
+			if (withModifiers != card.EnergyCost.Canonical)
+			{
+				result.energyCost = withModifiers;
+			}
+			return result;
 		}
 	}
 
@@ -388,9 +416,10 @@ public class NetFullCombatState : IPacketSerializable
 				relics = new List<RelicState>(),
 				orbs = new List<OrbState>(),
 				rngSet = player.PlayerRng.ToSerializable(),
-				oddsSet = player.PlayerOdds.ToSerializable(),
 				relicGrabBag = player.RelicGrabBag.ToSerializable()
 			};
+			item2.rngSet.Counters.Remove(PlayerRngType.Rewards);
+			item2.rngSet.Counters.Remove(PlayerRngType.Shops);
 			if (player.PlayerCombatState != null && CombatManager.Instance.IsInProgress)
 			{
 				item2.piles.Add(CombatPileState.From(player.PlayerCombatState.Hand));
@@ -602,21 +631,30 @@ public class NetFullCombatState : IPacketSerializable
 						handler.AppendFormatted(string.Join(",", card.keywords));
 						stringBuilder15.AppendLine(ref handler);
 					}
+					if (card.energyCost.HasValue)
+					{
+						stringBuilder2 = stringBuilder;
+						StringBuilder stringBuilder16 = stringBuilder2;
+						handler = new StringBuilder.AppendInterpolatedStringHandler(16, 1, stringBuilder2);
+						handler.AppendLiteral("\t\t\tEnergy Cost: ");
+						handler.AppendFormatted(string.Join(",", (object)card.energyCost));
+						stringBuilder16.AppendLine(ref handler);
+					}
 				}
 			}
 			foreach (PotionState potion in player.potions)
 			{
 				stringBuilder2 = stringBuilder;
-				StringBuilder stringBuilder16 = stringBuilder2;
+				StringBuilder stringBuilder17 = stringBuilder2;
 				handler = new StringBuilder.AppendInterpolatedStringHandler(8, 1, stringBuilder2);
 				handler.AppendLiteral("\tPotion ");
 				handler.AppendFormatted(potion.id);
-				stringBuilder16.AppendLine(ref handler);
+				stringBuilder17.AppendLine(ref handler);
 			}
 			foreach (RelicState relic in player.relics)
 			{
 				stringBuilder2 = stringBuilder;
-				StringBuilder stringBuilder17 = stringBuilder2;
+				StringBuilder stringBuilder18 = stringBuilder2;
 				handler = new StringBuilder.AppendInterpolatedStringHandler(29, 3, stringBuilder2);
 				handler.AppendLiteral("\tRelic ");
 				handler.AppendFormatted(relic.relic.Id);
@@ -624,12 +662,12 @@ public class NetFullCombatState : IPacketSerializable
 				handler.AppendFormatted(relic.relic.Props);
 				handler.AppendLiteral(" Floor added: ");
 				handler.AppendFormatted(relic.relic.FloorAddedToDeck);
-				stringBuilder17.AppendLine(ref handler);
+				stringBuilder18.AppendLine(ref handler);
 			}
 			foreach (OrbState orb in player.orbs)
 			{
 				stringBuilder2 = stringBuilder;
-				StringBuilder stringBuilder18 = stringBuilder2;
+				StringBuilder stringBuilder19 = stringBuilder2;
 				handler = new StringBuilder.AppendInterpolatedStringHandler(24, 3, stringBuilder2);
 				handler.AppendLiteral("\tOrb ");
 				handler.AppendFormatted(orb.id);
@@ -637,70 +675,66 @@ public class NetFullCombatState : IPacketSerializable
 				handler.AppendFormatted(orb.passive);
 				handler.AppendLiteral(" evoke: ");
 				handler.AppendFormatted(orb.evoke);
-				stringBuilder18.AppendLine(ref handler);
+				stringBuilder19.AppendLine(ref handler);
 			}
 			stringBuilder2 = stringBuilder;
-			StringBuilder stringBuilder19 = stringBuilder2;
+			StringBuilder stringBuilder20 = stringBuilder2;
 			handler = new StringBuilder.AppendInterpolatedStringHandler(17, 1, stringBuilder2);
 			handler.AppendLiteral("Player RNG seed: ");
 			handler.AppendFormatted(player.rngSet.Seed);
-			stringBuilder19.AppendLine(ref handler);
-			List<KeyValuePair<PlayerRngType, int>> list = player.rngSet.Counters.ToList();
-			foreach (KeyValuePair<PlayerRngType, int> item in list)
+			stringBuilder20.AppendLine(ref handler);
+			PlayerRngType[] values = Enum.GetValues<PlayerRngType>();
+			foreach (PlayerRngType playerRngType in values)
 			{
-				stringBuilder2 = stringBuilder;
-				StringBuilder stringBuilder20 = stringBuilder2;
-				handler = new StringBuilder.AppendInterpolatedStringHandler(15, 2, stringBuilder2);
-				handler.AppendLiteral("\tRNG counter ");
-				handler.AppendFormatted(item.Key);
-				handler.AppendLiteral(": ");
-				handler.AppendFormatted(item.Value);
-				stringBuilder20.AppendLine(ref handler);
+				if (player.rngSet.Counters.TryGetValue(playerRngType, out var value))
+				{
+					stringBuilder2 = stringBuilder;
+					StringBuilder stringBuilder21 = stringBuilder2;
+					handler = new StringBuilder.AppendInterpolatedStringHandler(15, 2, stringBuilder2);
+					handler.AppendLiteral("\tRNG counter ");
+					handler.AppendFormatted(playerRngType);
+					handler.AppendLiteral(": ");
+					handler.AppendFormatted(value);
+					stringBuilder21.AppendLine(ref handler);
+				}
 			}
-			stringBuilder.AppendLine("Player Odds:");
-			stringBuilder2 = stringBuilder;
-			StringBuilder stringBuilder21 = stringBuilder2;
-			handler = new StringBuilder.AppendInterpolatedStringHandler(13, 1, stringBuilder2);
-			handler.AppendLiteral("\tCard rarity:");
-			handler.AppendFormatted(player.oddsSet.CardRarityOddsValue);
-			stringBuilder21.AppendLine(ref handler);
-			stringBuilder2 = stringBuilder;
-			StringBuilder stringBuilder22 = stringBuilder2;
-			handler = new StringBuilder.AppendInterpolatedStringHandler(15, 1, stringBuilder2);
-			handler.AppendLiteral("\tPotion reward:");
-			handler.AppendFormatted(player.oddsSet.PotionRewardOddsValue);
-			stringBuilder22.AppendLine(ref handler);
 			stringBuilder.AppendLine("Player relic grab bag:");
-			List<KeyValuePair<RelicRarity, List<ModelId>>> list2 = player.relicGrabBag.RelicIdLists.ToList();
-			foreach (KeyValuePair<RelicRarity, List<ModelId>> item2 in list2)
+			RelicRarity[] values2 = Enum.GetValues<RelicRarity>();
+			foreach (RelicRarity relicRarity in values2)
 			{
-				stringBuilder2 = stringBuilder;
-				StringBuilder stringBuilder23 = stringBuilder2;
-				handler = new StringBuilder.AppendInterpolatedStringHandler(10, 2, stringBuilder2);
-				handler.AppendLiteral("\tRarity ");
-				handler.AppendFormatted(item2.Key);
-				handler.AppendLiteral(": ");
-				handler.AppendFormatted(string.Join(",", item2.Value.Select((ModelId m) => m.Entry)));
-				stringBuilder23.AppendLine(ref handler);
+				if (player.relicGrabBag.RelicIdLists.TryGetValue(relicRarity, out List<ModelId> value2))
+				{
+					stringBuilder2 = stringBuilder;
+					StringBuilder stringBuilder22 = stringBuilder2;
+					handler = new StringBuilder.AppendInterpolatedStringHandler(10, 2, stringBuilder2);
+					handler.AppendLiteral("\tRarity ");
+					handler.AppendFormatted(relicRarity);
+					handler.AppendLiteral(": ");
+					handler.AppendFormatted(string.Join(",", value2.Select((ModelId m) => m.Entry)));
+					stringBuilder22.AppendLine(ref handler);
+				}
 			}
 		}
 		stringBuilder2 = stringBuilder;
-		StringBuilder stringBuilder24 = stringBuilder2;
+		StringBuilder stringBuilder23 = stringBuilder2;
 		handler = new StringBuilder.AppendInterpolatedStringHandler(17, 1, stringBuilder2);
 		handler.AppendLiteral("RNG global seed: ");
 		handler.AppendFormatted(Rng.Seed);
-		stringBuilder24.AppendLine(ref handler);
-		List<KeyValuePair<RunRngType, int>> list3 = Rng.Counters.ToList();
-		foreach (KeyValuePair<RunRngType, int> item3 in list3)
+		stringBuilder23.AppendLine(ref handler);
+		RunRngType[] values3 = Enum.GetValues<RunRngType>();
+		foreach (RunRngType runRngType in values3)
 		{
-			stringBuilder2 = stringBuilder;
-			StringBuilder stringBuilder25 = stringBuilder2;
-			handler = new StringBuilder.AppendInterpolatedStringHandler(15, 2, stringBuilder2);
-			handler.AppendLiteral("\tRNG counter ");
-			handler.AppendFormatted(item3.Key);
-			handler.AppendLiteral(": ");
-			handler.AppendFormatted(item3.Value);
-			stringBuilder25.AppendLine(ref handler);
+			if (Rng.Counters.TryGetValue(runRngType, out var value3))
+			{
+				stringBuilder2 = stringBuilder;
+				StringBuilder stringBuilder24 = stringBuilder2;
+				handler = new StringBuilder.AppendInterpolatedStringHandler(15, 2, stringBuilder2);
+				handler.AppendLiteral("\tRNG counter ");
+				handler.AppendFormatted(runRngType);
+				handler.AppendLiteral(": ");
+				handler.AppendFormatted(value3);
+				stringBuilder24.AppendLine(ref handler);
+			}
 		}
 		return stringBuilder.ToString();
 	}

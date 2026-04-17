@@ -130,6 +130,10 @@ public abstract class Reward
 		case RewardType.Potion:
 			return new PotionReward(player);
 		case RewardType.Relic:
+			if (save.PredeterminedModelId != ModelId.none)
+			{
+				return new RelicReward(ModelDb.GetById<RelicModel>(save.PredeterminedModelId).ToMutable(), player);
+			}
 			return new RelicReward(player);
 		case RewardType.Card:
 		{

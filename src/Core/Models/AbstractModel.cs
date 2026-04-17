@@ -388,6 +388,11 @@ public abstract class AbstractModel : IComparable<AbstractModel>
 		return Task.CompletedTask;
 	}
 
+	public virtual Task AfterModifyingEnergyGain()
+	{
+		return Task.CompletedTask;
+	}
+
 	public virtual Task AfterModifyingHandDraw()
 	{
 		return Task.CompletedTask;
@@ -553,6 +558,11 @@ public abstract class AbstractModel : IComparable<AbstractModel>
 		return Task.CompletedTask;
 	}
 
+	public virtual Task AfterSideTurnStartLate(CombatSide side, CombatState combatState)
+	{
+		return Task.CompletedTask;
+	}
+
 	public virtual Task AfterPlayerTurnStartEarly(PlayerChoiceContext choiceContext, Player player)
 	{
 		return Task.CompletedTask;
@@ -569,6 +579,11 @@ public abstract class AbstractModel : IComparable<AbstractModel>
 	}
 
 	public virtual Task BeforePlayPhaseStart(PlayerChoiceContext choiceContext, Player player)
+	{
+		return Task.CompletedTask;
+	}
+
+	public virtual Task BeforePlayPhaseStartLate(PlayerChoiceContext choiceContext, Player player)
 	{
 		return Task.CompletedTask;
 	}
@@ -658,6 +673,11 @@ public abstract class AbstractModel : IComparable<AbstractModel>
 		return 1m;
 	}
 
+	public virtual decimal ModifyEnergyGain(Player player, decimal amount)
+	{
+		return amount;
+	}
+
 	public virtual ActMap ModifyGeneratedMap(IRunState runState, ActMap map, int actIndex)
 	{
 		return map;
@@ -676,11 +696,6 @@ public abstract class AbstractModel : IComparable<AbstractModel>
 	public virtual decimal ModifyHandDrawLate(Player player, decimal count)
 	{
 		return count;
-	}
-
-	public virtual decimal ModifyHealAmount(Creature creature, decimal amount)
-	{
-		return amount;
 	}
 
 	public virtual decimal ModifyHpLostBeforeOsty(Creature target, decimal amount, ValueProp props, Creature? dealer, CardModel? cardSource)
@@ -982,6 +997,11 @@ public abstract class AbstractModel : IComparable<AbstractModel>
 	}
 
 	public virtual bool ShouldForcePotionReward(Player player, RoomType roomType)
+	{
+		return false;
+	}
+
+	public virtual bool ShouldAllowFreeTravel()
 	{
 		return false;
 	}

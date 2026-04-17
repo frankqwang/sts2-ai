@@ -280,7 +280,7 @@ public sealed class MadScience : CardModel
 		case TinkerTime.RiderEffect.Chaos:
 		{
 			CardModel cardModel = ((MockedChaosCard == null) ? CardFactory.GetDistinctForCombat(base.Owner, base.Owner.Character.CardPool.GetUnlockedCards(base.Owner.UnlockState, base.Owner.RunState.CardMultiplayerConstraint), 1, base.Owner.RunState.Rng.CombatCardGeneration).First() : MockedChaosCard);
-			cardModel.EnergyCost.SetThisTurnOrUntilPlayed(0);
+			cardModel.SetToFreeThisTurn();
 			await CardPileCmd.Add(cardModel, PileType.Hand);
 			break;
 		}

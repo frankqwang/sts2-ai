@@ -212,7 +212,7 @@ public partial class NMultiplayerTest : Control, IStartRunLobbyListener
 			using (new NetLoadingHandle(_lobby.NetService))
 			{
 				acts[0] = _settings.Act;
-				RunState runState = RunState.CreateForNewRun(_lobby.Players.Select((LobbyPlayer p) => Player.CreateForNewRun(p.character, UnlockState.FromSerializable(p.unlockState), p.id)).ToList(), acts.Select((ActModel a) => a.ToMutable()).ToList(), _settings.Modifiers, _lobby.Ascension, seed);
+				RunState runState = RunState.CreateForNewRun(_lobby.Players.Select((LobbyPlayer p) => Player.CreateForNewRun(p.character, UnlockState.FromSerializable(p.unlockState), p.id)).ToList(), acts.Select((ActModel a) => a.ToMutable()).ToList(), _settings.Modifiers, GameMode.Standard, _lobby.Ascension, seed);
 				RunManager.Instance.SetUpNewMultiPlayer(runState, _lobby, _settings.SaveRunHistory);
 				await PreloadManager.LoadRunAssets(runState.Players.Select((Player p) => p.Character));
 				await RunManager.Instance.FinalizeStartingRelics();
@@ -449,7 +449,7 @@ public partial class NMultiplayerTest : Control, IStartRunLobbyListener
 		_characterContainers[player.slotId].playerName.Text = PlatformUtil.GetPlayerName(_lobby.NetService.Platform, player.id);
 	}
 
-	public void PlayerChanged(LobbyPlayer player)
+	public void PlayerChanged(LobbyPlayer player, bool isRandomCharacterResolution)
 	{
 		_characterContainers[player.slotId].characterImage.Texture = player.character.IconTexture;
 		_characterContainers[player.slotId].playerName.Text = PlatformUtil.GetPlayerName(_lobby.NetService.Platform, player.id);

@@ -19,7 +19,7 @@ public partial class NRegentCharacterSelectBg : Control
 
 	private Control _shapesHover;
 
-	private Control _amongusHover;
+	private Control _amogusHover;
 
 	public override void _Ready()
 	{
@@ -78,12 +78,12 @@ public partial class NRegentCharacterSelectBg : Control
 		{
 			SetSkin("normal");
 		}));
-		_amongusHover = GetNode<Control>("AmongusHover");
-		_amongusHover.Connect(Control.SignalName.MouseEntered, Callable.From(delegate
+		_amogusHover = GetNode<Control>("AmogusHover");
+		_amogusHover.Connect(Control.SignalName.MouseEntered, Callable.From(delegate
 		{
-			SetSkin("amongus constellation");
+			SetSkin("amogus constellation");
 		}));
-		_amongusHover.Connect(Control.SignalName.MouseExited, Callable.From(delegate
+		_amogusHover.Connect(Control.SignalName.MouseExited, Callable.From(delegate
 		{
 			SetSkin("normal");
 		}));
@@ -92,7 +92,10 @@ public partial class NRegentCharacterSelectBg : Control
 	private void SetSkin(string skinName)
 	{
 		MegaSkeleton skeleton = _spineController.GetSkeleton();
-		skeleton.SetSkin(skeleton.GetData().FindSkin(skinName));
-		skeleton.SetSlotsToSetupPose();
+		if (skeleton != null)
+		{
+			skeleton.SetSkin(skeleton.GetData().FindSkin(skinName));
+			skeleton.SetSlotsToSetupPose();
+		}
 	}
 }

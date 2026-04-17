@@ -1,13 +1,16 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Events;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models.Relics;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.ValueProps;
 
 namespace MegaCrit.Sts2.Core.Models.Events;
@@ -19,6 +22,11 @@ public sealed class RoundTeaParty : EventModel
 		new DamageVar(11m, ValueProp.Unblockable | ValueProp.Unpowered),
 		new StringVar("Relic", ModelDb.Relic<RoyalPoison>().Title.GetFormattedText())
 	});
+
+	public override bool IsAllowed(IRunState runState)
+	{
+		return runState.Players.All((Player p) => p.Creature.CurrentHp >= 12);
+	}
 
 	protected override IReadOnlyList<EventOption> GenerateInitialOptions()
 	{

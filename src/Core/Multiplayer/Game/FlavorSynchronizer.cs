@@ -88,7 +88,7 @@ public class FlavorSynchronizer : IDisposable
 			}
 			string text = (player.Creature.IsDead ? "dead" : "alive");
 			LocString locString = new LocString("characters", player.Character.Id.Entry + ".banter." + text + ".endTurnPing");
-			value = NSpeechBubbleVfx.Create(locString.GetFormattedText(), player.Creature, 1.5);
+			value = NSpeechBubbleVfx.Create(locString.GetFormattedText(), player.Creature, 1.5, player.Character.SpeechBubbleColor);
 			NCombatRoom.Instance?.CombatVfxContainer.AddChildSafely(value);
 			_endTurnPingDialogues[player] = value;
 		}

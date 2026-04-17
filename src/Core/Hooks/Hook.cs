@@ -515,6 +515,18 @@ public static class Hook
 		}
 	}
 
+	public static async Task AfterModifyingEnergyGain(CombatState combatState, IEnumerable<AbstractModel> modifiers)
+	{
+		foreach (AbstractModel modifier in combatState.IterateHookListeners())
+		{
+			if (modifiers.Contains(modifier))
+			{
+				await modifier.AfterModifyingEnergyGain();
+				modifier.InvokeExecutionFinished();
+			}
+		}
+	}
+
 	public static async Task AfterModifyingHandDraw(CombatState combatState, IEnumerable<AbstractModel> modifiers)
 	{
 		foreach (AbstractModel modifier in combatState.IterateHookListeners())
@@ -653,19 +665,26 @@ public static class Hook
 		}
 	}
 
-	public static async Task BeforePlayPhaseStart(CombatState combatState, Player player)
+	public static async Task BeforePlayPhaseStart(HookPlayerChoiceContext playerChoiceContext, Task setupPlayerTurnTask, CombatState combatState, Player player)
 	{
-		ulong? netId = LocalContext.NetId;
-		if (!netId.HasValue)
+		if (!LocalContext.NetId.HasValue)
 		{
 			return;
 		}
+		await setupPlayerTurnTask;
 		foreach (AbstractModel model in combatState.IterateHookListeners())
 		{
-			HookPlayerChoiceContext hookPlayerChoiceContext = new HookPlayerChoiceContext(model, netId.Value, combatState, GameActionType.Combat);
-			Task task = model.BeforePlayPhaseStart(hookPlayerChoiceContext, player);
-			await hookPlayerChoiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+			playerChoiceContext.PushModel(model);
+			await model.BeforePlayPhaseStart(playerChoiceContext, player);
 			model.InvokeExecutionFinished();
+			playerChoiceContext.PopModel(model);
+		}
+		foreach (AbstractModel model in combatState.IterateHookListeners())
+		{
+			playerChoiceContext.PushModel(model);
+			await model.BeforePlayPhaseStartLate(playerChoiceContext, player);
+			model.InvokeExecutionFinished();
+			playerChoiceContext.PopModel(model);
 		}
 	}
 
@@ -836,6 +855,11 @@ public static class Hook
 		foreach (AbstractModel model in combatState.IterateHookListeners())
 		{
 			await model.AfterSideTurnStart(side, combatState);
+			model.InvokeExecutionFinished();
+		}
+		foreach (AbstractModel model in combatState.IterateHookListeners())
+		{
+			await model.AfterSideTurnStartLate(side, combatState);
 			model.InvokeExecutionFinished();
 		}
 	}
@@ -1105,6 +1129,7 @@ public static class Hook
 
 	public static decimal ModifyDamage(IRunState runState, CombatState? combatState, Creature? target, Creature? dealer, decimal damage, ValueProp props, CardModel? cardSource, ModifyDamageHookType modifyDamageHookType, CardPreviewMode previewMode, out IEnumerable<AbstractModel> modifiers)
 	{
+		List<AbstractModel> modifiers2 = new List<AbstractModel>();
 		decimal num = damage;
 		if (cardSource != null && cardSource.Enchantment != null)
 		{
@@ -1134,22 +1159,22 @@ public static class Hook
 						if (type == PileType.Hand || type == PileType.Play)
 						{
 							flag3 = true;
-							goto IL_00b3;
+							goto IL_00bb;
 						}
 					}
 				}
 			}
 			flag3 = false;
-			goto IL_00b3;
+			goto IL_00bb;
 		}
-		goto IL_00b7;
-		IL_00b7:
-		List<AbstractModel> modifiers2;
-		if (flag2)
+		goto IL_00bf;
+		IL_00bf:
+		bool flag4 = flag2;
+		bool flag5 = false;
+		if (flag4)
 		{
-			bool flag4 = true;
+			bool flag6 = true;
 			decimal? num2 = null;
-			modifiers2 = new List<AbstractModel>();
 			foreach (Creature item in combatState?.HittableEnemies ?? Array.Empty<Creature>())
 			{
 				List<AbstractModel> modifiers3;
@@ -1160,13 +1185,14 @@ public static class Hook
 				}
 				else if ((int)num3 != (int)num2.Value)
 				{
-					flag4 = false;
+					flag6 = false;
 					break;
 				}
 				modifiers2.AddRange(modifiers3);
 			}
-			if (num2.HasValue && flag4)
+			if (num2.HasValue && flag6)
 			{
+				flag5 = true;
 				num = num2.Value;
 				modifiers2 = modifiers2.Distinct().ToList();
 			}
@@ -1175,15 +1201,15 @@ public static class Hook
 				modifiers2.Clear();
 			}
 		}
-		else
+		if (!flag4 || !flag5)
 		{
 			num = ModifyDamageInternal(runState, combatState, target, dealer, num, props, cardSource, modifyDamageHookType, out modifiers2);
 		}
 		modifiers = modifiers2;
 		return Math.Max(0m, num);
-		IL_00b3:
+		IL_00bb:
 		flag2 = flag3;
-		goto IL_00b7;
+		goto IL_00bf;
 	}
 
 	public static decimal ModifyEnergyCostInCombat(CombatState combatState, CardModel card, decimal originalCost)
@@ -1198,6 +1224,23 @@ public static class Hook
 			item.TryModifyEnergyCostInCombat(card, modifiedCost, out modifiedCost);
 		}
 		return modifiedCost;
+	}
+
+	public static decimal ModifyEnergyGain(CombatState combatState, Player player, decimal originalAmount, out IEnumerable<AbstractModel> modifiers)
+	{
+		decimal num = originalAmount;
+		List<AbstractModel> list = new List<AbstractModel>();
+		foreach (AbstractModel item in combatState.IterateHookListeners())
+		{
+			decimal num2 = num;
+			num = item.ModifyEnergyGain(player, num);
+			if ((int)num2 != (int)num)
+			{
+				list.Add(item);
+			}
+		}
+		modifiers = list;
+		return num;
 	}
 
 	public static IReadOnlyList<LocString> ModifyExtraRestSiteHealText(IRunState runState, Player player, IReadOnlyList<LocString> extraText)
@@ -1255,34 +1298,24 @@ public static class Hook
 		return num;
 	}
 
-	public static decimal ModifyHealAmount(IRunState runState, CombatState? combatState, Creature creature, decimal amount)
-	{
-		decimal num = amount;
-		foreach (AbstractModel item in runState.IterateHookListeners(combatState))
-		{
-			num = item.ModifyHealAmount(creature, num);
-		}
-		return num;
-	}
-
 	public static decimal ModifyHpLostBeforeOsty(IRunState runState, CombatState? combatState, Creature target, decimal amount, ValueProp props, Creature? dealer, CardModel? cardSource, out IEnumerable<AbstractModel> modifiers)
 	{
 		decimal num = amount;
 		List<AbstractModel> list = new List<AbstractModel>();
 		foreach (AbstractModel item in runState.IterateHookListeners(combatState))
 		{
-			decimal num2 = num;
+			decimal d = num;
 			num = item.ModifyHpLostBeforeOsty(target, num, props, dealer, cardSource);
-			if ((int)num2 != (int)num)
+			if (decimal.Truncate(d) != decimal.Truncate(num))
 			{
 				list.Add(item);
 			}
 		}
 		foreach (AbstractModel item2 in runState.IterateHookListeners(combatState))
 		{
-			decimal num3 = num;
+			decimal d2 = num;
 			num = item2.ModifyHpLostBeforeOstyLate(target, num, props, dealer, cardSource);
-			if ((int)num3 != (int)num)
+			if (decimal.Truncate(d2) != decimal.Truncate(num))
 			{
 				list.Add(item2);
 			}
@@ -1297,18 +1330,18 @@ public static class Hook
 		List<AbstractModel> list = new List<AbstractModel>();
 		foreach (AbstractModel item in runState.IterateHookListeners(combatState))
 		{
-			decimal num2 = num;
+			decimal d = num;
 			num = item.ModifyHpLostAfterOsty(target, num, props, dealer, cardSource);
-			if ((int)num2 != (int)num)
+			if (decimal.Truncate(d) != decimal.Truncate(num))
 			{
 				list.Add(item);
 			}
 		}
 		foreach (AbstractModel item2 in runState.IterateHookListeners(combatState))
 		{
-			decimal num3 = num;
+			decimal d2 = num;
 			num = item2.ModifyHpLostAfterOstyLate(target, num, props, dealer, cardSource);
-			if ((int)num3 != (int)num)
+			if (decimal.Truncate(d2) != decimal.Truncate(num))
 			{
 				list.Add(item2);
 			}
@@ -1414,7 +1447,7 @@ public static class Hook
 		foreach (AbstractModel item in combatState.IterateHookListeners())
 		{
 			decimal num2 = item.ModifyPowerAmountGiven(power, giver, num, target, cardSource);
-			if ((int)num2 != (int)num)
+			if (decimal.Truncate(num2) != decimal.Truncate(num))
 			{
 				num = num2;
 				list.Add(item);
@@ -1442,12 +1475,12 @@ public static class Hook
 
 	public static decimal ModifyRestSiteHealAmount(IRunState runState, Creature creature, decimal amount)
 	{
-		decimal amount2 = amount;
+		decimal num = amount;
 		foreach (AbstractModel item in runState.IterateHookListeners(null))
 		{
-			amount2 = item.ModifyRestSiteHealAmount(creature, amount2);
+			num = item.ModifyRestSiteHealAmount(creature, num);
 		}
-		return ModifyHealAmount(runState, null, creature, amount2);
+		return num;
 	}
 
 	public static IEnumerable<AbstractModel> ModifyRestSiteOptions(IRunState runState, Player player, ICollection<RestSiteOption> options)
@@ -1884,6 +1917,16 @@ public static class Hook
 		foreach (AbstractModel item in runState.IterateHookListeners(null))
 		{
 			flag = flag || item.ShouldForcePotionReward(player, roomType);
+		}
+		return flag;
+	}
+
+	public static bool ShouldAllowFreeTravel(IRunState runState)
+	{
+		bool flag = false;
+		foreach (AbstractModel item in runState.IterateHookListeners(null))
+		{
+			flag = flag || item.ShouldAllowFreeTravel();
 		}
 		return flag;
 	}

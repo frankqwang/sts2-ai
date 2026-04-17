@@ -231,20 +231,30 @@ public partial class NRelicInventory : FlowContainer
 		for (int i = 0; i < RelicNodes.Count; i++)
 		{
 			NRelicInventoryHolder nRelicInventoryHolder = RelicNodes[i];
-			nRelicInventoryHolder.FocusNeighborLeft = ((i > 0) ? RelicNodes[i - 1].GetPath() : RelicNodes[i].GetPath());
-			nRelicInventoryHolder.FocusNeighborRight = ((i < RelicNodes.Count - 1) ? RelicNodes[i + 1].GetPath() : RelicNodes[i].GetPath());
+			NodePath path;
+			if (i <= 0)
+			{
+				IReadOnlyList<NRelicInventoryHolder> relicNodes = RelicNodes;
+				path = relicNodes[relicNodes.Count - 1].GetPath();
+			}
+			else
+			{
+				path = RelicNodes[i - 1].GetPath();
+			}
+			nRelicInventoryHolder.FocusNeighborLeft = path;
+			nRelicInventoryHolder.FocusNeighborRight = ((i < RelicNodes.Count - 1) ? RelicNodes[i + 1].GetPath() : RelicNodes[0].GetPath());
 			Control firstPotionControl = NRun.Instance.GlobalUi.TopBar.PotionContainer.FirstPotionControl;
-			nRelicInventoryHolder.FocusNeighborTop = ((firstPotionControl != null && GodotObject.IsInstanceValid(firstPotionControl)) ? firstPotionControl.GetPath() : null);
+			nRelicInventoryHolder.FocusNeighborTop = ((firstPotionControl != null && GodotObject.IsInstanceValid(firstPotionControl)) ? firstPotionControl.GetPath() : nRelicInventoryHolder.GetPath());
 			NMultiplayerPlayerStateContainer multiplayerPlayerContainer = NRun.Instance.GlobalUi.MultiplayerPlayerContainer;
 			if (multiplayerPlayerContainer.GetChildCount() > 0)
 			{
 				Control control = multiplayerPlayerContainer.FirstPlayerState?.Hitbox;
-				nRelicInventoryHolder.FocusNeighborBottom = ((control != null && GodotObject.IsInstanceValid(control)) ? control.GetPath() : null);
+				nRelicInventoryHolder.FocusNeighborBottom = ((control != null && GodotObject.IsInstanceValid(control)) ? control.GetPath() : nRelicInventoryHolder.GetPath());
 			}
 			else
 			{
 				Control control2 = ActiveScreenContext.Instance.GetCurrentScreen()?.FocusedControlFromTopBar;
-				nRelicInventoryHolder.FocusNeighborBottom = ((control2 != null && GodotObject.IsInstanceValid(control2)) ? control2.GetPath() : null);
+				nRelicInventoryHolder.FocusNeighborBottom = ((control2 != null && GodotObject.IsInstanceValid(control2)) ? control2.GetPath() : nRelicInventoryHolder.GetPath());
 			}
 		}
 	}

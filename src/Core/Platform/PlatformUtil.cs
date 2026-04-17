@@ -109,4 +109,9 @@ public static class PlatformUtil
 	{
 		return GetPlatformUtil(PrimaryPlatform).GetSupportedWindowMode();
 	}
+
+	public static bool IsPlatformOverlayOpen()
+	{
+		return GetPlatformUtil(PrimaryPlatform).IsPlatformOverlayOpen;
+	}
 }

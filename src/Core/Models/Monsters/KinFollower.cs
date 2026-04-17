@@ -14,7 +14,6 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
-using MegaCrit.Sts2.Core.Nodes.Audio;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Random;
@@ -86,10 +85,9 @@ public sealed class KinFollower : MonsterModel
 
 	public override DamageSfxType TakeDamageSfxType => DamageSfxType.Fur;
 
-	public override void SetupSkins(NCreatureVisuals visuals)
+	public override void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
-		MegaSkeleton skeleton = visuals.SpineBody.GetSkeleton();
-		MegaSkin megaSkin = visuals.SpineBody.NewSkin("custom-skin");
+		MegaSkin megaSkin = spine.NewSkin("custom-skin");
 		MegaSkeletonDataResource data = skeleton.GetData();
 		MegaSkin skin = data.FindSkin(MegaCrit.Sts2.Core.Random.Rng.Chaotic.NextItem(_hairOptions));
 		megaSkin.AddSkin(skin);
@@ -101,26 +99,6 @@ public sealed class KinFollower : MonsterModel
 	{
 		await base.AfterAddedToRoom();
 		await PowerCmd.Apply<MinionPower>(base.Creature, 1m, base.Creature, null);
-		NRunMusicController.Instance?.UpdateMusicParameter("the_kin_progress", 0f);
-		base.Creature.Died += AfterDeath;
-	}
-
-	private void AfterDeath(Creature _)
-	{
-		base.Creature.Died -= AfterDeath;
-		IReadOnlyList<Creature> teammatesOf = base.Creature.CombatState.GetTeammatesOf(base.Creature);
-		if (teammatesOf.Any((Creature c) => c != null && c.Monster is KinPriest && c.IsAlive))
-		{
-			NRunMusicController.Instance?.UpdateMusicParameter("the_kin_progress", 1f);
-		}
-		if (!teammatesOf.Any((Creature c) => c != null && c.Monster is KinFollower && c.IsAlive))
-		{
-			Creature creature = teammatesOf.FirstOrDefault((Creature c) => c != null && c.Monster is KinPriest && c.IsAlive);
-			if (creature != null && creature.Monster is KinPriest kinPriest)
-			{
-				kinPriest.AllFollowerDeathResponse();
-			}
-		}
 	}
 
 	protected override MonsterMoveStateMachine GenerateMoveStateMachine()

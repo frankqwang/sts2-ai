@@ -11,7 +11,7 @@ public class VoteForMapCoordAction : GameAction
 {
 	private readonly Player _player;
 
-	private readonly RunLocation _source;
+	private readonly MapLocation _source;
 
 	private readonly MapVote? _destination;
 
@@ -19,7 +19,7 @@ public class VoteForMapCoordAction : GameAction
 
 	public override GameActionType ActionType => GameActionType.NonCombat;
 
-	public VoteForMapCoordAction(Player player, RunLocation source, MapVote? destination)
+	public VoteForMapCoordAction(Player player, MapLocation source, MapVote? destination)
 	{
 		_player = player;
 		_source = source;

@@ -89,9 +89,11 @@ public class LocManager
 
 	public string Language { get; private set; }
 
-	private static readonly CultureInfo EnglishCultureInfo = System.Globalization.CultureInfo.GetCultureInfo("en");
+	private static readonly CultureInfo _englishCultureInfo = System.Globalization.CultureInfo.GetCultureInfo("en");
 
 	public CultureInfo CultureInfo { get; private set; }
+
+	public StringComparer StringComparer { get; private set; }
 
 	public static void Initialize()
 	{
@@ -134,78 +136,33 @@ public class LocManager
 
 	private CultureInfo CultureInfoFromThreeLetterCode(string language)
 	{
-		try
+		string text = language switch
 		{
-			CultureInfo cultureInfo = System.Globalization.CultureInfo.GetCultures(CultureTypes.NeutralCultures).FirstOrDefault((CultureInfo c) => c.ThreeLetterISOLanguageName == language);
-			if (cultureInfo != null)
-			{
-				return cultureInfo;
-			}
-		}
-		catch (CultureNotFoundException value)
+			"eng" => "en", 
+			"zhs" => "zh-hans", 
+			"zht" => "zh-hant", 
+			"deu" => "de", 
+			"esp" => "es-419", 
+			"fra" => "fr", 
+			"ita" => "it", 
+			"jpn" => "ja", 
+			"kor" => "ko", 
+			"pol" => "pl", 
+			"ptb" => "pt-br", 
+			"rus" => "ru", 
+			"spa" => "es-ES", 
+			"tha" => "th", 
+			"tur" => "tr", 
+			_ => null, 
+		};
+		if (text == null)
 		{
-			Log.Error($"Couldn't enumerate cultures: {value}");
+			string text2 = "Language code " + language + " could not be mapped to CultureInfo! Add a new manual mapping";
+			Log.Error(text2);
+			SentryService.CaptureMessage(text2);
+			return System.Globalization.CultureInfo.GetCultureInfo("en");
 		}
-		if (language == "zhs")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("zh-hans");
-		}
-		if (language == "zht")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("zh-hant");
-		}
-		if (language == "ptb")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("pt-br");
-		}
-		if (language == "esp")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("es-419");
-		}
-		if (language == "spa")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("es-ES");
-		}
-		if (language == "deu")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("de");
-		}
-		if (language == "fra")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("fr");
-		}
-		if (language == "ita")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("it");
-		}
-		if (language == "jpn")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("ja");
-		}
-		if (language == "kor")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("ko");
-		}
-		if (language == "pol")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("pl");
-		}
-		if (language == "rus")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("ru");
-		}
-		if (language == "tha")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("th");
-		}
-		if (language == "tur")
-		{
-			return System.Globalization.CultureInfo.GetCultureInfo("tr");
-		}
-		string text = "Language code " + language + " could not be mapped to CultureInfo! Add a new manual mapping";
-		Log.Error(text);
-		SentryService.CaptureMessage(text);
-		return System.Globalization.CultureInfo.GetCultureInfo("en-us");
+		return System.Globalization.CultureInfo.GetCultureInfo(text);
 	}
 
 	private void LoadLocFormatters()
@@ -213,16 +170,16 @@ public class LocManager
 		_smartFormatter = new SmartFormatter();
 		ListFormatter listFormatter = new ListFormatter();
 		_smartFormatter.AddExtensions(listFormatter, new DictionarySource(), new ValueTupleSource(), new ReflectionSource(), new DefaultSource());
-		_smartFormatter.AddExtensions(listFormatter, new PluralLocalizationFormatter(), new ConditionalFormatter(), new ChooseFormatter(), new SubStringFormatter(), new IsMatchFormatter(), new DefaultFormatter(), new AbsoluteValueFormatter(), new EnergyIconsFormatter(), new StarIconsFormatter(), new HighlightDifferencesFormatter(), new HighlightDifferencesInverseFormatter(), new PercentMoreFormatter(), new PercentLessFormatter(), new ShowIfUpgradedFormatter());
+		_smartFormatter.AddExtensions(listFormatter, new PluralLocalizationFormatter(), new ConditionalFormatter(), new ChooseFormatter(), new SubStringFormatter(), new IsMatchFormatter(), new LocaleNumberFormatter(), new DefaultFormatter(), new AbsoluteValueFormatter(), new EnergyIconsFormatter(), new StarIconsFormatter(), new HighlightDifferencesFormatter(), new HighlightDifferencesInverseFormatter(), new PercentMoreFormatter(), new PercentLessFormatter(), new ShowIfUpgradedFormatter());
 		Smart.Default = _smartFormatter;
 	}
 
 	private void LoadLocCompletionFile()
 	{
-		using Godot.FileAccess fileAccess = Godot.FileAccess.Open("localization/completion.json", Godot.FileAccess.ModeFlags.Read);
+		using Godot.FileAccess fileAccess = Godot.FileAccess.Open("res://localization/completion.json", Godot.FileAccess.ModeFlags.Read);
 		if (fileAccess == null)
 		{
-			throw new LocException("Cannot find language completion file: localization/completion.json");
+			throw new LocException("Cannot find language completion file: res://localization/completion.json");
 		}
 		string asText = fileAccess.GetAsText();
 		_languageKeyCount = JsonSerializer.Deserialize(asText, LocManagerSerializerContext.Default.DictionaryStringInt32);
@@ -241,13 +198,17 @@ public class LocManager
 	{
 		string rawText = locString.GetRawText();
 		LocTable table = GetTable(locString.LocTable);
-		CultureInfo provider = (table.IsLocalKey(locString.LocEntryKey) ? CultureInfo : EnglishCultureInfo);
+		CultureInfo provider = (table.IsLocalKey(locString.LocEntryKey) ? CultureInfo : _englishCultureInfo);
 		try
 		{
 			return _smartFormatter.Format(provider, rawText, variables);
 		}
 		catch (Exception ex) when (((ex is FormattingException || ex is ParsingErrors) ? 1 : 0) != 0)
 		{
+			if (TestMode.IsOn)
+			{
+				throw;
+			}
 			string text = $"message={ex.Message}\ntable={locString.LocTable} key={locString.LocEntryKey} variables={ToString(variables)}";
 			Log.Error("Localization formatting error! " + text);
 			string errorPattern = Regex.Replace(ex.Message.Split('\n')[0], " at \\d+$", "");
@@ -299,14 +260,14 @@ public class LocManager
 		return "{" + string.Join(",", variables.Select<KeyValuePair<string, object>, string>((KeyValuePair<string, object> kp) => $"{kp.Key}:{kp.Value}")) + "}";
 	}
 
-	[MemberNotNull(new string[] { "CultureInfo", "Language" })]
+	[MemberNotNull(new string[] { "CultureInfo", "StringComparer", "Language" })]
 	public void SetLanguage(string language)
 	{
 		var (tables, overridesActive, validationErrors) = LoadTablesFromPath(language);
 		SetLanguageInternal(language, tables, overridesActive, validationErrors);
 	}
 
-	[MemberNotNull(new string[] { "CultureInfo", "Language" })]
+	[MemberNotNull(new string[] { "CultureInfo", "StringComparer", "Language" })]
 	private void SetLanguageInternal(string language, Dictionary<string, LocTable> tables, bool overridesActive, List<LocValidationError> validationErrors)
 	{
 		_tables = tables;
@@ -318,6 +279,7 @@ public class LocManager
 			Log.Info("Localization overrides are active for language '" + language + "'");
 		}
 		CultureInfo = CultureInfoFromThreeLetterCode(Language);
+		StringComparer = System.StringComparer.Create(CultureInfo, CompareOptions.None);
 		if (TestMode.IsOn)
 		{
 			Callable.From(TriggerLocaleChange).CallDeferred();

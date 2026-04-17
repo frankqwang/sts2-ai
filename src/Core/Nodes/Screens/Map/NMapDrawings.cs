@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
@@ -13,6 +14,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Game.Flavor;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.MapDrawing;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.Map;
@@ -30,6 +32,8 @@ public partial class NMapDrawings : Control
 		public Line2D? currentlyDrawingLine;
 
 		public required SubViewport drawViewport;
+
+		public required TextureRect drawingTexture;
 
 		public bool IsDrawing => currentlyDrawingLine != null;
 
@@ -334,25 +338,41 @@ public partial class NMapDrawings : Control
 			drawingState = new DrawingState
 			{
 				playerId = playerId,
-				drawViewport = control.GetNode<SubViewport>("DrawViewport")
+				drawViewport = control.GetNode<SubViewport>("DrawViewport"),
+				drawingTexture = control.GetNode<TextureRect>("DrawViewportTextureRect")
 			};
-			TaskHelper.RunSafely(SetVisibleLater(control));
+			TaskHelper.RunSafely(SetVisibleLater(drawingState));
 			_drawingStates.Add(drawingState);
 		}
 		return drawingState;
 	}
 
-	private async Task SetVisibleLater(Control mapDrawingScene)
+	private async Task SetVisibleLater(DrawingState state)
 	{
-		TextureRect drawingTexture = mapDrawingScene.GetNode<TextureRect>("DrawViewportTextureRect");
-		SubViewport drawViewport = mapDrawingScene.GetNode<SubViewport>("DrawViewport");
-		drawViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
-		drawingTexture.Visible = false;
+		state.drawViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+		state.drawingTexture.Visible = false;
 		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-		drawingTexture.Visible = true;
-		drawViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.WhenVisible;
+		state.drawingTexture.Visible = ShouldShowMapDrawing(state);
+		state.drawViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.WhenVisible;
+	}
+
+	public void UpdateVisibilityFromSettings()
+	{
+		foreach (DrawingState drawingState in _drawingStates)
+		{
+			drawingState.drawingTexture.Visible = ShouldShowMapDrawing(drawingState);
+		}
+	}
+
+	private bool ShouldShowMapDrawing(DrawingState state)
+	{
+		if (!SaveManager.Instance.PrefsSave.ShowMultiplayerDrawings)
+		{
+			return LocalContext.NetId == state.playerId;
+		}
+		return true;
 	}
 
 	public void ClearAllLines()
