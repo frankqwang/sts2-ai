@@ -37,6 +37,13 @@ _NONCOMBAT_DOMAIN_MAP = {
     "map": "route",
     "rest_site": "rest",
     "event": "event",
+    # P3 修复：加 treasure / relic_select 映射。原先缺这两个 key → 走 _resolve_domain
+    # 的 default fallback 直接进 combat 分支 → 编译空 banks / 错把非战斗 legal 当战斗
+    # 动作。选 "event" 作目标 domain 是因为两者都是"选项式非战斗决策"，语义最接近，
+    # 暂无专属 compiler。后续可加 treasure_compiler / relic_select_compiler。
+    "treasure": "event",
+    "relic_select": "event",
+    "relic_reward": "event",
 }
 
 
@@ -125,6 +132,7 @@ class CombatFeatureCompiler:
             turn_prefix=turn_prefix, combat_memory=combat_memory,
             run_build_memory=run_build_memory,
             action_candidates=action_candidates, room_type=room_type,
+            map_state=obs.get("map"),
         )
 
     def _compile_noncombat(self, obs, legal_actions, domain,
@@ -154,4 +162,5 @@ class CombatFeatureCompiler:
             room_type=room_type,
             is_combat=False,
             decision_domain=domain,
+            map_state=obs.get("map"),
         )

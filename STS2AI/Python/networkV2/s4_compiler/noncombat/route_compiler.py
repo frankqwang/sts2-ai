@@ -17,15 +17,18 @@ from typing import Any
 from networkV2.s1_schema.actions import ActionCandidate
 
 
-# 节点类型风险/价值标注
+# 节点类型风险/价值标注（U8 修复后直接存原始 [0,1] 值）
+# 历史：原先值 × 30/50 是为了对抗 _action_token 把 damage_est/block_est 做归一化
+# （_DMG=30 / _BLK=50），这是"字段语义黑客"。现在 ActionCandidate 有 route_risk /
+# route_value 专属字段，bank_assembler 直接透传原值不做归一化，常数 × 30/50 去掉。
 _NODE_RISK = {
     "monster": 0.3, "elite": 0.7, "boss": 1.0,
-    "event": 0.2, "treasure": 0.0,
+    "event": 0.2,   "treasure": 0.0,
     "rest_site": 0.0, "shop": 0.0,
 }
 _NODE_VALUE = {
     "monster": 0.3, "elite": 0.6, "boss": 0.0,
-    "event": 0.4, "treasure": 0.5,
+    "event": 0.4,   "treasure": 0.5,
     "rest_site": 0.7, "shop": 0.6,
 }
 
@@ -66,9 +69,9 @@ class RouteCompiler:
                     family="map",
                     target_scope="map",
                     roles=roles,
-                    # 用 damage/block_est 字段存 risk/value（语义复用）
-                    damage_est=_NODE_RISK.get(point_type, 0.3),
-                    block_est=_NODE_VALUE.get(point_type, 0.3),
+                    # U8: 直接写 route 专属字段（[0,1]），不再复用 damage_est/block_est
+                    route_risk=_NODE_RISK.get(point_type, 0.3),
+                    route_value=_NODE_VALUE.get(point_type, 0.3),
                 ))
 
         return candidates

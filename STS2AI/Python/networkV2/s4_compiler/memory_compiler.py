@@ -65,13 +65,13 @@ class MemoryCompiler:
     def compile_combat_memory(self, mem: CombatMemory) -> list[float]:
         """编译战斗长程记忆为数值向量。
 
-        注意：fight_mode 的 5 维 one-hot 已被移除 —— 该字段没有任何写入路径，
-        过去恒等于 UNKNOWN（即 4 维恒 0 + 1 维恒 1），属于典型死通道。
-        FightMode 分类本质是基于 HP 趋势 / 敌人残血 / intents / powers 的衍生信号，
-        这些原始信号都在网络输入里，让网络自学比人拍阈值更稳妥。
+        历史：原先有 fight_mode 的 5 维 one-hot (RACE/STABILIZE/ATTRITION/BURST_PREP/UNKNOWN)。
+        该字段恒等于 UNKNOWN（没写入路径），属死通道。U4 修复后 CombatMemory.fight_mode /
+        FightMode enum 已从 schema 删除。FightMode 分类本质是 HP 趋势 / 敌人残血 / intents /
+        powers 的衍生信号——这些原始信号都在网络输入里，让网络自学比人拍阈值更稳妥。
 
         behavior_history / transition_count：追踪敌人行为切换序列，
-        当前以 next_move_id 变化作为代理信号（bridge 暂未暴露 phase_id）。
+        当前以 next_move_id 变化作为代理信号（bridge 暂未暴露 phase_id，见 U5 遗留）。
         """
         # 本回合敌方最新伤害（时间序列尾部）
         last_enemy_hp_loss = mem.recent_enemy_hp_loss_window[-1] if mem.recent_enemy_hp_loss_window else 0

@@ -382,6 +382,63 @@ def load_card_tag_indices(path: str | Path | None = None) -> dict[str, list[int]
 
 
 # ---------------------------------------------------------------------------
+# Card feature vector (for NN token embedding)
+# ---------------------------------------------------------------------------
+
+# 模块级缓存：key = slug (lowercase), value = FUNCTIONAL_TAGS one-hot list[float]
+_FUNCTIONAL_TAG_VECTOR_CACHE: dict[str, list[float]] | None = None
+
+
+def _build_functional_tag_vectors() -> dict[str, list[float]]:
+    """读 card_tags.json，把每张卡的 tag list 转成 FUNCTIONAL_TAGS one-hot 向量。
+    未知 card 回落时调用方用全 0 即可。
+    """
+    tags_by_slug = load_card_tags()
+    out: dict[str, list[float]] = {}
+    for slug, tag_list in tags_by_slug.items():
+        vec = [0.0] * NUM_FUNCTIONAL_TAGS
+        tag_set = set(tag_list)
+        for t in tag_set:
+            idx = FUNCTIONAL_TAG_TO_IDX.get(t)
+            if idx is not None:
+                vec[idx] = 1.0
+        out[slug.lower()] = vec
+    return out
+
+
+def _normalize_card_slug(card_id: str) -> str:
+    """把 runtime card_id 规范成 card_tags.json 的 key 格式（lowercase slug）。
+
+    runtime 可能传 "Bash" / "bash" / "STRIKE_IRONCLAD" / "strike_ironclad"，
+    统一走 _slugify（驼峰拆分 + 大写标准化）再 .lower()。
+    """
+    from core.vocab import _slugify
+    return _slugify(str(card_id or "")).lower()
+
+
+def card_feature_vector(card_id: str) -> list[float]:
+    """返回 NUM_FUNCTIONAL_TAGS 维的 one-hot 语义向量。
+
+    用于 deck_card token 的 identity / 语义通道。未知卡牌返回全 0（和 relic 未知处理一致）。
+
+    注意：不含 rarity / type / cost — 这些已在 bank_assembler 的 coarse 11 维里。
+    本向量只负责"身份/功能分类"，例如 demon_form 的 strength_scaling 标签、
+    offering 的 draw+energy_gen+exhaust 组合等。
+    """
+    global _FUNCTIONAL_TAG_VECTOR_CACHE
+    if _FUNCTIONAL_TAG_VECTOR_CACHE is None:
+        try:
+            _FUNCTIONAL_TAG_VECTOR_CACHE = _build_functional_tag_vectors()
+        except FileNotFoundError:
+            _FUNCTIONAL_TAG_VECTOR_CACHE = {}
+    slug = _normalize_card_slug(card_id)
+    vec = _FUNCTIONAL_TAG_VECTOR_CACHE.get(slug)
+    if vec is None:
+        return [0.0] * NUM_FUNCTIONAL_TAGS
+    return list(vec)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 

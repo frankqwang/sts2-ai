@@ -21,38 +21,59 @@ from networkV2.s1_schema.memory import (
     TurnPrefixMemory,
     RunBuildMemory,
     PlayedAction,
-    FightMode,
 )
 from core.card_base_stats import is_aoe as _is_aoe
 
 
-# Ironclad heal-capable card ids（小集合，够用；其他职业可后续扩展）
-_HEAL_CARD_IDS: frozenset[str] = frozenset({
-    "REAPER", "REAPER_UPGRADED",
-    "BITE", "BITE_UPGRADED",
-    "SELF_REPAIR", "SELF_REPAIR_UPGRADED",
-})
+# 数据驱动规范（CLAUDE.md）：heal / draw 判定走 core.card_tags 的 functional tags，
+# 覆盖全职业所有卡 + 升级版自动继承。
+#
+# U6 修复：原先有 `_FALLBACK_HEAL_CARDS = {"reaper", "bite", "self_repair"}` 兜底集，
+# 是 STS1 卡名残留——STS2 里根本没有这些卡（对应 STS2 是 reaper_form / snakebite 等
+# 且不一定是 heal 卡）。重跑 card_tags 提取后确认：STS2 只有 spur 这一张带 heal tag
+# 的卡，兜底永远不命中。直接删除，完全数据驱动。
 
 
-# Ironclad + 通用 draw 卡（未升级基础值；升级版多半 +1 draw，但对比率影响可忽略）
-_DRAW_CARDS: dict[str, int] = {
-    "POMMEL_STRIKE": 1,
-    "POMMEL_STRIKE_UPGRADED": 2,
-    "ACROBATICS": 2,           # draw 3 discard 1 → 净 +2
-    "ACROBATICS_UPGRADED": 3,
-    "BATTLE_TRANCE": 3,
-    "BATTLE_TRANCE_UPGRADED": 4,
-    "OFFERING": 3,
-    "OFFERING_UPGRADED": 5,
-    "WARCRY": 1,
-    "WARCRY_UPGRADED": 2,
-    "DROPKICK": 1,             # conditional
-    "DROPKICK_UPGRADED": 1,
-}
+def _card_tags_db():
+    """Lazy load card_tags.json（由 core/card_tags.py 从 C# 源码提取）。返回
+    dict[card_id_lower, list[tag_name]]。"""
+    global _CARD_TAGS_CACHE
+    if _CARD_TAGS_CACHE is None:
+        try:
+            from core.card_tags import load_card_tags
+            _CARD_TAGS_CACHE = load_card_tags()
+        except Exception:
+            _CARD_TAGS_CACHE = {}
+    return _CARD_TAGS_CACHE
+
+
+_CARD_TAGS_CACHE: dict[str, list[str]] | None = None
+
+
+def _strip_upgrade_suffix(cid: str) -> str:
+    for suffix in ("_upgraded", "_upgrade", "+1"):
+        if cid.endswith(suffix):
+            return cid[: -len(suffix)]
+    return cid
+
+
+def _card_has_tag(card_id: str, tag: str) -> bool:
+    """查 card 是否有某功能 tag。升级版 "_UPGRADED" 后缀会被剥离后查 base 版。"""
+    cid = str(card_id or "").lower().strip()
+    if not cid:
+        return False
+    tags = _card_tags_db().get(cid)
+    if tags is None:
+        tags = _card_tags_db().get(_strip_upgrade_suffix(cid))
+    return tags is not None and tag in tags
+
+
+def _is_heal_card(card_id: str) -> bool:
+    return _card_has_tag(card_id, "heal")
 
 
 def _is_draw_card(card_id: str) -> bool:
-    return card_id.upper() in _DRAW_CARDS
+    return _card_has_tag(card_id, "draw")
 
 
 def _is_x_cost_card(card: dict[str, Any]) -> bool:
@@ -341,7 +362,7 @@ class CombatStateTracker:
         self.run_build_memory.register_combat(enemy_ids, room_type)
 
         # 从 obs 填充 build profile（每场战斗开始时刷新）
-        self._refresh_build_profile(obs)
+        self.refresh_build_profile(obs)
         # 初始化 pile 状态（用于 reshuffle 检测）
         self._prev_pile_counts = _extract_pile_counts(obs)
         # 初始化敌人行为基线：新战斗开始时清空 + 记录第一帧的 move_id
@@ -541,8 +562,13 @@ class CombatStateTracker:
         self.turn_prefix.reset()
         self._in_combat = False
 
-    def _refresh_build_profile(self, obs: dict[str, Any]) -> None:
-        """从 obs 的 player 信息填充 RunBuildMemory 的 build profile。"""
+    def refresh_build_profile(self, obs: dict[str, Any]) -> None:
+        """从 obs 的 player 信息填充 RunBuildMemory 的 build profile。
+
+        在 on_combat_start 时内部调用；训练主循环在非战斗 step（shop/card_reward/
+        rest/event/map）也应主动调一次，否则 gold/act/floor/deck/relic/potion
+        以及派生的 build profile 字段会滞后到上一次进战前的值。
+        """
         player = obs.get("player") or {}
         rbm = self.run_build_memory
 
@@ -581,7 +607,7 @@ class CombatStateTracker:
                     x_cost += 1
                 if _is_aoe(cid):
                     aoe_count += 1
-                if cid.upper() in _HEAL_CARD_IDS:
+                if _is_heal_card(cid):
                     heal_count += 1
                 if _is_draw_card(cid):
                     draw_count += 1
@@ -591,7 +617,7 @@ class CombatStateTracker:
             # 粗略的 build 画像
             rbm.frontload = attacks / n
             rbm.block = skills / n
-            rbm.draw = draw_count / n   # 从静态 _DRAW_CARDS 表统计
+            rbm.draw = draw_count / n   # 从 card_tags 的 "draw" tag 统计
             rbm.scaling = powers / n
             rbm.aoe = aoe_count / n
             rbm.heal = heal_count / n

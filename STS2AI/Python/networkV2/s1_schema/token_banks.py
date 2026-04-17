@@ -52,6 +52,11 @@ TK_MECHANISM = "mechanism"
 # --- combat: modifier_bank ---
 TK_MODIFIER = "modifier"
 
+# --- combat: power_bank ---
+# 每个 active power（enemy 或 player）一个 token，覆盖全部 power vocab。
+# 解决旧设计 top-N slot 截断导致低频 power 完全不可见的问题。
+TK_POWER_INSTANCE = "power_instance"
+
 # --- combat: turn_prefix_bank ---
 TK_PLAYED_ACTION = "played_action"
 TK_TURN_SUMMARY = "turn_summary"
@@ -85,6 +90,7 @@ ALL_TOKEN_TYPES = [
     TK_PLAYER, TK_HAND_CARD, TK_ENEMY_CORE, TK_ENEMY_INTENT, TK_PILE_SUMMARY,
     TK_MECHANISM,
     TK_MODIFIER,
+    TK_POWER_INSTANCE,
     TK_PLAYED_ACTION, TK_TURN_SUMMARY,
     TK_COMBAT_SUMMARY,
     # action
@@ -114,6 +120,7 @@ TOKEN_TIME_SCALE = {
     TK_PLAYED_ACTION: "fast", TK_TURN_SUMMARY: "fast",
     # combat - medium
     TK_MECHANISM: "medium", TK_MODIFIER: "medium", TK_COMBAT_SUMMARY: "medium",
+    TK_POWER_INSTANCE: "medium",
     # action
     TK_ACTION_CANDIDATE: "fast",
     # non-combat options
@@ -209,16 +216,23 @@ class SharedWorldBanks:
 
 @dataclass
 class CombatBanks:
-    """仅战斗时的 bank (5 组)。"""
+    """仅战斗时的 bank (6 组)。
+
+    v2 重构：新增 power_bank —— 每个 active power instance 一个 token，全覆盖无遗漏。
+    modifier_bank 只装有分类语义的 modifier primitive（DamageCap/OnHitTrigger 等），
+    不再作"所有 power"的容器。
+    """
     board_bank: TokenBank = field(default_factory=lambda: TokenBank(bank_name="board"))
     mechanism_bank: TokenBank = field(default_factory=lambda: TokenBank(bank_name="mechanism"))
     modifier_bank: TokenBank = field(default_factory=lambda: TokenBank(bank_name="modifier"))
+    power_bank: TokenBank = field(default_factory=lambda: TokenBank(bank_name="power"))
     turn_prefix_bank: TokenBank = field(default_factory=lambda: TokenBank(bank_name="turn_prefix"))
     combat_memory_bank: TokenBank = field(default_factory=lambda: TokenBank(bank_name="combat_memory"))
 
     def all_banks(self) -> list[TokenBank]:
         return [
             self.board_bank, self.mechanism_bank, self.modifier_bank,
+            self.power_bank,
             self.turn_prefix_bank, self.combat_memory_bank,
         ]
 

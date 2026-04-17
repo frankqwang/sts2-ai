@@ -15,7 +15,35 @@ from networkV2.s1_schema.primitives import (
     ShieldProgress,
 )
 from networkV2.s1_schema.entities import EnemyRuntime
-from networkV2.s2_config.mechanism_registry import EncounterMechanismConfig
+from networkV2.s2_config.mechanism_registry import (
+    EncounterMechanismConfig, normalize_monster_id,
+)
+
+
+def _resolve_owner_enemy(
+    owner_id: str,
+    enemies: list[EnemyRuntime],
+    fallback: EnemyRuntime | None,
+) -> EnemyRuntime | None:
+    """按 primitive.owner_id 找对应 runtime EnemyRuntime。
+
+    primitive.owner_id 来自 GAME_CATALOG（紧凑格式 "frogknight"），runtime enemy 的
+    enemy_id/entity_id 可能是带下划线的 sim 格式（"frog_knight"）。normalize 后匹配。
+    查不到才返回 fallback（通常是 primary_enemy）—— 这里保留 fallback 是为了兼容
+    registry 里 owner_id 缺失或拼写不一致的边缘 case，**不是**正常路径。
+
+    P1-2 修复：原先所有 primitive 都硬绑 primary_enemy，boss+adds / 多怪 encounter
+    的 minion/add primitive 会全挂到 HP 最大的那只怪身上。改成按 owner_id 查真正的
+    目标 enemy。
+    """
+    if not owner_id:
+        return fallback
+    normalized = normalize_monster_id(owner_id)
+    for e in enemies:
+        for candidate in (getattr(e, "enemy_id", ""), getattr(e, "entity_id", "")):
+            if candidate and normalize_monster_id(candidate) == normalized:
+                return e
+    return fallback
 
 
 @dataclass
@@ -54,23 +82,20 @@ class MechanismCompiler:
 
         results: list[ActiveMechanism] = []
 
-        # 找到主要敌人（通常是 boss/elite 本体）
-        # 优先取 HP 最高的，或者第一个
+        # 找到主要敌人（通常是 boss/elite 本体）作为 fallback
+        # owner_id 缺失或拼错时才用它，正常路径走 _resolve_owner_enemy。
         primary_enemy = self._find_primary_enemy(enemies, config)
 
-        if primary_enemy is None:
+        if primary_enemy is None and not enemies:
             return results
 
-        # 编译 phases
-        results.extend(self._compile_phases(config.phases, primary_enemy))
-        # 编译 windows
-        results.extend(self._compile_windows(config.windows, primary_enemy))
-        # 编译 summon_cycles
-        results.extend(self._compile_summons(config.summon_cycles, primary_enemy))
-        # 编译 threshold_gates
-        results.extend(self._compile_thresholds(config.threshold_gates, primary_enemy))
-        # 编译 shield_progress
-        results.extend(self._compile_shields(config.shield_progress, primary_enemy))
+        # 编译各类 primitive：每个 primitive 用自己的 owner_id 查 enemy，
+        # 查不到才 fallback 到 primary。
+        results.extend(self._compile_phases(config.phases, enemies, primary_enemy))
+        results.extend(self._compile_windows(config.windows, enemies, primary_enemy))
+        results.extend(self._compile_summons(config.summon_cycles, enemies, primary_enemy))
+        results.extend(self._compile_thresholds(config.threshold_gates, enemies, primary_enemy))
+        results.extend(self._compile_shields(config.shield_progress, enemies, primary_enemy))
 
         return results
 
@@ -93,16 +118,17 @@ class MechanismCompiler:
     def _compile_phases(
         self,
         phases: list[PhaseTransition],
-        enemy: EnemyRuntime,
+        enemies: list[EnemyRuntime],
+        primary: EnemyRuntime | None,
     ) -> list[ActiveMechanism]:
         results: list[ActiveMechanism] = []
-        current_phase = ""
-        # 按 priority 排序，取最后一个匹配的 phase
+        # 按 priority 排序，保留原语义
         sorted_phases = sorted(phases, key=lambda p: p.priority)
         for phase in sorted_phases:
+            enemy = _resolve_owner_enemy(phase.owner_id, enemies, primary)
+            if enemy is None:
+                continue
             is_active = phase.trigger(enemy)
-            if is_active:
-                current_phase = phase.phase_id
             results.append(ActiveMechanism(
                 primitive=phase,
                 is_active=is_active,
@@ -114,60 +140,76 @@ class MechanismCompiler:
     def _compile_windows(
         self,
         windows: list[Window],
-        enemy: EnemyRuntime,
+        enemies: list[EnemyRuntime],
+        primary: EnemyRuntime | None,
     ) -> list[ActiveMechanism]:
-        return [
-            ActiveMechanism(
+        results: list[ActiveMechanism] = []
+        for w in windows:
+            enemy = _resolve_owner_enemy(w.owner_id, enemies, primary)
+            if enemy is None:
+                continue
+            results.append(ActiveMechanism(
                 primitive=w,
                 is_active=True,
                 owner_enemy_id=enemy.entity_id,
                 window_open=w.detect_open(enemy),
-            )
-            for w in windows
-        ]
+            ))
+        return results
 
     def _compile_summons(
         self,
         summons: list[SummonCycle],
-        enemy: EnemyRuntime,
+        enemies: list[EnemyRuntime],
+        primary: EnemyRuntime | None,
     ) -> list[ActiveMechanism]:
-        return [
-            ActiveMechanism(
+        results: list[ActiveMechanism] = []
+        for s in summons:
+            enemy = _resolve_owner_enemy(s.owner_id, enemies, primary)
+            if enemy is None:
+                continue
+            results.append(ActiveMechanism(
                 primitive=s,
                 is_active=True,
                 owner_enemy_id=enemy.entity_id,
                 summon_active=s.detect_active(enemy),
-            )
-            for s in summons
-        ]
+            ))
+        return results
 
     def _compile_thresholds(
         self,
         thresholds: list[ThresholdGate],
-        enemy: EnemyRuntime,
+        enemies: list[EnemyRuntime],
+        primary: EnemyRuntime | None,
     ) -> list[ActiveMechanism]:
-        return [
-            ActiveMechanism(
+        results: list[ActiveMechanism] = []
+        for t in thresholds:
+            enemy = _resolve_owner_enemy(t.owner_id, enemies, primary)
+            if enemy is None:
+                continue
+            results.append(ActiveMechanism(
                 primitive=t,
                 is_active=True,
                 owner_enemy_id=enemy.entity_id,
                 triggered=t.detect_triggered(enemy),
-            )
-            for t in thresholds
-        ]
+            ))
+        return results
 
     def _compile_shields(
         self,
         shields: list[ShieldProgress],
-        enemy: EnemyRuntime,
+        enemies: list[EnemyRuntime],
+        primary: EnemyRuntime | None,
     ) -> list[ActiveMechanism]:
-        return [
-            ActiveMechanism(
+        results: list[ActiveMechanism] = []
+        for s in shields:
+            enemy = _resolve_owner_enemy(s.owner_id, enemies, primary)
+            if enemy is None:
+                continue
+            results.append(ActiveMechanism(
                 primitive=s,
                 is_active=True,
                 owner_enemy_id=enemy.entity_id,
                 current_layers=s.detect_current_layers(enemy),
                 broken=s.detect_broken(enemy),
-            )
-            for s in shields
-        ]
+            ))
+        return results

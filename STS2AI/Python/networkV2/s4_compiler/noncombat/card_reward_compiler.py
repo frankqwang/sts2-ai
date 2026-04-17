@@ -19,6 +19,24 @@ from typing import Any
 from networkV2.s1_schema.actions import ActionCandidate
 
 
+# R2.3: 稀有度 → soft 权重（bank_assembler._action_token 会编进 rarity_weight 通道）
+# 原先 card_reward / shop 只给 family+roles，同 cost+type+rarity 的选项 token 完全一致。
+# 现在把稀有度用一个连续 scalar 编码，让网络在 token 层就能分清 "Strike vs Demon Form"。
+_RARITY_WEIGHT = {
+    "basic":    0.0,
+    "common":   0.25,
+    "uncommon": 0.5,
+    "rare":     1.0,
+    "special":  0.5,
+    "curse":   -0.3,
+    "status":  -0.2,
+}
+
+
+def _rarity_weight(rarity: str) -> float:
+    return _RARITY_WEIGHT.get(str(rarity or "").strip().lower(), 0.0)
+
+
 def _pick(raw: dict[str, Any] | None, *keys: str, default: Any = None) -> Any:
     if not isinstance(raw, dict):
         return default
@@ -61,6 +79,8 @@ class CardRewardCompiler:
                     cost=card_info.get("cost", 0),
                     roles=self._infer_roles(card_info),
                     target_scope="none",
+                    # R2.3: 稀有度进 token，区分 "Strike vs Demon Form"
+                    rarity_weight=_rarity_weight(card_info.get("rarity", "")),
                 ))
 
             elif action_type in ("skip", "skip_card_reward"):

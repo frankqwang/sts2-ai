@@ -17,7 +17,10 @@ SEEDS_ROOT = ASSETS_ROOT / "seeds"
 
 MAINLINE_CHECKPOINT = CHECKPOINTS_ROOT / "act1" / "mainline_iter2270_carddebug.pt"
 
-SIM_HOST_EXE = ENV_ROOT / "Sim" / "Host" / "bin" / "Debug" / "net9.0" / "headless_sim_host_0991.exe"
+# 优先 Release build（~2x combat step 速度），fallback Debug
+_SIM_RELEASE = ENV_ROOT / "Sim" / "Host" / "bin" / "Release" / "net9.0" / "headless_sim_host_0991.exe"
+_SIM_DEBUG = ENV_ROOT / "Sim" / "Host" / "bin" / "Debug" / "net9.0" / "headless_sim_host_0991.exe"
+SIM_HOST_EXE = _SIM_RELEASE if _SIM_RELEASE.exists() else _SIM_DEBUG
 SIM_LEGACY_DLL = ENV_ROOT / "Sim" / "Runtime" / "HeadlessSim" / "bin" / "Debug" / "net9.0" / "HeadlessSim.dll"
 SPECTATOR_MOD_ROOT = ENV_ROOT / "Spectator" / "SpectatorBridgeMod"
 

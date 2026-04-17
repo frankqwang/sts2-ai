@@ -19,14 +19,21 @@ from networkV2.s1_schema.token_banks import (
     Token, TokenBank, SharedWorldBanks, CombatBanks, UnifiedTokenBanks,
     TK_PLAYER, TK_HAND_CARD, TK_ENEMY_CORE, TK_ENEMY_INTENT,
     TK_PILE_SUMMARY, TK_MECHANISM, TK_MODIFIER,
+    TK_POWER_INSTANCE,
     TK_PLAYED_ACTION, TK_TURN_SUMMARY, TK_COMBAT_SUMMARY,
     TK_BUILD_PROFILE, TK_DECK_CARD, TK_RELIC, TK_POTION, TK_OBJECTIVE,
     TK_ECONOMY, TK_COMBAT_FORECAST,
     TK_ACTION_CANDIDATE,
 )
+from networkV2.s1_schema.game_vocab import (
+    power_semantic_group_onehot, power_class_idx_normalized,
+    is_debuff_heuristic, N_POWER_SEMANTIC_GROUPS,
+)
+from networkV2.s1_schema.sim_catalog import GAME_CATALOG
 from networkV2.s4_compiler.mechanism_compiler import ActiveMechanism
 from networkV2.s4_compiler.memory_compiler import MemoryCompiler
 from core.relic_rules import relic_feature_vector, potion_feature_vector
+from core.card_tags import card_feature_vector, NUM_FUNCTIONAL_TAGS
 
 
 # 归一化常量
@@ -35,6 +42,90 @@ _BLK = 50.0
 _DMG = 30.0
 _NRG = 5.0
 _COST = 5.0
+
+
+def _compute_combo_signals(
+    c: HandCardRuntime,
+    player: PlayerRuntime | None,
+    piles_by_type: dict[str, PileSummary] | None,
+) -> dict[str, float]:
+    """根据手牌 + 玩家 + 牌堆 派生组合/牌序信号。
+
+    规范（SCHEMA_CONVENTION.md）：**不硬编码游戏 power 名**。
+    所有信号基于通用特征（card_type / stats / pile 组成），不查特定 power 名。
+    power-specific synergy（如 Tactician 触发 discard）通过 player_token 的
+    data-driven power vocab 暴露，由网络 attention 自己学习。
+
+    返回 6 个 [0, 1] 信号：
+      is_buff_provider          — 打出后给自己加 buff（先打）
+      benefits_from_strength    — 伤害随 strength 提升（buff 后再打）
+      is_card_draw              — 抽牌（先打扩展选项）
+      actions_left_at_cost      — 当前能量还能打几张该 cost 的牌
+      is_discard_card           — 牌的 commands 含 Discard（player 有 discard-trigger power 时高价值）
+      pile_after_draw_attack_ratio — draw pile 中 attack 占比
+    """
+    # is_buff_provider
+    is_buff_provider = float(
+        c.card_type == "power"
+        or (c.card_type == "skill" and c.damage_est == 0
+            and c.block_est == 0 and c.draw_est == 0
+            and c.rarity not in ("curse", "status"))
+    )
+
+    # benefits_from_strength（基于 stat 查询，非硬编码 power 名）
+    if c.card_type == "attack" and c.damage_est > 0 and player is not None:
+        strength = 0
+        for k, v in player.powers.items():
+            if str(k).lower() == "strength":
+                strength = int(v)
+                break
+        benefits_from_strength = min(c.damage_est / _DMG, 1.0) * min(strength / 5.0, 1.0)
+        if strength == 0:
+            benefits_from_strength = 0.3 * min(c.damage_est / _DMG, 1.0)
+    else:
+        benefits_from_strength = 0.0
+
+    is_card_draw = float(c.draw_est > 0)
+
+    # actions_left_at_cost
+    if not c.can_play:
+        actions_left = 0.0
+    elif c.current_cost <= 0:
+        actions_left = 1.0
+    elif player is not None:
+        actions_left = min(player.energy / max(c.current_cost, 1), 5.0) / 5.0
+    else:
+        actions_left = 0.0
+
+    # is_discard_card：这张牌打出后会 discard 自己或他牌
+    # 通用特征：keywords 含 "exhaust" 或 card_type "skill" 且 damage=block=draw=0
+    # 实际更精确的是 card.commands_json 含 "Discard"，但那要从 sqlite 查。
+    # 退一步：用 card.keywords（runtime 提供的）看是否含 discard-like 字样。
+    keywords_lower = [str(k).lower() for k in (c.keywords or [])]
+    is_discard_card = float(any(
+        "discard" in kw or "exhaust" in kw
+        for kw in keywords_lower
+    ))
+
+    # pile_after_draw_attack_ratio
+    if piles_by_type and "draw" in piles_by_type:
+        draw_pile = piles_by_type["draw"]
+        if draw_pile.size > 0:
+            pile_attack_ratio = draw_pile.attack_ratio
+        else:
+            disc = piles_by_type.get("discard")
+            pile_attack_ratio = disc.attack_ratio if disc and disc.size > 0 else 0.0
+    else:
+        pile_attack_ratio = 0.0
+
+    return {
+        "is_buff_provider": is_buff_provider,
+        "benefits_from_strength": benefits_from_strength,
+        "is_card_draw": is_card_draw,
+        "actions_left_at_cost": actions_left,
+        "is_discard_card": is_discard_card,
+        "pile_after_draw_attack_ratio": pile_attack_ratio,
+    }
 
 
 class BankAssembler:
@@ -65,6 +156,7 @@ class BankAssembler:
         room_type: str = "monster",
         is_combat: bool = True,
         decision_domain: str = "",
+        map_state: dict | None = None,
     ) -> UnifiedTokenBanks:
         mechanism_states = mechanism_states or []
         modifier_states = modifier_states or []
@@ -76,6 +168,7 @@ class BankAssembler:
         shared = self._assemble_shared(
             run_build_memory, player_rt, room_type,
             deck_cards or [], relics or [], potions or [],
+            map_state=map_state,
         )
         combat = None
         domain = "combat"
@@ -108,6 +201,7 @@ class BankAssembler:
         deck_cards: list[CardSemantics],
         relics: list[RelicSemantics],
         potions: list[PotionSemantics],
+        map_state: dict | None = None,
     ) -> SharedWorldBanks:
         shared = SharedWorldBanks()
 
@@ -117,20 +211,28 @@ class BankAssembler:
             token_type=TK_BUILD_PROFILE,
         ))
         for i, card in enumerate(deck_cards[:50]):  # cap at 50
+            # P1② 修复：deck_card token 加语义通道。原来只有 11 维 coarse
+            # (cost/type/rarity/upgraded)，同 cost+type+rarity 的牌在 token 层完全
+            # 不可区分（如 Strike 和 Pommel Strike）。tokenizer 不读 owner_id，
+            # 所以必须把身份编进 numeric。
+            # 加 NUM_FUNCTIONAL_TAGS 维 one-hot 功能标签（aoe/draw/strength_scaling/
+            # exhaust/innate 等），来自 core/card_tags.py 的离线提取。
+            coarse = [
+                card.base_cost / _COST,
+                float(card.card_type == "attack"),
+                float(card.card_type == "skill"),
+                float(card.card_type == "power"),
+                float(card.card_type == "curse"),
+                float(card.card_type == "status"),
+                float(card.is_upgraded),
+                float(card.rarity == "rare"),
+                float(card.rarity == "uncommon"),
+                float(card.rarity == "common"),
+                float(card.base_cost == 0),
+            ]
+            semantic = card_feature_vector(card.entity_id)  # NUM_FUNCTIONAL_TAGS 维
             shared.build_bank.add(Token(
-                numeric=[
-                    card.base_cost / _COST,
-                    float(card.card_type == "attack"),
-                    float(card.card_type == "skill"),
-                    float(card.card_type == "power"),
-                    float(card.card_type == "curse"),
-                    float(card.card_type == "status"),
-                    float(card.is_upgraded),
-                    float(card.rarity == "rare"),
-                    float(card.rarity == "uncommon"),
-                    float(card.rarity == "common"),
-                    float(card.base_cost == 0),
-                ],
+                numeric=coarse + semantic,
                 token_type=TK_DECK_CARD,
                 owner_id=card.entity_id,
                 order=i,
@@ -198,10 +300,94 @@ class BankAssembler:
             token_type=TK_COMBAT_FORECAST,
         ))
 
-        # route_bank: 路线（非战斗时由 route_compiler 填充，战斗时为空占位）
-        # 后续实现
+        # route_bank: 完整地图拓扑 + 玩家位置 + boss 位置 + 路径 forecast
+        # 历史问题：之前是空占位，agent 只能 1 步看 1 步无法做战略路线规划。
+        self._populate_route_bank(shared, map_state, player_rt)
 
         return shared
+
+    def _populate_route_bank(
+        self,
+        shared: SharedWorldBanks,
+        map_state: dict | None,
+        player_rt: PlayerRuntime,
+    ) -> None:
+        """填充 route_bank：每个未来 map node 一个 token + summary token。"""
+        if not map_state:
+            # 无 map 信息（战斗中等）→ 空占位
+            shared.route_bank.add(Token(
+                numeric=[0.0] * 8, token_type=TK_OBJECTIVE, owner_id="map_empty",
+            ))
+            return
+
+        nodes = map_state.get("nodes") or []
+        boss = map_state.get("boss") or {}
+        boss_col = int(boss.get("col", -1) or -1)
+        boss_row = int(boss.get("row", -1) or -1)
+        player_node = map_state.get("player") or {}
+        # 取玩家 col/row（不一定有 - act 1 起点 row=0）
+        player_col = int(player_node.get("col", -1) or -1)
+        player_row = int(player_node.get("row", -1) or -1)
+
+        # 1) summary token: 全局地图统计
+        node_types_count = {}
+        for n in nodes:
+            t = str(n.get("type", "") or "").lower()
+            node_types_count[t] = node_types_count.get(t, 0) + 1
+        total_nodes = max(len(nodes), 1)
+        boss_dist = max(boss_row - player_row, 0) if boss_row >= 0 and player_row >= 0 else 17
+
+        shared.route_bank.add(Token(
+            numeric=[
+                len(nodes) / 60.0,
+                node_types_count.get("monster", 0) / total_nodes,
+                node_types_count.get("elite", 0) / total_nodes,
+                node_types_count.get("event", 0) / total_nodes,
+                node_types_count.get("rest_site", 0) / total_nodes,
+                node_types_count.get("shop", 0) / total_nodes,
+                node_types_count.get("treasure", 0) / total_nodes,
+                boss_dist / 17.0,  # 距离 boss 的步数（act 内）
+            ],
+            token_type=TK_OBJECTIVE,
+            owner_id="map_summary",
+            order=0,
+        ))
+
+        # 2) per-node tokens（限制最多 30 个，按距离玩家排序优先未来节点）
+        candidates = []
+        for n in nodes:
+            n_col = int(n.get("col", -1) or -1)
+            n_row = int(n.get("row", -1) or -1)
+            n_type = str(n.get("type", "") or "").lower()
+            n_children = n.get("children") or []
+            # 只关注未来节点（row >= player_row）
+            if player_row >= 0 and n_row < player_row:
+                continue
+            dist = max(n_row - player_row, 0) if player_row >= 0 else n_row
+            # 距离 player 越近越重要
+            candidates.append((dist, n_col, n_row, n_type, len(n_children)))
+
+        candidates.sort()  # 按 dist 升序
+        for i, (dist, n_col, n_row, n_type, n_children) in enumerate(candidates[:30]):
+            shared.route_bank.add(Token(
+                numeric=[
+                    n_col / 7.0,                                # 列归一化
+                    n_row / 17.0,                               # 行归一化
+                    dist / 17.0,                                # 距玩家步数
+                    float(n_type == "monster"),
+                    float(n_type == "elite"),
+                    float(n_type == "boss"),
+                    float(n_type == "event"),
+                    float(n_type == "rest_site"),
+                    float(n_type == "shop"),
+                    float(n_type == "treasure"),
+                    n_children / 4.0,                           # 出度（连通性）
+                    float(n_col == boss_col and n_row == boss_row),  # 是不是 boss 节点
+                ],
+                token_type=TK_OBJECTIVE,
+                owner_id=f"node_{n_col}_{n_row}",
+                order=i + 1,
+            ))
 
     # ------------------------------------------------------------------
     # Combat Banks (5 组)
@@ -221,12 +407,18 @@ class BankAssembler:
     ) -> CombatBanks:
         cb = CombatBanks()
 
+        # piles 按 type 索引，便于 _hand_card_token 计算 combo signals
+        piles_by_type = {p.pile_type: p for p in piles}
+
         # --- board_bank ---
         cb.board_bank.add(self._player_token(player_rt, room_type))
         for i, card in enumerate(hand_cards):
-            cb.board_bank.add(self._hand_card_token(card, i))
+            cb.board_bank.add(self._hand_card_token(card, i, player_rt, piles_by_type))
         for i, enemy in enumerate(enemies):
             cb.board_bank.add(self._enemy_core_token(enemy, i))
+            # intent token 也带 owner snapshot，让网络知道"这个 intent 来自哪只怪"
+            # （多怪战斗时 attention 能把 intent 关联到正确 enemy_core）
+            intent_owner_snap = self._owner_snapshot_enemy(enemy)
             for j, intent in enumerate(enemy.intents):
                 cb.board_bank.add(Token(
                     numeric=[
@@ -237,6 +429,7 @@ class BankAssembler:
                         intent.damage / _DMG,
                         intent.total_damage / _DMG,
                         intent.repeats / 5.0,
+                        *intent_owner_snap,   # 4 维 owner identity
                     ],
                     token_type=TK_ENEMY_INTENT,
                     owner_id=enemy.entity_id,
@@ -266,6 +459,12 @@ class BankAssembler:
         for i, mod in enumerate(modifiers):
             cb.modifier_bank.add(self._modifier_token(mod, i))
 
+        # --- power_bank (v2) ---
+        # 每个 active power（enemy + player）一个 token，覆盖全部 vocab。
+        # 解决旧设计 _enemy_core_token / _player_token 的 top-N slot 截断问题：
+        # 低频 power（Illusion / HardToKill / CrabRage / ... 230+ 个）之前完全看不见。
+        self._append_power_tokens(cb.power_bank, enemies, player_rt)
+
         # --- turn_prefix_bank ---
         for i, action in enumerate(turn_prefix.played_actions):
             cb.turn_prefix_bank.add(Token(
@@ -287,6 +486,143 @@ class BankAssembler:
         return cb
 
     # ------------------------------------------------------------------
+    # Power Bank (v2)
+    # ------------------------------------------------------------------
+
+    # Power stack 归一化：大多数 power 层数在 [0, 10]；StrengthPower 可以到 ±30，
+    # 但我们 clip 到 [-1, 1] 量级。
+    _POWER_STACK_NORM = 10.0
+
+    def _append_power_tokens(
+        self,
+        bank: TokenBank,
+        enemies: list[EnemyRuntime],
+        player_rt: PlayerRuntime,
+    ) -> None:
+        """为每个 active power（enemy + player）生成一个 token 进入 power_bank。
+
+        Numeric 编码（16 维）：
+          [0]       stack_norm          — 层数 / 10，clip [-1.5, 1.5]
+          [1]       is_player           — 归属：0=enemy, 1=player
+          [2]       is_debuff_hint      — buff / debuff heuristic
+          [3:11]    semantic_group      — 8 维 one-hot (见 power_semantic_group_onehot)
+          [11]      class_idx_norm      — class_name 在对应 vocab 里的 index / VOCAB_SIZE
+          [12:16]   owner snapshot      — 4 维 owner identity (让网络知道 power 在"谁身上")
+                    [12] owner_hp_ratio
+                    [13] owner_max_hp / 100
+                    [14] owner_block / 50
+                    [15] owner_is_hittable (player 视为永远 hittable=1)
+
+        owner snapshot 和 enemy_core_token / player_token 的对应 numeric slot 一致，
+        网络可以通过 attention 做 owner matching（hp_ratio+max_hp 几乎唯一确定一只怪）。
+        """
+        order = 0
+        for enemy in enemies:
+            if not getattr(enemy, "is_alive", True):
+                continue
+            owner_snap = self._owner_snapshot_enemy(enemy)
+            for class_name, stacks in enemy.powers.items():
+                try:
+                    s = int(stacks)
+                except (TypeError, ValueError):
+                    s = 0
+                if s == 0:
+                    continue
+                bank.add(self._build_power_token(
+                    class_name=str(class_name),
+                    stacks=s,
+                    is_player=False,
+                    owner_id=enemy.entity_id,
+                    order=order,
+                    owner_snapshot=owner_snap,
+                ))
+                order += 1
+        # player powers
+        player_snap = self._owner_snapshot_player(player_rt)
+        for class_name, stacks in player_rt.powers.items():
+            try:
+                s = int(stacks)
+            except (TypeError, ValueError):
+                s = 0
+            if s == 0:
+                continue
+            bank.add(self._build_power_token(
+                class_name=str(class_name),
+                stacks=s,
+                is_player=True,
+                owner_id="player",
+                order=order,
+                owner_snapshot=player_snap,
+            ))
+            order += 1
+
+    @staticmethod
+    def _owner_snapshot_enemy(e: EnemyRuntime) -> list[float]:
+        """4 维 owner identity：[hp_ratio, max_hp/100, block/50, is_hittable]。
+        和 _enemy_core_token 的 numeric 前几维对齐，网络可做 owner matching。"""
+        return [
+            float(e.hp_ratio),
+            e.max_hp / _HP,
+            e.block / _BLK,
+            float(e.is_hittable),
+        ]
+
+    @staticmethod
+    def _owner_snapshot_player(p: PlayerRuntime) -> list[float]:
+        """player 版本。player 永远 hittable=1（设计一致性：attention 可通过 is_player
+        和 is_hittable 组合唯一识别 player）。"""
+        return [
+            float(p.hp_ratio),
+            p.max_hp / _HP,
+            p.block / _BLK,
+            1.0,  # player 固定 hittable
+        ]
+
+    def _build_power_token(
+        self,
+        class_name: str,
+        stacks: int,
+        is_player: bool,
+        owner_id: str,
+        order: int,
+        owner_snapshot: list[float],
+    ) -> Token:
+        stack_norm = max(-1.5, min(1.5, stacks / self._POWER_STACK_NORM))
+        # 优先用 sim game_catalog 的 base_classes（准确继承链）；fallback 到 heuristic。
+        # #1 优化：sim 接通后 semantic group 覆盖从 ~60% → 95%+。
+        base_classes = GAME_CATALOG.power_base_classes(class_name)
+        semantic = power_semantic_group_onehot(
+            class_name,
+            base_classes=base_classes if base_classes else None,
+        )
+        class_norm = power_class_idx_normalized(class_name, is_player=is_player)
+        # 优先用 sim 的 is_debuff_hint；None 时 fallback heuristic。
+        # #4 优化：sim 的判定更全，不只是 13 个硬编码 stem。
+        sim_debuff = GAME_CATALOG.power_is_debuff_hint(class_name)
+        if sim_debuff is not None:
+            debuff = float(sim_debuff)
+        else:
+            debuff = float(is_debuff_heuristic(class_name))
+        numeric = [
+            stack_norm,
+            float(is_player),
+            debuff,
+            *semantic,            # 8 维
+            class_norm,
+            *owner_snapshot,      # 4 维 owner identity
+        ]
+        assert len(numeric) == 3 + N_POWER_SEMANTIC_GROUPS + 1 + 4, (
+            f"power token numeric dim mismatch: got {len(numeric)}"
+        )
+        return Token(
+            numeric=numeric,
+            token_type=TK_POWER_INSTANCE,
+            owner_id=owner_id,
+            order=order,
+            metadata={"class_name": class_name, "stacks": stacks},
+        )
+
+    # ------------------------------------------------------------------
     # Action Bank
     # ------------------------------------------------------------------
 
@@ -301,14 +637,18 @@ class BankAssembler:
     # ------------------------------------------------------------------
 
     def _player_token(self, p: PlayerRuntime, room_type: str) -> Token:
-        s = p.powers.get
+        """Player token（v2 精简版）：只含实体本身数值。
+
+        所有 power 信息移到 power_bank（每个 active power 独立 token），
+        覆盖全部 vocab。原先 6 维核心 stat + 17 维 vocab slot 的硬绑方案导致
+        低频 power（~160 个）彻底不可见，已废弃。
+        """
         return Token(
             numeric=[
+                # HP / block / energy（6 维）
                 p.hp / _HP, p.hp_ratio, p.max_hp / _HP,
                 p.block / _BLK, p.energy / _NRG, p.max_energy / _NRG,
-                s("strength", 0) / 10.0, s("dexterity", 0) / 10.0,
-                s("weak", 0) / 5.0, s("vulnerable", 0) / 5.0,
-                s("frail", 0) / 5.0, s("artifact", 0) / 3.0,
+                # room_type one-hot（3 维）
                 float(room_type == "monster"),
                 float(room_type == "elite"),
                 float(room_type == "boss"),
@@ -316,7 +656,13 @@ class BankAssembler:
             token_type=TK_PLAYER,
         )
 
-    def _hand_card_token(self, c: HandCardRuntime, order: int) -> Token:
+    def _hand_card_token(
+        self,
+        c: HandCardRuntime,
+        order: int,
+        player: PlayerRuntime | None = None,
+        piles_by_type: dict[str, PileSummary] | None = None,
+    ) -> Token:
         # target_type one-hot（常见值）
         tt = c.target_type
         tt_enemy = float(tt in ("enemy", "single_enemy", "type_1"))
@@ -329,6 +675,12 @@ class BankAssembler:
         r_uncommon = float(r == "uncommon")
         r_rare = float(r == "rare")
         r_special = float(r in ("special", "curse", "status"))
+
+        # ---- Combo / sequencing signals (新增 6 维) ----
+        # 修组合/牌序学习的关键派生特征。原 hand_card token 没这些，网络
+        # 只能从 attention 间接挖关系，对 buff→damage 链路学得很慢。
+        combo = _compute_combo_signals(c, player, piles_by_type)
+
         return Token(
             numeric=[
                 c.current_cost / _COST,
@@ -338,23 +690,35 @@ class BankAssembler:
                 c.damage_est / _DMG, c.block_est / _BLK, c.draw_est / 3.0,
                 float(c.retain), float(c.ethereal), float(c.exhaust),
                 float(c.current_cost == 0),
-                # 新增 9 维：target_type(4) + rarity(4) + upgrade_count(1)
+                # target_type(4) + rarity(4) + upgrade_count(1)
                 tt_enemy, tt_all, tt_self, tt_random,
                 r_common, r_uncommon, r_rare, r_special,
                 min(c.upgrade_count / 3.0, 1.0),
+                # combo signals (6): buff/strength/draw/cost-budget/is_discard_card/pile-after
+                combo["is_buff_provider"],
+                combo["benefits_from_strength"],
+                combo["is_card_draw"],
+                combo["actions_left_at_cost"],
+                combo["is_discard_card"],
+                combo["pile_after_draw_attack_ratio"],
             ],
             token_type=TK_HAND_CARD, owner_id=c.card_id, order=order,
         )
 
     def _enemy_core_token(self, e: EnemyRuntime, order: int) -> Token:
-        g = e.powers.get
+        """Enemy core token（v2 精简版）：只含实体本身数值。
+
+        所有 power 信息移到 power_bank（每个 active power 独立 token，带
+        semantic group + class_idx 编码），覆盖全部 vocab。原先 13 维 base +
+        19 维 vocab slot 的硬绑方案导致低频 monster power（~44 个）彻底不可见，
+        已废弃。
+        """
         return Token(
             numeric=[
+                # HP / block / 存活状态（8 维）
                 e.hp / _HP, e.hp_ratio, e.max_hp / _HP, e.block / _BLK,
                 float(e.is_hittable), float(e.intends_to_attack),
                 e.total_intent_damage / _DMG,
-                g("strength", 0) / 10.0, g("vulnerable", 0) / 5.0,
-                g("weak", 0) / 5.0, g("poison", 0) / 20.0, g("artifact", 0) / 3.0,
                 float(e.max_hp >= 80),
             ],
             token_type=TK_ENEMY_CORE, owner_id=e.entity_id, order=order,
@@ -440,9 +804,30 @@ class BankAssembler:
         # ---- preview 扩展 (1) ----
         HEAL_NORM = 20.0
         extra_axes = [a.heal_est / HEAL_NORM]
-        # 合计 15 + 3 + 5 + 6 + 1 = 30 维（<= tokenizer max_numeric_dim=32）
+        # ---- R2.2: 非战斗 option 新通道 (3 + 9 = 12) ----
+        # rarity_weight (1): card_reward/shop 选卡的稀有度连续权重
+        # price_ratio (1):  shop 物品价格占当前 gold 的比例（0 = 免费, 1 = 刚好买得起）
+        # can_afford (1):   shop 能否购买（0/1）
+        # event_kind (9):   EVENT_KINDS one-hot，区分"拿金币"/"拿 relic"/"掉血换收益"等
+        # 原先所有 event option 的 roles 都是 "resource"、shop 不编价格、card_reward 不编稀有度
+        # → 网络只能靠终局长 horizon 回传区分选项。现在这些通道直接 token 层可分。
+        from networkV2.s1_schema.actions import EVENT_KINDS
+        noncombat_axes = [
+            float(a.rarity_weight),
+            float(a.price_ratio),
+            float(a.can_afford),
+        ]
+        event_kind_axes = [float(a.event_kind == k) for k in EVENT_KINDS]
+        # ---- U8: route 专属通道 (2) ----
+        # route_risk / route_value: map 节点的 [0,1] 威胁 / 价值，不走 _DMG/_BLK 归一化
+        # （原先复用 damage_est/block_est 再 × 30/50 是字段语义黑客，见 route_compiler.py U8 修复）
+        route_axes = [float(a.route_risk), float(a.route_value)]
+        # 合计 15 + 3 + 5 + 6 + 1 + 3 + 9 + 2 = 44 维（<= tokenizer max_numeric_dim=48）
         return Token(
-            numeric=combat_axes + target_axes + family_axes + role_axes + extra_axes,
+            numeric=(
+                combat_axes + target_axes + family_axes + role_axes
+                + extra_axes + noncombat_axes + event_kind_axes + route_axes
+            ),
             token_type=TK_ACTION_CANDIDATE,
             owner_id=a.source_card_id or a.source_potion_id or a.action_type,
             order=order,

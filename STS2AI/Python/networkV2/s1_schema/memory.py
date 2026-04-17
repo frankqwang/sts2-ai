@@ -11,7 +11,6 @@ Compiler 只读取，不修改。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum, auto
 
 
 # ---------------------------------------------------------------------------
@@ -95,13 +94,11 @@ class TurnPrefixMemory:
 # CombatMemory - 本战斗长程摘要
 # ---------------------------------------------------------------------------
 
-class FightMode(Enum):
-    """当前战斗模式。"""
-    UNKNOWN = auto()
-    RACE = auto()           # 拼速度/爆发
-    STABILIZE = auto()      # 稳血/控场
-    ATTRITION = auto()      # 消耗战
-    BURST_PREP = auto()     # 蓄力/等窗口
+# U4 修复：原 FightMode enum（RACE/STABILIZE/ATTRITION/BURST_PREP/UNKNOWN）和
+# `fight_mode` 字段是死通道——运行时没有任何写入路径，恒为 UNKNOWN。
+# memory_compiler.py 已经把它从 token encoding 里移除。现在彻底删掉避免误导后续开发。
+# 若后续需要 FightMode 分类，应从 HP 趋势/敌人残血/intent 等原始信号通过网络自学，
+# 不应再加显式分类字段。
 
 
 @dataclass
@@ -119,7 +116,6 @@ class CombatMemory:
     behavior_history: list[str] = field(default_factory=list)
     reshuffle_count: int = 0
     exhaust_total: int = 0
-    fight_mode: FightMode = FightMode.UNKNOWN
     # 辅助统计
     total_damage_dealt: float = 0.0
     total_block_gained: float = 0.0
@@ -161,7 +157,6 @@ class CombatMemory:
         self.behavior_history.clear()
         self.reshuffle_count = 0
         self.exhaust_total = 0
-        self.fight_mode = FightMode.UNKNOWN
         self.total_damage_dealt = 0.0
         self.total_block_gained = 0.0
         self.max_single_turn_damage = 0.0
