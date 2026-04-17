@@ -467,12 +467,14 @@ def _build_map_route_samples(
         for k, child in enumerate(children):
             child_node = nodes_by_coord.get(child) or {}
             child_type = str(child_node.get("type", "") or "").upper()
-            # child 在可见层(+1)所以类型应该都知道,但为了安全也处理 masked 情况
+            # child 在可见层(+1)所以类型应该都知道,兜底 masked 情况
             if child_type == UNKNOWN_NODE_TYPE:
-                # 不太可能发生,但兜底:特征置 0
                 risk, value = 0.1, 0.2
             else:
-                risk, value = _route_risk(child_type), _route_value(child_type)
+                # 综合自身 + 未来 5 层路径 lookahead(学路径关系的关键)
+                risk, value = _route_features_with_lookahead(
+                    child, child_type, nodes_by_coord, lookahead_depth=5,
+                )
             cand = ActionCandidate(
                 action_type="select_map_node",
                 action_index=k,
@@ -506,6 +508,78 @@ def _route_value(node_type: str) -> float:
     return {
         "M": 0.5, "E": 0.7, "B": 1.0, "S": 0.6, "R": 0.7, "V": 0.4, "T": 0.9,
     }.get(str(node_type or "").upper(), 0.2)
+
+
+def _path_lookahead(
+    start_coord: tuple,
+    nodes_by_coord: dict[tuple, dict],
+    max_depth: int = 5,
+) -> dict[str, int]:
+    """从 start_coord 沿 children BFS 至 max_depth,统计路径上各 type 节点数。
+
+    返回:{type: count},比如 {'R': 2, 'E': 1, 'S': 0, 'V': 3, ...}。
+    不含起点 start_coord 自己(那是候选节点本身,风险/价值已经算过)。
+
+    用途:给 route candidate 的 risk/value 加"未来 N 层有几个 rest/shop/elite"信号,
+    让网络做真正的路径规划决策。
+    """
+    counts: dict[str, int] = {}
+    visited: set[tuple] = {tuple(start_coord)}
+    frontier: set[tuple] = {tuple(start_coord)}
+    for _ in range(max_depth):
+        next_frontier: set[tuple] = set()
+        for c in frontier:
+            node = nodes_by_coord.get(c)
+            if node is None:
+                continue
+            for child in (node.get("children") or []):
+                ct = tuple(child)
+                if ct in visited:
+                    continue
+                visited.add(ct)
+                next_frontier.add(ct)
+                child_node = nodes_by_coord.get(ct)
+                if child_node is not None:
+                    t = str(child_node.get("type", "") or "").upper()
+                    counts[t] = counts.get(t, 0) + 1
+        if not next_frontier:
+            break
+        frontier = next_frontier
+    return counts
+
+
+def _route_features_with_lookahead(
+    child_coord: tuple,
+    child_type: str,
+    nodes_by_coord: dict[tuple, dict],
+    lookahead_depth: int = 5,
+) -> tuple[float, float]:
+    """计算候选 child 的综合 route_risk / route_value,含路径 lookahead。
+
+    基础:child 自身节点 type 的 base risk/value。
+    叠加:未来 N 层的节点类型分布:
+      +value: rest(+0.1/个) / shop(+0.05/个) / treasure(+0.08/个)
+      +risk:  elite(+0.1/个) / boss 距离(boss 近 → risk 高)
+      -value: 多 event(+0.02/个,事件有风险)
+
+    所有值 clamp 到 [0, 1]。
+    """
+    base_risk = _route_risk(child_type)
+    base_value = _route_value(child_type)
+
+    la = _path_lookahead(child_coord, nodes_by_coord, max_depth=lookahead_depth)
+    rest_ahead = la.get("R", 0)
+    shop_ahead = la.get("S", 0)
+    treasure_ahead = la.get("T", 0)
+    elite_ahead = la.get("E", 0)
+    event_ahead = la.get("V", 0)
+
+    value = base_value + 0.1 * rest_ahead + 0.05 * shop_ahead + 0.08 * treasure_ahead + 0.02 * event_ahead
+    risk = base_risk + 0.1 * elite_ahead
+    return (
+        max(0.0, min(1.0, risk)),
+        max(0.0, min(1.0, value)),
+    )
 
 
 def _build_value_only_sample(

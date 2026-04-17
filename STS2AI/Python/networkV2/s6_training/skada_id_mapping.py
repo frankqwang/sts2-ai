@@ -291,9 +291,10 @@ def room_letter_to_name(letter: str) -> str:
 # 网络学到"走路线 X 因为 3 层后是 R(rest)"这种玩家实际看不到的信息。
 #
 # MAP_VISIBILITY_DEPTH:玩家可见的层深(0 = 只看本层,1 = 看 children,...)
-# 默认 1:和 STS 原版 UI 一致。
-# 训练时把超出可见深度的节点 type 替换为 UNKNOWN,让 route policy 只学"合理的 UI 知识"。
-MAP_VISIBILITY_DEPTH = 1
+# STS 实际 UI:整张地图的**拓扑结构 + 节点 type** 全部可见,只有 V(event)的具体
+# 事件内容走到才知道 → 设大值让网络能做真实 lookahead(学"这条路未来的 rest/shop
+# 组合是否有利")。之前设 1 是过度保守,阻断了路径关系学习。
+MAP_VISIBILITY_DEPTH = 99   # 整 act 全可见(Act 1 通常 15-17 层)
 UNKNOWN_NODE_TYPE = "?"
 
 
