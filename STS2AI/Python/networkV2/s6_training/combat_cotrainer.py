@@ -691,24 +691,37 @@ def build_chain_deck(rng: random.Random) -> dict[str, Any]:
 
 
 def _compute_gae_combat(samples: list[TrainingSample], gamma: float = 0.99, lam: float = 0.95) -> None:
-    """Same GAE as train_full_run_v2._compute_gae, for combat-only samples."""
+    """GAE for combat-only samples。和 train_full_run_v2._compute_gae 语义对齐：
+    - `cur_val` 和 `next_val` 都走 bootstrap-aware lookup（终局硬标签优先于 rollout
+      value_estimate）。原实现只对 next_val 做 terminal override、cur_val 固定用
+      value_estimate，导致终局 delta 有系统性偏差，GAE 误差又往前传一整段。
+    - value_target 显式 clamp 到 [0,1]，避免超界值进 loss 前还要靠 CombatLoss 二次
+      clamp 隐式修正。
+    """
     n = len(samples)
     if n == 0:
         return
+
+    def _bootstrap(sample: TrainingSample) -> float:
+        if sample.fight_win_target >= 0.0:
+            return float(sample.fight_win_target)
+        return float(sample.value_estimate)
+
     advantages = [0.0] * n
     last_gae = 0.0
     for t in reversed(range(n)):
-        next_value = samples[t + 1].value_estimate if t + 1 < n else 0.0
-        cur_value = samples[t].value_estimate
+        next_value = _bootstrap(samples[t + 1]) if t + 1 < n else 0.0
+        cur_value = _bootstrap(samples[t])
         if samples[t].fight_win_target >= 0.0:
-            # terminal hard-label → bootstrap from 0
+            # terminal：未来没有 step，next_value 强制 0（即便 t+1 是新战斗起点也一样）
             next_value = 0.0
         delta = samples[t].reward + gamma * next_value - cur_value
         last_gae = delta + gamma * lam * last_gae
         advantages[t] = last_gae
     for t in range(n):
+        cur_val = _bootstrap(samples[t])
         samples[t].advantage = advantages[t]
-        samples[t].value_target = advantages[t] + samples[t].value_estimate
+        samples[t].value_target = max(0.0, min(1.0, advantages[t] + cur_val))
         samples[t].leaf_target = max(-1.0, min(1.0, 2 * samples[t].value_target - 1))
 
 
@@ -833,10 +846,15 @@ def run_cotrainer(args: argparse.Namespace) -> None:
            and getattr(args, "reset_encounter_conditioning", True):
             import torch.nn as _nn
             _nn.init.normal_(net.encounter_embed.weight, mean=0.0, std=0.3)
+            with torch.no_grad():
+                # 保持 UnifiedNet __init__ 的不变量：UNKNOWN slot（index 0）=0。
+                # 配合 _apply_encounter_conditioning 的 per-sample mask，这个 slot
+                # 在 forward 里永远不会被读到，设置为 0 只是让 state_dict 检查时一目了然。
+                net.encounter_embed.weight[0].zero_()
             net.encounter_gate.data.fill_(1.0)
             logger.info(
-                "[conditioning] Forced re-init: gate=1.0, embed std=0.3 "
-                "(破解 conditioning 死锁)"
+                "[conditioning] Forced re-init: gate=1.0, embed std=0.3, embed[0]=0 "
+                "(破解 conditioning 死锁；UNKNOWN slot 保持 neutral)"
             )
 
     trainer = UnifiedPPOTrainer(net, PPOConfig(
@@ -1034,6 +1052,9 @@ def main():
     ap.add_argument("--mini-batch-size", type=int, default=64)
     ap.add_argument("--value-warmup-iters", type=int, default=2)
     ap.add_argument("--target-kl", type=float, default=0.05)
+    ap.add_argument("--no-reset-encounter-conditioning", dest="reset_encounter_conditioning",
+                    action="store_false", default=True,
+                    help="load checkpoint 时不强制重置 encounter embed/gate（默认会重置以破解死锁）。")
     # 路径规范（DIAGNOSTICS_CONVENTION.md）：训练产物统一落 STS2AI/Artifacts/ 下
     _artifacts_root = Path(__file__).resolve().parents[3] / "Artifacts"
     ap.add_argument("--dump-dir", type=str, default="",

@@ -20,11 +20,15 @@ def _globally_normalize_advantages(samples: list[TrainingSample]) -> list[Traini
     必须在 train_step 入口调用一次而不是每 minibatch 调一次——否则每个 minibatch 内
     mean(adv)=0 会让 PPO 的 ratio≈1 时 policy_loss 恒等于 0（已知 bug）。
     """
-    if not samples:
+    if len(samples) < 2:
+        # n<2 时 `torch.std` 默认 unbiased=True 会返回 NaN（N-1=0 分母），
+        # 后续除法会把所有 advantage 污染成 NaN。batch 太小无统计意义，直接返回原值。
         return samples
     advs = torch.tensor([s.advantage for s in samples], dtype=torch.float64)
     mean = advs.mean().item()
-    std = advs.std().item()
+    # unbiased=False 使 n=1 时 std=0 而非 NaN；虽然我们上面已 early-return，
+    # 这里也保持和"总体 std"语义一致。
+    std = advs.std(unbiased=False).item()
     if std <= 1e-8:
         # 全 batch adv 几乎相同 → 无信号，留原值
         return samples
@@ -71,9 +75,14 @@ class CombatPPOTrainerV2:
         device = next(self.net.parameters()).device
         all_metrics: list[dict[str, float]] = []
         nan_skip_count = 0  # 诊断：被 NaN 跳过的 minibatch 数
+        epochs_done = 0  # 实际跑完的 epoch 数（考虑 KL 早停）
 
         for _epoch in range(self.cfg.ppo_epochs):
             indices = torch.randperm(len(samples))
+            # 和 UnifiedPPOTrainer 同款 KL 早停：最近 5 个 minibatch 滑窗均值超 1.5×target
+            # 立即 break；PPOConfig.target_kl=0 禁用。原先 CombatPPOTrainerV2 配了
+            # target_kl 但从没消费过，KL 爆炸时会白白跑完 4 epoch 把 policy 炸飞。
+            epoch_kls: list[float] = []
             for start in range(0, len(samples), self.cfg.mini_batch_size):
                 end = min(start + self.cfg.mini_batch_size, len(samples))
                 batch_idx = indices[start:end]
@@ -85,7 +94,7 @@ class CombatPPOTrainerV2:
                     enc_idx = enc_idx.to(device)
                 output = self.net(batched_banks=batched.banks, encounter_idx=enc_idx)
 
-                # 完整 multi-head loss
+                # 完整 multi-head loss（全部 target 传齐，避免 head 白训）
                 loss, metrics = self.loss_fn(
                     output=output,
                     action_indices=batched.action_indices.to(device),
@@ -96,6 +105,15 @@ class CombatPPOTrainerV2:
                     hp_loss_targets=batched.hp_loss_targets.to(device),
                     survival_targets=batched.survival_targets.to(device),
                     leaf_targets=batched.leaf_targets.to(device),
+                    transition_risk_targets=(
+                        batched.transition_risk_targets.to(device)
+                        if batched.transition_risk_targets is not None else None),
+                    resource_retention_targets=(
+                        batched.resource_retention_targets.to(device)
+                        if batched.resource_retention_targets is not None else None),
+                    turn_damage_targets=(
+                        batched.turn_damage_targets.to(device)
+                        if batched.turn_damage_targets is not None else None),
                     sample_weights=batched.sample_weights.to(device),
                 )
 
@@ -122,8 +140,27 @@ class CombatPPOTrainerV2:
                 self.optimizer.step()
                 all_metrics.append(metrics)
 
+                # Per-minibatch KL 早停
+                kl = metrics.get("approx_kl", 0.0)
+                if kl:
+                    epoch_kls.append(float(kl))
+                if self.cfg.target_kl > 0 and len(epoch_kls) >= 5:
+                    recent_kl = sum(epoch_kls[-5:]) / 5
+                    if recent_kl > 1.5 * self.cfg.target_kl:
+                        break
+
+            epochs_done += 1
+            # Per-epoch KL 早停（双重保险）
+            if self.cfg.target_kl > 0 and epoch_kls:
+                mean_kl = sum(epoch_kls) / len(epoch_kls)
+                if mean_kl > self.cfg.target_kl:
+                    break
+
         if not all_metrics:
-            return {"nan_skip_count": float(nan_skip_count)}
+            return {
+                "nan_skip_count": float(nan_skip_count),
+                "epochs_done": float(epochs_done),
+            }
         avg: dict[str, float] = {}
         all_keys: set[str] = set()
         for m in all_metrics:
@@ -131,6 +168,7 @@ class CombatPPOTrainerV2:
         for key in all_keys:
             avg[key] = sum(m.get(key, 0.0) for m in all_metrics) / len(all_metrics)
         avg["nan_skip_count"] = float(nan_skip_count)
+        avg["epochs_done"] = float(epochs_done)
         return avg
 
 
