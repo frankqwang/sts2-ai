@@ -100,16 +100,16 @@
     <Compile Include="$(UpstreamRoot)\src\Core\Platform\Steam\SteamDisconnectionReasonExtensions.cs" />
     <Compile Include="..\Overlay\Simulation\*.cs" Link="Overlay\Simulation\%(Filename)%(Extension)" />
     <Compile Remove="..\Overlay\Simulation\FullRunUiShim.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Combat\CombatManager.cs" Link="Overlay\Compat\CombatManager.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Rooms\CombatRoom.cs" Link="Overlay\Compat\CombatRoom.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Saves\Runs\SerializableRoom.cs" Link="Overlay\Compat\SerializableRoom.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Localization\LocString.cs" Link="Overlay\Compat\LocString.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Commands\CardPileCmd.cs" Link="Overlay\Compat\CardPileCmd.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Commands\CardSelectCmd.cs" Link="Overlay\Compat\CardSelectCmd.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Assets\PreloadManager.cs" Link="Overlay\Compat\PreloadManager.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Models\Monsters\Vantom.cs" Link="Overlay\Compat\Vantom.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Models\Monsters\LagavulinMatriarch.cs" Link="Overlay\Compat\LagavulinMatriarch.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Models\Monsters\SlumberingBeetle.cs" Link="Overlay\Compat\SlumberingBeetle.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Combat\CombatManager.cs" Link="Overlay\Compat\CombatManager.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Rooms\CombatRoom.cs" Link="Overlay\Compat\CombatRoom.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Saves\Runs\SerializableRoom.cs" Link="Overlay\Compat\SerializableRoom.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Localization\LocString.cs" Link="Overlay\Compat\LocString.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Commands\CardPileCmd.cs" Link="Overlay\Compat\CardPileCmd.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Commands\CardSelectCmd.cs" Link="Overlay\Compat\CardSelectCmd.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Assets\PreloadManager.cs" Link="Overlay\Compat\PreloadManager.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Models\Monsters\Vantom.cs" Link="Overlay\Compat\Vantom.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Models\Monsters\LagavulinMatriarch.cs" Link="Overlay\Compat\LagavulinMatriarch.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Models\Monsters\SlumberingBeetle.cs" Link="Overlay\Compat\SlumberingBeetle.cs" />
     <Compile Include="..\Overlay\Training\CombatTrainingDtos.cs" Link="Overlay\Training\CombatTrainingDtos.cs" />
     <Compile Include="..\Overlay\Training\CombatTrainingActionType.cs" Link="Overlay\Training\CombatTrainingActionType.cs" />
     <Compile Include="..\Overlay\Training\CombatTrainingActionRequest.cs" Link="Overlay\Training\CombatTrainingActionRequest.cs" />
@@ -123,8 +123,8 @@
     <Compile Include="..\Overlay\TestSupport\IRewardSelectionPromptSelector.cs" Link="Overlay\TestSupport\IRewardSelectionPromptSelector.cs" />
     <Compile Include="..\Overlay\TestSupport\ICardRewardPromptSelector.cs" Link="Overlay\TestSupport\ICardRewardPromptSelector.cs" />
     <Compile Include="..\Overlay\TestSupport\IRelicSelectionPromptSelector.cs" Link="Overlay\TestSupport\IRelicSelectionPromptSelector.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Saves\Runs\SerializablePlayerCombatState.cs" Link="Overlay\Saves\SerializablePlayerCombatState.cs" />
-    <Compile Include="..\Overlay\Compat\Upstream0991\Core\Saves\Runs\SerializableCreatureState.cs" Link="Overlay\Saves\SerializableCreatureState.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Saves\Runs\SerializablePlayerCombatState.cs" Link="Overlay\Saves\SerializablePlayerCombatState.cs" />
+    <Compile Include="..\Overlay\Compat\Source01032\Core\Saves\Runs\SerializableCreatureState.cs" Link="Overlay\Saves\SerializableCreatureState.cs" />
 
     <Compile Include="..\Runtime\HeadlessSim\BinaryProtocol.cs" Link="Host\BinaryProtocol.cs" />
     <Compile Include="..\Runtime\HeadlessSim\GeneratedStubs.cs" Link="Host\GeneratedStubs.cs" />

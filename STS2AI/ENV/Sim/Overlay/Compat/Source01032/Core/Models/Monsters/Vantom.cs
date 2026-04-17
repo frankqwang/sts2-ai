@@ -82,12 +82,8 @@ public sealed class Vantom : MonsterModel
 		NRunMusicController.Instance?.UpdateMusicParameter("vantom_progress", 5f);
 	}
 
-	public override void SetupSkins(NCreatureVisuals visuals)
-	{
-		MegaAnimationState animationState = visuals.SpineBody.GetAnimationState();
-		animationState.SetAnimation("_tracks/charge_up_1", loop: false, 1);
-		animationState.AddAnimation("_tracks/charged_1", 0f, loop: true, 1);
-	}
+	// SetupSkins override 在 HeadlessSim 里不需要(无图形 / 动画)。
+	// 0.103.2 源码签名改为 (MegaSprite, MegaSkeleton),动画 track 对 sim 无影响 → 删。
 
 	protected override MonsterMoveStateMachine GenerateMoveStateMachine()
 	{

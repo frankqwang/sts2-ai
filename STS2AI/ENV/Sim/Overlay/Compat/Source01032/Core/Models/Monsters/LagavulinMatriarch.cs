@@ -84,10 +84,7 @@ public sealed class LagavulinMatriarch : MonsterModel
 		}
 	}
 
-	public override void SetupSkins(NCreatureVisuals visuals)
-	{
-		visuals.SpineBody.GetAnimationState().SetAnimation("_tracks/eyes_closed_loop", loop: true, 1);
-	}
+	// SetupSkins override 对 HeadlessSim 无用(纯动画),0.103.2 源码签名已改 → 删。
 
 	public override async Task AfterAddedToRoom()
 	{

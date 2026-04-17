@@ -9,7 +9,6 @@
 
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;
-using HeadlessSim;
 using MegaCrit.Sts2.Core.Achievements;
 using MegaCrit.Sts2.Core.Animation;
 using MegaCrit.Sts2.Core.Assets;
@@ -79,6 +78,7 @@ using MegaCrit.Sts2.Core.Models.Achievements;
 using MegaCrit.Sts2.Core.Models.Acts;
 using MegaCrit.Sts2.Core.Models.Afflictions;
 using MegaCrit.Sts2.Core.Models.Afflictions.Mocks;
+using MegaCrit.Sts2.Core.Models.Badges;
 using MegaCrit.Sts2.Core.Models.CardPools;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Cards.Mocks;
@@ -94,6 +94,7 @@ using MegaCrit.Sts2.Core.Models.Modifiers;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Monsters.Mocks;
 using MegaCrit.Sts2.Core.Models.Orbs;
+using MegaCrit.Sts2.Core.Models.Orbs.Mock;
 using MegaCrit.Sts2.Core.Models.PotionPools;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Powers;
@@ -167,6 +168,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.Settings;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Nodes.Screens.StatsScreen;
 using MegaCrit.Sts2.Core.Nodes.Screens.Timeline;
+using MegaCrit.Sts2.Core.Nodes.Screens.Timeline.UnlockScreens;
 using MegaCrit.Sts2.Core.Nodes.TopBar;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Backgrounds;
@@ -198,20 +200,17 @@ using MegaCrit.Sts2.Core.Saves.Runs;
 using MegaCrit.Sts2.Core.Saves.Test;
 using MegaCrit.Sts2.Core.Saves.Validation;
 using MegaCrit.Sts2.Core.Settings;
-using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.TestSupport;
 using MegaCrit.Sts2.Core.TextEffects;
 using MegaCrit.Sts2.Core.Timeline;
 using MegaCrit.Sts2.Core.Timeline.Epochs;
 using MegaCrit.Sts2.Core.Timeline.Stories;
-using MegaCrit.Sts2.Core.Training;
 using MegaCrit.Sts2.Core.Unlocks;
 using MegaCrit.Sts2.Core.ValueProps;
 using MegaCrit.Sts2.GameInfo;
 using MegaCrit.Sts2.GameInfo.Objects;
-using MegaCrit.Sts2.addons.mega_text;
+using MegaCrit.Sts2.SourceGeneration;
 using MegaCrit.sts2.Core.Nodes.TopBar;
-using Steamworks;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -243,6 +242,7 @@ namespace MegaCrit.Sts2.Core.Audio.Debug
         public static NDebugAudioManager? Instance { get; set; }
         public new void _Ready() { }
         public int Play(string streamName, float volume= 1f, PitchVariance variance= PitchVariance.None) => 0;
+        public void StopAll() { }
         public void Stop(int id, float fadeTime= 0.5f) { }
         public void SetMasterAudioVolume(float linearVolume) { }
         public void SetSfxAudioVolume(float linearVolume) { }
@@ -267,6 +267,7 @@ namespace MegaCrit.Sts2.Core.Bindings.MegaSpine
         public void Apply(MegaSkeleton skeleton) { }
         public MegaTrackEntry GetCurrent(int trackIndex) => default!;
         public MegaTrackEntry? SetAnimation(string animationName, bool loop= true, int trackId= 0) => default!;
+        public MegaTrackEntry? AddEmptyAnimation(int trackId= 0) => default!;
         public void SetTimeScale(float scale) { }
         public void Update(float delta) { }
         public MegaAnimationState(Variant native) { }
@@ -352,7 +353,7 @@ namespace MegaCrit.Sts2.Core.Bindings.MegaSpine
         public void DisconnectWorldTransformsChanged(Callable callable) { }
         public bool HasAnimation(string animId) => false;
         public MegaAnimationState GetAnimationState() => default!;
-        public MegaSkeleton GetSkeleton() => default!;
+        public MegaSkeleton? GetSkeleton() => default!;
         public Material? GetAdditiveMaterial() => default!;
         public Material? GetNormalMaterial() => default!;
         public MegaSkin NewSkin(string name) => default!;
@@ -375,6 +376,15 @@ namespace MegaCrit.Sts2.Core.Bindings.MegaSpine
         public void SetTrackTime(float time) { }
         public void SetMixDuration(float time) { }
         public MegaTrackEntry(Variant native) { }
+    }
+    public partial struct SpineAnimationAccess
+    {
+        public bool IsValid { get; set; }
+        public MegaTrackEntry? SetAnimation(string name, bool loop= true, int track= 0) => default!;
+        public MegaTrackEntry? AddAnimation(string name, float delay= 0f, bool loop= true, int track= 0) => default!;
+        public MegaTrackEntry? GetCurrentTrack(int track= 0) => default!;
+        public void SetTimeScale(float scale) { }
+        public MegaAnimationState? GetAnimationState() => default!;
     }
 }
 
@@ -468,12 +478,15 @@ namespace MegaCrit.Sts2.Core.Debug
     public static partial class SentryService
     {
         public static bool IsEnabled { get; set; }
+        public static bool SampleForNonSteamBranches { get; set; }
+        public static bool IsForcedOn { get; set; }
+        public static string SessionId { get; set; }
         public static void Initialize() { }
-        public static void SetUserContext(string uniqueId) { }
-        public static void AddBreadcrumb(string message, string category= "app", BreadcrumbLevel level= BreadcrumbLevel.Info) { }
+        public static void AfterGameInit(string? platformBranch, string uniqueId, Node treeRoot) { }
+        public static void AddBreadcrumb(string message, string category= "app", object? level = null) { }
         public static void CaptureException(Exception ex) { }
         public static void CaptureException(Exception ex, Action<Sentry.Scope> configureScope) { }
-        public static void CaptureMessage(string message, SentryLevel level= SentryLevel.Info) { }
+        public static void CaptureMessage(string message, object? level = null, Action<Sentry.Scope>? configureScope= null) { }
         public static void SetTag(string key, string value) { }
         public static void SetExtra(string key, object value) { }
         public static void InitializeForTesting() { }
@@ -511,6 +524,7 @@ namespace MegaCrit.Sts2.Core.DevConsole
         public void Serialize(PacketWriter writer) { }
         public void Deserialize(PacketReader reader) { }
         public GameAction ToGameAction(Player player) => default!;
+        public new string ToString() => "";
     }
 }
 
@@ -576,7 +590,7 @@ namespace MegaCrit.Sts2.Core.Multiplayer.Transport.Steam
         public override bool IsConnected => default!;
         public override ulong NetId => default!;
         public override ulong HostNetId => default!;
-        public CSteamID? LobbyId { get; set; }
+        public object? LobbyId { get; set; }
         public Task<NetErrorInfo?> ConnectToLobbyOwnedByFriend(ulong steamPlayerId, CancellationToken cancelToken= default(CancellationToken)) => System.Threading.Tasks.Task.FromResult<NetErrorInfo?>(default!)!;
         public Task<NetErrorInfo?> ConnectToLobby(ulong lobbyId, CancellationToken cancelToken= default(CancellationToken)) => System.Threading.Tasks.Task.FromResult<NetErrorInfo?>(default!)!;
         public override void Update() { }
@@ -590,7 +604,7 @@ namespace MegaCrit.Sts2.Core.Multiplayer.Transport.Steam
         public override bool IsConnected => default!;
         public override ulong NetId => default!;
         public override IEnumerable<ulong> ConnectedPeerIds => default!;
-        public CSteamID? LobbyId { get; set; }
+        public object? LobbyId { get; set; }
         public Task<NetErrorInfo?> StartHost(int maxPlayers) => System.Threading.Tasks.Task.FromResult<NetErrorInfo?>(default!)!;
         public override void Update() { }
         public override void SetHostIsClosed(bool isClosed) { }
@@ -669,11 +683,11 @@ namespace MegaCrit.Sts2.Core.Nodes
         public Task ReturnToMainMenu() => System.Threading.Tasks.Task.CompletedTask;
         public void Relocalize() { }
         public void ReloadMainMenu() { }
-        public Task<RunState> StartNewSingleplayerRun(CharacterModel character, bool shouldSave, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, string seed, int ascensionLevel= 0, object? dailyTime= null) => System.Threading.Tasks.Task.FromResult<RunState>(default!)!;
+        public Task<RunState> StartNewSingleplayerRun(CharacterModel character, bool shouldSave, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, string seed, GameMode gameMode, int ascensionLevel= 0, object? dailyTime= null) => System.Threading.Tasks.Task.FromResult<RunState>(default!)!;
         public Task<RunState> StartNewMultiplayerRun(StartRunLobby lobby, bool shouldSave, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, string seed, int ascensionLevel, object? dailyTime= null) => System.Threading.Tasks.Task.FromResult<RunState>(default!)!;
         public Task LoadRun(RunState runState, SerializableRoom? preFinishedRoom) => System.Threading.Tasks.Task.CompletedTask;
         public new void _Input(InputEvent inputEvent) { }
-        public WorldEnvironment ActivateWorldEnvironment() => default!;
+        public object ActivateWorldEnvironment() => default!;
         public void DeactivateWorldEnvironment() { }
         public void SetScreenShakeTarget(Control target) { }
         public void ClearScreenShakeTarget() { }
@@ -970,7 +984,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Combat
         public void Deactivate() { }
         public void AddToPlayContainer(NCard card) { }
         public NCard? GetCardFromPlayContainer(CardModel model) => default!;
-        public void AnimOut(CombatRoom _) { }
+        public void AnimOut() { }
         public void OnHandSelectModeEntered() { }
         public void OnHandSelectModeExited() { }
         public void OnPeekButtonReady(NPeekButton peekButton) { }
@@ -983,6 +997,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Combat
     public partial class NCreature : Godot.Control
     {
         public static IEnumerable<string> AssetPaths { get; set; }
+        public static Vector2 PowerAppliedVfxPositionOffset { get; set; }
         public Task? DeathAnimationTask { get; set; }
         public CancellationTokenSource DeathAnimCancelToken { get; set; }
         public Control Hitbox { get; set; }
@@ -990,12 +1005,13 @@ namespace MegaCrit.Sts2.Core.Nodes.Combat
         public bool IsInteractable { get; set; }
         public Creature Entity { get; set; }
         public Vector2 VfxSpawnPosition { get; set; }
+        public Vector2 PowerAppliedVfxSpawnPosition { get; set; }
         public NCreatureVisuals Visuals { get; set; }
         public Node2D Body { get; set; }
         public Control IntentContainer { get; set; }
         public bool IsPlayingDeathAnimation { get; set; }
         public bool HasSpineAnimation { get; set; }
-        public MegaSprite? SpineController { get; set; }
+        public SpineAnimationAccess SpineAnimation { get; set; }
         public bool IsFocused { get; set; }
         public NMultiplayerPlayerIntentHandler? PlayerIntentHandler { get; set; }
         public T? GetSpecialNode<T>(string name) => default!;
@@ -1036,16 +1052,20 @@ namespace MegaCrit.Sts2.Core.Nodes.Combat
     }
     public partial class NCreatureVisuals : Godot.Node2D
     {
-        public Node2D Body { get; set; }
         public Control Bounds { get; set; }
         public Marker2D IntentPosition { get; set; }
         public Marker2D OrbPosition { get; set; }
         public Marker2D? TalkPosition { get; set; }
         public bool HasSpineAnimation { get; set; }
+        public bool IsUsingPhobiaModeBody { get; set; }
         public MegaSprite? SpineBody { get; set; }
+        public SpineAnimationAccess SpineAnimation { get; set; }
         public Marker2D VfxSpawnPosition { get; set; }
         public float DefaultScale { get; set; }
+        public Node2D GetCurrentBody() => default!;
         public new void _Ready() { }
+        public new void _EnterTree() { }
+        public new void _ExitTree() { }
         public void SetUpSkin(MonsterModel model) { }
         public void SetScaleAndHue(float scale, float hue) { }
         public bool IsPlayingHurtAnimation() => false;
@@ -1180,14 +1200,6 @@ namespace MegaCrit.Sts2.Core.Nodes.Combat
         public void SetCreatureBounds(Control bounds) { }
         public void SetCreature(Creature creature) { }
     }
-    public partial class NSelectedHandCardContainer : Godot.Control
-    {
-        public NPlayerHand? Hand { get; set; }
-        public List<NSelectedHandCardHolder> Holders { get; set; }
-        public new void _Ready() { }
-        public NSelectedHandCardHolder Add(NHandCardHolder originalHolder) => default!;
-        public void DeselectCard(CardModel card) { }
-    }
     public partial class NStarCounter : Godot.Control
     {
         public static IEnumerable<string> AssetPaths { get; set; }
@@ -1239,13 +1251,6 @@ namespace MegaCrit.Sts2.Core.Nodes.CommonUi
         public new void _EnterTree() { }
         public new void _ExitTree() { }
         public static NAbandonRunConfirmPopup? Create(NMainMenu? mainMenu) => default!;
-    }
-    public partial class NConfirmButton : NButton
-    {
-        public new string[] Hotkeys { get; set; }
-        public new void _Ready() { }
-        public new void _ExitTree() { }
-        public void OverrideHotkeys(string[] hotkeys) { }
     }
     public partial class NControllerManager : Godot.Node
     {
@@ -1401,8 +1406,6 @@ namespace MegaCrit.Sts2.Core.Nodes.CommonUi
     public partial class NVerticalPopup : Godot.Control
     {
         public static IEnumerable<string> AssetPaths { get; set; }
-        public MegaLabel TitleLabel { get; set; }
-        public MegaRichTextLabel BodyLabel { get; set; }
         public NPopupYesNoButton YesButton { get; set; }
         public NPopupYesNoButton NoButton { get; set; }
         public new void _Ready() { }
@@ -1418,18 +1421,6 @@ namespace MegaCrit.Sts2.Core.Nodes.CommonUi
 
 namespace MegaCrit.Sts2.Core.Nodes.Events
 {
-    public partial class NAncientEventLayout : NEventLayout
-    {
-        public new Control? DefaultFocusedControl { get; set; }
-        public new void _Ready() { }
-        public new void _EnterTree() { }
-        public new void _ExitTree() { }
-        public void SetDialogue(IReadOnlyList<AncientDialogueLine> lines) { }
-        public void ClearDialogue() { }
-        public new void OnSetupComplete() { }
-        public bool TryAdvanceDialogue() => false;
-        public const string ancientScenePath = "";
-    }
     public partial class NEventLayout : Godot.Control
     {
         public Control? VfxContainer { get; set; }
@@ -1517,7 +1508,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Ftue
     }
     public partial class NFtue : Godot.Control, IScreenContext
     {
-        public Control? DefaultFocusedControl { get; set; }
+        public Control DefaultFocusedControl { get; set; }
         public new void _EnterTree() { }
         public new void _ExitTree() { }
     }
@@ -1559,10 +1550,12 @@ namespace MegaCrit.Sts2.Core.Nodes.GodotExtensions
     }
     public static partial class NodeUtil
     {
+        public static Task<float> AwaitProcessFrame(object node, CancellationToken ct= default(CancellationToken)) => System.Threading.Tasks.Task.FromResult<float>(default!)!;
         public static bool IsDescendant(Node parent, Node candidate) => false;
         public static bool IsValid(object? node) => false;
         public static void TryGrabFocus(object control) { }
         public static T? GetAncestorOfType<T>(object node) => default!;
+        public static Task AwaitSignal(object source, StringName signal, Node owner) => System.Threading.Tasks.Task.CompletedTask;
         public static IEnumerable<T> GetChildrenRecursive<T>(object node) => default!;
     }
 }
@@ -1600,7 +1593,6 @@ namespace MegaCrit.Sts2.Core.Nodes.Multiplayer
         public static IEnumerable<string> AssetPaths { get; set; }
         public Control? DefaultFocusedControl { get; set; }
         public static NGenericPopup? Create() => default!;
-        public new void _Ready() { }
         public Task<bool> WaitForConfirmation(LocString body, LocString header, LocString? noButton, LocString yesButton) => System.Threading.Tasks.Task.FromResult<bool>(default!)!;
     }
     public partial class NMultiplayerCardIntent : Godot.Control
@@ -1741,7 +1733,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Potions
         public new void _ExitTree() { }
         public void Initialize(IRunState runState) { }
         public void AnimatePotion(PotionModel potion, Vector2? startPosition= null) { }
-        public void OnPotionUseCanceled(PotionModel potion) { }
+        public void OnPotionUseOrDiscardCanceled(PotionModel potion) { }
     }
     public partial class NPotionHolder : NClickableControl
     {
@@ -1753,7 +1745,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Potions
         public new void _Ready() { }
         public void AddPotion(NPotion potion) { }
         public void DisableUntilPotionRemoved() { }
-        public void CancelPotionUse() { }
+        public void CancelPotionUseOrDiscard() { }
         public void RemoveUsedPotion() { }
         public void DiscardPotion() { }
         public Task UsePotion() => System.Threading.Tasks.Task.CompletedTask;
@@ -1766,6 +1758,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Potions
         public static NPotionPopup Create(NPotionHolder holder) => default!;
         public new void _Ready() { }
         public new void _Input(InputEvent inputEvent) { }
+        public new void _ExitTree() { }
         public void Remove() { }
     }
 }
@@ -1890,13 +1883,13 @@ namespace MegaCrit.Sts2.Core.Nodes.Rooms
         public Control SceneContainer { get; set; }
         public NCombatBackground Background { get; set; }
         public NProceedButton ProceedButton { get; set; }
-        public Node BackCombatVfxContainer { get; set; }
+        public Control BackCombatVfxContainer { get; set; }
         public Control CombatVfxContainer { get; set; }
         public ulong CreatedMsec { get; set; }
         public CombatRoomMode Mode { get; set; }
         public static IEnumerable<string> AssetPaths { get; set; }
         public Control DefaultFocusedControl { get; set; }
-        public Control? FocusedControlFromTopBar { get; set; }
+        public Control FocusedControlFromTopBar { get; set; }
         public static NCombatRoom? Create(ICombatRoomVisuals visuals, CombatRoomMode mode) => default!;
         public new void _Ready() { }
         public static Rng GenerateBackgroundRngForCurrentPoint(IRunState state) => default!;
@@ -1965,8 +1958,6 @@ namespace MegaCrit.Sts2.Core.Nodes.Rooms
         public new void _ExitTree() { }
         public void FoulPotionThrown(FoulPotion potion) { }
         public void OpenInventory() { }
-        public void BlockInput() { }
-        public void UnblockInput() { }
     }
     public partial class NRestSiteRoom : Godot.Control, IScreenContext, IRoomWithProceedButton
     {
@@ -2091,6 +2082,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens
         public static NRewardsScreen ShowScreen(bool isTerminal, IRunState runState) => default!;
         public new void _Ready() { }
         public void SetRewards(IEnumerable<Reward> rewards) { }
+        public void DisallowSkipping() { }
         public void RewardCollectedFrom(Control button) { }
         public void RewardSkippedFrom(Control button) { }
         public void AfterOverlayOpened() { }
@@ -2353,6 +2345,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect
         public object RemoteSelectedPlayers { get; set; }
         public CharacterModel Character { get; set; }
         public bool IsLocked { get; set; }
+        public bool IsSelected { get; set; }
         public new void _Ready() { }
         public void Init(CharacterModel character, ICharacterSelectButtonDelegate del) { }
         public new void _Process(double delta) { }
@@ -2383,7 +2376,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect
         public void SelectCharacter(NCharacterSelectButton charSelectButton, CharacterModel characterModel) { }
         public void MaxAscensionChanged() { }
         public void PlayerConnected(LobbyPlayer player) { }
-        public void PlayerChanged(LobbyPlayer player) { }
+        public void PlayerChanged(LobbyPlayer player, bool isRandomCharacterResolution) { }
         public void AscensionChanged() { }
         public void SeedChanged() { }
         public void ModifiersChanged() { }
@@ -2451,7 +2444,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.CustomRun
         public void SelectCharacter(NCharacterSelectButton charSelectButton, CharacterModel characterModel) { }
         public void MaxAscensionChanged() { }
         public void PlayerConnected(LobbyPlayer player) { }
-        public void PlayerChanged(LobbyPlayer player) { }
+        public void PlayerChanged(LobbyPlayer player, bool isRandomCharacterResolution) { }
         public void AscensionChanged() { }
         public void SeedChanged() { }
         public void ModifiersChanged() { }
@@ -2464,6 +2457,9 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.CustomRun
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.DailyRun
 {
+    public partial struct DecodedDailyScore
+    {
+    }
     public partial class NDailyRunLeaderboard : Godot.Control
     {
         public static IEnumerable<string> AssetPaths { get; set; }
@@ -2471,6 +2467,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.DailyRun
         public void Cleanup() { }
         public void Initialize(object dateTime, IEnumerable<ulong> playersInRun, bool allowPagination) { }
         public void SetDay(object dateTime) { }
+        public new void _ExitTree() { }
     }
     public partial class NDailyRunLoadScreen : NSubmenu, ILoadRunLobbyListener
     {
@@ -2505,7 +2502,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.DailyRun
         public new void OnSubmenuClosed() { }
         public new void _Process(double delta) { }
         public void PlayerConnected(LobbyPlayer player) { }
-        public void PlayerChanged(LobbyPlayer player) { }
+        public void PlayerChanged(LobbyPlayer player, bool isRandomCharacterResolution) { }
         public void MaxAscensionChanged() { }
         public void AscensionChanged() { }
         public void SeedChanged() { }
@@ -2717,6 +2714,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.Map
         public bool IsLocalDrawing() => false;
         public DrawingMode GetDrawingMode(ulong playerId) => default!;
         public DrawingMode GetLocalDrawingMode(bool useOverride= true) => default!;
+        public void UpdateVisibilityFromSettings() { }
         public void ClearAllLines() { }
         public SerializableMapDrawings GetSerializableMapDrawings() => default!;
         public void LoadDrawings(SerializableMapDrawings drawings) { }
@@ -2946,6 +2944,15 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.RunHistoryScreen
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext
 {
+    public partial class ActiveScreenContext
+    {
+        public static ActiveScreenContext Instance { get; set; }
+        public void Update() { }
+        public IScreenContext? GetCurrentScreen() => default!;
+        public bool IsCurrent(IScreenContext screen) => false;
+        public void FocusOnDefaultControl() { }
+        public event Action? Updated;
+    }
     public partial interface IScreenContext { }
 }
 
@@ -2978,7 +2985,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.Shops
         public new void _Ready() { }
         public new void _ExitTree() { }
         public new void _Process(double delta) { }
-        public void PointAtTarget(Vector2 pos) { }
+        public void PointAtTarget(Control target, Vector2 offset) { }
         public void StopPointing(float lingerTime) { }
     }
     public partial class NMerchantInventory : Godot.Control, IScreenContext
@@ -2994,12 +3001,14 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.Shops
         public void Open() { }
         public void OnCardRemovalUsed() { }
         public IEnumerable<NMerchantSlot> GetAllSlots() => default!;
+        public void BlockInput() { }
+        public void UnblockInput() { }
     }
     public abstract partial class NMerchantSlot : Godot.Control
     {
         public NClickableControl Hitbox { get; set; }
         public abstract MerchantEntry Entry { get; }
-        public abstract CanvasItem Visual { get; }
+        public abstract object Visual { get; }
         public Player? Player { get; set; }
         public void Initialize(NMerchantInventory rug) { }
         public new void _Ready() { }
@@ -3048,6 +3057,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.Timeline
     {
         public static IEnumerable<string> AssetPaths { get; set; }
         public static NTimelineScreen Instance { get; set; }
+        public NUnlockScreen? CurrentUnlockScreen { get; set; }
         public override Control? InitialFocusedControl => default!;
         public static NTimelineScreen? Create() => default!;
         public new void OnSubmenuOpened() { }
@@ -3072,6 +3082,16 @@ namespace MegaCrit.Sts2.Core.Nodes.Screens.Timeline
         public void EnableInput() { }
         public Control GetReminderVfxHolder() => default!;
         public Control? DefaultFocusedControl => default!;
+    }
+}
+
+namespace MegaCrit.Sts2.Core.Nodes.Screens.Timeline.UnlockScreens
+{
+    public abstract partial class NUnlockScreen : Godot.Control, IScreenContext
+    {
+        public virtual Control? DefaultFocusedControl { get; set; }
+        public new void _Ready() { }
+        public virtual void Open() { }
     }
 }
 
@@ -3151,7 +3171,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Vfx
     public partial class NCardEnchantVfx : Godot.Node2D
     {
         public static IEnumerable<string> AssetPaths { get; set; }
-        public Curve? EmbossCurve { get; set; }
+        public object? EmbossCurve { get; set; }
         public static NCardEnchantVfx? Create(CardModel card) => default!;
         public new void _Ready() { }
         public new void _ExitTree() { }
@@ -3458,7 +3478,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Vfx
     {
         public static IEnumerable<string> AssetPaths { get; set; }
         public new void _Ready() { }
-        public static NPowerAppliedVfx? Create(PowerModel power, int amount) => default!;
+        public static NPowerAppliedVfx? Create(PowerModel power, int amount, bool isBuff) => default!;
         public new void _ExitTree() { }
     }
     public partial class NPowerFlashVfx : Godot.Node2D
@@ -3629,10 +3649,16 @@ namespace MegaCrit.Sts2.Core.Nodes.Vfx
         public new void _Ready() { }
         public static readonly string scenePath = "";
     }
+    public partial class NTestSubjectBurnVfx : Godot.ColorRect
+    {
+        public static NTestSubjectBurnVfx? Create() => default!;
+        public new void _Ready() { }
+    }
     public partial class NThinSliceVfx : Godot.Node2D
     {
         public static NThinSliceVfx? Create(Creature? target, VfxColor vfxColor= VfxColor.Cyan) => default!;
         public new void _Ready() { }
+        public new void _ExitTree() { }
     }
     public partial class NThoughtBubbleVfx : Godot.Control
     {
@@ -3669,6 +3695,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Vfx
     {
         public static void Play() { }
     }
+    public enum VfxDuration { None, VeryShort, Short, Standard, Long, VeryLong, Custom, Forever }
 }
 
 namespace MegaCrit.Sts2.Core.Nodes.Vfx.Backgrounds
@@ -3749,7 +3776,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Vfx.Ui
 {
     public partial class NLowHpBorderVfx : Godot.ColorRect
     {
-        public static NLowHpBorderVfx Create() => default!;
+        public static NLowHpBorderVfx? Create() => default!;
         public new void _Ready() { }
         public void Play() { }
         public static readonly string scenePath = "";
@@ -3786,6 +3813,7 @@ namespace MegaCrit.Sts2.Core.Platform
         public static void SetRichPresenceValue(string key, string? value) { }
         public static void ClearRichPresence() { }
         public static SupportedWindowMode GetSupportedWindowMode() => default!;
+        public static bool IsPlatformOverlayOpen() => false;
     }
     public static partial class StatsManager
     {
@@ -3802,11 +3830,11 @@ namespace MegaCrit.Sts2.Core.Platform.Null
     public partial class NullLeaderboardStrategy : ILeaderboardStrategy
     {
         public PlatformType Platform { get; set; }
-        public Task<ILeaderboardHandle?> GetLeaderboard(string name) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle?>(default!)!;
-        public Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle>(default!)!;
+        public Task<ILeaderboardHandle?> GetLeaderboard(string name, CancellationToken cancelToken) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle?>(default!)!;
+        public Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name, CancellationToken cancelToken) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle>(default!)!;
         public Task UploadLocalScore(ILeaderboardHandle handleInterface, int score, IReadOnlyList<ulong> userIds) => System.Threading.Tasks.Task.CompletedTask;
-        public Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handleInterface, LeaderboardQueryType type, int startIndex, int count) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
-        public Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handleInterface, IReadOnlyList<ulong> userIds) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
+        public Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handleInterface, LeaderboardQueryType type, int startIndex, int count, CancellationToken cancelToken) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
+        public Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handleInterface, IReadOnlyList<ulong> userIds, CancellationToken cancelToken) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
         public int GetLeaderboardEntryCount(ILeaderboardHandle handleInterface) => 0;
         public void DebugAddEntry(ILeaderboardHandle handleInterface, LeaderboardEntry entry) { }
     }
@@ -3826,110 +3854,17 @@ namespace MegaCrit.Sts2.Core.Platform.Steam
     public partial class SteamLeaderboardStrategy : ILeaderboardStrategy
     {
         public PlatformType Platform { get; set; }
-        public Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle>(default!)!;
-        public Task<ILeaderboardHandle?> GetLeaderboard(string name) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle?>(default!)!;
+        public Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name, CancellationToken cancelToken) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle>(default!)!;
+        public Task<ILeaderboardHandle?> GetLeaderboard(string name, CancellationToken cancelToken) => System.Threading.Tasks.Task.FromResult<ILeaderboardHandle?>(default!)!;
         public Task UploadLocalScore(ILeaderboardHandle handleInterface, int score, IReadOnlyList<ulong> userIds) => System.Threading.Tasks.Task.CompletedTask;
-        public Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handleInterface, LeaderboardQueryType type, int startIndex, int count) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
-        public Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handleInterface, IReadOnlyList<ulong> userIds) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
+        public Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handleInterface, LeaderboardQueryType type, int startIndex, int count, CancellationToken cancelToken= default(CancellationToken)) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
+        public Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handleInterface, IReadOnlyList<ulong> userIds, CancellationToken cancelToken= default(CancellationToken)) => System.Threading.Tasks.Task.FromResult<List<LeaderboardEntry>>(default!)!;
         public int GetLeaderboardEntryCount(ILeaderboardHandle handleInterface) => 0;
     }
-}
-
-namespace MegaCrit.Sts2.Core.Saves.Migrations
-{
-    public partial interface IMigration<T> : IMigration where T : ISaveSchema { }
-}
-
-namespace MegaCrit.Sts2.Core.Saves.Migrations.PrefsSaves
-{
-    [MegaCrit.Sts2.Core.Saves.Migrations.Migration(typeof(PrefsSave), 1, 2)]
-    public partial class PrefsSaveV1ToV2 : MigrationBase<PrefsSave>
+    public partial class SteamRemoteSaveStoreException : Exception
     {
-        protected override void ApplyMigration(MigratingData saveData) { }
-    }
-}
-
-namespace MegaCrit.Sts2.Core.Saves.Migrations.ProfileSaves
-{
-    [MegaCrit.Sts2.Core.Saves.Migrations.Migration(typeof(ProfileSave), 1, 2)]
-    public partial class ProfileSaveV1ToV2 : MigrationBase<ProfileSave>
-    {
-        protected override void ApplyMigration(MigratingData saveData) { }
-    }
-}
-
-namespace MegaCrit.Sts2.Core.Saves.Migrations.ProgressSaves
-{
-    [MegaCrit.Sts2.Core.Saves.Migrations.Migration(typeof(SerializableProgress), 20, 21)]
-    public partial class ProgressSaveV20ToV21 : MigrationBase<SerializableProgress>
-    {
-        protected override void ApplyMigration(MigratingData saveData) { }
-    }
-}
-
-namespace MegaCrit.Sts2.Core.Saves.Migrations.RunHistories
-{
-    [MegaCrit.Sts2.Core.Saves.Migrations.Migration(typeof(RunHistory), 7, 8)]
-    public partial class RunHistoryV7ToV8 : MigrationBase<RunHistory>
-    {
-        protected override void ApplyMigration(MigratingData saveData) { }
-    }
-}
-
-namespace MegaCrit.Sts2.Core.Saves.Migrations.SerializableRuns
-{
-    [MegaCrit.Sts2.Core.Saves.Migrations.Migration(typeof(SerializableRun), 12, 13)]
-    public partial class SerializableRunV12ToV13 : MigrationBase<SerializableRun>
-    {
-        protected override void ApplyMigration(MigratingData saveData) { }
-    }
-    [MegaCrit.Sts2.Core.Saves.Migrations.Migration(typeof(SerializableRun), 13, 14)]
-    public partial class SerializableRunV13ToV14 : MigrationBase<SerializableRun>
-    {
-        protected override void ApplyMigration(MigratingData saveData) { }
-    }
-}
-
-namespace MegaCrit.Sts2.Core.Saves.Migrations.SettingsSaves
-{
-    [MegaCrit.Sts2.Core.Saves.Migrations.Migration(typeof(SettingsSave), 3, 4)]
-    public partial class SettingsSaveV3ToV4 : MigrationBase<SettingsSave>
-    {
-        protected override void ApplyMigration(MigratingData saveData) { }
-    }
-}
-
-namespace MegaCrit.Sts2.Core.Training
-{
-    public partial class CombatTrainingSession : Godot.Node
-    {
-        public static CombatTrainingSession? Instance { get; set; }
-        public string? CurrentSeed { get; set; }
-        public string? CurrentCharacterId { get; set; }
-        public string? CurrentEncounterId { get; set; }
-        public int CurrentAscensionLevel { get; set; }
-        public bool? LastCombatWasVictory { get; set; }
-        public int CurrentEpisodeNumber { get; set; }
-        public new void _EnterTree() { }
-        public new void _ExitTree() { }
-        public Task StartAsync(Nodes.NGame game) => System.Threading.Tasks.Task.CompletedTask;
-        public Task ResetAsync(CombatTrainingResetRequest? request= null) => System.Threading.Tasks.Task.CompletedTask;
-    }
-    public partial class HumanCombatCaptureRecorder : Godot.Node
-    {
-        public static HumanCombatCaptureRecorder? Instance { get; set; }
-        public static bool IsEnabled { get; set; }
-        public new void _EnterTree() { }
-        public new void _ExitTree() { }
-        public static void RecordQueuedAction(GameAction action) { }
-        public static void RecordSelectionAction(string actionType, CardModel? card= null) { }
-        public static void RecordRestSiteChoice(RunState runState, IReadOnlyList<RestSiteOption> options, int optionIndex) { }
-        public static void RecordEventChoice(RunState runState, EventModel eventModel, int optionIndex) { }
-        public static void RecordShopPurchase(MerchantInventory inventory, MerchantEntry entry) { }
-        public static void RecordShopProceed(MerchantInventory inventory) { }
-        public static void RecordCardRewardChoice(params object[] args) { }
-        public static void RecordTreasureChoice(RunState runState, IReadOnlyList<RelicModel> relics, int relicIndex) { }
-        public static void RecordCardSelectChoice(params object[] args) { }
+        public object Result { get; set; }
+        public SteamRemoteSaveStoreException(string message, object result) { }
     }
 }
 
@@ -3967,8 +3902,9 @@ namespace MegaCrit.sts2.Core.Nodes.TopBar
     {
         public void Initialize(Player player) { }
     }
-    public partial class NTopBarPortraitTip : Godot.TextureRect
+    public partial class NTopBarPortraitTip : NClickableControl
     {
+        public bool ShowTip { get; set; }
         public new void _Ready() { }
         public void Initialize(IRunState runState) { }
     }
@@ -3980,5 +3916,27 @@ namespace MegaCrit.sts2.Core.Nodes.TopBar
         public void Initialize(IRunState runState) { }
         public void DebugSetMapPointTypeOverride(MapPointType mapPointType) { }
         public void DebugClearMapPointTypeOverride() { }
+    }
+}
+
+
+namespace Sentry
+{
+    // 0.103.2:Sentry.Scope 占位,HeadlessSim 不实际使用 Sentry
+    public partial class Scope { }
+}
+
+namespace MegaCrit.Sts2.Core.Saves.Migrations.PrefsSaves { /* placeholder for 0.103.2 source-only using */ }
+
+namespace MegaCrit.Sts2.Core.Saves.Migrations.ProfileSaves { /* placeholder for 0.103.2 source-only using */ }
+
+namespace MegaCrit.Sts2.Core.Saves.Migrations.ProgressSaves { /* placeholder for 0.103.2 source-only using */ }
+
+namespace MegaCrit.Sts2.Core.Training
+{
+    public partial class CombatTrainingSession
+    {
+        public static CombatTrainingSession? Instance { get; set; }
+        public System.Threading.Tasks.Task ResetAsync(object? request) => System.Threading.Tasks.Task.CompletedTask;
     }
 }

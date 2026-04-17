@@ -1537,7 +1537,8 @@ def main(argv: list[str] | None = None) -> int:
         included_namespaces=scanner.included_namespaces,
     )
 
-    output_path = project_root / "tools" / "headless-sim" / "HeadlessSim" / "GeneratedStubs.cs"
+    # 实际 HeadlessSim 项目位置(历史 tools/headless-sim/ 已迁移到 STS2AI/ENV/Sim/)
+    output_path = project_root / "STS2AI" / "ENV" / "Sim" / "Runtime" / "HeadlessSim" / "GeneratedStubs.cs"
     output_path.write_text(stub_content, encoding="utf-8")
 
     # Post-fix: sed-level cleanup
@@ -1632,12 +1633,60 @@ def main(argv: list[str] | None = None) -> int:
         "default(CancellationToken) =>",
         "default(CancellationToken)) =>"
     )
+
+    # CS1763: object level= SomeEnum.Value → C# 不允许 enum 当 object 默认值,改 object? level=null
+    content = re.sub(
+        r'object level\s*=\s*\w+\.\w+',
+        'object? level = null',
+        content,
+    )
+
+    # CS0246: Scope 类型未生成 stub。SentryService.CaptureException 用裸 Scope,
+    # 直接 replace 成全限定 Sentry.Scope 避免 using Sentry 引入 namespace 冲突(CS0104)
+    content = re.sub(r'Action<Scope>', 'Action<Sentry.Scope>', content)
+    content = re.sub(r'Action<Scope\?>', 'Action<Sentry.Scope?>', content)
+    if 'namespace Sentry' not in content:
+        content += (
+            "\n\nnamespace Sentry\n{\n"
+            "    // 0.103.2:Sentry.Scope 占位,HeadlessSim 不实际使用 Sentry\n"
+            "    public partial class Scope { }\n"
+            "}\n"
+        )
+
+    # CS0234: 3 个源码里只声明 using 但没文件的子命名空间,建空声明绕过
+    # (src/Core/Saves/Migrations/IMigrationSubtypes.cs 的 using 是这样写的,真正内容可能在 game assembly 里)
+    missing_migration_namespaces = [
+        "PrefsSaves", "ProfileSaves", "ProgressSaves",
+    ]
+    for ns in missing_migration_namespaces:
+        content += (
+            f"\nnamespace MegaCrit.Sts2.Core.Saves.Migrations.{ns} "
+            "{ /* placeholder for 0.103.2 source-only using */ }\n"
+        )
+
+    # CS0246: CombatTrainingSession 在 0.103.2 源码不存在但 Overlay/Training/
+    # CombatTrainingEnvService.cs 还引用它。给一个最小 stub 让编译通过
+    # (HeadlessSim 不走 UseTrainerBackend 分支,Instance 恒 null,不会实际执行)
+    if 'class CombatTrainingSession' not in content:
+        content += (
+            "\nnamespace MegaCrit.Sts2.Core.Training\n{\n"
+            "    public partial class CombatTrainingSession\n"
+            "    {\n"
+            "        public static CombatTrainingSession? Instance { get; set; }\n"
+            "        public System.Threading.Tasks.Task ResetAsync(object? request) "
+            "=> System.Threading.Tasks.Task.CompletedTask;\n"
+            "    }\n"
+            "}\n"
+        )
+
     output_path.write_text(content, encoding="utf-8")
     print(f"  Wrote stubs to: {output_path}")
 
     # Step 6: Build-error-driven postfix (CS0115/CS0507/CS0546)
     print(f"\nStep 6: Post-fix (build-error-driven)...")
-    csproj = str(project_root / "tools" / "headless-sim" / "HeadlessSim" / "HeadlessSim.csproj")
+    # 真实 csproj 位置(老 tools/headless-sim/ 已迁移),必须指对否则 dotnet build 报
+    # "project not found" 导致 error_count=0 假阳性,post-fix 空跑。
+    csproj = str(project_root / "STS2AI" / "ENV" / "Sim" / "Host" / "headless_sim_host_0991.csproj")
     import subprocess
     prev_error_count = None
     for postfix_round in range(5):

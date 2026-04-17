@@ -115,7 +115,9 @@ public class CombatRoom : AbstractRoom, ICombatRoomVisuals
 		return combatRoom;
 	}
 
-	public override async Task Enter(IRunState? runState, bool isRestoringRoomStackBase)
+	// 0.103.2 源码:Enter 改为非 virtual(模板方法),抽象逻辑转移到 EnterInternal
+	// 这里把原 Enter 主体搬到 EnterInternal 即可,外层 Enter 自动走父类模板
+	public override async Task EnterInternal(IRunState? runState, bool isRestoringRoomStackBase)
 	{
 		if (isRestoringRoomStackBase)
 		{
