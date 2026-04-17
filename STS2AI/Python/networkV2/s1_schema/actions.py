@@ -117,6 +117,18 @@ class ActionCandidate:
     route_risk: float = 0.0   # [0,1]：该节点的潜在威胁（boss=1, elite=0.7, rest=0）
     route_value: float = 0.0  # [0,1]：该节点的潜在价值（rest=0.7, shop=0.6, boss=0）
 
+    # 路径规划信号:从此 child 到 boss 的**全局路径统计**(覆盖下游所有可达子路径)
+    # 目的:选下一步时等价看到了整条路线的 type 分布,不仅是近邻
+    # 仅 map family 填;所有计数按 "路径长度" 归一化到 [0,1] 防值爆炸
+    route_path_rest_rate: float = 0.0      # 所有下游路径上 rest 占比
+    route_path_shop_rate: float = 0.0      # shop 占比
+    route_path_elite_rate: float = 0.0     # elite 占比
+    route_path_treasure_rate: float = 0.0  # treasure 占比
+    route_path_event_rate: float = 0.0     # event 占比
+    route_path_monster_rate: float = 0.0   # monster 占比
+    route_best_rest_count: float = 0.0     # 所有下游路径里最大 rest 数(归一化 /5)
+    route_path_length_norm: float = 0.0    # 到 boss 最短距离(归一化 /17,约等于 act 长度)
+
     # Skada community priors（social inductive bias,from skada_analytics.sqlite）
     # 只在 non-combat option 上填;combat 动作默认 0.0(不适用)。
     # loader 构造 option 时查 SkadaPriors,让 token-level 就含"玩家群体行为"先验。

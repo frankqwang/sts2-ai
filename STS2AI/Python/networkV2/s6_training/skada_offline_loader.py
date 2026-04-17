@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -470,11 +471,14 @@ def _build_map_route_samples(
             # child 在可见层(+1)所以类型应该都知道,兜底 masked 情况
             if child_type == UNKNOWN_NODE_TYPE:
                 risk, value = 0.1, 0.2
+                stats = _PathGlobalStats()
             else:
-                # 综合自身 + 未来 5 层路径 lookahead(学路径关系的关键)
-                risk, value = _route_features_with_lookahead(
-                    child, child_type, nodes_by_coord, lookahead_depth=5,
-                )
+                # 自身 type 粗 risk/value
+                risk = _route_risk(child_type)
+                value = _route_value(child_type)
+                # 全局路径 stat:从此 child 到 boss 所有可达路径的 type 分布 +
+                # 最优子路径 rest 数 + 路径长度 → 让网络看到"下游所有选择"
+                stats = _path_global_stats(child, nodes_by_coord)
             cand = ActionCandidate(
                 action_type="select_map_node",
                 action_index=k,
@@ -483,6 +487,14 @@ def _build_map_route_samples(
                 target_scope="map",
                 route_risk=risk,
                 route_value=value,
+                route_path_rest_rate=stats.rest_rate,
+                route_path_shop_rate=stats.shop_rate,
+                route_path_elite_rate=stats.elite_rate,
+                route_path_treasure_rate=stats.treasure_rate,
+                route_path_event_rate=stats.event_rate,
+                route_path_monster_rate=stats.monster_rate,
+                route_best_rest_count=stats.best_rest_count_norm,
+                route_path_length_norm=stats.path_length_norm,
             )
             candidates.append(cand)
             if child == next_coord:
@@ -515,13 +527,9 @@ def _path_lookahead(
     nodes_by_coord: dict[tuple, dict],
     max_depth: int = 5,
 ) -> dict[str, int]:
-    """从 start_coord 沿 children BFS 至 max_depth,统计路径上各 type 节点数。
+    """从 start_coord 沿 children BFS 至 max_depth,统计**所有经过节点**的 type 计数。
 
-    返回:{type: count},比如 {'R': 2, 'E': 1, 'S': 0, 'V': 3, ...}。
-    不含起点 start_coord 自己(那是候选节点本身,风险/价值已经算过)。
-
-    用途:给 route candidate 的 risk/value 加"未来 N 层有几个 rest/shop/elite"信号,
-    让网络做真正的路径规划决策。
+    (用于 legacy risk/value 聚合;路径规划更复杂的版本见 _path_global_stats)
     """
     counts: dict[str, int] = {}
     visited: set[tuple] = {tuple(start_coord)}
@@ -548,38 +556,132 @@ def _path_lookahead(
     return counts
 
 
+@dataclass
+class _PathGlobalStats:
+    """从 child 到 boss 的全局路径 stat。让网络看到"下游所有可能路线"的聚合信号。
+
+    字段都是归一化到 [0,1] 的 rate 或 normalized count。
+    """
+    rest_rate: float = 0.0
+    shop_rate: float = 0.0
+    elite_rate: float = 0.0
+    treasure_rate: float = 0.0
+    event_rate: float = 0.0
+    monster_rate: float = 0.0
+    best_rest_count_norm: float = 0.0   # 所有可达路径中 rest 最多那条的 rest 数 / 5
+    path_length_norm: float = 0.0       # 到 boss 的最短路径长度 / 17
+
+
+def _path_global_stats(
+    start_coord: tuple,
+    nodes_by_coord: dict[tuple, dict],
+    boss_coord: tuple | None = None,
+    max_hops: int = 20,
+) -> _PathGlobalStats:
+    """从 start_coord 做完整下游展开,算到 boss 的全局路径 stat。
+
+    做 2 件事:
+      1. 全下游 BFS:统计可达节点总的 type 分布(occurrence rate = type 计数 / 总节点数)
+         → 近似 "走这条下去,未来每一步遇到某 type 的概率"
+      2. DP 求最优子路径的 rest 数:
+         max_rest[node] = node 自身 rest? + max(max_rest[child] for child in children)
+         表达"如果规划得当,走这条最多能拿几个 rest"
+
+    boss_coord=None 时自动检测(拓扑里没有 children 的节点 = boss 或叶子;
+    没 children 的节点深度作为 path_length)。
+    """
+    start = tuple(start_coord)
+    if start not in nodes_by_coord:
+        return _PathGlobalStats()
+
+    # ---- 1. 全下游 BFS ----
+    type_counts: dict[str, int] = {}
+    total_nodes = 0
+    visited: set[tuple] = set()
+    frontier = {start}
+    bfs_depth = 0
+    max_depth_seen = 0
+    while frontier and bfs_depth < max_hops:
+        next_frontier: set[tuple] = set()
+        for c in frontier:
+            if c in visited:
+                continue
+            visited.add(c)
+            node = nodes_by_coord.get(c)
+            if node is None:
+                continue
+            t = str(node.get("type", "") or "").upper()
+            if t:
+                type_counts[t] = type_counts.get(t, 0) + 1
+                total_nodes += 1
+            max_depth_seen = max(max_depth_seen, bfs_depth)
+            for child in (node.get("children") or []):
+                ct = tuple(child)
+                if ct not in visited:
+                    next_frontier.add(ct)
+        frontier = next_frontier
+        bfs_depth += 1
+
+    rates: dict[str, float] = {}
+    if total_nodes > 0:
+        for t, c in type_counts.items():
+            rates[t] = c / total_nodes
+
+    # ---- 2. DP: 最优子路径 rest 计数 ----
+    # 拓扑是 DAG(y 递增),按 y 倒序 DP
+    # max_rest_from[node] = (node.type == R ? 1 : 0) + max(max_rest_from[child])
+    sorted_coords: list[tuple] = sorted(
+        visited,
+        key=lambda c: c[1] if len(c) >= 2 else 0,
+        reverse=True,   # 远端(y 大)先算
+    )
+    max_rest_from: dict[tuple, int] = {}
+    for c in sorted_coords:
+        node = nodes_by_coord.get(c)
+        if node is None:
+            max_rest_from[c] = 0
+            continue
+        self_count = 1 if str(node.get("type", "") or "").upper() == "R" else 0
+        children = [tuple(ch) for ch in (node.get("children") or [])]
+        if not children:
+            max_rest_from[c] = self_count
+        else:
+            best_child = max((max_rest_from.get(ch, 0) for ch in children), default=0)
+            max_rest_from[c] = self_count + best_child
+    best_rest = max_rest_from.get(start, 0)
+
+    return _PathGlobalStats(
+        rest_rate=rates.get("R", 0.0),
+        shop_rate=rates.get("S", 0.0),
+        elite_rate=rates.get("E", 0.0),
+        treasure_rate=rates.get("T", 0.0),
+        event_rate=rates.get("V", 0.0),
+        monster_rate=rates.get("M", 0.0),
+        best_rest_count_norm=min(best_rest / 5.0, 1.0),
+        path_length_norm=min(max_depth_seen / 17.0, 1.0),
+    )
+
+
 def _route_features_with_lookahead(
     child_coord: tuple,
     child_type: str,
     nodes_by_coord: dict[tuple, dict],
     lookahead_depth: int = 5,
 ) -> tuple[float, float]:
-    """计算候选 child 的综合 route_risk / route_value,含路径 lookahead。
-
-    基础:child 自身节点 type 的 base risk/value。
-    叠加:未来 N 层的节点类型分布:
-      +value: rest(+0.1/个) / shop(+0.05/个) / treasure(+0.08/个)
-      +risk:  elite(+0.1/个) / boss 距离(boss 近 → risk 高)
-      -value: 多 event(+0.02/个,事件有风险)
-
-    所有值 clamp 到 [0, 1]。
+    """已废弃:保留只为其他地方兼容 import。
+    新代码应走 _path_global_stats 把 8 维特征喂给 ActionCandidate。
     """
     base_risk = _route_risk(child_type)
     base_value = _route_value(child_type)
-
     la = _path_lookahead(child_coord, nodes_by_coord, max_depth=lookahead_depth)
     rest_ahead = la.get("R", 0)
     shop_ahead = la.get("S", 0)
     treasure_ahead = la.get("T", 0)
     elite_ahead = la.get("E", 0)
     event_ahead = la.get("V", 0)
-
     value = base_value + 0.1 * rest_ahead + 0.05 * shop_ahead + 0.08 * treasure_ahead + 0.02 * event_ahead
     risk = base_risk + 0.1 * elite_ahead
-    return (
-        max(0.0, min(1.0, risk)),
-        max(0.0, min(1.0, value)),
-    )
+    return max(0.0, min(1.0, risk)), max(0.0, min(1.0, value))
 
 
 def _build_value_only_sample(

@@ -34,7 +34,7 @@ class BankTokenizer(nn.Module):
       → linear projection → d_model
     """
 
-    def __init__(self, d_model: int = 384, max_numeric_dim: int = 48):
+    def __init__(self, d_model: int = 384, max_numeric_dim: int = 56):
         super().__init__()
         self.d_model = d_model
         self.max_numeric_dim = max_numeric_dim

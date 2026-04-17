@@ -55,9 +55,11 @@ class NetworkConfig:
     d_model: int = 384
     n_heads: int = 8
     dropout: float = 0.1
-    # 48：原 32 不够。deck_card token 需 11 coarse + 34 semantic = 45 维（P1② 修复后），
-    # 其他 token（rbm=32、action=30）还在 32 内。48 留 3 维余量避免截断。
-    max_numeric_dim: int = 48
+    # 56:原 48 不够。action token 已用满 48(详见 bank_assembler._action_token 注释),
+    # 路径规划要求给 route candidate 加 8 维 path global stats(到 boss 整条路径的
+    # rest/shop/elite/treasure/event/monster 计数 + 路径长度 + 最优子路径 rest 数),
+    # 让网络看到每个 child 的"下游全局"而非只有近邻。
+    max_numeric_dim: int = 56
 
     # ---- Memory Encoders (Layer 2) ----
     # 每个 encoder 的 self-attention 层数
