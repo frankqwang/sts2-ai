@@ -18,6 +18,9 @@ from env.sts2_singleplayer_env import (
 from env.binary_pipe_client import BinaryPipeClient
 from env.headless_sim_runner import start_headless_sim, stop_process
 from env.pipe_client import PipeClient
+# 2026-04-17: proto 协议（protobuf-encoded state）接入。接口兼容 BinaryPipeClient，
+# schema 更稳、后续扩 field 方便。训练默认切 proto，bin 保留作 legacy / fallback。
+from networkV2.s0_bridge.proto_pipe_client import ProtoPipeClient
 from env.simulator_api_error import SimulatorApiError
 
 logger = logging.getLogger(__name__)
@@ -534,10 +537,21 @@ class PipeBackedFullRunClient:
         self._pipe = self._new_pipe_client()
 
     def _normalized_protocol(self) -> str:
-        return "bin" if str(self.protocol).strip().lower() in {"bin", "binary", "pipe-binary"} else "json"
+        """统一归一化：返回 'bin' / 'proto' / 'json' 之一。"""
+        p = str(self.protocol).strip().lower()
+        if p in {"bin", "binary", "pipe-binary"}:
+            return "bin"
+        if p in {"proto", "protobuf", "pipe-proto"}:
+            return "proto"
+        return "json"
 
-    def _new_pipe_client(self) -> PipeClient | BinaryPipeClient:
-        return BinaryPipeClient(port=self.port) if self._normalized_protocol() == "bin" else PipeClient(port=self.port)
+    def _new_pipe_client(self) -> PipeClient | BinaryPipeClient | ProtoPipeClient:
+        proto = self._normalized_protocol()
+        if proto == "proto":
+            return ProtoPipeClient(port=self.port)
+        if proto == "bin":
+            return BinaryPipeClient(port=self.port)
+        return PipeClient(port=self.port)
 
     @property
     def is_dead(self) -> bool:
@@ -844,7 +858,8 @@ class PipeBackedFullRunClient:
 
     @property
     def supports_local_ort(self) -> bool:
-        return self._normalized_protocol() == "bin"
+        # bin 和 proto 都能跑本地 ORT（opcode-based request 编码）
+        return self._normalized_protocol() in {"bin", "proto"}
 
     def load_ort_model(self, path: str) -> bool:
         if not self.supports_local_ort:
@@ -875,7 +890,12 @@ class PipeBackedFullRunClient:
 
     @property
     def transport_name(self) -> str:
-        return "pipe-binary" if self._normalized_protocol() == "bin" else "pipe"
+        proto = self._normalized_protocol()
+        if proto == "proto":
+            return "pipe-proto"
+        if proto == "bin":
+            return "pipe-binary"
+        return "pipe"
 
     @property
     def last_step_info(self) -> dict[str, Any] | None:
@@ -886,7 +906,28 @@ class PipeBackedFullRunClient:
 
 @dataclass(slots=True)
 class BinaryBackedFullRunClient(PipeBackedFullRunClient):
-    protocol: str = "bin"
+    """训练主客户端。2026-04-17 默认从 bin 迁移到 proto（protobuf schema 更稳）。
+
+    class 名保留 "Binary" 前缀是向后兼容（旧代码 import 不变），但默认协议已是 proto。
+    需要回退到 bin 仅限：诊断旧 checkpoint、对比实验。
+    """
+    protocol: str = "proto"
+
+
+def _resolve_pipe_protocol(transport: str | None) -> str:
+    """把 transport 名字归一化到 pipe protocol。
+
+    2026-04-17 默认切 proto（除非显式传 bin / binary）。
+    """
+    t = str(transport or "").strip().lower()
+    if t in {"pipe-bin", "pipe-binary", "bin", "binary"}:
+        return "bin"
+    if t in {"pipe-proto", "pipe-protobuf", "proto", "protobuf"}:
+        return "proto"
+    if t in {"pipe", "pipe-json", "json"}:
+        return "json"
+    # 默认（包括 "pipe" 含糊值或空）→ proto
+    return "proto"
 
 
 def create_full_run_client(
@@ -908,7 +949,7 @@ def create_full_run_client(
         return PipeBackedFullRunClient(
             port=pipe_port,
             connect_timeout_s=ready_timeout_s,
-            protocol="bin" if str(transport or "").strip().lower() == "pipe-binary" else "json",
+            protocol=_resolve_pipe_protocol(transport),
             auto_launch=auto_launch,
             repo_root=repo_root,
             dll_path=dll_path,

@@ -498,7 +498,7 @@ def dump_real_fixtures(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    client = create_full_run_client(use_pipe=True, transport="pipe-binary", port=port)
+    client = create_full_run_client(use_pipe=True, transport="pipe-proto", port=port)
     samples = []
 
     for ep in range(num_samples * 3):  # run enough episodes to get samples

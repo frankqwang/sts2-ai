@@ -210,7 +210,7 @@ def run_audit(args: argparse.Namespace) -> dict[str, Any]:
     client = create_full_run_client(
         port=int(args.port),
         use_pipe=True,
-        transport="pipe-binary",
+        transport="pipe-proto",
         ready_timeout_s=15.0,
     )
     assert isinstance(client, PipeBackedFullRunClient)
@@ -332,7 +332,7 @@ def main() -> int:
             port=int(args.port),
             repo_root=Path(args.repo_root).resolve(),
             dll_path=Path(args.headless_dll).resolve(),
-            protocol="bin",
+            protocol="proto",
         )
         atexit.register(lambda: stop_process(proc))
     report = run_audit(args)

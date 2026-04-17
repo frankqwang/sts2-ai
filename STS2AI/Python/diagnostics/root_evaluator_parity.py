@@ -270,12 +270,12 @@ def main() -> int:
             repo_root=Path(args.repo_root).resolve(),
             dll_path=Path(args.headless_dll).resolve(),
             connect_timeout_s=15.0,
-            protocol="bin",
+            protocol="proto",
         )
         client = create_full_run_client(
             port=int(args.port),
             use_pipe=True,
-            transport="pipe-binary",
+            transport="pipe-proto",
             ready_timeout_s=15.0,
         )
         assert isinstance(client, PipeBackedFullRunClient)

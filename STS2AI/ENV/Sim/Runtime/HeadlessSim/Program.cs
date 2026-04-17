@@ -1419,6 +1419,10 @@ internal static class Program
 			"combat_reset" => BuildCombatApiState(await CombatResetAsync(paramsElement)),
 			"combat_step" => await CombatStepAsync(paramsElement),
 			"combat_catalog" => BuildCombatCatalog(),
+			// game_catalog: 完整静态数据（cards/relics/monsters/potions/encounters/powers）
+			// Python 侧 GAME_CATALOG.attach_sim(client) 调一次，所有特征工程查这里
+			// 规范见 STS2AI/docs/design/SCHEMA_CONVENTION.md
+			"game_catalog" => BuildGameCatalog(),
 			"step" => await StepAsync(service, paramsElement, cache),
 			"batch_step" => await BatchStepAsync(service, paramsElement, cache),
 			"save_state" => new Dictionary<string, object?>
@@ -1780,6 +1784,253 @@ internal static class Program
 		{
 			["encounters"] = encounters,
 		};
+	}
+
+	// ==========================================================================
+	// game_catalog: 完整游戏静态数据（cards/relics/monsters/potions/encounters/powers）
+	// --------------------------------------------------------------------------
+	// Python 侧 `GAME_CATALOG.attach_sim(client)` 启动时调一次，后续特征工程全走
+	// 缓存结果。避免开发者手写卡名/怪名/power class name（STS1 残留或拼写错）。
+	//
+	// C# 侧也缓存：ModelDb 是启动后静态数据，不变；重复调用只返回同一对象。
+	// 多 sim 进程共启动时各自 build 一次。
+	//
+	// 规范：STS2AI/docs/design/SCHEMA_CONVENTION.md
+	// TODO（另一 AI / Spectator）：把这段逻辑提到 shared lib，Spectator 侧也暴露
+	// 相同 endpoint，以便 Spectator 也能用统一特征。
+	// ==========================================================================
+	private static object? _gameCatalogCache;
+	private static readonly object _gameCatalogLock = new();
+
+	private static object BuildGameCatalog()
+	{
+		// 静态数据，只 build 一次
+		if (_gameCatalogCache != null)
+		{
+			return _gameCatalogCache;
+		}
+		lock (_gameCatalogLock)
+		{
+			if (_gameCatalogCache != null)
+			{
+				return _gameCatalogCache;
+			}
+			_gameCatalogCache = BuildGameCatalogOnce();
+			return _gameCatalogCache;
+		}
+	}
+
+	private static object BuildGameCatalogOnce()
+	{
+		// encounters：id / room_type / monster_ids / act_index
+		// act_index 来自 ModelDb.Acts 枚举（0 = act1, 1 = act2, ...）
+		Dictionary<string, int> encounterAct = new();
+		try
+		{
+			int actIdx = 0;
+			foreach (ActModel act in ModelDb.Acts)
+			{
+				foreach (EncounterModel e in act.AllEncounters)
+				{
+					if (!encounterAct.ContainsKey(e.Id.Entry))
+					{
+						encounterAct[e.Id.Entry] = actIdx;
+					}
+				}
+				actIdx++;
+			}
+		}
+		catch { }
+
+		List<Dictionary<string, object?>> encounters = ModelDb.AllEncounters
+			.OrderBy(static e => e.RoomType)
+			.ThenBy(static e => e.Id.Entry, StringComparer.Ordinal)
+			.Select(e => new Dictionary<string, object?>
+			{
+				["encounter_id"] = e.Id.Entry,
+				["room_type"] = e.RoomType.ToString().ToLowerInvariant(),
+				["monster_ids"] = BuildEncounterMonsterIds(e),
+				["act_index"] = encounterAct.TryGetValue(e.Id.Entry, out int a) ? a : -1,
+			})
+			.ToList();
+
+		// monsters：id / class_name / initial powers / hp
+		List<Dictionary<string, object?>> monsters = ModelDb.Monsters
+			.OrderBy(static m => m.Id.Entry, StringComparer.Ordinal)
+			.Select(static m => new Dictionary<string, object?>
+			{
+				["monster_id"] = m.Id.Entry,
+				["class_name"] = m.GetType().Name,
+				["powers"] = BuildMonsterPowerClassNames(m),
+			})
+			.ToList();
+
+		// cards：id / type / cost / rarity / target_type / tags / keywords / gains_block
+		List<Dictionary<string, object?>> cards = ModelDb.AllCards
+			.OrderBy(static c => c.Id.Entry, StringComparer.Ordinal)
+			.Select(static c => new Dictionary<string, object?>
+			{
+				["card_id"] = c.Id.Entry,
+				["class_name"] = c.GetType().Name,
+				["card_type"] = c.Type.ToString().ToLowerInvariant(),
+				["rarity"] = c.Rarity.ToString().ToLowerInvariant(),
+				["target_type"] = c.TargetType.ToString().ToLowerInvariant(),
+				// BaseEnergyCost 通过 EnergyCost.BaseCost（可能为 null，X-cost）
+				["base_cost"] = SafeBaseCost(c),
+				["is_x_cost"] = c.EnergyCost?.GetType().Name.Contains("XCost") ?? false,
+				["gains_block"] = c.GainsBlock,
+				["tags"] = c.Tags.Select(t => t.ToString()).OrderBy(s => s, StringComparer.Ordinal).ToList(),
+				["keywords"] = c.CanonicalKeywords.Select(k => k.ToString()).OrderBy(s => s, StringComparer.Ordinal).ToList(),
+			})
+			.ToList();
+
+		// relics：id / class_name / rarity / tags
+		List<Dictionary<string, object?>> relics = ModelDb.AllRelics
+			.OrderBy(static r => r.Id.Entry, StringComparer.Ordinal)
+			.Select(static r => new Dictionary<string, object?>
+			{
+				["relic_id"] = r.Id.Entry,
+				["class_name"] = r.GetType().Name,
+				["rarity"] = SafeRelicRarity(r),
+				["tags"] = SafeRelicTags(r),
+			})
+			.ToList();
+
+		// potions：id / class_name / rarity
+		List<Dictionary<string, object?>> potions = ModelDb.AllPotions
+			.OrderBy(static p => p.Id.Entry, StringComparer.Ordinal)
+			.Select(static p => new Dictionary<string, object?>
+			{
+				["potion_id"] = p.Id.Entry,
+				["class_name"] = p.GetType().Name,
+				["rarity"] = SafePotionRarity(p),
+			})
+			.ToList();
+
+		// powers：class_name + base class chain + 类别（buff/debuff/等，基于 class 名 heuristic）
+		// 加 base_classes 让 Python 侧能识别 power 继承类型（如 "xxx → TimedPower → PowerModel" 表示临时 power）
+		List<Dictionary<string, object?>> powers = ModelDb.AllPowers
+			.OrderBy(static p => p.GetType().Name, StringComparer.Ordinal)
+			.Select(static p => new Dictionary<string, object?>
+			{
+				["class_name"] = p.GetType().Name,
+				["base_classes"] = GetBaseClassChain(p.GetType(), "PowerModel"),
+				// Heuristic：类名含 "Debuff" / "Buff" 或者根据已知 debuff list
+				["is_debuff_hint"] = IsDebuffByName(p.GetType().Name),
+			})
+			.ToList();
+
+		return new Dictionary<string, object?>
+		{
+			["encounters"] = encounters,
+			["monsters"] = monsters,
+			["cards"] = cards,
+			["relics"] = relics,
+			["potions"] = potions,
+			["powers"] = powers,
+		};
+	}
+
+	private static List<string> BuildEncounterMonsterIds(EncounterModel encounter)
+	{
+		// EncounterModel.AllPossibleMonsters -> IEnumerable<MonsterModel>
+		List<string> ids = new();
+		try
+		{
+			foreach (MonsterModel m in encounter.AllPossibleMonsters)
+			{
+				if (m != null)
+				{
+					ids.Add(m.GetType().Name);
+				}
+			}
+		}
+		catch { }
+		return ids;
+	}
+
+	private static List<string> BuildMonsterPowerClassNames(MonsterModel monster)
+	{
+		// Monster 初始 power 是 runtime 阶段 AddPower 才创建的，ModelDb 没有静态列表。
+		// 暂时返回空；initial powers 仍由 source_knowledge.sqlite 提供（build 脚本扫源码）。
+		// TODO：扫源码注释 / MoveModel 的 PowerFactory 类型注解可提取，需另一 AI 实现。
+		return new List<string>();
+	}
+
+	// ---- game_catalog 辅助 ----
+	private static int SafeBaseCost(CardModel c)
+	{
+		try
+		{
+			// CardEnergyCost.Canonical (int) = base cost (未升级/未 modifier 前)
+			return c.EnergyCost?.Canonical ?? 0;
+		}
+		catch { return 0; }
+	}
+
+	private static string SafeRelicRarity(RelicModel r)
+	{
+		try
+		{
+			var prop = r.GetType().GetProperty("Rarity");
+			var v = prop?.GetValue(r);
+			return v?.ToString()?.ToLowerInvariant() ?? "";
+		}
+		catch { return ""; }
+	}
+
+	private static List<string> SafeRelicTags(RelicModel r)
+	{
+		try
+		{
+			var prop = r.GetType().GetProperty("Tags");
+			var v = prop?.GetValue(r);
+			if (v is IEnumerable<object> list)
+			{
+				return list.Where(x => x != null).Select(x => x!.ToString()!).OrderBy(s => s).ToList();
+			}
+		}
+		catch { }
+		return new List<string>();
+	}
+
+	private static string SafePotionRarity(PotionModel p)
+	{
+		try
+		{
+			var prop = p.GetType().GetProperty("Rarity");
+			var v = prop?.GetValue(p);
+			return v?.ToString()?.ToLowerInvariant() ?? "";
+		}
+		catch { return ""; }
+	}
+
+	private static List<string> GetBaseClassChain(Type t, string stopAt)
+	{
+		List<string> chain = new();
+		Type? cur = t.BaseType;
+		while (cur != null && cur != typeof(object))
+		{
+			chain.Add(cur.Name);
+			if (cur.Name == stopAt) break;
+			cur = cur.BaseType;
+		}
+		return chain;
+	}
+
+	private static bool IsDebuffByName(string className)
+	{
+		// Known STS2 debuff powers by class name suffix/stem
+		string[] debuffHints = {
+			"WeakPower", "VulnerablePower", "FrailPower", "PoisonPower",
+			"ShacklesPower", "StranglePower", "ConfusedPower", "NoDrawPower",
+			"EntangledPower", "HexPower", "LockOnPower",
+		};
+		foreach (var h in debuffHints)
+		{
+			if (className == h) return true;
+		}
+		return className.EndsWith("DebuffPower", StringComparison.Ordinal);
 	}
 
 	private static object BuildCombatApiState()

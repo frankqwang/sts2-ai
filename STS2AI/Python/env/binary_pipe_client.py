@@ -1,4 +1,15 @@
-"""二进制协议命名管道客户端，用于与 STS2 模拟器的紧凑 IPC 通信。"""
+"""二进制协议命名管道客户端（DEPRECATED）。
+
+**2026-04-17**: 训练主流程已切到 proto 协议（networkV2/s0_bridge/proto_pipe_client.py），
+binary pipe 仅保留作：
+  1. 旧 checkpoint 诊断（需要 schema_hash=sts2-binary-schema-2026-04-14 的对比实验）
+  2. 协议对比测试（test_simulator_consistency.py --backend headless-binary）
+
+新代码应该用：
+  from networkV2.s0_bridge.proto_pipe_client import ProtoPipeClient
+
+本文件不再新增功能。任何新的 opcode / RPC method 请只加到 proto 侧。
+"""
 from __future__ import annotations
 
 import ctypes
@@ -6,6 +17,7 @@ import json
 import struct
 import sys
 import time
+import warnings
 from dataclasses import dataclass
 from typing import Any
 

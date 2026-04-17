@@ -143,8 +143,18 @@ def _kill_stale_headless_processes(*, port: int, dll_path: Path) -> None:
         pass
 
 
+def _normalize_protocol(protocol: str) -> str:
+    """统一的 protocol 名归一化：支持 json / bin / proto 三种。"""
+    p = str(protocol).strip().lower()
+    if p in {"bin", "binary"}:
+        return "bin"
+    if p in {"proto", "protobuf"}:
+        return "proto"
+    return "json"
+
+
 def _build_launch_command(host_path: Path, protocol: str, port: int) -> list[str]:
-    normalized_protocol = "bin" if protocol in {"bin", "binary"} else "json"
+    normalized_protocol = _normalize_protocol(protocol)
     host_args = ["--port", str(port), "--protocol", normalized_protocol]
     if host_path.suffix.lower() == ".dll":
         return ["dotnet", str(host_path), *host_args]
@@ -152,8 +162,13 @@ def _build_launch_command(host_path: Path, protocol: str, port: int) -> list[str
 
 
 def _pipe_name_for_port(*, port: int, protocol: str) -> str:
-    normalized_protocol = "bin" if protocol in {"bin", "binary"} else "json"
-    pipe_suffix = f"sts2_mcts_bin_{port}" if normalized_protocol == "bin" else f"sts2_mcts_{port}"
+    normalized_protocol = _normalize_protocol(protocol)
+    if normalized_protocol == "bin":
+        pipe_suffix = f"sts2_mcts_bin_{port}"
+    elif normalized_protocol == "proto":
+        pipe_suffix = f"sts2_mcts_proto_{port}"
+    else:
+        pipe_suffix = f"sts2_mcts_{port}"
     return rf"\\.\pipe\{pipe_suffix}"
 
 
@@ -248,7 +263,7 @@ def main() -> int:
     parser.add_argument("--repo-root", type=Path, default=DEFAULT_REPO_ROOT)
     parser.add_argument("--dll-path", type=Path, default=DEFAULT_DLL_PATH)
     parser.add_argument("--ready-timeout", type=float, default=15.0)
-    parser.add_argument("--protocol", choices=["json", "bin"], default="json")
+    parser.add_argument("--protocol", choices=["json", "bin", "proto"], default="json")
     args = parser.parse_args()
 
     proc = start_headless_sim(
