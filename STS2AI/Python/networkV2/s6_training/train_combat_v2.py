@@ -38,6 +38,7 @@ from env.combat_training_env import (
     adapt_combat_snapshot,
     build_combat_legal_actions,
 )
+from env.run_outcome_vocab import is_victory_outcome, is_failure_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def detect_combat_outcome(state: dict[str, Any], done: bool) -> bool | None:
-    """统一的战斗结果检测。True=胜, False=败, None=未结束。"""
+    """统一的战斗结果检测。True=胜, False=败, None=未结束。
+
+    P3 修复：改用 env.run_outcome_vocab 的 helper，避免本地字符串字面比较和上游
+    normalize（"loss"/"lose"/"dead"/"defeat" 等多种拼写）漂移。
+    """
     if not done:
         return None
-    outcome = str(state.get("run_outcome", "") or "").lower()
-    if outcome == "victory":
+    raw = state.get("run_outcome")
+    if is_victory_outcome(raw):
         return True
-    if outcome in ("defeat", "loss"):
+    if is_failure_outcome(raw):
         return False
     if state.get("terminal"):
         enemies = (state.get("battle") or {}).get("enemies") or state.get("enemies") or []
@@ -386,7 +391,7 @@ def main():
     p.add_argument("--d-model", type=int, default=384)
     p.add_argument("--n-heads", type=int, default=8)
     p.add_argument("--n-build-slots", type=int, default=8)
-    p.add_argument("--max-numeric-dim", type=int, default=32)
+    p.add_argument("--max-numeric-dim", type=int, default=48)
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--ppo-epochs", type=int, default=4)

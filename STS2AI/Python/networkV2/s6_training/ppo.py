@@ -39,7 +39,7 @@ class PPOConfig:
     mini_batch_size: int = 32
     gamma: float = 0.99
     gae_lambda: float = 0.95
-    max_numeric_dim: int = 32
+    max_numeric_dim: int = 48
     # Value warmup: 前 N 轮 train_step 调用时 policy_coef=0，只训 value head
     value_warmup_iters: int = 0
     # KL 早停：一个 epoch 内 minibatch 的平均 approx_kl 超过阈值就结束当前 epoch
@@ -80,7 +80,10 @@ class CombatPPOTrainerV2:
                 batch_samples = [samples[i] for i in batch_idx]
 
                 batched = collate_training_samples(batch_samples, self.cfg.max_numeric_dim)
-                output = self.net(batched_banks=batched.banks)
+                enc_idx = getattr(batched, "encounter_indices", None)
+                if enc_idx is not None:
+                    enc_idx = enc_idx.to(device)
+                output = self.net(batched_banks=batched.banks, encounter_idx=enc_idx)
 
                 # 完整 multi-head loss
                 loss, metrics = self.loss_fn(
@@ -177,7 +180,10 @@ class UnifiedPPOTrainer:
 
     def _combat_forward_loss(self, samples: list[TrainingSample], device) -> tuple[torch.Tensor, dict[str, float]]:
         batched = collate_training_samples(samples, self.cfg.max_numeric_dim)
-        output = self.net(batched_banks=batched.banks, decision_domain="combat")
+        enc_idx = getattr(batched, "encounter_indices", None)
+        if enc_idx is not None:
+            enc_idx = enc_idx.to(device)
+        output = self.net(batched_banks=batched.banks, decision_domain="combat", encounter_idx=enc_idx)
         return self.combat_loss(
             output=output,
             action_indices=batched.action_indices.to(device),
@@ -190,6 +196,7 @@ class UnifiedPPOTrainer:
             leaf_targets=batched.leaf_targets.to(device),
             transition_risk_targets=batched.transition_risk_targets.to(device) if batched.transition_risk_targets is not None else None,
             resource_retention_targets=batched.resource_retention_targets.to(device) if batched.resource_retention_targets is not None else None,
+            turn_damage_targets=batched.turn_damage_targets.to(device) if batched.turn_damage_targets is not None else None,
             sample_weights=batched.sample_weights.to(device),
         )
 
@@ -198,7 +205,10 @@ class UnifiedPPOTrainer:
         # Non-combat 分支对所有非战斗 domain 走同一计算图；output.decision_domain 只是标签
         # 用第一个样本的 domain 作为代表（label 不影响梯度）
         domain = samples[0].banks.decision_domain or "event"
-        output = self.net(batched_banks=batched.banks, decision_domain=domain)
+        enc_idx = getattr(batched, "encounter_indices", None)
+        if enc_idx is not None:
+            enc_idx = enc_idx.to(device)
+        output = self.net(batched_banks=batched.banks, decision_domain=domain, encounter_idx=enc_idx)
         # non-combat 样本暂用 fight_win_target 作为 run_win_target 的信号源：
         # full-run rollout 里终局时写 0/1 硬标签到 fight_win_target，其他为 -1（哨值）
         # 语义完全一致（整局胜率）

@@ -38,6 +38,7 @@ class BatchedBanks:
     fight_win_targets: torch.Tensor | None = None    # (B,)
     hp_loss_targets: torch.Tensor | None = None      # (B,)
     survival_targets: torch.Tensor | None = None     # (B,)
+    turn_damage_targets: torch.Tensor | None = None  # (B,) <0 = invalid (skip in loss)
     # Leaf targets
     leaf_targets: torch.Tensor | None = None         # (B,)
     transition_risk_targets: torch.Tensor | None = None    # (B,)
@@ -50,7 +51,7 @@ class BatchedBanks:
     sample_weights: torch.Tensor | None = None       # (B,)
 
 
-def _pad_bank(samples: list[TokenBank], max_numeric_dim: int = 32) -> PaddedBank:
+def _pad_bank(samples: list[TokenBank], max_numeric_dim: int = 48) -> PaddedBank:
     B = len(samples)
     max_len = max((len(bank) for bank in samples), default=1)
     max_len = max(max_len, 1)
@@ -76,7 +77,7 @@ def _pad_bank(samples: list[TokenBank], max_numeric_dim: int = 32) -> PaddedBank
 
 def collate_banks(
     samples: list[UnifiedTokenBanks],
-    max_numeric_dim: int = 32,
+    max_numeric_dim: int = 48,
 ) -> BatchedBanks:
     B = len(samples)
     if B == 0:
@@ -124,6 +125,9 @@ class TrainingSample:
     fight_win_target: float = -1.0
     hp_loss_target: float = 0.0     # [0,+inf) 期望掉血
     survival_target: float = 1.0    # [0,1] 近期生存概率
+    # 1-turn lookahead：从本步起到回合结束累计的实际造成伤害（含本步动作伤害）。
+    # combo / 牌序学习的关键监督信号。<0 = 无效（非战斗或回合未关闭），loss 跳过。
+    turn_damage_target: float = -1.0
     # Leaf head targets（leaf_evaluator 4 个 head 全监督）
     leaf_target: float = 0.0                  # leaf_score ∈ [-1,1]（= 2*value_target - 1）
     transition_risk_target: float = 0.0       # ∈ [0,1] 敌方行为切换频率
@@ -140,7 +144,7 @@ class TrainingSample:
 
 def collate_training_samples(
     samples: list[TrainingSample],
-    max_numeric_dim: int = 32,
+    max_numeric_dim: int = 48,
 ) -> BatchedBanks:
     """将 TrainingSample 列表拼成 BatchedBanks，含全部 multi-head targets。"""
     batched = collate_banks([s.banks for s in samples], max_numeric_dim)
@@ -151,6 +155,7 @@ def collate_training_samples(
     batched.fight_win_targets = torch.tensor([s.fight_win_target for s in samples], dtype=torch.float32)
     batched.hp_loss_targets = torch.tensor([s.hp_loss_target for s in samples], dtype=torch.float32)
     batched.survival_targets = torch.tensor([s.survival_target for s in samples], dtype=torch.float32)
+    batched.turn_damage_targets = torch.tensor([s.turn_damage_target for s in samples], dtype=torch.float32)
     batched.leaf_targets = torch.tensor([s.leaf_target for s in samples], dtype=torch.float32)
     batched.transition_risk_targets = torch.tensor([s.transition_risk_target for s in samples], dtype=torch.float32)
     batched.resource_retention_targets = torch.tensor([s.resource_retention_target for s in samples], dtype=torch.float32)
@@ -158,4 +163,9 @@ def collate_training_samples(
     batched.resource_health_targets = torch.tensor([s.resource_health_target for s in samples], dtype=torch.float32)
     batched.deck_quality_targets = torch.tensor([s.deck_quality_target for s in samples], dtype=torch.float32)
     batched.sample_weights = torch.tensor([s.sample_weight for s in samples], dtype=torch.float32)
+    # Encounter conditioning index（方案 A: Conditional Policy）
+    from networkV2.s1_schema.encounter_vocab import encounter_to_index
+    batched.encounter_indices = torch.tensor(
+        [encounter_to_index(s.encounter_id) for s in samples], dtype=torch.long,
+    )
     return batched

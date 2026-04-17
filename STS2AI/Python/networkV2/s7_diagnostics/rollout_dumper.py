@@ -115,10 +115,24 @@ class RolloutDumper:
                     [s.banks.decision_domain == "combat" for s in samples], dtype=bool),
             )
 
-        # 4) Episode summaries
+        # 4) Episode summaries（不含 trajectory，那部分单独写以避免单文件爆炸）
         if episode_infos:
             ep_path = self.root / f"iter{iteration:04d}_episodes.jsonl"
             with ep_path.open("w", encoding="utf-8") as f:
                 for info in episode_infos:
-                    f.write(json.dumps({k: v for k, v in info.items()},
-                                       ensure_ascii=False, default=str) + "\n")
+                    f.write(json.dumps(
+                        {k: v for k, v in info.items() if k != "trajectory"},
+                        ensure_ascii=False, default=str) + "\n")
+
+        # 5) Trajectories（含 step-by-step 决策序列，仅有 trajectory 字段的 episode）
+        traj_episodes = [info for info in (episode_infos or []) if info.get("trajectory")]
+        if traj_episodes:
+            traj_path = self.root / f"iter{iteration:04d}_trajectories.jsonl"
+            with traj_path.open("w", encoding="utf-8") as f:
+                for ep_idx, info in enumerate(traj_episodes):
+                    record = {
+                        "episode_idx": ep_idx,
+                        "summary": {k: v for k, v in info.items() if k != "trajectory"},
+                        "trajectory": info["trajectory"],
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
