@@ -26,9 +26,9 @@ class LeafOutputs:
 class LeafEvaluator(nn.Module):
     def __init__(self, d_model: int = 384, hidden_dim: int = 256):
         super().__init__()
-        # 4 个 bank 的 pool 拼接: board + combat_memory + mechanism + modifier
+        # 5 个 bank 的 pool 拼接: board + combat_memory + mechanism + modifier + power (v2)
         self.context_proj = nn.Sequential(
-            nn.Linear(d_model * 4, hidden_dim),
+            nn.Linear(d_model * 5, hidden_dim),
             nn.GELU(),
         )
         self.eval_proj = nn.Sequential(
@@ -47,13 +47,17 @@ class LeafEvaluator(nn.Module):
         combat_memory_bt: BankTensor,
         mechanism_bt: BankTensor,
         modifier_bt: BankTensor,
+        power_bt: BankTensor,
     ) -> LeafOutputs:
         board_pool = self._masked_mean(board_bt)
         cm_pool = self._masked_mean(combat_memory_bt)
         mech_pool = self._masked_mean(mechanism_bt)
         mod_pool = self._masked_mean(modifier_bt)
+        power_pool = self._masked_mean(power_bt)
 
-        ctx = self.context_proj(torch.cat([board_pool, cm_pool, mech_pool, mod_pool], dim=-1))
+        ctx = self.context_proj(
+            torch.cat([board_pool, cm_pool, mech_pool, mod_pool, power_pool], dim=-1)
+        )
         h = self.eval_proj(torch.cat([decision_repr, ctx], dim=-1))
 
         return LeafOutputs(

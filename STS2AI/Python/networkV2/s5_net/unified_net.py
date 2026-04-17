@@ -25,6 +25,7 @@ from networkV2.s5_net.encoders.build_encoder import BuildMemoryEncoder
 from networkV2.s5_net.encoders.board_encoder import BoardEncoder
 from networkV2.s5_net.encoders.mechanism_encoder import MechanismEncoder
 from networkV2.s5_net.encoders.modifier_encoder import ModifierEncoder
+from networkV2.s5_net.encoders.power_encoder import PowerEncoder
 from networkV2.s5_net.encoders.prefix_encoder import TurnPrefixEncoder
 from networkV2.s5_net.encoders.combat_memory_encoder import CombatMemoryEncoder
 from networkV2.s5_net.action_contextualizer import ActionContextualizer
@@ -92,6 +93,7 @@ class UnifiedNet(nn.Module):
         self.board_encoder = BoardEncoder(d, nh, n_layers=config.board_n_layers, dropout=drop)
         self.mechanism_encoder = MechanismEncoder(d, nh_half, n_layers=config.mechanism_n_layers, dropout=drop)
         self.modifier_encoder = ModifierEncoder(d, nh_half, n_layers=config.modifier_n_layers, dropout=drop)
+        self.power_encoder = PowerEncoder(d, nh_half, n_layers=config.power_n_layers, dropout=drop)
         self.prefix_encoder = TurnPrefixEncoder(d, nh_half, n_layers=config.prefix_n_layers, dropout=drop)
         self.combat_memory_encoder = CombatMemoryEncoder(
             d, nh_half, n_layers=config.combat_memory_n_layers, dropout=drop)
@@ -105,12 +107,56 @@ class UnifiedNet(nn.Module):
             d, nh, drop, mode=config.option_contextualizer_mode)
         self.run_evaluator = RunEvaluator(d)
 
+        # ---- Encounter Conditioning (方案 A: Conditional Policy) ----
+        # 给 decision_repr 注入 encounter-specific bias，所有下游 head（policy /
+        # value / leaf / run_eval）自动继承 boss context。
+        #
+        # 2026-04-17 co17 诊断: 原 init (gate=0.1, embed std=0.02) 导致注入量级仅
+        # ~0.002，相对 decision_repr (~0.5-1.0) 的信号比 1e-5，PPO 梯度
+        # ∂L/∂gate 几乎为 0 → 死锁：gate 不更新 → 注入持续小 → 永远没梯度信号。
+        # co17 iter 40 时 gate 仍然 0.108（几乎没动），embed norm 也没分化。
+        #
+        # 修复：gate init 1.0 + embed std 0.3 → 初始注入 ~0.3（decision_repr 30%），
+        # PPO 能明显感受到 conditioning 的 causal effect，梯度正常流动。
+        # 代价：部分破坏继承 checkpoint 的 policy 表示，前几 iter 胜率会掉，
+        # 但很快会适应 + 真正学会 conditioning。
+        self.enable_encounter_conditioning = bool(
+            getattr(config, "enable_encounter_conditioning", False))
+        if self.enable_encounter_conditioning:
+            n_enc = int(getattr(config, "n_encounters", 128))
+            self.encounter_embed = nn.Embedding(n_enc, d)
+            nn.init.normal_(self.encounter_embed.weight, mean=0.0, std=0.3)
+            self.encounter_gate = nn.Parameter(torch.tensor(1.0))
+        else:
+            self.encounter_embed = None
+            self.encounter_gate = None
+
+    def _apply_encounter_conditioning(
+        self,
+        decision_repr: torch.Tensor,
+        encounter_idx: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """给 decision_repr 加上 encounter-specific bias。"""
+        if not self.enable_encounter_conditioning or encounter_idx is None:
+            return decision_repr
+        idx = encounter_idx.to(device=decision_repr.device, dtype=torch.long)
+        idx = idx.clamp(min=0, max=self.encounter_embed.num_embeddings - 1)
+        boss_bias = self.encounter_embed(idx)
+        return decision_repr + self.encounter_gate * boss_bias
+
     def forward(
         self,
         banks: UnifiedTokenBanks | None = None,
         batched_banks: dict | None = None,
         decision_domain: str = "combat",
+        encounter_idx: torch.Tensor | None = None,
     ) -> UnifiedNetOutput:
+        """
+        encounter_idx: (B,) long tensor。若 enable_encounter_conditioning=True，
+        decision_repr 会加上 encounter-specific bias。调用方从
+        `networkV2.s1_schema.encounter_vocab.encounter_to_index(encounter_id)` 得到。
+        传 None 或 全 0 → UNKNOWN，不加 bias。
+        """
         device = next(self.parameters()).device
 
         if batched_banks is not None:
@@ -140,35 +186,41 @@ class UnifiedNet(nn.Module):
 
         if decision_domain == "combat":
             return self._combat_forward(bt, B, device, action_bt, build_slots,
-                                        build_bt, inventory_bt, objective_bt, forecast_bt)
+                                        build_bt, inventory_bt, objective_bt, forecast_bt,
+                                        encounter_idx=encounter_idx)
         else:
             return self._noncombat_forward(bt, B, device, action_bt, build_slots,
                                            build_bt, inventory_bt, economy_bt,
-                                           objective_bt, forecast_bt, decision_domain)
+                                           objective_bt, forecast_bt, decision_domain,
+                                           encounter_idx=encounter_idx)
 
     def _combat_forward(self, bt, B, device, action_bt, build_slots,
-                        build_bt, inventory_bt, objective_bt, forecast_bt):
+                        build_bt, inventory_bt, objective_bt, forecast_bt,
+                        encounter_idx=None):
         _e = lambda: self._empty_bt(device, B)
         board_bt = bt.get("board", _e())
         mechanism_bt = bt.get("mechanism", _e())
         modifier_bt = bt.get("modifier", _e())
+        power_bt = bt.get("power", _e())
         prefix_bt = bt.get("turn_prefix", _e())
         combat_mem_bt = bt.get("combat_memory", _e())
 
         board_enc = self.board_encoder(board_bt) if board_bt.mask.any() else board_bt
         mech_enc = self.mechanism_encoder(mechanism_bt) if mechanism_bt.mask.any() else mechanism_bt
         mod_enc = self.modifier_encoder(modifier_bt) if modifier_bt.mask.any() else modifier_bt
+        power_enc = self.power_encoder(power_bt) if power_bt.mask.any() else power_bt
         prefix_enc = self.prefix_encoder(prefix_bt) if prefix_bt.mask.any() else prefix_bt
         cm_enc = self.combat_memory_encoder(combat_mem_bt) if combat_mem_bt.mask.any() else combat_mem_bt
 
         action_hyp = self.action_contextualizer(
-            action_bt, board_enc, mod_enc, mech_enc, prefix_enc, cm_enc, build_slots)
+            action_bt, board_enc, mod_enc, mech_enc, power_enc, prefix_enc, cm_enc, build_slots)
 
         decision_repr, action_refined = self.decision_core(action_hyp)
+        decision_repr = self._apply_encounter_conditioning(decision_repr, encounter_idx)
 
         logits = self.policy_head(decision_repr, action_refined)
         values = self.value_heads(decision_repr)
-        leaf = self.leaf_evaluator(decision_repr, board_enc, cm_enc, mech_enc, mod_enc)
+        leaf = self.leaf_evaluator(decision_repr, board_enc, cm_enc, mech_enc, mod_enc, power_enc)
 
         return UnifiedNetOutput(
             logits=logits, action_mask=action_bt.mask,
@@ -176,7 +228,7 @@ class UnifiedNet(nn.Module):
 
     def _noncombat_forward(self, bt, B, device, option_bt, build_slots,
                            build_bt, inventory_bt, economy_bt, objective_bt, forecast_bt,
-                           domain):
+                           domain, encounter_idx=None):
         _e = lambda: self._empty_bt(device, B)
         inv_bt = inventory_bt or _e()
 
@@ -184,6 +236,7 @@ class UnifiedNet(nn.Module):
             option_bt, build_bt, inv_bt, economy_bt, forecast_bt, objective_bt, build_slots)
 
         decision_repr, option_refined = self.decision_core(option_hyp)
+        decision_repr = self._apply_encounter_conditioning(decision_repr, encounter_idx)
 
         logits = self.policy_head(decision_repr, option_refined)
         run_eval = self.run_evaluator(decision_repr, build_bt, inv_bt, objective_bt, forecast_bt)

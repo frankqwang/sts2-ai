@@ -55,13 +55,16 @@ class NetworkConfig:
     d_model: int = 384
     n_heads: int = 8
     dropout: float = 0.1
-    max_numeric_dim: int = 32
+    # 48：原 32 不够。deck_card token 需 11 coarse + 34 semantic = 45 维（P1② 修复后），
+    # 其他 token（rbm=32、action=30）还在 32 内。48 留 3 维余量避免截断。
+    max_numeric_dim: int = 48
 
     # ---- Memory Encoders (Layer 2) ----
     # 每个 encoder 的 self-attention 层数
     board_n_layers: int = 3
     mechanism_n_layers: int = 2
     modifier_n_layers: int = 2
+    power_n_layers: int = 1          # v2: power_bank 编码层数（每个 active power 一个 token）
     prefix_n_layers: int = 2
     combat_memory_n_layers: int = 1
 
@@ -84,6 +87,13 @@ class NetworkConfig:
     # ---- Option Contextualizer (Layer 3b, non-combat) ----
     # 同上，non-combat 分支
     option_contextualizer_mode: str = "full"
+
+    # ---- Encounter Conditioning (方案 A: Conditional Policy) ----
+    # 给 decision_repr 注入 boss/encounter-specific embedding，
+    # 让 policy / value heads 自然条件化到当前对手，缓解多 boss 共享参数的梯度冲突。
+    # vocab size 取 GAME_CATALOG 里 ~88 个 encounter，留 128 余量（新 DLC 扩展）。
+    enable_encounter_conditioning: bool = True
+    n_encounters: int = 128
 
     @property
     def is_slim(self) -> bool:

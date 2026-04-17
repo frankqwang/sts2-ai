@@ -36,10 +36,11 @@ from networkV2.s5_net.tokenizer import BankTensor
 _BANK_TYPE_BOARD = 0
 _BANK_TYPE_MODIFIER = 1
 _BANK_TYPE_MECHANISM = 2
-_BANK_TYPE_PREFIX = 3
-_BANK_TYPE_COMBAT_MEMORY = 4
-_BANK_TYPE_BUILD = 5
-_N_BANK_TYPES = 6
+_BANK_TYPE_POWER = 3            # v2: power_bank（每 active power 一个 token）
+_BANK_TYPE_PREFIX = 4
+_BANK_TYPE_COMBAT_MEMORY = 5
+_BANK_TYPE_BUILD = 6
+_N_BANK_TYPES = 7
 
 
 class ActionContextualizer(nn.Module):
@@ -53,12 +54,13 @@ class ActionContextualizer(nn.Module):
         ffn_dim = d_model * 2
 
         if mode == "full":
-            # 原版 6 段 cross
+            # 原版 7 段 cross（v2：并行 4 段 board/mod/mech/power + 串行 3 段 prefix/cm/build）
             self.cross_board = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
             self.cross_modifier = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
             self.cross_mechanism = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
+            self.cross_power = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
             self.merge_gate = nn.Sequential(
-                nn.Linear(d_model * 3, d_model), nn.GELU(),
+                nn.Linear(d_model * 4, d_model), nn.GELU(),
             )
             self.merge_norm = nn.LayerNorm(d_model)
             self.cross_prefix = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
@@ -92,6 +94,7 @@ class ActionContextualizer(nn.Module):
         board_bt: BankTensor,
         modifier_bt: BankTensor,
         mechanism_bt: BankTensor,
+        power_bt: BankTensor,
         prefix_bt: BankTensor,
         combat_memory_bt: BankTensor,
         build_slots: torch.Tensor,
@@ -99,11 +102,15 @@ class ActionContextualizer(nn.Module):
         action = action_bt.features
 
         if self.mode == "full":
-            # 并行 3 段 + 增量 merge
+            # 并行 4 段（v2：加 power）+ 增量 merge
             out_board = self.cross_board(action, board_bt.features, board_bt.mask)
             out_mod = self.cross_modifier(action, modifier_bt.features, modifier_bt.mask)
             out_mech = self.cross_mechanism(action, mechanism_bt.features, mechanism_bt.mask)
-            delta = torch.cat([out_board - action, out_mod - action, out_mech - action], dim=-1)
+            out_power = self.cross_power(action, power_bt.features, power_bt.mask)
+            delta = torch.cat(
+                [out_board - action, out_mod - action, out_mech - action, out_power - action],
+                dim=-1,
+            )
             merged = self.merge_gate(delta)
             action = self.merge_norm(action + merged)
             # 串行 3 段
@@ -118,11 +125,12 @@ class ActionContextualizer(nn.Module):
                 mask=torch.ones(build_slots.shape[:2], dtype=torch.bool, device=build_slots.device),
                 bank_name="build_slots",
             )
-            # 并行 3 bank concat → 1 次 cross
+            # 并行 4 bank concat（v2：加 power）→ 1 次 cross
             fast_bts = [
                 self._tag(board_bt, _BANK_TYPE_BOARD),
                 self._tag(modifier_bt, _BANK_TYPE_MODIFIER),
                 self._tag(mechanism_bt, _BANK_TYPE_MECHANISM),
+                self._tag(power_bt, _BANK_TYPE_POWER),
             ]
             fast_kv, fast_mask = self._concat(fast_bts)
             action = self.cross_fast(action, fast_kv, fast_mask)
@@ -145,6 +153,7 @@ class ActionContextualizer(nn.Module):
                 self._tag(board_bt, _BANK_TYPE_BOARD),
                 self._tag(modifier_bt, _BANK_TYPE_MODIFIER),
                 self._tag(mechanism_bt, _BANK_TYPE_MECHANISM),
+                self._tag(power_bt, _BANK_TYPE_POWER),
                 self._tag(prefix_bt, _BANK_TYPE_PREFIX),
                 self._tag(combat_memory_bt, _BANK_TYPE_COMBAT_MEMORY),
                 self._tag(build_bt, _BANK_TYPE_BUILD),
