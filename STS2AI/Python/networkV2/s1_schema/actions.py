@@ -129,6 +129,12 @@ class ActionCandidate:
     route_best_rest_count: float = 0.0     # 所有下游路径里最大 rest 数(归一化 /5)
     route_path_length_norm: float = 0.0    # 到 boss 最短距离(归一化 /17,约等于 act 长度)
 
+    # Skada victory-runs 挖出的路径先验(build_path_priors.py 产出,loader 查表填):
+    # frequency: 该 fingerprint 在 victory 玩家(同 character+asc)里的出现频率 [0,1]
+    # efficiency: 1 - normalized(avg_duration),越高 = 越快赢;未查到时 0.5(中性)
+    route_prior_frequency: float = 0.0
+    route_prior_efficiency: float = 0.5
+
     # Skada community priors（social inductive bias,from skada_analytics.sqlite）
     # 只在 non-combat option 上填;combat 动作默认 0.0(不适用)。
     # loader 构造 option 时查 SkadaPriors,让 token-level 就含"玩家群体行为"先验。

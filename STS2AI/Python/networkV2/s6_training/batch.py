@@ -51,7 +51,7 @@ class BatchedBanks:
     sample_weights: torch.Tensor | None = None       # (B,)
 
 
-def _pad_bank(samples: list[TokenBank], max_numeric_dim: int = 56) -> PaddedBank:
+def _pad_bank(samples: list[TokenBank], max_numeric_dim: int = 58) -> PaddedBank:
     B = len(samples)
     max_len = max((len(bank) for bank in samples), default=1)
     max_len = max(max_len, 1)
@@ -77,7 +77,7 @@ def _pad_bank(samples: list[TokenBank], max_numeric_dim: int = 56) -> PaddedBank
 
 def collate_banks(
     samples: list[UnifiedTokenBanks],
-    max_numeric_dim: int = 56,
+    max_numeric_dim: int = 58,
 ) -> BatchedBanks:
     B = len(samples)
     if B == 0:
@@ -144,7 +144,7 @@ class TrainingSample:
 
 def collate_training_samples(
     samples: list[TrainingSample],
-    max_numeric_dim: int = 56,
+    max_numeric_dim: int = 58,
 ) -> BatchedBanks:
     """将 TrainingSample 列表拼成 BatchedBanks，含全部 multi-head targets。"""
     batched = collate_banks([s.banks for s in samples], max_numeric_dim)

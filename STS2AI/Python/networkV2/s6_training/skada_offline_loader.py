@@ -422,6 +422,50 @@ def _build_shop_sample(
     return samples
 
 
+# 全局可选:fetcher 传进来用于查 path priors(训练时由 train 脚本注入)
+_PATH_PRIORS_FETCHER = None
+
+
+def set_path_priors_fetcher(fetcher) -> None:
+    """让训练脚本注入 SkadaIndexFetcher,loader 内部查 path priors 时用。"""
+    global _PATH_PRIORS_FETCHER
+    _PATH_PRIORS_FETCHER = fetcher
+
+
+def _compute_path_fingerprint_key(
+    start_coord: tuple,
+    nodes_by_coord: dict[tuple, dict],
+    max_hops: int = 20,
+) -> str:
+    """和 build_path_priors.py 的 _compute_fingerprint 同逻辑,BFS 下游算 fingerprint key。"""
+    from networkV2.s6_training.build_path_priors import _compute_fingerprint
+
+    visited: set[tuple] = set()
+    frontier = {tuple(start_coord)}
+    types: list[str] = []
+    bfs_depth = 0
+    while frontier and bfs_depth < max_hops:
+        next_frontier: set[tuple] = set()
+        for c in frontier:
+            if c in visited:
+                continue
+            visited.add(c)
+            node = nodes_by_coord.get(c)
+            if node is None:
+                continue
+            t = str(node.get("type", "") or "")
+            if t:
+                types.append(t)
+            for child in (node.get("children") or []):
+                ct = tuple(child)
+                if ct not in visited:
+                    next_frontier.add(ct)
+        frontier = next_frontier
+        bfs_depth += 1
+    fp = _compute_fingerprint(types)
+    return fp.key()
+
+
 def _build_map_route_samples(
     run_state: SkadaRunState,
     map_act: dict[str, Any],
@@ -479,6 +523,25 @@ def _build_map_route_samples(
                 # 全局路径 stat:从此 child 到 boss 所有可达路径的 type 分布 +
                 # 最优子路径 rest 数 + 路径长度 → 让网络看到"下游所有选择"
                 stats = _path_global_stats(child, nodes_by_coord)
+            # Skada data-driven path priors(freq + efficiency,查 sqlite)
+            prior_freq, prior_eff = 0.0, 0.5
+            if _PATH_PRIORS_FETCHER is not None and child_type != UNKNOWN_NODE_TYPE:
+                try:
+                    fp_key = _compute_path_fingerprint_key(child, nodes_by_coord)
+                    # asc_bucket 从 ascension 算
+                    asc = int(run_state.ascension or 0)
+                    if asc < 5: asc_bucket = "low"
+                    elif asc < 15: asc_bucket = "mid"
+                    elif asc < 20: asc_bucket = "high"
+                    else: asc_bucket = "max"
+                    result = _PATH_PRIORS_FETCHER.lookup_path_prior(
+                        run_state.character, asc_bucket, fp_key,
+                    )
+                    if result is not None:
+                        prior_freq, prior_eff = result
+                except Exception:
+                    pass
+
             cand = ActionCandidate(
                 action_type="select_map_node",
                 action_index=k,
@@ -495,6 +558,8 @@ def _build_map_route_samples(
                 route_path_monster_rate=stats.monster_rate,
                 route_best_rest_count=stats.best_rest_count_norm,
                 route_path_length_norm=stats.path_length_norm,
+                route_prior_frequency=prior_freq,
+                route_prior_efficiency=prior_eff,
             )
             candidates.append(cand)
             if child == next_coord:
@@ -919,6 +984,67 @@ def iter_records_from_sqlite(
             yield rec
     finally:
         con.close()
+
+
+def load_samples_from_index(
+    index_db: Path,
+    *,
+    priors_db: Path | None = None,
+    n_runs: int = 2000,
+    balanced: bool = True,
+    n_per_group: int | None = None,
+    require_map_acts: bool = False,
+    characters: list[str] | None = None,
+    asc_bucket: str | None = None,
+    seed: int = 0,
+    **loader_kwargs: Any,
+) -> list[TrainingSample]:
+    """基于 skada_runs.sqlite 索引 + 原始 jsonl seek 读取产 TrainingSample。
+
+    4.7 GB jsonl 不全 load,按 index 分层采样 → 只拉选中的 runs。
+    priors_db 提供时会自动 attach 到 fetcher,candidate 填 data-driven prior feature。
+    """
+    from networkV2.s6_training.skada_index_dataset import SkadaIndexFetcher
+
+    fetcher = SkadaIndexFetcher(index_db=index_db, priors_db=priors_db)
+    set_path_priors_fetcher(fetcher)
+
+    try:
+        stats = fetcher.stats()
+        logger.info(f"index stats: {stats}")
+
+        if balanced:
+            per_group = n_per_group or max(n_runs // 20, 10)
+            rows = fetcher.sample_balanced(
+                n_per_group=per_group, require_map_acts=require_map_acts, seed=seed,
+            )
+        else:
+            rows = fetcher.sample_clean_runs(
+                n=n_runs,
+                character=characters[0] if characters and len(characters) == 1 else None,
+                asc_bucket=asc_bucket,
+                require_map_acts=require_map_acts,
+                seed=seed,
+            )
+
+        logger.info(f"selected {len(rows)} runs for loading")
+        all_samples: list[TrainingSample] = []
+        for i, record in enumerate(fetcher.fetch_records(rows)):
+            if not record.get("floor_timeline"):
+                continue
+            try:
+                samples = load_run_samples(record, **loader_kwargs)
+            except Exception as e:
+                logger.warning(f"load_run_samples failed: {e}")
+                continue
+            all_samples.extend(samples)
+            if (i + 1) % 500 == 0:
+                logger.info(f"loaded {i+1} runs → {len(all_samples)} samples")
+        logger.info(f"done: {len(all_samples)} samples from {len(rows)} runs")
+        return all_samples
+    finally:
+        fetcher.close()
+        set_path_priors_fetcher(None)
 
 
 def load_samples_from_sqlite(

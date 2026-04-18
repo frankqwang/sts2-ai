@@ -55,11 +55,9 @@ class NetworkConfig:
     d_model: int = 384
     n_heads: int = 8
     dropout: float = 0.1
-    # 56:原 48 不够。action token 已用满 48(详见 bank_assembler._action_token 注释),
-    # 路径规划要求给 route candidate 加 8 维 path global stats(到 boss 整条路径的
-    # rest/shop/elite/treasure/event/monster 计数 + 路径长度 + 最优子路径 rest 数),
-    # 让网络看到每个 child 的"下游全局"而非只有近邻。
-    max_numeric_dim: int = 56
+    # 58:56 → 58 加 2 维 skada path prior(frequency + efficiency),
+    # 来自 build_path_priors.py 的离线聚合表,data-driven 路径先验。
+    max_numeric_dim: int = 58
 
     # ---- Memory Encoders (Layer 2) ----
     # 每个 encoder 的 self-attention 层数

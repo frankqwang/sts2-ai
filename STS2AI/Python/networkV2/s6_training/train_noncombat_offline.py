@@ -39,7 +39,7 @@ from networkV2.s5_net.unified_net import UnifiedNet
 from networkV2.s6_training.batch import TrainingSample, collate_training_samples
 from networkV2.s6_training.offline_bc_loss import OfflineBCLoss, OfflineBCLossConfig
 from networkV2.s6_training.skada_offline_loader import (
-    load_samples_from_jsonl_dir, load_samples_from_sqlite,
+    load_samples_from_jsonl_dir, load_samples_from_sqlite, load_samples_from_index,
 )
 
 
@@ -277,9 +277,19 @@ def train_offline(
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Skada 离线非战斗训练(BC + value regression)")
     p.add_argument("--jsonl-dir", type=Path, default=None,
-                   help="skada run jsonl 目录(优先 --sqlite,都没给默认 jsonl 目录)")
+                   help="skada run jsonl 目录(优先 --sqlite/--index-db,都没给默认 jsonl 目录)")
     p.add_argument("--sqlite", type=Path, default=None,
-                   help="skada_analytics.sqlite 路径(生产推荐)")
+                   help="(legacy)skada_analytics.sqlite raw_json 路径")
+    p.add_argument("--index-db", type=Path, default=None,
+                   help="skada_runs.sqlite 索引(build_skada_index.py 产出);推荐生产用")
+    p.add_argument("--priors-db", type=Path, default=None,
+                   help="skada_path_priors.sqlite(build_path_priors.py 产出);接 data-driven 路径先验")
+    p.add_argument("--n-per-group", type=int, default=None,
+                   help="index 模式下每 (character, asc_bucket) 组采样 N 条 run;不给则 max-runs/20")
+    p.add_argument("--balanced", action="store_true", default=True,
+                   help="index 模式下按 character × asc_bucket 分层均衡采样")
+    p.add_argument("--require-map-acts", action="store_true",
+                   help="index 模式下只选有 map_acts 的 runs(route policy 必需)")
     p.add_argument("--only-victory", action="store_true",
                    help="只用 is_victory=1 的 run")
     p.add_argument("--min-ascension", type=int, default=0,
@@ -322,7 +332,20 @@ def main():
         include_map_routes=not args.no_map_routes,
     )
 
-    if args.sqlite is not None:
+    if args.index_db is not None:
+        logger.info(f"loading from index: {args.index_db} (priors={args.priors_db})")
+        samples = load_samples_from_index(
+            index_db=args.index_db,
+            priors_db=args.priors_db,
+            n_runs=args.max_runs or 2000,
+            balanced=args.balanced,
+            n_per_group=args.n_per_group,
+            require_map_acts=args.require_map_acts,
+            characters=characters,
+            seed=args.seed,
+            **loader_kwargs,
+        )
+    elif args.sqlite is not None:
         logger.info(f"loading from SQLite: {args.sqlite}")
         samples = load_samples_from_sqlite(
             args.sqlite,

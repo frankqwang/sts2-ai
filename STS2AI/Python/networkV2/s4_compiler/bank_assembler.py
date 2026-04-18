@@ -844,12 +844,19 @@ class BankAssembler:
             float(a.route_best_rest_count),
             float(a.route_path_length_norm),
         ]
-        # 合计 15+3+5+6+1+3+9+2+4+8 = 56 维(= tokenizer max_numeric_dim=56)
+        # Skada victory-runs 挖出的 data-driven 先验(2 维):
+        # frequency:该 fingerprint 在高手群体出现频率 → 等价 "受欢迎的赢法"
+        # efficiency:1 - duration_normalized → 等价 "更快的赢法"
+        route_data_prior_axes = [
+            float(a.route_prior_frequency),
+            float(a.route_prior_efficiency),
+        ]
+        # 合计 15+3+5+6+1+3+9+2+4+8+2 = 58 维(= tokenizer max_numeric_dim=58)
         return Token(
             numeric=(
                 combat_axes + target_axes + family_axes + role_axes
                 + extra_axes + noncombat_axes + event_kind_axes + route_axes
-                + skada_prior_axes + route_path_axes
+                + skada_prior_axes + route_path_axes + route_data_prior_axes
             ),
             token_type=TK_ACTION_CANDIDATE,
             owner_id=a.source_card_id or a.source_potion_id or a.action_type,
