@@ -269,6 +269,20 @@ def buffed_ironclad_deck() -> dict[str, Any]:
 
 
 @lru_cache(maxsize=1)
+def _load_skada_victory_decks_cached(character: str | None = None) -> list[dict]:
+    """加载 skada 真实玩家 final_deck(18K unique decks,按 character 过滤)。
+
+    优先级最高:比老 Artifacts/combat_teacher/ 的 teacher deck 多 100x,真实玩家分布。
+    """
+    try:
+        from networkV2.s6_training.skada_victory_decks import load_skada_victory_decks
+        decks = load_skada_victory_decks(character=character)
+        return decks or []
+    except Exception as e:
+        logger.debug(f"skada_victory_decks load failed: {e}")
+        return []
+
+
 def _load_real_boss_decks_cached() -> list[dict]:
     """Cache 真实 boss deck 列表（启动时加载一次）。"""
     try:
@@ -703,11 +717,26 @@ def chained_combat_rollout(
     return all_samples, sub_infos
 
 
-def build_chain_deck(rng: random.Random) -> dict[str, Any]:
-    """整个 chain 共用的 deck。默认用真实 boss-ready deck（模拟玩家走到 boss 前状态）。
-
-    Fallback：若 real_boss_decks 加载失败 → buffed_ironclad_deck。
+def build_chain_deck(rng: random.Random, character: str = "IRONCLAD") -> dict[str, Any]:
+    """整个 chain 共用的 deck。Fallback chain:
+      1. skada_victory_decks(18K 真实玩家 final_deck,按 character 过滤)
+      2. real_boss_decks(Artifacts/combat_teacher,老 AI teacher)
+      3. buffed_ironclad_deck(hardcoded fallback)
     """
+    # 优先 1:skada 真实玩家 deck(多样性最好)
+    skada_decks = _load_skada_victory_decks_cached(character=character)
+    if skada_decks:
+        chosen = rng.choice(skada_decks)
+        return {
+            "deck": list(chosen["deck"]),
+            "relics": list(chosen.get("relics", [])),
+            "max_hp": chosen.get("max_hp", 80),
+            "current_hp": chosen.get("current_hp", chosen.get("max_hp", 80)),
+            "gold": chosen.get("gold", 99),
+            "max_energy": chosen.get("max_energy", 3),
+            "_source": "skada_victory",
+        }
+    # fallback 2:Artifacts/combat_teacher
     real_decks = _load_real_boss_decks_cached()
     if real_decks:
         chosen = rng.choice(real_decks)
@@ -718,8 +747,12 @@ def build_chain_deck(rng: random.Random) -> dict[str, Any]:
             "current_hp": chosen.get("current_hp", chosen.get("max_hp", 80)),
             "gold": chosen.get("gold", 99),
             "max_energy": chosen.get("max_energy", 3),
+            "_source": "combat_teacher",
         }
-    return buffed_ironclad_deck()
+    # fallback 3:hardcoded
+    d = buffed_ironclad_deck()
+    d["_source"] = "buffed_hardcoded"
+    return d
 
 
 def _compute_gae_combat(samples: list[TrainingSample], gamma: float = 0.99, lam: float = 0.95) -> None:
