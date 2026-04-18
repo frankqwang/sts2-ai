@@ -94,13 +94,15 @@ class SkadaIndexFetcher:
         asc_bucket: str | None = None,
         require_map_acts: bool = False,
         seed: int = 0,
-        version_prefix: str | None = "v0.103.",
+        version_prefix: str | None = "v0.103.2",
     ) -> list[RunIndexRow]:
         """从 clean runs 里抽 n 条。支持按 character / asc_bucket / 是否需要 map_acts 过滤。
 
-        version_prefix: 只抽 game_version 以此为前缀的 run(LIKE prefix%)。默认 v0.103.
-        (skada 有 v0.99 老版本数据,encounter/card 和当前 sim 不兼容,默认过滤掉)。
-        传 None 不过滤版本 (配合 sim 白名单过滤不兼容 encounter/card)。
+        version_prefix: 只抽 game_version 以此为前缀的 run(LIKE prefix%)。
+        默认 `v0.103.2` — 和当前 sim 版本精确对齐。skada 混了多个 patch
+        (v0.99 / v0.102 / v0.103.0 / .1 / .2),非 .2 版本的 encounter balance 和
+        card property 可能被 rebalance,replay 时 deck 合法性 / 胜率分布会偏。
+        传 None 不过滤版本。
         """
         con = sqlite3.connect(str(self.index_db))
         con.row_factory = sqlite3.Row
