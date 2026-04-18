@@ -147,7 +147,7 @@ nohup python -u -m networkV2.s6_training.combat_cotrainer \
 - `networkV2/s2_config/act1/bosses.py/elites.py` —— 已 deprecated
 
 ### Sim C#
-- `STS2AI/ENV/Sim/Runtime/HeadlessSim/Program.cs` —— `game_catalog` endpoint + `BuildGameCatalog()`
+- `STS2AI/ENV/Sim/HeadlessSim/Program.cs` —— `game_catalog` endpoint + `BuildGameCatalog()`
 - `STS2AI/Python/constants.py` —— `SIM_HOST_EXE` 优先 Release
 
 ### 诊断工具（放 `runs/<exp>/analysis/`）
