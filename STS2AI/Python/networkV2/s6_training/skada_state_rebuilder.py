@@ -344,15 +344,19 @@ class SkadaRunState:
                     self.deck.append(base)
 
         # --- relic_choices (含 ancient_choices) ---
+        # 2026-04-19:skada 数据里 ancient_choices 偶尔把 character_id (NECROBINDER /
+        # IRONCLAD / REGENT / SILENT) 写进 relic_id 字段(爬虫 bug)。还有 mod relic
+        # (EXTRARELICS-*) / skada 自制 relic (NEOWS_*)。用 `is_known_relic`(走
+        # source_knowledge.sqlite)过滤,确保只有 sim 认识的 id 进 state。
         for c in floor_data.get("relic_choices", []) or []:
             if c.get("was_picked"):
                 rid = normalize_relic_id(c.get("relic_id", ""))
-                if rid:
+                if rid and is_known_relic(rid):
                     self.relics.append(rid)
         for c in floor_data.get("ancient_choices", []) or []:
             if c.get("was_picked"):
                 rid = normalize_relic_id(c.get("relic_id", ""))
-                if rid and rid not in self.relics:
+                if rid and is_known_relic(rid) and rid not in self.relics:
                     self.relics.append(rid)
 
         # --- campfire card_upgrades ---
@@ -380,7 +384,7 @@ class SkadaRunState:
                     self.deck.append(base)
             elif atype in ("buy_relic", "purchase_relic"):
                 rid = normalize_relic_id(iid_raw)
-                if rid:
+                if rid and is_known_relic(rid):
                     self.relics.append(rid)
             elif atype in ("buy_potion", "purchase_potion"):
                 pid = normalize_potion_id(iid_raw)

@@ -65,8 +65,10 @@ class LossConfig:
     tempo_coef: float = 0.3
     leaf_coef: float = 0.2
     # turn_damage_lookahead: combo/牌序学习的关键 head；
-    # raw 数值同 hp_loss 范围（0~50+），所以 coef 设小 0.02 平衡量级
-    turn_damage_coef: float = 0.02
+    # 【暂禁用】BC 未监督此 head,RL 中 softplus 输出放飞到 1e7 级,拖爆 total_loss。
+    # 后续若要重启,需要:(1) BC 阶段加 target 监督;(2) target 除 max_hp normalize;
+    # (3) pred 加 clamp(比如 sigmoid * max_hp)。
+    turn_damage_coef: float = 0.0
     # leaf_evaluator 其余 3 个 head 的权重（小：避免盖过主 head，同时消除"白训"）
     transition_risk_coef: float = 0.1
     survival_margin_coef: float = 0.1
