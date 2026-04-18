@@ -56,14 +56,14 @@ build = {
 ## 当前入口
 
 - full-run reset：
-  - [FullRunSimulationDtos.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulationDtos.cs:7)
-  - [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:309)
+  - [FullRunSimulationDtos.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulationDtos.cs:7)
+  - [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:309)
 - combat-only reset：
-  - [CombatTrainingResetRequest.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Training/CombatTrainingResetRequest.cs:5)
-  - [CombatTrainingSession.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Training/CombatTrainingSession.cs:143)
-  - [CombatSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/CombatSimulatorRuntimeFacade.cs:70)
+  - [CombatTrainingResetRequest.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Training/CombatTrainingResetRequest.cs:5)
+  - [CombatTrainingSession.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Training/CombatTrainingSession.cs:143)
+  - [CombatSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/CombatSimulatorRuntimeFacade.cs:70)
 - 共享 helper：
-  - [SimulationBuildSupport.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/SimulationBuildSupport.cs:12)
+  - [SimulationBuildSupport.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/SimulationBuildSupport.cs:12)
 - Python reset 客户端：
   - [full_run_env.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Python/ipc/full_run_env.py:102)
   - [binary_pipe_client.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Python/ipc/binary_pipe_client.py:487)
@@ -76,7 +76,7 @@ binary pipe 协议版本从 `11` 升到 `12`，schema hash 改为：
 
 对应位置：
 
-- [BinaryProtocol.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Runtime/HeadlessSim/BinaryProtocol.cs:180)
+- [BinaryProtocol.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/BinaryProtocol.cs:180)
 - [binary_pipe_client.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Python/ipc/binary_pipe_client.py:45)
 
 这次改动要求 Python client 和 C# host 一起更新。
@@ -92,7 +92,7 @@ binary pipe 协议版本从 `11` 升到 `12`，schema hash 改为：
 
 已做一轮最小 smoke：
 
-- 用临时编译的 `headless_sim_host_0991.exe`
+- 用临时编译的 `HeadlessSim.exe`
 - 通过 pipe-binary 调 `reset(build=...)`
 - 成功在返回状态里读到指定的 deck / relics / hp / gold
 - 非法 `upgrade_level` 也会被引擎正确拒绝
