@@ -24,6 +24,7 @@ import ctypes.wintypes
 import json
 import struct
 import sys
+import threading
 import time
 from typing import Any
 
@@ -58,7 +59,15 @@ _kernel32 = ctypes.windll.kernel32 if sys.platform == "win32" else None
 
 
 class PipeClient:
-    """Named pipe client using Windows overlapped I/O for timeout support."""
+    """Named pipe client using Windows overlapped I/O for timeout support.
+
+    **线程安全**: `self._handle` 和 `self._event` 是共享状态,overlapped I/O
+    event 不能被两个线程并发占用。**调用方必须用 lock 串行 call()**。
+
+    历史: 之前在 call() 里做 owner-thread 断言检测,但 rollout 每 iter 新建
+    worker thread (thread_id 不同),会误报为跨线程并发,挂整 iter。改成
+    "内部不自检,依赖调用方串行化" (PipeBackedCombatTrainingClient 已加 RLock)。
+    """
 
     def __init__(self, port: int = 15527, pipe_name: str | None = None,
                  default_timeout_s: float = 30.0):
@@ -274,78 +283,6 @@ class PipeClient:
 
     def __exit__(self, *args):
         self.close()
-
-
-class PipeBackedMctsEnv:
-    """MCTS environment using named pipe for high-speed IPC."""
-
-    def __init__(self, port: int = 15527):
-        self.pipe = PipeClient(port=port)
-        self.pipe.connect()
-        self._state: dict | None = None
-
-    def reset(self, character_id: str = "IRONCLAD",
-              ascension_level: int = 0,
-              seed: str | None = None) -> dict:
-        params: dict[str, Any] = {
-            "character_id": character_id,
-            "ascension_level": ascension_level,
-        }
-        if seed:
-            params["seed"] = seed
-        self._state = self.pipe.call("reset", params)
-        return self._state
-
-    def step(self, action: dict) -> dict:
-        result = self.pipe.call("step", action)
-        if "state" in result and isinstance(result["state"], dict):
-            self._state = result["state"]
-        else:
-            self._state = result
-        return self._state
-
-    def get_state(self) -> dict:
-        self._state = self.pipe.call("state")
-        return self._state
-
-    def save(self) -> str:
-        result = self.pipe.call("save_state")
-        return result["state_id"]
-
-    def load(self, state_id: str) -> dict:
-        self._state = self.pipe.call("load_state", {"state_id": state_id})
-        return self._state
-
-    def delete(self, state_id: str) -> bool:
-        result = self.pipe.call("delete_state", {"state_id": state_id})
-        return result.get("deleted", False)
-
-    def clear_cache(self) -> None:
-        self.pipe.call("delete_state", {"clear_all": True})
-
-    def legal_actions(self) -> list[dict]:
-        result = self.pipe.call("legal_actions")
-        actions = result.get("legal_actions") or []
-        return [a for a in actions
-                if isinstance(a, dict) and a.get("is_enabled") is not False]
-
-    def batch_step(self, actions: list[dict]) -> dict:
-        return self.pipe.call("batch_step", {"actions": actions})
-
-    @property
-    def state_type(self) -> str:
-        if self._state is None:
-            return ""
-        return (self._state.get("state_type") or "").lower()
-
-    @property
-    def is_terminal(self) -> bool:
-        if self._state is None:
-            return False
-        return bool(self._state.get("terminal"))
-
-    def close(self):
-        self.pipe.close()
 
 
 if __name__ == "__main__":

@@ -1,18 +1,19 @@
-"""全局运行环境客户端（HTTP、pipe、binary-pipe），用于驱动完整的 STS2 游戏。"""
+"""全局运行环境客户端。
+
+- `ApiBackedFullRunClient`: HTTP 观战 mod。
+- `PipeBackedFullRunClient` / `BinaryBackedFullRunClient`: 训练主通道（Named Pipe, proto）。
+"""
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import time
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from env.sts2_singleplayer_env import (
     SingleplayerApiError,
     SingleplayerClient,
-    SingleplayerConnectionError,
     SingleplayerTimeoutError,
 )
 from env.binary_pipe_client import BinaryPipeClient
@@ -24,37 +25,6 @@ from networkV2.s0_bridge.proto_pipe_client import ProtoPipeClient
 from env.simulator_api_error import SimulatorApiError
 
 logger = logging.getLogger(__name__)
-
-
-class FullRunEnvError(RuntimeError):
-    pass
-
-
-class FullRunEnv(ABC):
-    @abstractmethod
-    def reset(
-        self,
-        *,
-        character_id: str = "IRONCLAD",
-        ascension_level: int = 0,
-        seed: str | None = None,
-        build: dict[str, Any] | None = None,
-        auto_start_from_menu: bool | None = None,
-        timeout_s: float | None = None,
-    ) -> dict[str, Any]:
-        """Reset env for a new full-run episode and return initial state."""
-
-    @abstractmethod
-    def get_state(self) -> dict[str, Any]:
-        """Fetch the latest raw environment state snapshot."""
-
-    @abstractmethod
-    def step(self, action: dict[str, Any]) -> tuple[dict[str, Any], float, bool, dict[str, Any]]:
-        """Apply one action and return (state, reward, done, info)."""
-
-    @abstractmethod
-    def close(self) -> None:
-        """Release client resources."""
 
 
 def _state_type(state: dict[str, Any] | None) -> str:
@@ -101,7 +71,6 @@ def _looks_like_missing_endpoint(exc: Exception) -> bool:
             "unknown api",
         )
     )
-
 
 def _normalize_build_spec(build: dict[str, Any] | None) -> dict[str, Any] | None:
     if build is None:
@@ -510,8 +479,15 @@ class PipeBackedFullRunClient:
     Requires the Godot simulator to be running with pipe server enabled.
     In pure-sim mode all game logic is synchronous, with no polling needed.
 
-    If pipe connection fails, temporarily falls back to HTTP and periodically
-    retries pipe reconnection (every ``_PIPE_RETRY_INTERVAL`` calls).
+    Pipe 断开的恢复策略:
+      1. 快速重连一轮（1s/2s/3-5s 三次）
+      2. 失败 → auto_launch 开启时重启 HeadlessSim host 再重连
+      3. 还失败 → consecutive_failures++,到 _DEAD_THRESHOLD 标记 _dead=True
+
+    **不再有 HTTP fallback**:之前的 `_http_fallback` 字段从未被实例化过
+    (grep 全文件无 `= ApiBackedFullRunClient(...)` 赋值),是死代码,2026-04-18
+    清理。HTTP 路径只在观战 mod (ApiBackedFullRunClient 独立使用) 场景保留,
+    sim 训练主路径纯 pipe。
     """
     port: int = 15527
     protocol: str = "json"
@@ -523,11 +499,8 @@ class PipeBackedFullRunClient:
     _pipe: PipeClient | BinaryPipeClient = field(init=False, repr=False)
     _connected: bool = field(default=False, init=False, repr=False)
     _last_step_info: dict[str, Any] | None = field(default=None, init=False, repr=False)
-    _http_fallback: ApiBackedFullRunClient | None = field(default=None, init=False, repr=False)
-    _call_count_since_fallback: int = field(default=0, init=False, repr=False)
     _owned_host_proc: Any | None = field(default=None, init=False, repr=False)
 
-    _PIPE_RETRY_INTERVAL: int = 50  # retry pipe every N calls while on HTTP
     _consecutive_failures: int = field(default=0, init=False, repr=False)
     _dead: bool = field(default=False, init=False, repr=False)
     _DEAD_THRESHOLD: int = 3  # mark dead after N consecutive total failures
@@ -614,29 +587,6 @@ class PipeBackedFullRunClient:
             raise ConnectionError(f"Pipe reconnect cycle failed on port {self.port}")
         raise last_error
 
-    def _maybe_retry_pipe(self) -> None:
-        """Periodically try to recover pipe connection while on HTTP fallback."""
-        if self._http_fallback is None:
-            return
-        self._call_count_since_fallback += 1
-        if self._call_count_since_fallback < self._PIPE_RETRY_INTERVAL:
-            return
-        self._call_count_since_fallback = 0
-        try:
-            new_pipe = self._new_pipe_client()
-            new_pipe.connect(timeout_s=3.0)
-            # Success: switch back to pipe
-            self._pipe = new_pipe
-            self._http_fallback = None
-            self._connected = True
-            self._consecutive_failures = 0
-            self._dead = False
-            import logging
-            logging.getLogger(__name__).info(
-                "Pipe recovered on port %d, switching back from HTTP", self.port)
-        except Exception:
-            pass  # stay on HTTP, will retry later
-
     def _reconnect(self) -> None:
         """Force reconnect after pipe error (timeout, broken pipe, etc)."""
         log = logging.getLogger(__name__)
@@ -647,7 +597,6 @@ class PipeBackedFullRunClient:
             self._try_pipe_reconnect_cycle(timeouts=quick_timeouts)
             self._consecutive_failures = 0
             self._dead = False
-            self._http_fallback = None
             return
         except Exception as exc:
             last_error = exc
@@ -660,7 +609,6 @@ class PipeBackedFullRunClient:
                 self._try_pipe_reconnect_cycle(timeouts=[2.0, 3.0, 5.0])
                 self._consecutive_failures = 0
                 self._dead = False
-                self._http_fallback = None
                 log.info("Pipe recovered on port %d after host restart", self.port)
                 return
             except Exception as exc:
@@ -688,29 +636,22 @@ class PipeBackedFullRunClient:
 
     def get_state(self) -> dict[str, Any]:
         self._ensure_connected()
-        self._maybe_retry_pipe()
-        if self._http_fallback is not None:
-            return self._http_fallback.get_state()
         try:
             return self._pipe.call("state")
-        except (TimeoutError, ConnectionError, BrokenPipeError):
+        except (TimeoutError, ConnectionError, BrokenPipeError, ValueError, json.JSONDecodeError):
+            # ValueError/JSONDecodeError 处理 proto/json desync 场景:
+            # server 发了异常帧导致 unpack/decode 失败。必须触发 reconnect
+            # 清理 pipe 里的残留字节,否则后续 call 都会读到 garbage。
             self._reconnect()
-            if self._http_fallback is not None:
-                return self._http_fallback.get_state()
             return self._pipe.call("state")
 
     def act(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._ensure_connected()
         self._last_step_info = None
-        self._maybe_retry_pipe()
-        if self._http_fallback is not None:
-            return self._http_fallback.act(payload)
         try:
             result = self._pipe.call("step", payload)
-        except (TimeoutError, ConnectionError, BrokenPipeError):
+        except (TimeoutError, ConnectionError, BrokenPipeError, ValueError, json.JSONDecodeError):
             self._reconnect()
-            if self._http_fallback is not None:
-                return self._http_fallback.act(payload)
             result = self._pipe.call("step", payload)
         info = result.get("info")
         if isinstance(info, dict):
@@ -769,19 +710,10 @@ class PipeBackedFullRunClient:
             params["seed"] = str(seed)
         if normalized_build is not None:
             params["build"] = normalized_build
-        self._maybe_retry_pipe()
-        if self._http_fallback is not None:
-            return self._http_fallback.reset(
-                character_id=character_id, ascension_level=ascension_level,
-                seed=seed, build=normalized_build, timeout_s=timeout_s)
         try:
             state = self._pipe.call("reset", params)
-        except (TimeoutError, ConnectionError, BrokenPipeError):
+        except (TimeoutError, ConnectionError, BrokenPipeError, ValueError, json.JSONDecodeError):
             self._reconnect()
-            if self._http_fallback is not None:
-                return self._http_fallback.reset(
-                    character_id=character_id, ascension_level=ascension_level,
-                    seed=seed, build=normalized_build, timeout_s=timeout_s)
             state = self._pipe.call("reset", params)
         if isinstance(state, dict):
             return state
@@ -884,9 +816,11 @@ class PipeBackedFullRunClient:
 
     def close(self) -> None:
         self._close_pipe_quietly()
-        self._http_fallback = None
         stop_process(self._owned_host_proc)
         self._owned_host_proc = None
+        # reset dead state so client 重新构造 / resume 训练时可以再次尝试连接
+        self._consecutive_failures = 0
+        self._dead = False
 
     @property
     def transport_name(self) -> str:
@@ -961,164 +895,3 @@ def create_full_run_client(
         ready_timeout_s=ready_timeout_s,
         prefer_v2=prefer_v2,
     )
-
-
-@dataclass(slots=True)
-class SingleplayerFullRunEnv(FullRunEnv):
-    base_url: str = "http://127.0.0.1:15526"
-    poll_interval_s: float = 0.05
-    request_timeout_s: float = 10.0
-    ready_timeout_s: float = 20.0
-    auto_start_from_menu: bool = True
-    prefer_v2: bool = True
-    _client: ApiBackedFullRunClient = field(init=False, repr=False)
-    _has_entered_run: bool = field(default=False, init=False, repr=False)
-    _last_state: dict[str, Any] | None = field(default=None, init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self._client = ApiBackedFullRunClient(
-            base_url=self.base_url,
-            poll_interval_s=self.poll_interval_s,
-            request_timeout_s=self.request_timeout_s,
-            ready_timeout_s=self.ready_timeout_s,
-            prefer_v2=self.prefer_v2,
-        )
-
-    def reset(
-        self,
-        *,
-        character_id: str = "IRONCLAD",
-        ascension_level: int = 0,
-        seed: str | None = None,
-        build: dict[str, Any] | None = None,
-        auto_start_from_menu: bool | None = None,
-        timeout_s: float | None = None,
-    ) -> dict[str, Any]:
-        state = self.get_state()
-        if _state_type(state) != "menu":
-            self._has_entered_run = True
-            return state
-
-        should_auto_start = self.auto_start_from_menu if auto_start_from_menu is None else bool(auto_start_from_menu)
-        if not should_auto_start:
-            return state
-        state = self._client.reset(
-            character_id=character_id,
-            ascension_level=int(ascension_level),
-            seed=seed,
-            build=build,
-            timeout_s=timeout_s,
-        )
-        self._has_entered_run = True
-        self._last_state = state
-        return state
-
-    def get_state(self) -> dict[str, Any]:
-        state = self._client.get_state()
-        if _state_type(state) != "menu":
-            self._has_entered_run = True
-        self._last_state = state
-        return state
-
-    def step(self, action: dict[str, Any]) -> tuple[dict[str, Any], float, bool, dict[str, Any]]:
-        next_state = self._client.act(action)
-        state_type = _state_type(next_state)
-        if state_type != "menu":
-            self._has_entered_run = True
-
-        run_outcome = _extract_run_outcome(next_state)
-        done = bool(state_type == "game_over" or (state_type == "menu" and self._has_entered_run))
-        reward = 0.0
-        if done:
-            if run_outcome and ("victory" in run_outcome or run_outcome == "win"):
-                reward = 1.0
-            elif run_outcome:
-                reward = -1.0
-
-        info: dict[str, Any] = {
-            "accepted": True,
-            "state_type": state_type,
-            "run_outcome": run_outcome,
-            "transport_name": self._client.transport_name,
-        }
-        step_info = self._client.last_step_info
-        if isinstance(step_info, dict):
-            info["step_info"] = step_info
-        self._last_state = next_state
-        return next_state, reward, done, info
-
-    def close(self) -> None:
-        self._client.close()
-
-
-def connect(base_url: str = "http://127.0.0.1:15526") -> SingleplayerFullRunEnv:
-    env = SingleplayerFullRunEnv(base_url=base_url)
-    env.get_state()
-    return env
-
-
-def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Full-run env adapter that prefers /api/v2/full_run_env and falls back to /api/v1/singleplayer.",
-    )
-    parser.add_argument("--base-url", default="http://127.0.0.1:15526", help="STS2MCP HTTP base URL.")
-    parser.add_argument("--character-id", default="IRONCLAD", help="Character for reset(start_run).")
-    parser.add_argument("--ascension-level", type=int, default=0, help="Ascension for reset(start_run).")
-    parser.add_argument("--seed", default=None, help="Optional seed for reset(start_run).")
-    parser.add_argument("--no-auto-start", action="store_true", help="Do not start a run from menu on reset().")
-    parser.add_argument("--force-v1", action="store_true", help="Disable /api/v2/full_run_env and always use /api/v1/singleplayer.")
-    parser.add_argument("--step-json", default=None, help="Optional JSON action to send through step().")
-    parser.add_argument("--print-state-json", action="store_true", help="Print full state JSON payload(s).")
-    return parser
-
-
-def main() -> int:
-    parser = _build_arg_parser()
-    args = parser.parse_args()
-
-    env = SingleplayerFullRunEnv(
-        base_url=args.base_url,
-        auto_start_from_menu=not args.no_auto_start,
-        prefer_v2=not args.force_v1,
-    )
-    try:
-        state = env.reset(
-            character_id=args.character_id,
-            ascension_level=int(args.ascension_level),
-            seed=args.seed,
-        )
-        summary = {
-            "event": "reset",
-            "state_type": _state_type(state),
-            "run": state.get("run"),
-        }
-        print(json.dumps(summary, ensure_ascii=True))
-        if args.print_state_json:
-            print(json.dumps(state, ensure_ascii=True))
-
-        if args.step_json:
-            action = json.loads(args.step_json)
-            if not isinstance(action, dict):
-                raise FullRunEnvError("--step-json must decode to a JSON object.")
-            next_state, reward, done, info = env.step(action)
-            step_summary = {
-                "event": "step",
-                "reward": reward,
-                "done": done,
-                "info": info,
-                "state_type": _state_type(next_state),
-                "run": next_state.get("run"),
-            }
-            print(json.dumps(step_summary, ensure_ascii=True))
-            if args.print_state_json:
-                print(json.dumps(next_state, ensure_ascii=True))
-        return 0
-    except (SingleplayerConnectionError, SingleplayerApiError, SingleplayerTimeoutError, FullRunEnvError) as exc:
-        print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=True))
-        return 1
-    finally:
-        env.close()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

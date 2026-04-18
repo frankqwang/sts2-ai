@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from env.full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
 from env.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 from constants import ARTIFACTS_ROOT, REPO_ROOT
-from test_simulator_consistency import pick_deterministic_action, state_summary
+from test_simulator_consistency import state_summary
 
 
 COMBAT_TYPES = {"monster", "elite", "boss"}
@@ -32,10 +32,10 @@ CARD_REWARD_SAVELOAD_SEEDS = ("CARD_SCAN_24", "CARD_SCAN_169")
 EXACT_STATE_CASES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("map", "map", ("SHOP_EXIT_000",)),
     ("event", "event", ("SHOP_EXIT_000", "SHOP_EXIT_001", "SHOP_EXIT_002")),
-    ("rest_site", "rest_site", ("SHOP_EXIT_000", "SHOP_EXIT_002", "SHOP_EXIT_003")),
-    ("shop", "shop", ("SHOP_EXIT_005", "SHOP_EXIT_010", "SHOP_EXIT_011")),
-    ("treasure", "treasure", ("SHOP_EXIT_000", "SHOP_EXIT_009", "SHOP_EXIT_010")),
-    ("game_over", "game_over", ("SHOP_EXIT_000", "SHOP_EXIT_001", "SHOP_EXIT_002")),
+    ("rest_site", "rest_site", ("SHOP_EXIT_017", "SHOP_EXIT_025", "SHOP_EXIT_026")),
+    ("shop", "shop", ("SHOP_EXIT_000", "SHOP_EXIT_002", "SHOP_EXIT_005")),
+    ("treasure", "treasure", ("SHOP_EXIT_015", "SHOP_EXIT_024", "SHOP_EXIT_036")),
+    ("game_over", "game_over", ("SHOP_EXIT_012", "SHOP_EXIT_042", "SHOP_EXIT_055")),
 )
 REWARD_FLOW_EXACT_CASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("combat_rewards", REWARD_SAVELOAD_SEEDS),
@@ -55,7 +55,9 @@ def create_client(backend: str, port: int) -> FullRunClientLike:
             ready_timeout_s=30.0,
         )
     if backend == "headless-binary":
-        return BinaryBackedFullRunClient(port=port, connect_timeout_s=15.0)
+        # 训练主类名保留了 Binary 前缀，但默认协议已切到 proto。
+        # 这里是 legacy bin 协议验收，必须显式指定 protocol="bin"。
+        return BinaryBackedFullRunClient(port=port, connect_timeout_s=15.0, protocol="bin")
     return PipeBackedFullRunClient(port=port, connect_timeout_s=15.0)
 
 
@@ -393,6 +395,37 @@ def choose_target_action(state: dict[str, Any], targets: set[str], rng: random.R
     if not legal:
         return {"action": "wait"}
 
+    if state_type == "map":
+        map_state = state.get("map") or {}
+        next_options = map_state.get("next_options") or []
+        normalized_targets = {str(target).strip().lower() for target in targets}
+        for option in next_options:
+            point_type = str(option.get("point_type") or option.get("type") or "").strip().lower()
+            if point_type not in normalized_targets:
+                continue
+            target_index = option.get("index")
+            target_col = option.get("col")
+            target_row = option.get("row")
+            action = next(
+                (
+                    entry
+                    for entry in legal
+                    if entry.get("action") == "choose_map_node"
+                    and (
+                        (target_index is not None and entry.get("index") == target_index)
+                        or (
+                            target_col is not None
+                            and target_row is not None
+                            and entry.get("col") == target_col
+                            and entry.get("row") == target_row
+                        )
+                    )
+                ),
+                None,
+            )
+            if action is not None:
+                return action
+
     if "card_reward" in targets and state_type == "combat_rewards":
         rewards = state.get("rewards") or {}
         for item in rewards.get("items") or []:
@@ -409,7 +442,7 @@ def choose_target_action(state: dict[str, Any], targets: set[str], rng: random.R
                 if action is not None:
                     return action
 
-    return choose_default_action(state) if state_type == "hand_select" else pick_deterministic_action(str(state_type or ""), legal, rng)
+    return choose_default_action(state)
 
 
 def verify_combat_save_load(client: FullRunClientLike) -> tuple[str, list[str]]:

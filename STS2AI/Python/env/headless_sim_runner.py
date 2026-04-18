@@ -28,8 +28,9 @@ DEFAULT_DLL_PATH = SIM_HOST_EXE if SIM_HOST_EXE.exists() else SIM_LEGACY_DLL
 def _source_roots(repo_root: Path) -> Iterable[Path]:
     candidates = (
         repo_root / "src",
-        repo_root / "STS2AI" / "ENV" / "Sim" / "Overlay",
-        repo_root / "STS2AI" / "ENV" / "Sim" / "Runtime",
+        repo_root / "STS2AI" / "ENV" / "Sim" / "SrcCompat",
+        repo_root / "STS2AI" / "ENV" / "Sim" / "HeadlessSim",
+        repo_root / "STS2AI" / "ENV" / "Sim" / "GodotSharpStub",
     )
     for root in candidates:
         if root.exists():
@@ -37,7 +38,7 @@ def _source_roots(repo_root: Path) -> Iterable[Path]:
 
 
 def _host_project_path(repo_root: Path) -> Path:
-    return repo_root / "STS2AI" / "ENV" / "Sim" / "Host" / "headless_sim_host_0991.csproj"
+    return repo_root / "STS2AI" / "ENV" / "Sim" / "HeadlessSim" / "HeadlessSim.csproj"
 
 
 def _resolve_msbuild_path(raw_value: str, *, repo_root: Path, host_project: Path) -> Path | None:
@@ -82,6 +83,8 @@ def _newest_source_file(repo_root: Path) -> tuple[Path | None, float]:
         )
     for root in candidate_roots:
         for path in root.rglob("*.cs"):
+            if any(part in {"bin", "obj", "__pycache__"} for part in path.parts):
+                continue
             try:
                 mtime = path.stat().st_mtime
             except OSError:
@@ -110,7 +113,7 @@ def ensure_host_binary_is_fresh(*, repo_root: Path, dll_path: Path) -> None:
         raise RuntimeError(
             "HeadlessSim host binary is stale: "
             f"{dll_path} is older than source {newest_source}. "
-            "Rebuild STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj before auto-launch."
+            "Rebuild STS2AI/ENV/Sim/HeadlessSim/HeadlessSim.csproj before auto-launch."
         )
 
 
@@ -205,15 +208,41 @@ def start_headless_sim(
     launch_cmd = _build_launch_command(dll_path, protocol, port)
     if extra_host_args:
         launch_cmd.extend(str(arg) for arg in extra_host_args)
-    proc = subprocess.Popen(
-        launch_cmd,
-        cwd=str(repo_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    _wait_until_ready(port=port, timeout_s=connect_timeout_s, protocol=protocol)
-    return proc
+    # stderr 落盘捕获 C# NPE stack trace(默认 Artifacts/sim_logs/),
+    # 之前 DEVNULL 直接吞掉所有 sim 异常,定位不到问题。
+    log_dir = Path(repo_root) / "Artifacts" / "sim_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = log_dir / f"sim_port{port}_{ts}.log"
+    log_fh = open(log_path, "w", buffering=1, encoding="utf-8", errors="replace")
+    proc: subprocess.Popen | None = None
+    try:
+        proc = subprocess.Popen(
+            launch_cmd,
+            cwd=str(repo_root),
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        proc._sim_log_fh = log_fh  # attach handle for later close
+        proc._sim_log_path = str(log_path)
+        _wait_until_ready(port=port, timeout_s=connect_timeout_s, protocol=protocol)
+        return proc
+    except Exception as exc:
+        if proc is not None:
+            try:
+                stop_process(proc)
+            except Exception:
+                pass
+        else:
+            try:
+                log_fh.close()
+            except Exception:
+                pass
+        raise RuntimeError(
+            f"HeadlessSim on port {port} failed to become ready. See log: {log_path}"
+        ) from exc
 
 
 def stop_process(proc: subprocess.Popen | None) -> None:
@@ -223,7 +252,20 @@ def stop_process(proc: subprocess.Popen | None) -> None:
         proc.terminate()
         proc.wait(timeout=5)
     except Exception:
-        proc.kill()
+        try:
+            proc.kill()
+            # kill() 是异步 signal,紧接着 close log fd 可能 WinError 32
+            # (子进程尚未释放 stdout handle)。等最多 2s 让 OS 真正收回 handle。
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+    # 关 stderr log handle 释放文件
+    log_fh = getattr(proc, "_sim_log_fh", None)
+    if log_fh is not None:
+        try:
+            log_fh.close()
+        except Exception:
+            pass
 
 
 def _wait_until_ready(*, port: int, timeout_s: float, protocol: str = "json") -> None:

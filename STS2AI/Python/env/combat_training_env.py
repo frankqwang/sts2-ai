@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 
+import logging
 import random
+import threading
+import time as _time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,19 +27,31 @@ _CARD_TYPE_NAMES = {
     6: "QUEST",
 }
 _TARGET_TYPE_NAMES = {
-    0: None,
-    1: "None",
-    2: "Self",
-    3: "AnyEnemy",
-    4: "AnyPlayer",
-    5: "AnyAlly",
-    6: "TargetedNoCreature",
-    7: "AllEnemies",
-    8: "RandomEnemy",
-    9: "AllAllies",
-    10: "Osty",
+    # 对齐 C# `src/Core/Entities/Cards/TargetType.cs` enum 顺序
+    # (旧 map 错位 +1 导致 STRIKE_DEFECT(enum=2=AnyEnemy) 被 Python 当 Self,
+    # 生成不带 target 的 play_card,sim reject "requires a target")
+    0: "None",
+    1: "Self",
+    2: "AnyEnemy",
+    3: "AllEnemies",
+    4: "RandomEnemy",
+    5: "AnyPlayer",
+    6: "AnyAlly",
+    7: "AllAllies",
+    8: "TargetedNoCreature",
+    9: "Osty",
 }
+# 根据 target_type 判定是否需要 target 参数(权威,不依赖 sim 的 requires_target 字段)。
+# sim 端的 requires_target 字段有时和 target_type 不一致 → 踩过坑。
+_TARGETED_TYPES = frozenset({"AnyEnemy", "AnyPlayer", "AnyAlly", "TargetedNoCreature"})
 _ROOM_TYPES = {"monster", "elite", "boss"}
+
+
+def _target_type_needs_target(target_type) -> bool:
+    """单一权威判定:基于 target_type 字符串决定是否要传 target_id。"""
+    if target_type is None:
+        return False
+    return str(target_type) in _TARGETED_TYPES
 
 
 def _pick(raw: dict[str, Any] | None, *keys: str, default: Any = None) -> Any:
@@ -176,39 +191,53 @@ def build_combat_legal_actions(snapshot: dict[str, Any]) -> list[dict[str, Any]]
     hand_cards = snapshot.get("hand")
     if not isinstance(hand_cards, list):
         hand_cards = ((snapshot.get("battle") or {}).get("hand") or [])
+    # 当前 hand 里的 hand_index 集合(sim 可能给非连续 index,不能只看长度)
+    valid_hand_indices: set[int] = set()
+    for c in (hand_cards or []):
+        if isinstance(c, dict):
+            idx = _pick(c, "hand_index", "HandIndex", default=None)
+            if idx is not None:
+                valid_hand_indices.add(int(idx))
     for raw_card in hand_cards or []:
         if not isinstance(raw_card, dict):
             continue
         if not bool(_pick(raw_card, "can_play", "CanPlay", default=False)):
             continue
         hand_index = int(_pick(raw_card, "hand_index", "HandIndex", default=0) or 0)
+        if hand_index not in valid_hand_indices:
+            continue
         card_id = str(_pick(raw_card, "id", "Id", default="") or "")
         label = str(_pick(raw_card, "title", "Title", default=card_id) or card_id)
-        valid_targets = [int(target_id) for target_id in (_pick(raw_card, "valid_target_ids", "ValidTargetIds", default=[]) or [])]
-        if bool(_pick(raw_card, "requires_target", "RequiresTarget", default=False)) and valid_targets:
+        # sim 权威:requires_target 是 C# 从 card 实际逻辑算出来的,不要自己猜。
+        # (历史坑:Python 手写 _TARGET_TYPE_NAMES enum map 错位一位 → 生成
+        #  错的 play_card target schema → 大量 "requires a target" reject。)
+        requires_target = bool(_pick(raw_card, "requires_target", "RequiresTarget", default=False))
+        valid_targets = [int(tid) for tid in (_pick(raw_card, "valid_target_ids", "ValidTargetIds", default=[]) or [])]
+
+        if requires_target:
+            # 没 valid_targets → sim 发的数据矛盾(但确实见过,比如无效的 enemy 死了),skip
+            if not valid_targets:
+                continue
             for target_id in valid_targets:
-                actions.append(
-                    {
-                        "action": "play_card",
-                        "hand_index": hand_index,
-                        "card_index": hand_index,
-                        "index": hand_index,
-                        "card_id": card_id,
-                        "label": label,
-                        "target_id": target_id,
-                    }
-                )
-        else:
-            actions.append(
-                {
+                actions.append({
                     "action": "play_card",
                     "hand_index": hand_index,
                     "card_index": hand_index,
                     "index": hand_index,
                     "card_id": card_id,
                     "label": label,
-                }
-            )
+                    "target_id": target_id,
+                })
+        else:
+            # 不需 target 的 card:绝对不带 target_id
+            actions.append({
+                "action": "play_card",
+                "hand_index": hand_index,
+                "card_index": hand_index,
+                "index": hand_index,
+                "card_id": card_id,
+                "label": label,
+            })
     if bool(_pick(snapshot, "can_end_turn", "CanEndTurn", default=False)):
         actions.append({"action": "end_turn", "label": "End Turn"})
     return actions
@@ -307,50 +336,76 @@ def adapt_combat_snapshot(
     return state
 
 
+_logger = logging.getLogger(__name__)
+
+
 @dataclass(slots=True)
 class PipeBackedCombatTrainingClient:
+    """Combat training sim client。
+
+    **2026-04-18 重构**:内部 pipe 管理全部下沉到 `networkV2.s0_bridge.transport`。
+    不再自己维护 PipeClient/RLock/heartbeat/reconnect。本类只保留 combat 业务:
+      - _normalize_build_spec / _adapt combat snapshot
+      - reset / step / combat_catalog / get_state RPC 语义
+
+    所有通用设施:
+      - 连接管理/重连/lock → PipeConnection
+      - 后台保活 → HealthMonitor (独立 pipe 连接)
+    """
     port: int = 15527
     connect_timeout_s: float = 10.0
     auto_launch: bool = False
     repo_root: str | Path = DEFAULT_REPO_ROOT
     dll_path: str | Path = DEFAULT_DLL_PATH
-    _pipe: PipeClient = field(init=False, repr=False)
-    _connected: bool = field(default=False, init=False, repr=False)
+    enable_heartbeat: bool = True           # 是否启 HealthMonitor 独立 pipe 保活
+    heartbeat_interval_s: float = 5.0       # 心跳间隔
+    _conn: Any = field(default=None, init=False, repr=False)
+    _health: Any = field(default=None, init=False, repr=False)
     _owned_host_proc: Any | None = field(default=None, init=False, repr=False)
     _room_type_lookup: dict[str, str] = field(default_factory=dict, init=False, repr=False)
     _current_build: dict[str, Any] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._pipe = PipeClient(port=self.port)
-
-    def _start_owned_host(self) -> None:
-        if self._owned_host_proc is not None:
-            return
-        self._owned_host_proc = start_headless_sim(
-            port=self.port,
-            repo_root=self.repo_root,
-            dll_path=self.dll_path,
-            connect_timeout_s=max(15.0, float(self.connect_timeout_s)),
-            protocol="json",
-            extra_host_args=["--combat-sim-server"],
+        from networkV2.s0_bridge.transport import (
+            PipeConnection, PipeConnectionConfig, HealthMonitor,
         )
+        # 注入 sim launcher/stopper 给 PipeConnection 做 auto_launch
+        def _launcher(port: int):
+            proc = start_headless_sim(
+                port=port,
+                repo_root=self.repo_root,
+                dll_path=self.dll_path,
+                connect_timeout_s=max(15.0, float(self.connect_timeout_s)),
+                protocol="json",
+                extra_host_args=["--combat-sim-server"],
+            )
+            self._owned_host_proc = proc
+            return proc
+        cfg = PipeConnectionConfig(
+            port=self.port,
+            protocol="json",
+            connect_timeout_s=self.connect_timeout_s,
+            auto_launch=self.auto_launch,
+            sim_launcher=_launcher if self.auto_launch else None,
+            sim_stopper=stop_process if self.auto_launch else None,
+        )
+        self._conn = PipeConnection(cfg)
+        # HealthMonitor 独立 pipe 连接保活 (和业务连接互不干扰)
+        if self.enable_heartbeat:
+            self._health = HealthMonitor(
+                cfg, interval_s=self.heartbeat_interval_s,
+                ping_method="combat_catalog",
+            )
 
     def _ensure_connected(self) -> None:
-        if self._connected:
-            return
-        try:
-            self._pipe.connect(timeout_s=self.connect_timeout_s)
-        except Exception:
-            if not self.auto_launch:
-                raise
-            self._start_owned_host()
-            self._pipe = PipeClient(port=self.port)
-            self._pipe.connect(timeout_s=max(15.0, float(self.connect_timeout_s)))
-        self._connected = True
+        if not self._conn.is_connected():
+            self._conn.connect()
+            if self._health is not None:
+                self._health.start()
 
     def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         self._ensure_connected()
-        result = self._pipe.call(method, params)
+        result = self._conn.safe_call(method, params)
         if not isinstance(result, dict):
             raise SimulatorApiError(f"{method} response is not a dict")
         return result
@@ -433,13 +488,27 @@ class PipeBackedCombatTrainingClient:
         return state, reward, done, info
 
     def close(self) -> None:
-        try:
-            self._pipe.close()
-        except Exception:
-            pass
-        self._connected = False
-        stop_process(self._owned_host_proc)
-        self._owned_host_proc = None
+        # HealthMonitor 后台 ping 先停
+        if self._health is not None:
+            try:
+                self._health.stop()
+            except Exception:
+                pass
+            self._health = None
+        # 业务连接
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+        # 如果 auto_launch 的 sim 已被 PipeConnection 管(sim_stopper),这里是重复
+        # 但 stop_process 幂等,保留无害
+        if self._owned_host_proc is not None:
+            try:
+                stop_process(self._owned_host_proc)
+            except Exception:
+                pass
+            self._owned_host_proc = None
 
 
 def sample_weighted_room_type(

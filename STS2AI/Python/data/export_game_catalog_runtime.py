@@ -30,7 +30,7 @@ B. Skada 兼容层(字段名/id 格式和 skada_analytics.sqlite 对齐,方便 j
     # 指定输出位置 / sim host exe
     python -m data.export_game_catalog_runtime \
         --output data/source_knowledge.sqlite \
-        --sim-host ENV/Sim/Host/bin/Release/net9.0/headless_sim_host_0991.exe
+        --sim-host ENV/Sim/HeadlessSim/bin/Release/net9.0/HeadlessSim.exe
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ _PYTHON_ROOT = Path(__file__).resolve().parents[1]           # .../STS2AI/Python
 _STS2AI_ROOT = _PYTHON_ROOT.parent                            # .../STS2AI
 _DEFAULT_OUTPUT = _PYTHON_ROOT / "data" / "source_knowledge.sqlite"
 _DEFAULT_SIM_HOST_CANDIDATES = (
-    _STS2AI_ROOT / "ENV" / "Sim" / "Host" / "bin" / "Release" / "net9.0" / "headless_sim_host_0991.exe",
-    _STS2AI_ROOT / "ENV" / "Sim" / "Host" / "bin" / "Debug"   / "net9.0" / "headless_sim_host_0991.exe",
+    _STS2AI_ROOT / "ENV" / "Sim" / "HeadlessSim" / "bin" / "Release" / "net9.0" / "HeadlessSim.exe",
+    _STS2AI_ROOT / "ENV" / "Sim" / "HeadlessSim" / "bin" / "Debug"   / "net9.0" / "HeadlessSim.exe",
 )
 _DEFAULT_PORT = 15527      # sim host 默认端口;pipe 名格式 "sts2_mcts_<port>"
 _SIM_READY_TIMEOUT = 30.0  # 启动 sim 后 connect 的最大等待
@@ -128,7 +128,7 @@ def _resolve_sim_host(user_path: str | None) -> Path:
         if c.exists():
             return c
     raise FileNotFoundError(
-        "no headless_sim_host_0991.exe found. "
+        "no HeadlessSim.exe found. "
         "Tried: " + " ; ".join(str(c) for c in _DEFAULT_SIM_HOST_CANDIDATES)
     )
 
@@ -177,8 +177,8 @@ def _connect_client(port: int, protocol: str = _DEFAULT_PROTOCOL, timeout_s: flo
             if "protocol version mismatch" in str(e).lower():
                 raise ConnectionError(
                     f"sim protocol version mismatch: {e}\n"
-                    "  → headless_sim_host_0991.exe 是旧版,请 rebuild:\n"
-                    "    dotnet build -c Release STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj\n"
+                    "  → HeadlessSim.exe 是旧版,请 rebuild:\n"
+                    "    dotnet build -c Release STS2AI/ENV/Sim/HeadlessSim/HeadlessSim.csproj\n"
                     "  rebuild 后重跑本脚本即可。"
                 ) from e
             time.sleep(0.3)
@@ -569,7 +569,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT,
                    help=f"输出 sqlite 路径(默认 {_DEFAULT_OUTPUT})")
     p.add_argument("--sim-host", type=str, default=None,
-                   help="headless_sim_host_0991.exe 路径(默认自动找 Release/Debug)")
+                   help="HeadlessSim.exe 路径(默认自动找 Release/Debug)")
     p.add_argument("--port", type=int, default=_DEFAULT_PORT,
                    help=f"sim pipe port(默认 {_DEFAULT_PORT})")
     p.add_argument("--no-spawn-sim", dest="spawn_sim", action="store_false", default=True,

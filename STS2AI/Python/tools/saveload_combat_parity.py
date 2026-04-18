@@ -25,7 +25,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent))
+python_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(python_root))
 
 from env.full_run_env import FullRunClientLike
 from sim_semantic_audit_common import (
