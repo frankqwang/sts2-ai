@@ -69,7 +69,10 @@ from networkV2.s6_training.train_full_run_v2 import (
 )
 from networkV2.s7_diagnostics.rollout_dumper import RolloutDumper
 
-from env.combat_training_env import PipeBackedCombatTrainingClient
+# 2026-04-18: combat rollout 通道切到 proto 直连。`CombatSession` 是
+# `networkV2.s0_bridge.transport.PipeConnection + ProtoCodec` 的高层封装,
+# sim 侧 legal_actions 是权威字段,Python 不再自己推断。
+from networkV2.s0_bridge.combat_session import CombatSession as PipeBackedCombatTrainingClient
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +357,7 @@ def combat_rollout(
     seed: str = "",
     greedy: bool = False,
     record_trajectory: bool = False,
+    graph_runner_holder: dict | None = None,
 ) -> tuple[list[TrainingSample], dict[str, Any]]:
     """跑一场 combat，收 TrainingSample。
 
@@ -375,6 +379,11 @@ def combat_rollout(
     steps = 0
     turn_start_sample_idx = 0
     turn_step_damages: list[float] = []
+    # Step-level profiling(性能瓶颈定位)。每 phase 累积 ms,combat 结束时写 info["_prof"]
+    _prof_compile = 0.0
+    _prof_forward = 0.0
+    _prof_step = 0.0
+    _prof_post = 0.0
     hp_at_start = int((state.get("player") or {}).get("hp", 0) or 0)
     # Gap 1:per-turn HP/enemy_max 跟踪,给 turn_end_reward 算 hp_loss_this_turn
     hp_at_turn_start = hp_at_start
@@ -402,6 +411,7 @@ def combat_rollout(
         if not legal:
             break
 
+        _t0 = time.perf_counter()
         banks = compiler.compile(
             state, legal,
             combat_memory=tracker.combat_memory,
@@ -410,8 +420,22 @@ def combat_rollout(
             encounter_id=encounter_id.lower(),
             room_type=room_type,
         )
+        _t1 = time.perf_counter()
+        # Lazy init per-worker CUDA graph runner:第一次 step 拿到 banks 样本后 capture
+        forward_fn = net
+        if graph_runner_holder is not None and graph_runner_holder.get("runner") is None \
+           and not graph_runner_holder.get("init_attempted", False):
+            graph_runner_holder["init_attempted"] = True
+            graph_runner_holder["runner"] = _try_init_worker_graph_runner(
+                net, banks, enc_idx_tensor,
+                graph_runner_holder.get("worker_id", 0),
+            )
+        if graph_runner_holder is not None:
+            rr = graph_runner_holder.get("runner")
+            if rr is not None and rr.enabled:
+                forward_fn = rr
         with torch.no_grad():
-            out = net(banks=banks, encounter_idx=enc_idx_tensor)
+            out = forward_fn(banks=banks, encounter_idx=enc_idx_tensor)
         logits = out.logits[0, :len(legal)]
         mask = out.action_mask[0, :len(legal)]
         logits = torch.nan_to_num(logits.masked_fill(~mask, float("-inf")), nan=0.0)
@@ -420,6 +444,7 @@ def combat_rollout(
         lp = dist.log_prob(torch.tensor(idx, device=logits.device)).item()
         value = out.values.fight_win.item() if out.values is not None else 0.5
         chosen = legal[idx]
+        _t2 = time.perf_counter()
 
         # step
         try:
@@ -427,6 +452,10 @@ def combat_rollout(
         except Exception as e:
             logger.warning(f"[co] step failed: {e}")
             break
+        _t3 = time.perf_counter()
+        _prof_compile += (_t1 - _t0) * 1000.0
+        _prof_forward += (_t2 - _t1) * 1000.0
+        _prof_step += (_t3 - _t2) * 1000.0
 
         # per-step damage
         step_damage = max(0, _enemies_total_hp(state) - _enemies_total_hp(next_state))
@@ -589,6 +618,8 @@ def combat_rollout(
         steps += 1
         prev_state = state
         state = next_state
+        _t4 = time.perf_counter()
+        _prof_post += (_t4 - _t3) * 1000.0
         if done:
             break
 
@@ -621,6 +652,15 @@ def combat_rollout(
         "max_hp": (state.get("player") or {}).get("max_hp", 0) or 0,
         "hp_loss": max(hp_at_start - final_hp, 0),
     }
+    # Step-level 性能分解(ms per step, 看瓶颈是 compile/forward/sim_step/post)
+    if steps > 0:
+        info["_prof"] = {
+            "compile_ms": round(_prof_compile / steps, 3),
+            "forward_ms": round(_prof_forward / steps, 3),
+            "step_ms": round(_prof_step / steps, 3),
+            "post_ms": round(_prof_post / steps, 3),
+            "total_ms": round((_prof_compile + _prof_forward + _prof_step + _prof_post) / steps, 3),
+        }
     if record_trajectory:
         info["trajectory"] = trajectory
     return samples, info
@@ -669,6 +709,7 @@ def chained_combat_rollout(
     heal_after_combat: dict[int, float] = CHAIN_HEAL_AFTER_COMBAT,
     start_full_hp: bool = CHAIN_START_FULL_HP,
     abort_on_defeat: bool = CHAIN_ABORT_ON_DEFEAT,
+    graph_runner_holder: dict | None = None,
 ) -> tuple[list[TrainingSample], list[dict[str, Any]]]:
     """顺序跑 N 场战斗，HP 跨场保留，场间按 heal_after_combat 回血。
 
@@ -692,6 +733,7 @@ def chained_combat_rollout(
             max_steps=max_steps_per_combat,
             seed=f"{seed_prefix}-c{i}",
             record_trajectory=record_trajectory,
+            graph_runner_holder=graph_runner_holder,
         )
         # 给 sub_info 加 chain 上下文
         info["chain_index"] = i
@@ -713,6 +755,75 @@ def chained_combat_rollout(
             if heal_frac > 0:
                 heal_amount = int(round(max_hp * heal_frac))
                 cur_hp = min(max_hp, cur_hp + heal_amount)
+
+    return all_samples, sub_infos
+
+
+def skada_chain_combat_rollout(
+    client: PipeBackedCombatTrainingClient,
+    net: UnifiedNet,
+    compiler: CombatFeatureCompiler,
+    task_chain: list[dict[str, Any]],
+    max_steps_per_combat: int,
+    seed_prefix: str,
+    record_trajectory: bool = False,
+    abort_on_defeat: bool = False,
+    use_skada_hp_each_combat: bool = False,
+    graph_runner_holder: dict | None = None,
+) -> tuple[list[TrainingSample], list[dict[str, Any]]]:
+    """按 skada run 的真实 combat 序列顺序跑,每场还原当时的 deck/relics。
+
+    HP 继承策略:
+      - 第一场:用 task.build.current_hp(skada 起始 hp)
+      - 后续 victory:用 AI 上场残血 或 skada 那时刻 hp(取 min,AI 不能吃白食)
+      - 后续 defeat:重置为 skada 真实玩家那时刻的 hp,继续打下一场
+        这样确保 AI 一定见过 boss/elite,不会因为前几场挂了就错过训练信号
+      - abort_on_defeat=True 时,失败直接中止 chain(更严谨 RL 但 boss 信号稀疏)
+
+    deck/relics:每场都用 task[i] 那时刻的真实 skada 状态
+    (玩家可能在战斗间获得新卡/新 relic,AI 应该能用到)。
+    """
+    if not task_chain:
+        return [], []
+
+    all_samples: list[TrainingSample] = []
+    sub_infos: list[dict[str, Any]] = []
+
+    cur_hp: int | None = None
+    for i, task in enumerate(task_chain):
+        build = dict(task["build"])
+        skada_hp = int(build.get("current_hp", build.get("max_hp", 80)))
+        if i == 0 or use_skada_hp_each_combat or cur_hp is None:
+            # 第一场或 per-combat HP 模式:用 skada 真实 hp
+            build["current_hp"] = skada_hp
+        else:
+            # 残血继承:AI 真实血 和 skada 当时 hp 取 min
+            # (AI 比 skada 强时 hp 不应该超过 skada 真实玩家;AI 比 skada 弱时用残血)
+            build["current_hp"] = max(1, min(cur_hp, skada_hp))
+
+        seed = f"{seed_prefix}-c{i}"
+        samples, info = combat_rollout(
+            client, net, compiler,
+            task["encounter_id"], task["room_type"], build,
+            max_steps=max_steps_per_combat, seed=seed,
+            record_trajectory=record_trajectory,
+            graph_runner_holder=graph_runner_holder,
+        )
+        info["chain_index"] = i
+        info["chain_total"] = len(task_chain)
+        info["hp_enter"] = int(build.get("current_hp", 0))
+        info["ref_floor"] = task.get("ref_floor", -1)
+        info["run_id"] = task.get("run_id", -1)
+        sub_infos.append(info)
+        all_samples.extend(samples)
+
+        if info.get("outcome") != "victory":
+            if abort_on_defeat:
+                break
+            # 不 abort:下场重置为 skada 那时刻 hp,AI 继续见 boss/elite
+            cur_hp = skada_hp
+        else:
+            cur_hp = int(info.get("final_hp", cur_hp or skada_hp))
 
     return all_samples, sub_infos
 
@@ -814,6 +925,61 @@ class CombatClientPool:
         self.clients.clear()
 
 
+def _try_init_worker_graph_runner(net, banks_sample, enc_idx_sample, worker_id: int):
+    """懒初始化 per-worker CUDA graph runner。
+
+    每 worker 独立 static buffer + graph,避免多 thread race。
+
+    行为依赖 net._cuda_graph_cfg.strict(默认 True):
+      - strict=True: capture 失败 → raise (GraphCaptureFailedError/ GraphBankUndeclaredError)
+                     让训练立刻挂,强迫修代码而不是静默降级
+      - strict=False: 失败降级 eager 并打印 warning(需要显式接受损失 5-10x 加速)
+
+    GraphBankUndeclaredError 永远 raise,无论 strict(因为 fallback 也解决不了漏配 bank)。
+    """
+    cfg = getattr(net, "_cuda_graph_cfg", None)
+    if cfg is None:
+        return None
+    from networkV2.s5_net.graph_runner import (
+        GraphRunner,
+        GraphBankUndeclaredError,
+        GraphCaptureFailedError,
+    )
+    strict = bool(cfg.get("strict", True))
+    try:
+        runner = GraphRunner(
+            net, banks_sample, enc_idx_sample,
+            parity_check_every=int(cfg.get("parity_check_every", 500)),
+            atol=float(cfg.get("atol", 1e-3)),
+            rtol=float(cfg.get("rtol", 1e-3)),
+            startup_parity_n=int(cfg.get("startup_parity_n", 10)),
+            startup_parity_noise=float(cfg.get("startup_parity_noise", 0.05)),
+            strict=strict,
+        )
+    except GraphBankUndeclaredError:
+        raise
+    except GraphCaptureFailedError:
+        raise
+    except Exception as e:
+        if strict:
+            raise
+        logger.warning(
+            f"[cuda-graph] worker {worker_id} init failed: {type(e).__name__}: "
+            f"{str(e)[:150]}. Fallback eager (strict=False)."
+        )
+        return None
+
+    if runner.enabled:
+        logger.info(f"[cuda-graph] worker {worker_id} runner OK")
+        return runner
+    # enabled=False 且上面没 raise → 唯一可能就是 strict=False 降级
+    logger.warning(
+        f"[cuda-graph] worker {worker_id} disabled (strict=False fallback). "
+        f"训练将以 eager 跑,QPS 会显著降低。"
+    )
+    return None
+
+
 def _worker_collect(
     worker_id: int,
     pool: CombatClientPool,
@@ -823,9 +989,13 @@ def _worker_collect(
                   #   chained:       ("chain", sequence, chain_deck, seed_prefix, record_traj)
     max_steps: int,
     result_q: queue.Queue,
+    graph_runner_holder: dict | None = None,  # per-worker runner cache(thread-local)
 ) -> None:
     compiler = CombatFeatureCompiler()
     client = pool.get(worker_id)
+    # Per-worker CUDA graph holder(thread-local);first rollout 时 lazy init
+    if graph_runner_holder is None:
+        graph_runner_holder = {"worker_id": worker_id, "runner": None, "init_attempted": False}
     samples_out: list[TrainingSample] = []
     infos: list[dict] = []
     for task in tasks:
@@ -837,6 +1007,18 @@ def _worker_collect(
                     max_steps_per_combat=max_steps,
                     seed_prefix=seed_prefix,
                     record_trajectory=record_traj,
+                    graph_runner_holder=graph_runner_holder,
+                )
+                samples_out.extend(samples)
+                infos.extend(sub_infos)
+            elif task and task[0] == "skada_chain":
+                _tag, task_chain, seed_prefix, record_traj = task
+                samples, sub_infos = skada_chain_combat_rollout(
+                    client, net, compiler, task_chain,
+                    max_steps_per_combat=max_steps,
+                    seed_prefix=seed_prefix,
+                    record_trajectory=record_traj,
+                    graph_runner_holder=graph_runner_holder,
                 )
                 samples_out.extend(samples)
                 infos.extend(sub_infos)
@@ -846,6 +1028,7 @@ def _worker_collect(
                     client, net, compiler, enc_id, rt, deck,
                     max_steps=max_steps, seed=seed,
                     record_trajectory=record_traj,
+                    graph_runner_holder=graph_runner_holder,
                 )
                 samples_out.extend(samples)
                 infos.append(info)
@@ -886,9 +1069,16 @@ def run_cotrainer(args: argparse.Namespace) -> None:
     logger.info(f"UnifiedNet: {params:,} params ({params/1e6:.1f}M)")
 
     if args.checkpoint and Path(args.checkpoint).exists():
-        state = torch.load(args.checkpoint, map_location=device)
-        if isinstance(state, dict) and "net" in state:
-            state = state["net"]
+        state = torch.load(args.checkpoint, map_location=device, weights_only=False)
+        # 兼容多种 checkpoint 格式:
+        #   {"net": ...} (cotrainer 自己保存的老格式)
+        #   {"model_state": ..., "epoch": ..., ...}(BC / train_noncombat_offline 保存)
+        #   直接 state_dict(裸)
+        if isinstance(state, dict):
+            if "net" in state:
+                state = state["net"]
+            elif "model_state" in state:
+                state = state["model_state"]
         try:
             net.load_state_dict(state)
             logger.info(f"Loaded checkpoint: {args.checkpoint}")
@@ -921,6 +1111,68 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                 "[conditioning] Forced re-init: gate=1.0, embed std=0.3, embed[0]=0 "
                 "(破解 conditioning 死锁；UNKNOWN slot 保持 neutral)"
             )
+
+        # BC 从来没训 turn_damage_lookahead head（BC target 里没这个信号）,
+        # 加载 BC checkpoint 后 softplus head 里残留 random init,forward 可能输出
+        # 1e7 量级 → vl_turn_damage 爆到 1e7,拖爆 total_loss。
+        # 对最后一层 Linear 重 init 到 small + bias=0,让 softplus 输出 ~log(2)≈0.7 起步。
+        try:
+            import torch.nn as _nn
+            td_head = net.value_heads.turn_damage
+            last_linear = td_head.proj[-1]
+            _nn.init.normal_(last_linear.weight, mean=0.0, std=0.01)
+            _nn.init.zeros_(last_linear.bias)
+            logger.info("[turn_damage] Reset turn_damage head last-linear (avoid softplus explosion)")
+        except Exception as _e:
+            logger.debug(f"turn_damage head reset skipped: {_e}")
+
+    # torch.compile 用于 rollout 加速 (batch=1 eager 22ms → compile 后 3-8ms)
+    # 注意:trainer 仍用原 `net`(training 需要 autograd 反传,compile 对 backward 支持有限)
+    if getattr(args, "compile_net", False):
+        try:
+            compiled_net = torch.compile(
+                net, mode=args.compile_mode, dynamic=True,
+            )
+            logger.info(
+                f"[compile] torch.compile mode={args.compile_mode} dynamic=True enabled (rollout only)"
+            )
+        except Exception as e:
+            logger.warning(f"[compile] torch.compile failed: {e}; rollout uses eager")
+            compiled_net = net
+    else:
+        compiled_net = net
+
+    # CUDA graph 用于 rollout 加速 (Windows-friendly,不需要 triton)。预期 5-10x forward 加速。
+    # GraphRunner 包一层 wrapper,硬检测 shape/parity drift,capture 失败自动 fallback。
+    cuda_graph_runner = None
+    if getattr(args, "use_cuda_graph", False):
+        from networkV2.s5_net.graph_runner import GraphRunner, patch_dropout_for_graph_safety
+        import torch.nn as _nn
+        # PyTorch issue #99820 防污染:F.dropout p=0 短路 patch (进程全局)
+        patch_dropout_for_graph_safety()
+        # 双保险:永久关 net dropout (rollout+training 都 0)。RL fine-tune 关 dropout
+        # 影响极小;但 cuda graph RNG state 污染训练 100% 挂(issue #99820)。
+        _dcount = 0
+        for m in net.modules():
+            if isinstance(m, _nn.MultiheadAttention):
+                m.dropout = 0.0
+                _dcount += 1
+            elif isinstance(m, _nn.Dropout):
+                m.p = 0.0
+                _dcount += 1
+        logger.info(
+            f"[cuda-graph] dropout disabled globally ({_dcount} modules); "
+            f"F.dropout(p=0) short-circuited"
+        )
+        net._cuda_graph_cfg = {
+            "parity_check_every": int(args.graph_parity_every),
+            "atol": float(args.graph_atol),
+            "rtol": float(args.graph_atol),
+        }
+        logger.info(
+            f"[cuda-graph] enabled (parity_every={args.graph_parity_every}, "
+            f"atol={args.graph_atol}). 首次 rollout 时 capture,~5s warmup。"
+        )
 
     trainer = UnifiedPPOTrainer(net, PPOConfig(
         lr=args.lr, ppo_epochs=args.ppo_epochs,
@@ -959,11 +1211,16 @@ def run_cotrainer(args: argparse.Namespace) -> None:
     out_dir = Path(args.output_dir); out_dir.mkdir(parents=True, exist_ok=True)
 
     use_chained = not bool(getattr(args, "no_chained_episodes", False))
+    use_skada_replay = bool(getattr(args, "skada_replay_index_db", None))
     chain_len = sum(c for _, c in CHAIN_STRUCTURE)
 
     print()
     print(f"Config: preset={args.preset} lr={args.lr} eps/iter={args.episodes_per_iter} workers={args.num_workers}")
-    if use_chained:
+    if use_skada_replay:
+        print(f"Skada chain replay ENABLED: 1 ep = 1 victory run 的全部 combat 按 floor 顺序")
+        print(f"  每场 reset 还原当时 deck/relics,HP 跨场继承(败则用 skada 当时 hp 重置续跑)")
+        print(f"  n_runs={args.skada_replay_n_runs}; avg ~18 combats/run(act1→boss)")
+    elif use_chained:
         struct_str = " → ".join(f"{n}x{rt}" for rt, n in CHAIN_STRUCTURE)
         heal_str = ", ".join(f"after_c{i}+{int(100*f)}%" for i, f in sorted(CHAIN_HEAL_AFTER_COMBAT.items()))
         print(f"Chained episodes ENABLED: 1 ep = {chain_len} combats ({struct_str})")
@@ -975,6 +1232,14 @@ def run_cotrainer(args: argparse.Namespace) -> None:
     print()
     print(f"Iter | Combats | Steps | W/L | Easy% / Med% / Hard% | Losses                           | Time")
     print(f"-----|-----|-------|-----|----------------------|----------------------------------|-----")
+
+    # Sim 健康监控:连续 empty iter 累计,超阈值尝试重启 pool;再失败 abort
+    consecutive_empty_iters = 0
+    MAX_CONSECUTIVE_EMPTY = 2          # 连续 N iter 没 sample → 重启
+    MAX_TOTAL_EMPTY_ABORTS = 3         # 总共重启 N 次还 empty → 彻底 abort
+    total_empty_aborts = 0
+    # Per-worker CUDA graph holder 跨 iter 持久化(避免每 iter 重 capture 累积 RNG 污染)
+    _worker_graph_holders: dict[int, dict] = {}
 
     for iteration in range(1, args.max_iterations + 1):
         t0 = time.time()
@@ -989,7 +1254,40 @@ def run_cotrainer(args: argparse.Namespace) -> None:
         n_record = max(0, int(getattr(args, "record_trajectory_every", 0) or 0))
         tasks_per_worker: list[list] = [[] for _ in range(args.num_workers)]
 
-        if use_chained:
+        if getattr(args, "skada_replay_index_db", None):
+            # Skada chain replay 模式:抽 skada victory run,每 ep = 1 run 的全部战斗
+            # 按 floor 顺序打,每场战斗 reset 时还原当时真实 deck/relics,HP 跨场继承。
+            # 天然解决 deck-encounter 难度匹配 + 真实 build 演化 + curriculum 渐进。
+            if "_skada_chains_pool" not in locals():
+                from networkV2.s6_training.skada_index_dataset import SkadaIndexFetcher
+                from networkV2.s6_training.skada_combat_replay import (
+                    sample_combat_chains, chain_stats, load_sim_supported_lists,
+                )
+                # 从 sim 权威 API 拿支持的 encounter/card/relic 白名单,
+                # 过滤 skada 里(多人模式卡 MP_*/老版本 encounter TOADPOLES_NORMAL/
+                # mod relic EXTRARELICS-*/错分类 event encounter) 等不兼容数据。
+                # 数据源不改,清洗在 cache load 阶段做,训练期永不 hit unsupported。
+                _supported = load_sim_supported_lists(pool.clients[0])
+                _sf = SkadaIndexFetcher(
+                    index_db=Path(args.skada_replay_index_db),
+                )
+                _skada_chains_pool = sample_combat_chains(
+                    _sf, n_runs=int(args.skada_replay_n_runs or 100),
+                    require_map_acts=True, seed=args.seed,
+                    supported_encounters=_supported.encounters or None,
+                    supported_cards=_supported.cards or None,
+                    supported_relics=_supported.relics or None,
+                )
+                logger.info(f"skada chain pool: {chain_stats(_skada_chains_pool)}")
+                _sf.close()
+            # 每 ep 抽一个 run chain(整个 run 的全部 combat 顺序打)
+            ep_chains = [rng.choice(_skada_chains_pool) for _ in range(eps_total)] \
+                if _skada_chains_pool else []
+            for i, chain in enumerate(ep_chains):
+                seed_prefix = f"co-{iteration}-{i}-{rng.getrandbits(32):08x}"
+                tasks_per_worker[i % args.num_workers].append(
+                    ("skada_chain", chain, seed_prefix, record_all))
+        elif use_chained:
             # Chained 模式：每 ep 一个 chain（3m+1e+1b），整个 chain 用同一 deck
             for i in range(eps_total):
                 seq = build_chain_sequence(rng)
@@ -1024,9 +1322,15 @@ def run_cotrainer(args: argparse.Namespace) -> None:
         for w_idx in range(args.num_workers):
             if not tasks_per_worker[w_idx]:
                 continue
+            if w_idx not in _worker_graph_holders:
+                _worker_graph_holders[w_idx] = {
+                    "worker_id": w_idx, "runner": None, "init_attempted": False,
+                }
             t = threading.Thread(
                 target=_worker_collect,
-                args=(w_idx, pool, net, tasks_per_worker[w_idx], args.max_steps, result_q),
+                args=(w_idx, pool, compiled_net, tasks_per_worker[w_idx],
+                      args.max_steps, result_q,
+                      _worker_graph_holders[w_idx]),
             )
             t.start()
             threads.append(t)
@@ -1041,17 +1345,70 @@ def run_cotrainer(args: argparse.Namespace) -> None:
             iter_samples.extend(r["samples"])
             iter_infos.extend(r["infos"])
 
-        # 按难度分类胜率
+        # 按难度分类胜率 + sim error 计数
         wins_by_rt = {"monster": 0, "elite": 0, "boss": 0}
         total_by_rt = {"monster": 0, "elite": 0, "boss": 0}
+        sim_error_count = 0
+        sim_error_types: dict[str, int] = {}
+        # 性能 profiling 汇总(步数加权平均各 phase 耗时 ms)
+        _prof_agg = {"compile_ms": 0.0, "forward_ms": 0.0, "step_ms": 0.0, "post_ms": 0.0}
+        _prof_total_steps = 0
         for info in iter_infos:
             rt = info.get("room_type", "")
             if rt in total_by_rt:
                 total_by_rt[rt] += 1
                 if info.get("outcome") == "victory":
                     wins_by_rt[rt] += 1
+            # sim error 分类统计(WriteFile failed / NPE / invalid action 等)
+            if info.get("outcome") == "error":
+                sim_error_count += 1
+                err_msg = str(info.get("error", ""))[:60]
+                sim_error_types[err_msg] = sim_error_types.get(err_msg, 0) + 1
+            # 性能汇总
+            pr = info.get("_prof")
+            nstep = int(info.get("steps", 0) or 0)
+            if isinstance(pr, dict) and nstep > 0:
+                for k in ("compile_ms", "forward_ms", "step_ms", "post_ms"):
+                    _prof_agg[k] += float(pr.get(k, 0.0)) * nstep
+                _prof_total_steps += nstep
 
         def _wr(rt): return wins_by_rt[rt] / max(total_by_rt[rt], 1)
+
+        # Sim 健康检查:如果 iter 整个 0 有效 combat 或 error 爆 → 尝试重启 pool
+        n_valid_combats = sum(total_by_rt.values())
+        if n_valid_combats == 0 and len(iter_infos) > 0:
+            consecutive_empty_iters += 1
+            logger.error(
+                f"[sim-health] iter {iteration}: 0 valid combats, {sim_error_count} errors. "
+                f"top errors: {sorted(sim_error_types.items(), key=lambda x: -x[1])[:3]}"
+            )
+            if consecutive_empty_iters >= MAX_CONSECUTIVE_EMPTY:
+                total_empty_aborts += 1
+                if total_empty_aborts >= MAX_TOTAL_EMPTY_ABORTS:
+                    logger.error(
+                        f"[sim-health] {MAX_TOTAL_EMPTY_ABORTS} recovery attempts failed, ABORTING training"
+                    )
+                    break
+                logger.warning(
+                    f"[sim-health] {consecutive_empty_iters} consecutive empty iters, "
+                    f"restarting sim pool (attempt {total_empty_aborts}/{MAX_TOTAL_EMPTY_ABORTS})"
+                )
+                pool.close_all()
+                time.sleep(3)
+                pool = CombatClientPool(args.base_port, args.num_workers)
+                try:
+                    from networkV2.s1_schema.sim_catalog import GAME_CATALOG
+                    GAME_CATALOG.attach_sim(pool.clients[0])
+                except Exception as _e:
+                    logger.warning(f"re-attach GAME_CATALOG failed: {_e}")
+                consecutive_empty_iters = 0
+                # 跳过本 iter 训练
+                metrics = {"policy_loss": 0.0, "value_loss": 0.0}
+                wall = time.time() - t0
+                print(f" {iteration:4d} | sim-recover | {len(iter_infos)} errors | restart-pool | {wall:.1f}s")
+                continue
+        else:
+            consecutive_empty_iters = 0
 
         # 训练
         if len(iter_samples) >= args.min_update_samples:
@@ -1059,19 +1416,33 @@ def run_cotrainer(args: argparse.Namespace) -> None:
             metrics = trainer.train_step(iter_samples)
         else:
             metrics = {"policy_loss": 0.0, "value_loss": 0.0}
+        # 把 sim 错误信息进 metrics
+        metrics["sim_error_count"] = float(sim_error_count)
+        metrics["sim_error_rate"] = float(sim_error_count) / max(len(iter_infos), 1)
+        # 把性能 profile 进 metrics(步数加权平均每 step 各 phase 的 ms)
+        if _prof_total_steps > 0:
+            for k, v in _prof_agg.items():
+                metrics[f"prof_{k}"] = v / _prof_total_steps
+            metrics["prof_total_ms"] = sum(_prof_agg.values()) / _prof_total_steps
 
         wall = time.time() - t0
         total_wins = sum(wins_by_rt.values())
         total_runs = sum(total_by_rt.values())
 
+        err_flag = f" ERR={sim_error_count}" if sim_error_count > 0 else ""
         line = (
             f"{iteration:5d} | {total_runs:3d} | {len(iter_samples):5d} | {total_wins}/{total_runs} | "
             f"{100*_wr('monster'):5.1f}% / {100*_wr('elite'):5.1f}% / {100*_wr('boss'):5.1f}% | "
             f"pl={metrics.get('policy_loss',0):.4f} vl={metrics.get('value_loss',0):.3f} "
-            f"kl={metrics.get('approx_kl',0):.4f} ep={int(metrics.get('epochs_done',0))} | "
+            f"kl={metrics.get('approx_kl',0):.4f} ep={int(metrics.get('epochs_done',0))}{err_flag} | "
             f"{wall:5.1f}s"
         )
         print(line)
+        # ERR 分类:每次 iter 有 ERR 都打印 top 3,便于定位 sim crash 根因
+        if sim_error_count > 0:
+            top = sorted(sim_error_types.items(), key=lambda x: -x[1])[:3]
+            top_str = "; ".join(f"[{cnt}x] {msg}" for msg, cnt in top)
+            logger.warning(f"[sim-errors] iter {iteration}: {top_str}")
 
         if dumper:
             dumper.dump_iteration(
@@ -1086,8 +1457,9 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                     "wins_by_room_type": wins_by_rt,
                     "total_by_room_type": total_by_rt,
                     "curriculum_pool_size": (
-                        len(pool_encs) if not use_chained
-                        else sum(c for _, c in CHAIN_STRUCTURE)
+                        len(locals().get("_skada_chains_pool", [])) if getattr(args, "skada_replay_index_db", None)
+                        else (len(pool_encs) if (not use_chained and "pool_encs" in locals())
+                              else sum(c for _, c in CHAIN_STRUCTURE))
                     ),
                     "chained_episodes": use_chained,
                 },
@@ -1120,6 +1492,12 @@ def main():
     ap.add_argument("--no-reset-encounter-conditioning", dest="reset_encounter_conditioning",
                     action="store_false", default=True,
                     help="load checkpoint 时不强制重置 encounter embed/gate（默认会重置以破解死锁）。")
+    ap.add_argument("--skada-replay-index-db", type=str, default="",
+                    help="启用 skada replay 模式:路径指 skada_runs.sqlite 索引。"
+                         "开启后 rollout 用 skada victory runs 里的真实 combat (encounter, build) 作 task,"
+                         "自动 curriculum + deck 难度匹配。和 chain/curriculum 模式互斥。")
+    ap.add_argument("--skada-replay-n-runs", type=int, default=100,
+                    help="skada replay 抽多少 run(每 run 产 ~15-20 combat task)。100 runs → ~2K task pool。")
     # 路径规范（DIAGNOSTICS_CONVENTION.md）：训练产物统一落 STS2AI/Artifacts/ 下
     _artifacts_root = Path(__file__).resolve().parents[3] / "Artifacts"
     ap.add_argument("--dump-dir", type=str, default="",
@@ -1141,6 +1519,21 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--cpu", action="store_true")
     ap.add_argument("--log-level", type=str, default="INFO")
+    ap.add_argument("--compile-net", action="store_true",
+                    help="torch.compile(net) for inference — 消除 batch=1 launch overhead,"
+                         " 首次 forward 会 trace/编译 10-30s,之后 3-5x 加速 (需要 PyTorch 2.0+)")
+    ap.add_argument("--compile-mode", type=str, default="reduce-overhead",
+                    choices=["default", "reduce-overhead", "max-autotune"],
+                    help="torch.compile mode; reduce-overhead 对 RL inference 最合适")
+    ap.add_argument("--use-cuda-graph", action="store_true",
+                    help="rollout forward 用 CUDA graph (Windows-friendly,不需要 triton)。"
+                         " 首次 capture ~5s,之后预期 3-10x forward 加速。"
+                         " 有硬检测:shape/periodic parity,drift 会抛异常。"
+                         " capture 失败自动 fallback 到 eager (不阻塞训练)。")
+    ap.add_argument("--graph-parity-every", type=int, default=500,
+                    help="CUDA graph 周期性 parity check 间隔(0=禁用)")
+    ap.add_argument("--graph-atol", type=float, default=1e-3,
+                    help="CUDA graph vs eager logits 允许的绝对误差")
     args = ap.parse_args()
 
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(message)s")

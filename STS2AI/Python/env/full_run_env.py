@@ -16,15 +16,34 @@ from env.sts2_singleplayer_env import (
     SingleplayerClient,
     SingleplayerTimeoutError,
 )
-from env.binary_pipe_client import BinaryPipeClient
 from env.headless_sim_runner import start_headless_sim, stop_process
-from env.pipe_client import PipeClient
-# 2026-04-17: proto 协议（protobuf-encoded state）接入。接口兼容 BinaryPipeClient，
-# schema 更稳、后续扩 field 方便。训练默认切 proto，bin 保留作 legacy / fallback。
-from networkV2.s0_bridge.proto_pipe_client import ProtoPipeClient
+# 2026-04-18: V2 训练统一走 networkV2.s0_bridge.transport.PipeConnection + proto。
+# - proto 协议 (ProtoCodec) : 训练主通道,schema 稳定
+# - json  协议 (JsonCodec)  : 观战 / 诊断路径 (Godot mod 仍在用)
+# - bin   协议              : **废弃** — 手写二进制解码器已停,禁止再加新功能
+from networkV2.s0_bridge.transport import (
+    PipeConnection,
+    PipeConnectionConfig,
+    JsonCodec,
+    ProtoCodec,
+    SimulatorApiError as TransportSimulatorApiError,
+    TransportTimeoutError,
+)
 from env.simulator_api_error import SimulatorApiError
 
 logger = logging.getLogger(__name__)
+
+
+def _unwrap_envelope(result: Any) -> Any:
+    """PipeConnection 的 binary codec 可能返回 {status,opcode,payload} envelope;
+    提取内部 payload dict。JSON codec 返回纯 dict 时直接透传。"""
+    if (isinstance(result, dict)
+            and "payload" in result
+            and isinstance(result.get("payload"), dict)
+            and "status" in result
+            and "opcode" in result):
+        return result["payload"]
+    return result
 
 
 def _state_type(state: dict[str, Any] | None) -> str:
@@ -355,13 +374,13 @@ class ApiBackedFullRunClient:
         return False
 
     def load_ort_model(self, path: str) -> bool:
-        raise SingleplayerApiError("Local ORT rollout is only supported on pipe-binary clients.")
+        raise SingleplayerApiError("Local ORT rollout requires proto pipe transport.")
 
     def run_combat_local(self, *, max_steps: int = 600) -> dict[str, Any]:
-        raise SingleplayerApiError("Local ORT rollout is only supported on pipe-binary clients.")
+        raise SingleplayerApiError("Local ORT rollout requires proto pipe transport.")
 
     def search_combat_mcts(self, **kwargs: Any) -> dict[str, Any]:
-        raise SingleplayerApiError("C# combat MCTS is only supported on pipe-binary clients.")
+        raise SingleplayerApiError("C# combat MCTS requires proto pipe transport.")
 
     def close(self) -> None:
         self._singleplayer.close()
@@ -479,24 +498,25 @@ class PipeBackedFullRunClient:
     Requires the Godot simulator to be running with pipe server enabled.
     In pure-sim mode all game logic is synchronous, with no polling needed.
 
-    Pipe 断开的恢复策略:
-      1. 快速重连一轮（1s/2s/3-5s 三次）
-      2. 失败 → auto_launch 开启时重启 HeadlessSim host 再重连
-      3. 还失败 → consecutive_failures++,到 _DEAD_THRESHOLD 标记 _dead=True
+    **2026-04-18 重构**:协议统一走
+    `networkV2.s0_bridge.transport.PipeConnection` + codec (proto / json)。
+    连接/重连/锁/heartbeat 全下沉,本类只管业务调用语义。
 
-    **不再有 HTTP fallback**:之前的 `_http_fallback` 字段从未被实例化过
-    (grep 全文件无 `= ApiBackedFullRunClient(...)` 赋值),是死代码,2026-04-18
-    清理。HTTP 路径只在观战 mod (ApiBackedFullRunClient 独立使用) 场景保留,
-    sim 训练主路径纯 pipe。
+    **bin 协议废弃**:老 `BinaryPipeClient` 手写二进制 wire 已停止维护。
+    诊断需求走 json,训练主路径走 proto。不再接受 `protocol="bin"` 构造。
+
+    **不再有 HTTP fallback**:之前的 `_http_fallback` 字段从未被实例化过,是死代码
+    2026-04-18 清理。HTTP 路径只在观战 mod (ApiBackedFullRunClient 独立使用)
+    场景保留,sim 训练主路径纯 pipe。
     """
     port: int = 15527
-    protocol: str = "json"
+    protocol: str = "proto"
     poll_interval_s: float = 0.0  # not used, kept for FullRunClientLike compat
     connect_timeout_s: float = 10.0
     auto_launch: bool = False
     repo_root: str | None = None
     dll_path: str | None = None
-    _pipe: PipeClient | BinaryPipeClient = field(init=False, repr=False)
+    _conn: PipeConnection = field(init=False, repr=False)
     _connected: bool = field(default=False, init=False, repr=False)
     _last_step_info: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _owned_host_proc: Any | None = field(default=None, init=False, repr=False)
@@ -504,27 +524,49 @@ class PipeBackedFullRunClient:
     _consecutive_failures: int = field(default=0, init=False, repr=False)
     _dead: bool = field(default=False, init=False, repr=False)
     _DEAD_THRESHOLD: int = 3  # mark dead after N consecutive total failures
-    _RECONNECT_ATTEMPTS_PER_CYCLE: int = 3
 
     def __post_init__(self) -> None:
-        self._pipe = self._new_pipe_client()
+        self._conn = self._build_client()
 
     def _normalized_protocol(self) -> str:
-        """统一归一化：返回 'bin' / 'proto' / 'json' 之一。"""
+        """归一化 protocol 字段。只接受 proto / json;bin 明确拒绝。"""
         p = str(self.protocol).strip().lower()
-        if p in {"bin", "binary", "pipe-binary"}:
-            return "bin"
         if p in {"proto", "protobuf", "pipe-proto"}:
             return "proto"
-        return "json"
+        if p in {"json", "pipe", "pipe-json"}:
+            return "json"
+        if p in {"bin", "binary", "pipe-binary"}:
+            raise ValueError(
+                "PipeBackedFullRunClient 不再支持 'bin' 协议(手写二进制 wire 已废弃)。"
+                "训练请用 'proto',诊断用 'json'。"
+            )
+        raise ValueError(f"Unknown pipe protocol: {p!r}")
 
-    def _new_pipe_client(self) -> PipeClient | BinaryPipeClient | ProtoPipeClient:
+    def _build_client(self) -> PipeConnection:
         proto = self._normalized_protocol()
-        if proto == "proto":
-            return ProtoPipeClient(port=self.port)
-        if proto == "bin":
-            return BinaryPipeClient(port=self.port)
-        return PipeClient(port=self.port)
+
+        def _launcher(port: int):
+            proc = start_headless_sim(
+                port=port,
+                repo_root=self.repo_root,
+                dll_path=self.dll_path,
+                connect_timeout_s=max(15.0, float(self.connect_timeout_s)),
+                protocol=proto,
+            )
+            self._owned_host_proc = proc
+            return proc
+
+        codec = ProtoCodec() if proto == "proto" else JsonCodec()
+        cfg = PipeConnectionConfig(
+            port=self.port,
+            protocol=proto,
+            connect_timeout_s=float(self.connect_timeout_s),
+            auto_launch=bool(self.auto_launch and self.repo_root and self.dll_path),
+            sim_launcher=_launcher if (self.auto_launch and self.repo_root) else None,
+            sim_stopper=stop_process if self.auto_launch else None,
+            codec=codec,
+        )
+        return PipeConnection(cfg)
 
     @property
     def is_dead(self) -> bool:
@@ -532,33 +574,40 @@ class PipeBackedFullRunClient:
         return self._dead
 
     def _ensure_connected(self) -> None:
-        if self._connected:
+        if self._connected and self._conn_is_live():
             return
         try:
-            self._connect_fresh_pipe(timeout_s=self.connect_timeout_s)
+            self._connect_fresh(timeout_s=self.connect_timeout_s)
             self._consecutive_failures = 0
             self._dead = False
         except Exception:
             self._reconnect()
 
+    def _conn_is_live(self) -> bool:
+        try:
+            return bool(self._conn.is_connected())
+        except Exception:
+            return False
+
     def _close_pipe_quietly(self) -> None:
         try:
-            self._pipe.close()
+            self._conn.close()
         except Exception:
             pass
         self._connected = False
 
-    def _connect_fresh_pipe(self, *, timeout_s: float) -> None:
-        new_pipe = self._new_pipe_client()
+    def _connect_fresh(self, *, timeout_s: float) -> None:
+        new_client = self._build_client()
         try:
-            new_pipe.connect(timeout_s=timeout_s)
+            new_client.cfg.connect_timeout_s = float(timeout_s)
+            new_client.connect()
         except Exception:
             try:
-                new_pipe.close()
+                new_client.close()
             except Exception:
                 pass
             raise
-        self._pipe = new_pipe
+        self._conn = new_client
         self._connected = True
 
     def _restart_host_process(self) -> None:
@@ -575,9 +624,9 @@ class PipeBackedFullRunClient:
 
     def _try_pipe_reconnect_cycle(self, *, timeouts: list[float]) -> None:
         last_error: Exception | None = None
-        for attempt, timeout_s in enumerate(timeouts[: self._RECONNECT_ATTEMPTS_PER_CYCLE], start=1):
+        for attempt, timeout_s in enumerate(timeouts, start=1):
             try:
-                self._connect_fresh_pipe(timeout_s=timeout_s)
+                self._connect_fresh(timeout_s=timeout_s)
                 return
             except Exception as exc:
                 last_error = exc
@@ -634,25 +683,36 @@ class PipeBackedFullRunClient:
         )
         raise ConnectionError(f"Port {self.port} reconnect failed")
 
-    def get_state(self) -> dict[str, Any]:
+    def _call(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        """业务 RPC 入口,带自动重连。统一走 PipeConnection.safe_call。
+
+        返回:业务 payload dict (和旧 API 一致)。
+        """
         self._ensure_connected()
         try:
-            return self._pipe.call("state")
+            try:
+                result = self._conn.safe_call(method, params)
+            except TransportSimulatorApiError as exc:
+                raise SimulatorApiError(str(exc), error_code=exc.error_code) from exc
+            except TransportTimeoutError as exc:
+                raise TimeoutError(str(exc)) from exc
+            return _unwrap_envelope(result)
         except (TimeoutError, ConnectionError, BrokenPipeError, ValueError, json.JSONDecodeError):
-            # ValueError/JSONDecodeError 处理 proto/json desync 场景:
-            # server 发了异常帧导致 unpack/decode 失败。必须触发 reconnect
-            # 清理 pipe 里的残留字节,否则后续 call 都会读到 garbage。
             self._reconnect()
-            return self._pipe.call("state")
+            try:
+                result = self._conn.safe_call(method, params)
+            except TransportSimulatorApiError as exc:
+                raise SimulatorApiError(str(exc), error_code=exc.error_code) from exc
+            except TransportTimeoutError as exc:
+                raise TimeoutError(str(exc)) from exc
+            return _unwrap_envelope(result)
+
+    def get_state(self) -> dict[str, Any]:
+        return self._call("state")
 
     def act(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self._ensure_connected()
         self._last_step_info = None
-        try:
-            result = self._pipe.call("step", payload)
-        except (TimeoutError, ConnectionError, BrokenPipeError, ValueError, json.JSONDecodeError):
-            self._reconnect()
-            result = self._pipe.call("step", payload)
+        result = self._call("step", payload)
         info = result.get("info")
         if isinstance(info, dict):
             self._last_step_info = dict(info)
@@ -682,8 +742,7 @@ class PipeBackedFullRunClient:
         raise SingleplayerApiError("Pipe step response did not include a state payload.")
 
     def batch_act(self, actions: list[dict[str, Any]]) -> dict[str, Any]:
-        self._ensure_connected()
-        result = self._pipe.call("batch_step", {"actions": actions})
+        result = self._call("batch_step", {"actions": actions})
         if not bool(result.get("accepted", False)):
             error = SingleplayerApiError(str(result.get("error") or "Batch step error"))
             setattr(error, "latest_state", result)
@@ -700,7 +759,6 @@ class PipeBackedFullRunClient:
         build: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
-        self._ensure_connected()
         normalized_build = _normalize_build_spec(build)
         params: dict[str, Any] = {
             "character_id": str(character_id),
@@ -710,11 +768,7 @@ class PipeBackedFullRunClient:
             params["seed"] = str(seed)
         if normalized_build is not None:
             params["build"] = normalized_build
-        try:
-            state = self._pipe.call("reset", params)
-        except (TimeoutError, ConnectionError, BrokenPipeError, ValueError, json.JSONDecodeError):
-            self._reconnect()
-            state = self._pipe.call("reset", params)
+        state = self._call("reset", params)
         if isinstance(state, dict):
             return state
         raise SingleplayerApiError("Pipe reset response did not include a state payload.")
@@ -730,88 +784,76 @@ class PipeBackedFullRunClient:
         return self.get_state()
 
     def save_state(self) -> str:
-        self._ensure_connected()
-        result = self._pipe.call("save_state")
+        result = self._call("save_state")
         state_id = result.get("state_id")
         if isinstance(state_id, str) and state_id:
             return state_id
         raise SingleplayerApiError("Pipe save_state response did not include a state_id.")
 
     def export_state(self, path: str, *, state_id: str | None = None) -> str:
-        self._ensure_connected()
         params: dict[str, Any] = {"path": str(path)}
         if state_id:
             params["state_id"] = str(state_id)
-        result = self._pipe.call("export_state", params)
+        result = self._call("export_state", params)
         written_path = result.get("path")
         if isinstance(written_path, str) and written_path:
             return written_path
         raise SingleplayerApiError("Pipe export_state response did not include a path.")
 
     def import_state(self, path: str) -> dict[str, Any]:
-        self._ensure_connected()
-        result = self._pipe.call("import_state", {"path": str(path)})
+        result = self._call("import_state", {"path": str(path)})
         if isinstance(result, dict):
             return result
         raise SingleplayerApiError("Pipe import_state response did not include a state payload.")
 
     def load_state(self, state_id: str) -> dict[str, Any]:
-        self._ensure_connected()
-        result = self._pipe.call("load_state", {"state_id": str(state_id)})
+        result = self._call("load_state", {"state_id": str(state_id)})
         if isinstance(result, dict):
             return result
         raise SingleplayerApiError("Pipe load_state response did not include a state payload.")
 
     def delete_state(self, state_id: str) -> bool:
-        self._ensure_connected()
-        result = self._pipe.call("delete_state", {"state_id": str(state_id)})
+        result = self._call("delete_state", {"state_id": str(state_id)})
         return bool(result.get("deleted", False))
 
     def clear_state_cache(self) -> bool:
-        self._ensure_connected()
-        result = self._pipe.call("delete_state", {"clear_all": True})
+        result = self._call("delete_state", {"clear_all": True})
         return bool(result.get("deleted", False))
 
     def legal_actions(self) -> list[dict[str, Any]]:
-        self._ensure_connected()
-        result = self._pipe.call("legal_actions")
+        result = self._call("legal_actions")
         legal = result.get("legal_actions")
         return legal if isinstance(legal, list) else []
 
     def perf_stats(self) -> dict[str, Any]:
-        self._ensure_connected()
-        result = self._pipe.call("perf_stats")
+        result = self._call("perf_stats")
         return result if isinstance(result, dict) else {}
 
     def reset_perf_stats(self) -> bool:
-        self._ensure_connected()
-        result = self._pipe.call("reset_perf_stats")
+        result = self._call("reset_perf_stats")
         return bool(result.get("reset", False))
 
     @property
     def supports_local_ort(self) -> bool:
-        # bin 和 proto 都能跑本地 ORT（opcode-based request 编码）
-        return self._normalized_protocol() in {"bin", "proto"}
+        # proto 走 opcode-based request 编码,可驱动 sim 的本地 ORT 接口
+        return self._normalized_protocol() == "proto"
 
     def load_ort_model(self, path: str) -> bool:
         if not self.supports_local_ort:
-            raise SingleplayerApiError("Local ORT rollout requires pipe-binary transport.")
-        self._ensure_connected()
-        result = self._pipe.call("load_ort_model", {"path": str(path)})
+            raise SingleplayerApiError("Local ORT rollout requires proto pipe transport.")
+        result = self._call("load_ort_model", {"path": str(path)})
         return bool(result.get("loaded", False))
 
     def run_combat_local(self, *, max_steps: int = 600) -> dict[str, Any]:
         if not self.supports_local_ort:
-            raise SingleplayerApiError("Local ORT rollout requires pipe-binary transport.")
-        self._ensure_connected()
-        result = self._pipe.call("run_combat_local", {"max_steps": int(max_steps)})
+            raise SingleplayerApiError("Local ORT rollout requires proto pipe transport.")
+        result = self._call("run_combat_local", {"max_steps": int(max_steps)})
         return result if isinstance(result, dict) else {}
 
     def search_combat_mcts(self, **kwargs: Any) -> dict[str, Any]:
         if not self.supports_local_ort:
-            raise SingleplayerApiError("C# combat MCTS requires pipe-binary transport.")
-        self._ensure_connected()
-        result = self._pipe.call("search_combat_mcts", kwargs)
+            raise SingleplayerApiError("C# combat MCTS requires proto pipe transport.")
+        result = self._call("search_combat_mcts", kwargs)
         return result if isinstance(result, dict) else {}
 
     def close(self) -> None:
@@ -825,11 +867,7 @@ class PipeBackedFullRunClient:
     @property
     def transport_name(self) -> str:
         proto = self._normalized_protocol()
-        if proto == "proto":
-            return "pipe-proto"
-        if proto == "bin":
-            return "pipe-binary"
-        return "pipe"
+        return "pipe-proto" if proto == "proto" else "pipe"
 
     @property
     def last_step_info(self) -> dict[str, Any] | None:
@@ -840,27 +878,29 @@ class PipeBackedFullRunClient:
 
 @dataclass(slots=True)
 class BinaryBackedFullRunClient(PipeBackedFullRunClient):
-    """训练主客户端。2026-04-17 默认从 bin 迁移到 proto（protobuf schema 更稳）。
+    """训练主客户端,协议固定为 proto。
 
-    class 名保留 "Binary" 前缀是向后兼容（旧代码 import 不变），但默认协议已是 proto。
-    需要回退到 bin 仅限：诊断旧 checkpoint、对比实验。
+    class 名保留 "Binary" 前缀仅向后兼容旧 import;底层已是 proto pipe,
+    **不会** 走废弃的手写二进制 wire。
     """
     protocol: str = "proto"
 
 
 def _resolve_pipe_protocol(transport: str | None) -> str:
-    """把 transport 名字归一化到 pipe protocol。
+    """归一化 transport → pipe protocol。只支持 proto / json。
 
-    2026-04-17 默认切 proto（除非显式传 bin / binary）。
+    2026-04-18: bin 协议(手写二进制 wire)正式废弃;传 "bin" 会 raise。
     """
     t = str(transport or "").strip().lower()
     if t in {"pipe-bin", "pipe-binary", "bin", "binary"}:
-        return "bin"
+        raise ValueError(
+            "pipe-binary transport is deprecated. Use 'proto' (training) or 'json' (diagnostics)."
+        )
     if t in {"pipe-proto", "pipe-protobuf", "proto", "protobuf"}:
         return "proto"
     if t in {"pipe", "pipe-json", "json"}:
         return "json"
-    # 默认（包括 "pipe" 含糊值或空）→ proto
+    # 默认(空或含糊值)→ proto
     return "proto"
 
 

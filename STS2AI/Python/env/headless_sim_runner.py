@@ -16,8 +16,6 @@ if __package__ in {None, ""}:
     if str(python_root) not in sys.path:
         sys.path.insert(0, str(python_root))
 
-from env.binary_pipe_client import BinaryPipeClient
-from env.pipe_client import PipeClient
 from constants import REPO_ROOT, SIM_HOST_EXE, SIM_LEGACY_DLL
 
 
@@ -282,15 +280,18 @@ def _wait_until_ready(*, port: int, timeout_s: float, protocol: str = "json") ->
 
     deadline = time.monotonic() + timeout_s
     protocol = str(protocol).strip().lower()
+    # Linux/非 Windows 回退 probe:走 transport.PipeTransport.connect()(规范统一 bridge 层)。
+    # 2026-04-18:不再支持 bin 协议(手写二进制 wire 已废弃)。
+    from networkV2.s0_bridge.transport.pipe_transport import PipeTransport
+    pipe_name = {
+        "proto": f"sts2_mcts_proto_{port}",
+    }.get(protocol, f"sts2_mcts_{port}")
     while time.monotonic() < deadline:
         try:
-            client = BinaryPipeClient(port=port) if protocol in {"bin", "binary"} else PipeClient(port=port)
-            client.connect(timeout_s=1.0)
-            client.close()
-            # The standalone host allows only one active pipe owner at a time.
-            # A single successful handshake is sufficient to prove readiness;
-            # avoid an immediate second connect so benchmarks and training
-            # workers do not race the launcher for ownership.
+            t = PipeTransport(pipe_name)
+            t.connect(timeout_s=1.0)
+            t.close()
+            # Sim 只允许单 active pipe owner,停顿让 handshake 完全释放
             time.sleep(0.25)
             return
         except Exception as exc:

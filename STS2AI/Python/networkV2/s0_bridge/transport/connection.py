@@ -12,14 +12,13 @@
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Callable
 
+from networkV2.s0_bridge.transport.codec import JsonCodec, ProtocolCodec
 from networkV2.s0_bridge.transport.pipe_transport import (
     PipeTransport,
     TransportClosedError,
@@ -50,6 +49,9 @@ class PipeConnectionConfig:
     auto_launch: bool = False
     sim_launcher: Callable[[int], Any] | None = None  # 返回 sim 进程句柄;用于 auto_launch
     sim_stopper: Callable[[Any], None] | None = None  # 停 sim 进程(reconnect 失败时重启 sim)
+    # 协议 codec:控制 encode_request / decode_response / handshake 字节语义。
+    # 留 None 时,按 `protocol` 字段自动选:json→JsonCodec,bin/proto→需调用方显式传。
+    codec: ProtocolCodec | None = None
 
     @property
     def pipe_name(self) -> str:
@@ -60,6 +62,12 @@ class PipeConnectionConfig:
         if p == "proto":
             return f"sts2_mcts_proto_{self.port}"
         return f"{self.pipe_name_prefix}_{self.port}"
+
+    def resolve_codec(self) -> ProtocolCodec:
+        """选中有效 codec:显式传 > protocol 字段推断 > JsonCodec 兜底。"""
+        if self.codec is not None:
+            return self.codec
+        return JsonCodec()
 
 
 class PipeConnection:
@@ -78,6 +86,7 @@ class PipeConnection:
 
     def __init__(self, config: PipeConnectionConfig):
         self.cfg = config
+        self._codec: ProtocolCodec = config.resolve_codec()
         self._lock = threading.RLock()
         self._transport: PipeTransport | None = None
         self._sim_proc: Any | None = None
@@ -205,25 +214,29 @@ class PipeConnection:
     # ------------------------------------------------------------------
 
     def _handshake(self) -> None:
-        """读 server 欢迎帧(可能为空或含版本信息)。"""
-        # json 协议 server 会直接发 {"ok": true}
+        """读 server 欢迎帧(可能为空或含版本信息)。
+
+        握手字节语义由 codec 决定:JsonCodec 期望 {"ok": true},proto/bin
+        codec 期望 opcode=0x00 payload。任意错误在 codec 侧以 dict['error']
+        上报,此处转换为 SimulatorApiError。
+        """
         try:
             hello_bytes = self._transport.read_frame(timeout_ms=5000)
-            hello = json.loads(hello_bytes.decode("utf-8"))
-            if hello.get("error"):
-                raise SimulatorApiError(str(hello["error"]), error_code=hello.get("error_code"))
-        except (TransportTimeoutError, json.JSONDecodeError):
+        except TransportTimeoutError:
             # 一些 server 不发欢迎帧,容忍
-            pass
+            return
+        hello = self._codec.read_handshake(hello_bytes)
+        if isinstance(hello, dict) and hello.get("error"):
+            raise SimulatorApiError(
+                str(hello["error"]),
+                error_code=hello.get("error_code"),
+            )
 
     def _encode_request(self, method: str, params: dict[str, Any]) -> bytes:
-        req = {"method": method}
-        if params:
-            req["params"] = params
-        return json.dumps(req).encode("utf-8")
+        return self._codec.encode_request(method, params)
 
     def _decode_response(self, data: bytes) -> dict[str, Any]:
-        return json.loads(data.decode("utf-8"))
+        return self._codec.decode_response(data)
 
     def _reconnect(self, *, restart_sim: bool = False) -> None:
         with self._lock:

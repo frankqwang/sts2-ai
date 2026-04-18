@@ -231,7 +231,7 @@ internal static class Program
 		{
 			using (pipe)
 			{
-				if (options.Protocol is HostProtocol.Binary or HostProtocol.Proto)
+				if (options.Protocol == HostProtocol.Proto)
 				{
 					await WritePipeMessageAsync(
 						pipe,
@@ -257,11 +257,7 @@ internal static class Program
 		{
 			using (pipe)
 			{
-				if (options.Protocol == HostProtocol.Binary)
-				{
-					await WritePipeMessageAsync(pipe, BinaryProtocol.BuildHandshakeResponse(), cancellationToken);
-				}
-				else if (options.Protocol == HostProtocol.Proto)
+				if (options.Protocol == HostProtocol.Proto)
 				{
 					await WritePipeMessageAsync(pipe, ProtoStateBuilder.BuildHandshakeResponse(), cancellationToken);
 				}
@@ -269,8 +265,6 @@ internal static class Program
 				{
 					await WritePipeMessageAsync(pipe, JsonSerializer.Serialize(new { ok = true }, JsonOptions), cancellationToken);
 				}
-
-				BinarySessionState? binarySession = options.Protocol == HostProtocol.Binary ? new BinarySessionState() : null;
 
 				while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
 				{
@@ -280,21 +274,14 @@ internal static class Program
 						break;
 					}
 
-					if (options.Protocol is HostProtocol.Binary or HostProtocol.Proto)
+					if (options.Protocol == HostProtocol.Proto)
 					{
 						byte[] responseBytes;
 						try
 						{
 							using CancellationTokenSource requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 							requestCts.CancelAfter(options.RequestTimeout);
-							if (options.Protocol == HostProtocol.Proto)
-							{
-								responseBytes = await ProcessProtoRequestAsync(service, requestBytes).WaitAsync(requestCts.Token);
-							}
-							else
-							{
-								responseBytes = await ProcessBinaryRequestAsync(service, binarySession!, requestBytes).WaitAsync(requestCts.Token);
-							}
+							responseBytes = await ProcessProtoRequestAsync(service, requestBytes).WaitAsync(requestCts.Token);
 						}
 						catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 						{
@@ -306,7 +293,7 @@ internal static class Program
 						}
 						catch (Exception ex)
 						{
-							Console.Error.WriteLine($"HeadlessSim: {options.Protocol} request error opcode={SafeParseOpcode(requestBytes)}: {ex}");
+							Console.Error.WriteLine($"HeadlessSim: proto request error opcode={SafeParseOpcode(requestBytes)}: {ex}");
 							responseBytes = BinaryProtocol.BuildErrorResponse(
 								SafeParseOpcode(requestBytes),
 								GetBinaryErrorStatus(ex),
@@ -467,6 +454,10 @@ internal static class Program
 			BinaryOpcode.RunCombatLocal => await ProcessBinaryRunCombatLocalAsync(service, session, requestBytes, cache),
 			BinaryOpcode.SkipCombat => await ProcessBinarySkipCombatAsync(service, session, cache),
 			BinaryOpcode.SearchCombatMcts => await ProcessBinarySearchCombatMctsAsync(service, requestBytes, cache),
+				// Combat-only opcodes are proto-wire only; legacy binary 协议拒绝。
+				BinaryOpcode.CombatReset or BinaryOpcode.CombatStep or BinaryOpcode.CombatState
+					=> BinaryProtocol.BuildErrorResponse(opcode, BinaryStatus.ProtocolError, "unsupported_on_binary_wire",
+						$"Combat opcode {opcode} requires proto protocol. Use sts2_mcts_proto_{{port}} pipe."),
 				_ => BinaryProtocol.BuildErrorResponse(opcode, BinaryStatus.ProtocolError, "unknown_method", $"Unknown opcode: {(byte)opcode}")
 			};
 		}
@@ -514,6 +505,11 @@ internal static class Program
 				BinaryOpcode.RunCombatLocal => await ProcessProtoRunCombatLocalAsync(service, requestBytes, cache),
 				BinaryOpcode.SkipCombat => await ProcessProtoSkipCombatAsync(service, cache),
 				BinaryOpcode.SearchCombatMcts => await ProcessBinarySearchCombatMctsAsync(service, requestBytes, cache),
+				// 2026-04-18: combat-only proto opcodes。payload 用 CombatResetRequest/
+				// CombatStepRequest proto;响应是含 legal_actions 的 GameState proto。
+				BinaryOpcode.CombatReset => await ProcessProtoCombatResetAsync(requestBytes),
+				BinaryOpcode.CombatStep => await ProcessProtoCombatStepAsync(requestBytes),
+				BinaryOpcode.CombatState => ProcessProtoCombatState(),
 				_ => ProtoStateBuilder.BuildErrorResponse(opcode, BinaryStatus.ProtocolError, "unknown_method", $"Unknown opcode: {(byte)opcode}")
 			};
 		}
@@ -666,6 +662,179 @@ internal static class Program
 			new FullRunSimulationActionRequest { Action = "skip_combat" });
 		FullRunSimulationStateSnapshot snapshot = skipResult.State ?? GetSnapshot(service, cache);
 		return ProtoStateBuilder.BuildStepResponse(skipResult, snapshot);
+	}
+
+	// ================================================================
+	// Proto combat-only opcodes (2026-04-18)
+	//
+	// 请求 payload:
+	//   CombatReset  : [u8 opcode][CombatResetRequest proto bytes]
+	//   CombatStep   : [u8 opcode][CombatStepRequest proto bytes]
+	//   CombatState  : [u8 opcode]
+	// 响应 payload:
+	//   CombatReset  : [u8 status][u8 opcode][GameState proto bytes]
+	//   CombatStep   : [u8 status][u8 opcode][u8 accepted][opt string error][GameState proto]
+	//   CombatState  : [u8 status][u8 opcode][GameState proto bytes]
+	//
+	// sim 直接 populate GameState.legal_actions,Python 端不再自己推断。
+	// ================================================================
+
+	private static async Task<byte[]> ProcessProtoCombatResetAsync(byte[] requestBytes)
+	{
+		STS2AI.Bridge.CombatResetRequest req;
+		try
+		{
+			req = ProtoStateBuilder.ParseCombatResetRequest(requestBytes);
+		}
+		catch (Exception exc)
+		{
+			return ProtoStateBuilder.BuildErrorResponse(
+				BinaryOpcode.CombatReset, BinaryStatus.ProtocolError,
+				"proto_parse_error", $"CombatResetRequest parse failed: {exc.Message}");
+		}
+		CombatTrainingResetRequest request = BuildCombatTrainingResetRequest(req);
+		CombatTrainingStateSnapshot snapshot;
+		try
+		{
+			using IDisposable _ = FullRunSimulationDiagnostics.Measure("request.combat_reset.runtime_ms");
+			snapshot = await CombatTrainingEnvService.Instance.ResetAsync(request);
+		}
+		catch (Exception exc)
+		{
+			return ProtoStateBuilder.BuildErrorResponse(
+				BinaryOpcode.CombatReset, BinaryStatus.SimulatorError,
+				"combat_reset_error", exc.Message);
+		}
+		return ProtoStateBuilder.BuildCombatStateResponse(BinaryOpcode.CombatReset, snapshot);
+	}
+
+	private static async Task<byte[]> ProcessProtoCombatStepAsync(byte[] requestBytes)
+	{
+		STS2AI.Bridge.CombatStepRequest req;
+		try
+		{
+			req = ProtoStateBuilder.ParseCombatStepRequest(requestBytes);
+		}
+		catch (Exception exc)
+		{
+			return ProtoStateBuilder.BuildErrorResponse(
+				BinaryOpcode.CombatStep, BinaryStatus.ProtocolError,
+				"proto_parse_error", $"CombatStepRequest parse failed: {exc.Message}");
+		}
+		CombatTrainingActionRequest action;
+		try
+		{
+			action = BuildCombatTrainingActionRequest(req.Action);
+		}
+		catch (Exception exc)
+		{
+			return ProtoStateBuilder.BuildErrorResponse(
+				BinaryOpcode.CombatStep, BinaryStatus.ProtocolError,
+				"action_decode_error", exc.Message);
+		}
+		CombatTrainingStepResult result;
+		using (FullRunSimulationDiagnostics.Measure("request.combat_step.runtime_ms"))
+		{
+			result = await CombatTrainingEnvService.Instance.StepAsync(action);
+		}
+		CombatTrainingStateSnapshot snapshot = result.State ?? CombatTrainingEnvService.Instance.GetState();
+		return ProtoStateBuilder.BuildCombatStepResponse(result, snapshot);
+	}
+
+	private static byte[] ProcessProtoCombatState()
+	{
+		CombatTrainingStateSnapshot snapshot = CombatTrainingEnvService.Instance.GetState();
+		return ProtoStateBuilder.BuildCombatStateResponse(BinaryOpcode.CombatState, snapshot);
+	}
+
+	private static CombatTrainingResetRequest BuildCombatTrainingResetRequest(
+		STS2AI.Bridge.CombatResetRequest req)
+	{
+		CombatTrainingResetRequest request = new CombatTrainingResetRequest
+		{
+			CharacterId = string.IsNullOrWhiteSpace(req.CharacterId) ? null : req.CharacterId,
+			EncounterId = string.IsNullOrWhiteSpace(req.EncounterId) ? null : req.EncounterId,
+			Seed = string.IsNullOrWhiteSpace(req.Seed) ? null : req.Seed,
+			AscensionLevel = req.AscensionLevel,
+		};
+		if (req.Build != null)
+		{
+			SimulationBuildSpec build = new SimulationBuildSpec
+			{
+				CurrentHp = req.Build.CurrentHp,
+				MaxHp = req.Build.MaxHp,
+				MaxEnergy = req.Build.MaxEnergy,
+				Gold = req.Build.Gold,
+			};
+			if (req.Build.Deck.Count > 0)
+			{
+				build.Deck = new List<SimulationBuildCardSpec>();
+				foreach (var card in req.Build.Deck)
+				{
+					if (string.IsNullOrWhiteSpace(card.Id)) continue;
+					build.Deck.Add(new SimulationBuildCardSpec
+					{
+						Id = card.Id,
+						UpgradeLevel = card.UpgradeLevel,
+					});
+				}
+			}
+			if (req.Build.Relics.Count > 0)
+			{
+				build.Relics = new List<SimulationBuildRelicSpec>();
+				foreach (var relic in req.Build.Relics)
+				{
+					if (string.IsNullOrWhiteSpace(relic.Id)) continue;
+					build.Relics.Add(new SimulationBuildRelicSpec { Id = relic.Id });
+				}
+			}
+			request.Build = build;
+		}
+		return request;
+	}
+
+	private static CombatTrainingActionRequest BuildCombatTrainingActionRequest(
+		STS2AI.Bridge.LegalAction? action)
+	{
+		if (action == null)
+		{
+			throw new InvalidOperationException("CombatStepRequest.action is missing.");
+		}
+		string raw = (action.Action ?? string.Empty).Trim().ToLowerInvariant();
+		CombatTrainingActionType type = raw switch
+		{
+			"play_card" => CombatTrainingActionType.PlayCard,
+			"end_turn" => CombatTrainingActionType.EndTurn,
+			"select_hand_card" => CombatTrainingActionType.SelectHandCard,
+			"select_card_option" => CombatTrainingActionType.SelectCardChoice,
+			"confirm_selection" => CombatTrainingActionType.ConfirmSelection,
+			"cancel_selection" => CombatTrainingActionType.CancelSelection,
+			"use_potion" => CombatTrainingActionType.UsePotion,
+			_ => throw new InvalidOperationException($"Unsupported combat action type: {raw}")
+		};
+		CombatTrainingActionRequest req = new CombatTrainingActionRequest { Type = type };
+		int chosenIdx = action.CardIndex >= 0 ? action.CardIndex : action.Index;
+		if (chosenIdx >= 0)
+		{
+			// select_card_option 走 ChoiceIndex;其他 (play_card/select_hand_card)走 HandIndex
+			if (type == CombatTrainingActionType.SelectCardChoice)
+			{
+				req.ChoiceIndex = chosenIdx;
+			}
+			else
+			{
+				req.HandIndex = chosenIdx;
+			}
+		}
+		if (action.TargetId > 0)
+		{
+			req.TargetId = (uint)action.TargetId;
+		}
+		if (action.Slot != 0)
+		{
+			req.Slot = action.Slot;
+		}
+		return req;
 	}
 
 	private static async Task<byte[]> ProcessProtoStepLocalPolicyAsync(
@@ -2394,9 +2563,10 @@ internal static class Program
 						options.Protocol = protocol switch
 						{
 							"json" => HostProtocol.Json,
-							"bin" or "binary" => HostProtocol.Binary,
+							"bin" or "binary" => throw new InvalidOperationException(
+								"--protocol binary (手写二进制 wire) 已废弃。请用 --protocol proto。"),
 							"proto" or "protobuf" => HostProtocol.Proto,
-							_ => throw new InvalidOperationException($"Unknown protocol '{values[i + 1]}'. Expected 'json', 'bin', or 'proto'.")
+							_ => throw new InvalidOperationException($"Unknown protocol '{values[i + 1]}'. Expected 'json' or 'proto'.")
 						};
 						i++;
 						break;

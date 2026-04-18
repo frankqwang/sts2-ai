@@ -112,10 +112,10 @@ def _is_upgraded(runtime_id: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Sim 起进程 + 连接(复用 env/headless_sim_runner,协议固定 bin 以兼容 BinaryPipeClient)
+# Sim 起进程 + 连接:2026-04-18 切 proto wire,binary 协议(手写二进制)已废弃。
 # ---------------------------------------------------------------------------
 
-_DEFAULT_PROTOCOL = "bin"    # bin 协议 + BinaryPipeClient 最稳定通用
+_DEFAULT_PROTOCOL = "proto"  # proto wire 是 V2 唯一支持的非 json 协议
 
 
 def _resolve_sim_host(user_path: str | None) -> Path:
@@ -151,20 +151,47 @@ def _spawn_sim_via_runner(exe: Path, port: int, protocol: str = _DEFAULT_PROTOCO
 
 
 def _connect_client(port: int, protocol: str = _DEFAULT_PROTOCOL, timeout_s: float = _SIM_READY_TIMEOUT):
-    """用匹配协议的 client 连上 sim,支持 bin / proto / json。"""
+    """连 sim 拉 game_catalog。默认 json(proto wire 暂未给 catalog 加 opcode)。
+
+    bin 协议(手写 binary wire)已废弃,不再支持。
+    proto wire 也**不**支持 `game_catalog` RPC(proto 只给 combat 热路径加了 opcode);
+    catalog 是静态数据,不是 hot path,走 json 没问题。
+    """
     deadline = time.monotonic() + timeout_s
     last_err: Exception | None = None
 
-    if protocol == "bin":
-        from env.binary_pipe_client import BinaryPipeClient
-        client_cls = BinaryPipeClient
-        client_kwargs: dict[str, Any] = {"port": port}
+    if protocol == "json":
+        from networkV2.s0_bridge.transport import (
+            PipeConnection, PipeConnectionConfig, JsonCodec,
+        )
+        cfg = PipeConnectionConfig(
+            port=port, protocol="json", codec=JsonCodec(),
+            connect_timeout_s=3.0,
+        )
+        class _JsonClient:
+            def __init__(self):
+                self._conn = PipeConnection(cfg)
+            def connect(self, timeout_s: float = 3.0):
+                self._conn.cfg.connect_timeout_s = float(timeout_s)
+                self._conn.connect()
+            def close(self):
+                self._conn.close()
+            def call(self, method, params=None, timeout_s=None):
+                return self._conn.safe_call(method, params, timeout_s=timeout_s)
+        client_cls = _JsonClient
+        client_kwargs: dict[str, Any] = {}
     elif protocol == "proto":
-        from networkV2.s0_bridge.proto_pipe_client import ProtoPipeClient
-        client_cls = ProtoPipeClient
-        client_kwargs = {"port": port, "pipe_name": f"sts2_mcts_proto_{port}"}
+        # proto wire 目前没给 `game_catalog` opcode,用 json 更直接。
+        raise ValueError(
+            "protocol 'proto' 目前不支持 game_catalog RPC(ProtoCodec 没为 catalog 加 opcode)。"
+            " 请用 --protocol json。"
+        )
+    elif protocol in {"bin", "binary"}:
+        raise ValueError(
+            f"protocol {protocol!r} (手写二进制 wire)已废弃。请用 --protocol json。"
+        )
     else:
-        raise ValueError(f"protocol {protocol!r} not supported by export pipeline (use bin or proto)")
+        raise ValueError(f"protocol {protocol!r} not supported by export pipeline (use json)")
 
     while time.monotonic() < deadline:
         try:
@@ -576,8 +603,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="不自动起 sim(假设外部已起好,用 --port 指向)")
     p.add_argument("--keep-sim", action="store_true",
                    help="导出完成后不 kill sim(调试用)")
-    p.add_argument("--protocol", type=str, default=_DEFAULT_PROTOCOL, choices=["bin", "proto"],
-                   help=f"sim 协议(默认 {_DEFAULT_PROTOCOL}),bin = BinaryPipeClient,proto = ProtoPipeClient")
+    p.add_argument("--protocol", type=str, default="json", choices=["json"],
+                   help="sim 协议,唯一可选:json(proto wire 暂未给 catalog RPC 加 opcode)")
     return p
 
 

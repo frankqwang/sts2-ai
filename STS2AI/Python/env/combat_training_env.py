@@ -357,8 +357,11 @@ class PipeBackedCombatTrainingClient:
     auto_launch: bool = False
     repo_root: str | Path = DEFAULT_REPO_ROOT
     dll_path: str | Path = DEFAULT_DLL_PATH
-    enable_heartbeat: bool = True           # 是否启 HealthMonitor 独立 pipe 保活
-    heartbeat_interval_s: float = 5.0       # 心跳间隔
+    # 注意: sim 侧每个 sim instance 只允许一个 pipe session,HealthMonitor 独立
+    # 连接会被 sim 拒 "simulator runtime is already owned by another active pipe
+    # session"。默认关;PipeConnection.safe_call 的自动重连已能处理 idle 断连。
+    enable_heartbeat: bool = False
+    heartbeat_interval_s: float = 5.0
     _conn: Any = field(default=None, init=False, repr=False)
     _health: Any = field(default=None, init=False, repr=False)
     _owned_host_proc: Any | None = field(default=None, init=False, repr=False)

@@ -134,6 +134,238 @@ internal static class ProtoStateBuilder
 		=> BinaryProtocol.BuildSearchCombatMctsResponse(result);
 
 	// ================================================================
+	// Proto combat request parsers (2026-04-18)
+	//
+	// 把 Python 发来的 CombatReset/CombatStep 请求 bytes 反序列化成 proto
+	// message。opcode 字节是 payload[0],剩余是 proto-serialized message。
+	// 统一走 protobuf,禁止再用手写二进制 reader。
+	// ================================================================
+
+	public static STS2AI.Bridge.CombatResetRequest ParseCombatResetRequest(ReadOnlySpan<byte> request)
+	{
+		if (request.Length < 1)
+		{
+			throw new InvalidOperationException("CombatReset request body is empty.");
+		}
+		if (request[0] != (byte)BinaryOpcode.CombatReset)
+		{
+			throw new InvalidOperationException(
+				$"CombatReset opcode mismatch. Expected {(byte)BinaryOpcode.CombatReset}, got {request[0]}.");
+		}
+		return STS2AI.Bridge.CombatResetRequest.Parser.ParseFrom(request.Slice(1).ToArray());
+	}
+
+	public static STS2AI.Bridge.CombatStepRequest ParseCombatStepRequest(ReadOnlySpan<byte> request)
+	{
+		if (request.Length < 1)
+		{
+			throw new InvalidOperationException("CombatStep request body is empty.");
+		}
+		if (request[0] != (byte)BinaryOpcode.CombatStep)
+		{
+			throw new InvalidOperationException(
+				$"CombatStep opcode mismatch. Expected {(byte)BinaryOpcode.CombatStep}, got {request[0]}.");
+		}
+		return STS2AI.Bridge.CombatStepRequest.Parser.ParseFrom(request.Slice(1).ToArray());
+	}
+
+	// ================================================================
+	// Combat-only responses (2026-04-18)
+	//
+	// 把 CombatTrainingStateSnapshot 包装成 proto GameState(含 legal_actions),
+	// Python 侧不再自己推断 legal actions,直接消费 sim 的权威字段。
+	// ================================================================
+
+	public static byte[] BuildCombatStateResponse(BinaryOpcode opcode, CombatTrainingStateSnapshot snapshot)
+	{
+		byte[] statePayload = BuildCombatGameStatePayload(snapshot);
+		using MemoryStream stream = new();
+		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+		writer.Write((byte)BinaryStatus.Ok);
+		writer.Write((byte)opcode);
+		writer.Write(statePayload);
+		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", statePayload.Length);
+		return stream.ToArray();
+	}
+
+	public static byte[] BuildCombatStepResponse(CombatTrainingStepResult result, CombatTrainingStateSnapshot snapshot)
+	{
+		BinaryStatus status = result.Accepted ? BinaryStatus.Ok : BinaryStatus.RejectedAction;
+		byte[] statePayload = BuildCombatGameStatePayload(snapshot);
+		using MemoryStream stream = new();
+		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+		writer.Write((byte)status);
+		writer.Write((byte)BinaryOpcode.CombatStep);
+		writer.Write((byte)(result.Accepted ? 1 : 0));
+		BinaryProtocol.WriteOptionalString(writer, result.Error);
+		writer.Write(statePayload);
+		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", statePayload.Length);
+		return stream.ToArray();
+	}
+
+	private static byte[] BuildCombatGameStatePayload(CombatTrainingStateSnapshot snapshot)
+	{
+		GameState gs = new GameState
+		{
+			StateType = DetectCombatStateType(snapshot),
+			Terminal = snapshot.IsEpisodeDone,
+			RunOutcome = snapshot.IsEpisodeDone
+				? (snapshot.Victory == true ? "victory" : (snapshot.Victory == false ? "defeat" : ""))
+				: "",
+			EncounterId = snapshot.EncounterId ?? "",
+			Run = new RunInfo(),
+		};
+
+		if (snapshot.Player != null)
+		{
+			gs.Player = new PlayerState
+			{
+				Hp = snapshot.Player.CurrentHp,
+				MaxHp = snapshot.Player.MaxHp,
+				Block = snapshot.Player.Block,
+				Energy = snapshot.Player.Energy,
+				MaxEnergy = snapshot.Player.MaxEnergy,
+				DrawPileCount = snapshot.Piles?.Draw ?? 0,
+				DiscardPileCount = snapshot.Piles?.Discard ?? 0,
+				ExhaustPileCount = snapshot.Piles?.Exhaust ?? 0,
+				PlayPileCount = snapshot.Piles?.Play ?? 0,
+				Stars = snapshot.Player.Stars,
+			};
+			if (snapshot.Player.Powers != null)
+			{
+				foreach (CombatTrainingPowerSnapshot power in snapshot.Player.Powers
+					.Where(static p => p?.Id != null && p.Amount != 0))
+				{
+					gs.Player.Powers.Add(new Power { Id = power.Id ?? "", Amount = power.Amount });
+				}
+			}
+		}
+
+		gs.Battle = BuildBattleState(snapshot);
+		PopulateCombatLegalActions(gs, snapshot);
+		return gs.ToByteArray();
+	}
+
+	private static string DetectCombatStateType(CombatTrainingStateSnapshot snapshot)
+	{
+		if (snapshot.IsHandSelectionActive)
+		{
+			return "hand_select";
+		}
+		if (snapshot.IsCardSelectionActive)
+		{
+			return "card_select";
+		}
+		// 没有 encounter room_type 信息,用 monster 作默认;训练侧拿 encounter_id 查 catalog
+		return "monster";
+	}
+
+	private static void PopulateCombatLegalActions(GameState gs, CombatTrainingStateSnapshot snapshot)
+	{
+		// 规则:优先 hand_selection > card_selection > play-phase (play_card/end_turn)
+		// 权威字段(来自 sim):RequiresTarget / ValidTargetIds / CanPlay / CanConfirm / Cancelable
+		if (snapshot.IsEpisodeDone)
+		{
+			return;
+		}
+
+		if (snapshot.IsHandSelectionActive && snapshot.HandSelection != null)
+		{
+			var hs = snapshot.HandSelection;
+			foreach (CombatTrainingHandCardSnapshot card in hs.SelectableCards)
+			{
+				gs.LegalActions.Add(new LegalAction
+				{
+					Action = "select_hand_card",
+					Index = card.HandIndex,
+					CardIndex = card.HandIndex,
+					CardId = card.Id ?? "",
+					Label = card.Title ?? card.Id ?? "",
+				});
+			}
+			if (hs.CanConfirm)
+			{
+				gs.LegalActions.Add(new LegalAction { Action = "confirm_selection", Label = "Confirm" });
+			}
+			if (hs.Cancelable)
+			{
+				gs.LegalActions.Add(new LegalAction { Action = "cancel_selection", Label = "Cancel" });
+			}
+			return;
+		}
+
+		if (snapshot.IsCardSelectionActive && snapshot.CardSelection != null)
+		{
+			var cs = snapshot.CardSelection;
+			foreach (CombatTrainingSelectableCardSnapshot opt in cs.SelectableCards)
+			{
+				gs.LegalActions.Add(new LegalAction
+				{
+					Action = "select_card_option",
+					Index = opt.ChoiceIndex,
+					CardIndex = opt.ChoiceIndex,
+					CardId = opt.Id ?? "",
+					Label = opt.Title ?? opt.Id ?? "",
+				});
+			}
+			if (cs.CanConfirm)
+			{
+				gs.LegalActions.Add(new LegalAction { Action = "confirm_selection", Label = "Confirm" });
+			}
+			if (cs.Cancelable)
+			{
+				gs.LegalActions.Add(new LegalAction { Action = "cancel_selection", Label = "Cancel" });
+			}
+			return;
+		}
+
+		// Play phase
+		HashSet<int> validHandIndices = new HashSet<int>();
+		foreach (CombatTrainingHandCardSnapshot card in snapshot.Hand)
+		{
+			validHandIndices.Add(card.HandIndex);
+		}
+		foreach (CombatTrainingHandCardSnapshot card in snapshot.Hand)
+		{
+			if (!card.CanPlay) continue;
+			if (!validHandIndices.Contains(card.HandIndex)) continue;
+			string cardId = card.Id ?? "";
+			string label = card.Title ?? cardId;
+			if (card.RequiresTarget)
+			{
+				if (card.ValidTargetIds == null || card.ValidTargetIds.Count == 0) continue;
+				foreach (uint tid in card.ValidTargetIds)
+				{
+					gs.LegalActions.Add(new LegalAction
+					{
+						Action = "play_card",
+						Index = card.HandIndex,
+						CardIndex = card.HandIndex,
+						CardId = cardId,
+						Label = label,
+						TargetId = (int)tid,
+					});
+				}
+			}
+			else
+			{
+				gs.LegalActions.Add(new LegalAction
+				{
+					Action = "play_card",
+					Index = card.HandIndex,
+					CardIndex = card.HandIndex,
+					CardId = cardId,
+					Label = label,
+				});
+			}
+		}
+		if (snapshot.CanEndTurn)
+		{
+			gs.LegalActions.Add(new LegalAction { Action = "end_turn", Label = "End Turn" });
+		}
+	}
+
+	// ================================================================
 	// Core: snapshot → protobuf GameState → byte[]
 	// ================================================================
 

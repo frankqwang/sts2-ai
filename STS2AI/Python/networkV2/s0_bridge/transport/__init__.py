@@ -24,12 +24,18 @@ from networkV2.s0_bridge.transport.pipe_transport import (
     TransportClosedError,
     TransportTimeoutError,
 )
+from networkV2.s0_bridge.transport.codec import (
+    BinaryOpcodeCodec,
+    JsonCodec,
+    ProtocolCodec,
+)
 from networkV2.s0_bridge.transport.connection import (
     PipeConnection,
     PipeConnectionConfig,
     SimulatorApiError,
 )
 from networkV2.s0_bridge.transport.heartbeat import HealthMonitor
+from networkV2.s0_bridge.transport.proto_codec import ProtoCodec
 
 __all__ = [
     "PipeTransport",
@@ -39,4 +45,8 @@ __all__ = [
     "SimulatorApiError",
     "TransportClosedError",
     "TransportTimeoutError",
+    "ProtocolCodec",
+    "JsonCodec",
+    "BinaryOpcodeCodec",
+    "ProtoCodec",
 ]

@@ -50,7 +50,12 @@ internal enum BinaryOpcode : byte
 	ExportState = 0x0D,
 	ImportState = 0x0E,
 	SkipCombat = 0x0F,
-	SearchCombatMcts = 0x10
+	SearchCombatMcts = 0x10,
+	// Combat-only opcodes (2026-04-18): 和 Python s0_bridge.constants 对齐。
+	// 用 CombatResetRequest / CombatStepRequest proto 体,响应 GameState proto。
+	CombatReset = 0x11,
+	CombatStep = 0x12,
+	CombatState = 0x13
 }
 
 internal enum BinaryStatus : byte

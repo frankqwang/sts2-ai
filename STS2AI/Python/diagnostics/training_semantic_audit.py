@@ -87,7 +87,8 @@ def _transport_for_backend(backend: str) -> str:
 	return {
 		"godot-http": "http",
 		"headless-pipe": "pipe",
-		"headless-binary": "pipe-binary",
+		# 2026-04-18: headless-binary (手写二进制 wire) 已废弃,走 proto。
+		"headless-proto": "pipe-proto",
 	}[backend]
 
 
