@@ -95,7 +95,8 @@ def _move_batched_to_device(batched, device):
         "fight_win_targets", "hp_loss_targets", "survival_targets",
         "turn_damage_targets", "leaf_targets", "transition_risk_targets",
         "resource_retention_targets", "boss_readiness_targets",
-        "resource_health_targets", "deck_quality_targets", "sample_weights",
+        "resource_health_targets", "deck_quality_targets",
+        "future_dq_targets", "sample_weights",
     ):
         val = getattr(batched, attr, None)
         if val is not None:
@@ -124,6 +125,7 @@ def train_offline(
     save_every: int = 1,
     log_every: int = 20,
     seed: int = 0,
+    resume_from: Path | None = None,
 ) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -139,6 +141,13 @@ def train_offline(
     # 离线训非战斗不需要战斗侧的 encounter conditioning 梯度,
     # 保持默认设置(如 preset 打开则继续开)。
     net = UnifiedNet(config=cfg).to(device)
+    # resume from checkpoint(warm start):shape 匹配的 param 都加载,不匹配的随机初始
+    if resume_from is not None:
+        logger.info(f"resume from {resume_from}")
+        ckpt = torch.load(str(resume_from), map_location=device, weights_only=False)
+        state = ckpt.get("model_state", ckpt)
+        report = net.load_compatible_params(state, strict_shapes=False)
+        logger.info(f"  loaded={report['loaded']} missing={report['missing']} skipped_shape={report['skipped_shape']}")
     loss_fn = OfflineBCLoss(OfflineBCLossConfig()).to(device)
 
     n_params = sum(p.numel() for p in net.parameters())
@@ -160,6 +169,9 @@ def train_offline(
         "bc_vl_boss_ready", "bc_vl_resource_health", "bc_vl_deck_quality",
         "bc_vl_exp_hp_loss", "bc_vl_exp_dmg_output", "bc_vl_floor_clear",
         "bc_top1_acc", "bc_entropy",
+        # 档 2/3 新加的诊断指标
+        "bc_pairwise_loss", "bc_vl_future_dq",
+        "bc_awr_mean_weight", "bc_awr_adv_std",
     )
     for epoch in range(1, epochs + 1):
         net.train()
@@ -196,6 +208,7 @@ def train_offline(
                 expected_hp_loss_targets=batched.hp_loss_targets,
                 expected_dmg_output_targets=batched.turn_damage_targets,
                 floor_clear_targets=batched.survival_targets,
+                future_dq_targets=batched.future_dq_targets,
                 sample_weights=batched.sample_weights,
             )
 
@@ -284,6 +297,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="skada_runs.sqlite 索引(build_skada_index.py 产出);推荐生产用")
     p.add_argument("--priors-db", type=Path, default=None,
                    help="skada_path_priors.sqlite(build_path_priors.py 产出);接 data-driven 路径先验")
+    p.add_argument("--synergy-db", type=Path, default=None,
+                   help="skada_card_synergy.sqlite(build_card_synergy_matrix.py 产出);card_reward synergy prior")
+    p.add_argument("--resume-from", type=Path, default=None,
+                   help="从已有 checkpoint 继续训练(warm start),路径可指向 bc_epoch_N.pt")
     p.add_argument("--n-per-group", type=int, default=None,
                    help="index 模式下每 (character, asc_bucket) 组采样 N 条 run;不给则 max-runs/20")
     p.add_argument("--balanced", action="store_true", default=True,
@@ -333,10 +350,11 @@ def main():
     )
 
     if args.index_db is not None:
-        logger.info(f"loading from index: {args.index_db} (priors={args.priors_db})")
+        logger.info(f"loading from index: {args.index_db} (priors={args.priors_db} synergy={args.synergy_db})")
         samples = load_samples_from_index(
             index_db=args.index_db,
             priors_db=args.priors_db,
+            synergy_db=args.synergy_db,
             n_runs=args.max_runs or 2000,
             balanced=args.balanced,
             n_per_group=args.n_per_group,
@@ -382,6 +400,7 @@ def main():
         save_every=args.save_every,
         log_every=args.log_every,
         seed=args.seed,
+        resume_from=args.resume_from,
     )
 
 

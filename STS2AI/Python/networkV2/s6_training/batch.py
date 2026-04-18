@@ -47,6 +47,7 @@ class BatchedBanks:
     boss_readiness_targets: torch.Tensor | None = None      # (B,)
     resource_health_targets: torch.Tensor | None = None     # (B,)
     deck_quality_targets: torch.Tensor | None = None        # (B,)
+    future_dq_targets: torch.Tensor | None = None           # (B,) ∈ [-1,1] 或 -2 = 无效
     # Sample weights
     sample_weights: torch.Tensor | None = None       # (B,)
 
@@ -136,6 +137,10 @@ class TrainingSample:
     boss_readiness_target: float = 0.5        # ∈ [0,1]
     resource_health_target: float = 0.5       # ∈ [0,1]
     deck_quality_target: float = 0.0          # ∈ [-1,1]
+    # future_deck_quality 真值:沿 run 找下个 boss 入口层(floor 17/34/48)时的 dq
+    # loss 用这个做 AWR advantage:选 card 后 future_dq 提升越多 → policy loss 权重越高
+    # -2 = 无效(本条 sample 没有对应未来 boss),loss skip
+    future_dq_target: float = -2.0
     # Meta
     sample_weight: float = 1.0
     encounter_id: str = ""
@@ -162,6 +167,7 @@ def collate_training_samples(
     batched.boss_readiness_targets = torch.tensor([s.boss_readiness_target for s in samples], dtype=torch.float32)
     batched.resource_health_targets = torch.tensor([s.resource_health_target for s in samples], dtype=torch.float32)
     batched.deck_quality_targets = torch.tensor([s.deck_quality_target for s in samples], dtype=torch.float32)
+    batched.future_dq_targets = torch.tensor([s.future_dq_target for s in samples], dtype=torch.float32)
     batched.sample_weights = torch.tensor([s.sample_weight for s in samples], dtype=torch.float32)
     # Encounter conditioning index（方案 A: Conditional Policy）
     from networkV2.s1_schema.encounter_vocab import encounter_to_index

@@ -41,6 +41,13 @@ class RunEvalOutputs:
     expected_hp_loss: torch.Tensor     # (B,) 未来每战掉血期望 [0,+inf)
     expected_dmg_output: torch.Tensor  # (B,) 未来每战输出期望 [0,+inf)
     floor_clear_prob: torch.Tensor     # (B,) 本层通关概率 [0,1]
+    # 第 8 个 head:关键 credit assignment 信号
+    # 预测 "当前 state 走到下个 boss 入口时,deck_quality 会变成多少"
+    # target 在 loader 回填:沿 run 的 floor_timeline 找下个 boss(17/34/48),
+    # 取那时的 deck_quality_target 作为 future value
+    # 用途:loss 里算 advantage = fut_dq_after_pick - fut_dq_before_pick,
+    # 对 card_reward policy CE 做 advantage-weighted reweighting
+    future_deck_quality_at_boss: torch.Tensor   # (B,) [-1,1] tanh
 
 
 class RunEvaluator(nn.Module):
@@ -64,6 +71,8 @@ class RunEvaluator(nn.Module):
         self.hp_loss_head = nn.Linear(hidden_dim, 1)
         self.dmg_output_head = nn.Linear(hidden_dim, 1)
         self.floor_clear_head = nn.Linear(hidden_dim, 1)
+        # 第 8 个 head
+        self.future_dq_head = nn.Linear(hidden_dim, 1)
 
     def forward(
         self,
@@ -89,6 +98,7 @@ class RunEvaluator(nn.Module):
             expected_hp_loss=F.softplus(self.hp_loss_head(h).squeeze(-1)),
             expected_dmg_output=F.softplus(self.dmg_output_head(h).squeeze(-1)),
             floor_clear_prob=torch.sigmoid(self.floor_clear_head(h).squeeze(-1)),
+            future_deck_quality_at_boss=torch.tanh(self.future_dq_head(h).squeeze(-1)),
         )
 
     @staticmethod

@@ -139,12 +139,40 @@ def _resource_health_target(run_state: SkadaRunState) -> float:
 # Common: banks 组装 + TrainingSample 包装
 # ---------------------------------------------------------------------------
 
+def _compute_boss_checkpoints(rec: dict[str, Any]) -> list[tuple[int, float]]:
+    """预扫整条 run,返回 [(boss_floor, deck_quality_at_that_floor), ...]。
+
+    用于档 2:给每个 sample 填 future_dq_target = 选完后下个 boss 入口的 dq。
+    """
+    checkpoints: list[tuple[int, float]] = []
+    state = SkadaRunState.from_run_record(rec)
+    for fd in rec.get("floor_timeline") or []:
+        state.apply_floor_pre(fd)
+        state.apply_floor_post(fd)
+        cmb = fd.get("combat") or {}
+        # enc_type='B' 是显式 boss;同时兼容 floor ∈ {17, 34, 48} 启发式
+        is_boss = (str(cmb.get("enc_type", "")).upper() == "B") or (state.floor in (17, 34, 48))
+        if is_boss:
+            checkpoints.append((state.floor, _deck_quality_target(state)))
+    return checkpoints
+
+
+def _next_boss_dq(current_floor: int, checkpoints: list[tuple[int, float]]) -> float:
+    """找 current_floor 之后最近一个 boss 的 dq。没有未来 boss → -2(无效,loss skip)。"""
+    for bf, dq in checkpoints:
+        if bf > current_floor:
+            return dq
+    return -2.0
+
+
 def _make_training_sample(
     run_state: SkadaRunState,
     candidates: list[ActionCandidate],
     chosen_index: int,
     decision_domain: str,
     room_type: str,
+    *,
+    future_dq: float = -2.0,
 ) -> TrainingSample | None:
     """产出 TrainingSample。chosen_index < 0 → skip。
 
@@ -188,6 +216,7 @@ def _make_training_sample(
         boss_readiness_target=_boss_readiness_target(run_state),
         resource_health_target=_resource_health_target(run_state),
         deck_quality_target=_deck_quality_target(run_state),
+        future_dq_target=future_dq,       # 档 2:走到下个 boss 时 dq 的真值
         sample_weight=_sample_weight(run_state),
         encounter_id="",
         room_type=room_type,
@@ -213,8 +242,18 @@ def _rarity_weight(rarity: str) -> float:
     return _RARITY_WEIGHT.get(str(rarity or "").strip().lower(), 0.0)
 
 
-def _fill_card_priors(cand: ActionCandidate, card_slug: str, floor: int, deck: list[str]) -> None:
-    """给 ActionCandidate 填 skada priors(pick_rate / win_rate_delta / deck_win_rate / synergy)。"""
+def _fill_card_priors(
+    cand: ActionCandidate,
+    card_slug: str,
+    floor: int,
+    deck: list[str],
+    character: str = "",
+) -> None:
+    """给 ActionCandidate 填 skada priors(pick_rate / win_rate_delta / deck_win_rate / synergy)。
+
+    Synergy 计算优先走新 SkadaIndexFetcher(13175 pair,build_card_synergy_matrix 产出);
+    fallback V1 SkadaPriors 的 18 pair + sum-based boost。
+    """
     sp = _get_skada_priors()
     if sp is None or not card_slug:
         return
@@ -229,9 +268,17 @@ def _fill_card_priors(cand: ActionCandidate, card_slug: str, floor: int, deck: l
         cp.floor_mid if floor <= 33 else
         cp.floor_late
     )
-    # synergy:该卡加到当前 deck 的提升期望
-    syn = sp.deck_synergy_boost(card_slug, deck)
-    # deck_synergy_boost 返回 sum,clamp 到 [-1, 1]
+    # synergy:优先查新 13175-pair synergy matrix(lift + PMI 合并,char-conditional)
+    syn = 0.0
+    fetcher = _PATH_PRIORS_FETCHER
+    if fetcher is not None and character:
+        try:
+            syn = fetcher.deck_card_synergy(character, card_slug, deck)
+        except Exception:
+            syn = 0.0
+    if syn == 0.0:
+        # fallback:V1 18-pair 的 raw sum(旧版行为)
+        syn = sp.deck_synergy_boost(card_slug, deck)
     cand.synergy_prior = max(-1.0, min(1.0, syn))
 
 
@@ -255,6 +302,7 @@ def _build_card_reward_sample(
     *,
     include_skip: bool = True,
     strict: bool = False,
+    future_dq: float = -2.0,
 ) -> TrainingSample | None:
     """对 floor_timeline[i].card_choices 产一个 sample。
 
@@ -280,7 +328,7 @@ def _build_card_reward_sample(
             target_scope="none",
         )
         # Skada priors(pick_rate / win_rate_delta / synergy / floor-conditioned)
-        _fill_card_priors(cand, base, run_state.floor, run_state.deck)
+        _fill_card_priors(cand, base, run_state.floor, run_state.deck, character=run_state.character)
         candidates.append(cand)
         if c.get("was_picked"):
             chosen = i
@@ -301,6 +349,7 @@ def _build_card_reward_sample(
     return _make_training_sample(
         run_state, candidates, chosen,
         decision_domain="card_reward", room_type="card_reward",
+        future_dq=future_dq,
     )
 
 
@@ -311,6 +360,7 @@ def _build_relic_choice_sample(
     ancient: bool = False,
     include_skip: bool = True,
     strict: bool = False,
+    future_dq: float = -2.0,
 ) -> TrainingSample | None:
     """relic_choices / ancient_choices 都走这里,domain 归为 event。"""
     if not relic_choices:
@@ -352,12 +402,15 @@ def _build_relic_choice_sample(
         run_state, candidates, chosen,
         decision_domain="event",
         room_type="ancient" if ancient else "relic_reward",
+        future_dq=future_dq,
     )
 
 
 def _build_campfire_sample(
     run_state: SkadaRunState,
     floor_data: dict[str, Any],
+    *,
+    future_dq: float = -2.0,
 ) -> TrainingSample | None:
     """campfire 决策 — 简化为 SMITH vs HEAL 二分类。
 
@@ -399,6 +452,7 @@ def _build_campfire_sample(
     return _make_training_sample(
         run_state, candidates, chosen,
         decision_domain="rest", room_type="rest",
+        future_dq=future_dq,
     )
 
 
@@ -471,6 +525,7 @@ def _build_map_route_samples(
     map_act: dict[str, Any],
     *,
     visibility_depth: int = MAP_VISIBILITY_DEPTH,
+    future_dq: float = -2.0,
 ) -> list[TrainingSample]:
     """从 map_acts[i] 展开路线选择 sample。
 
@@ -569,6 +624,7 @@ def _build_map_route_samples(
         sample = _make_training_sample(
             run_state, candidates, chosen,
             decision_domain="route", room_type="map",
+            future_dq=future_dq,
         )
         if sample is not None:
             samples.append(sample)
@@ -752,6 +808,8 @@ def _route_features_with_lookahead(
 def _build_value_only_sample(
     run_state: SkadaRunState,
     room_type: str,
+    *,
+    future_dq: float = -2.0,
 ) -> TrainingSample | None:
     """每个 floor 产一个 "只监督 value head" 的 sample。
 
@@ -772,6 +830,7 @@ def _build_value_only_sample(
     sample = _make_training_sample(
         run_state, candidates, 0,
         decision_domain="event", room_type=f"value_only_{room_type}",
+        future_dq=future_dq,
     )
     if sample is not None:
         # 设置小 sample_weight 避免 policy 学 "永远选 proceed"(退化)
@@ -809,25 +868,32 @@ def load_run_samples(
         logger.info(f"skip unknown character {character!r} run_id={rec.get('run', {}).get('run_id')}")
         return []
 
+    # 档 2:预扫 run 的 boss 层 deck_quality 检查点(供 future_dq_target 回填)
+    boss_checkpoints = _compute_boss_checkpoints(rec)
+
     for floor_data, pre_state, post_state in iter_timeline_with_state(rec):
+        future_dq = _next_boss_dq(pre_state.floor, boss_checkpoints)
         # card_reward
         if floor_data.get("card_choices"):
-            s = _build_card_reward_sample(pre_state, floor_data["card_choices"], strict=strict_ids)
+            s = _build_card_reward_sample(pre_state, floor_data["card_choices"], strict=strict_ids,
+                                           future_dq=future_dq)
             if s is not None:
                 samples.append(s)
 
         if floor_data.get("relic_choices"):
-            s = _build_relic_choice_sample(pre_state, floor_data["relic_choices"], ancient=False, strict=strict_ids)
+            s = _build_relic_choice_sample(pre_state, floor_data["relic_choices"], ancient=False,
+                                           strict=strict_ids, future_dq=future_dq)
             if s is not None:
                 samples.append(s)
 
         if floor_data.get("ancient_choices"):
-            s = _build_relic_choice_sample(pre_state, floor_data["ancient_choices"], ancient=True, strict=strict_ids)
+            s = _build_relic_choice_sample(pre_state, floor_data["ancient_choices"], ancient=True,
+                                           strict=strict_ids, future_dq=future_dq)
             if s is not None:
                 samples.append(s)
 
         if floor_data.get("campfire_choice"):
-            s = _build_campfire_sample(pre_state, floor_data)
+            s = _build_campfire_sample(pre_state, floor_data, future_dq=future_dq)
             if s is not None:
                 samples.append(s)
 
@@ -837,7 +903,7 @@ def load_run_samples(
 
         if include_value_only:
             room_type = str(floor_data.get("room_type", "") or "").upper()
-            s = _build_value_only_sample(pre_state, room_type)
+            s = _build_value_only_sample(pre_state, room_type, future_dq=future_dq)
             if s is not None:
                 samples.append(s)
 
@@ -848,8 +914,13 @@ def load_run_samples(
         for floor_data, pre_state, post_state in iter_timeline_with_state(rec):
             final_state = post_state
         for map_act in rec.get("map_acts", []) or []:
+            # map route 用 act 起始 floor 算 future_dq
+            act_idx = int(map_act.get("act", 0) or 0)
+            ref_floor = act_idx * 17
+            act_future_dq = _next_boss_dq(ref_floor, boss_checkpoints)
             samples.extend(_build_map_route_samples(
                 final_state, map_act, visibility_depth=map_visibility_depth,
+                future_dq=act_future_dq,
             ))
 
     return samples
@@ -990,6 +1061,7 @@ def load_samples_from_index(
     index_db: Path,
     *,
     priors_db: Path | None = None,
+    synergy_db: Path | None = None,
     n_runs: int = 2000,
     balanced: bool = True,
     n_per_group: int | None = None,
@@ -1006,7 +1078,7 @@ def load_samples_from_index(
     """
     from networkV2.s6_training.skada_index_dataset import SkadaIndexFetcher
 
-    fetcher = SkadaIndexFetcher(index_db=index_db, priors_db=priors_db)
+    fetcher = SkadaIndexFetcher(index_db=index_db, priors_db=priors_db, synergy_db=synergy_db)
     set_path_priors_fetcher(fetcher)
 
     try:

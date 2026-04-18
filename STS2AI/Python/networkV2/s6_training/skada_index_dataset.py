@@ -56,10 +56,12 @@ class SkadaIndexFetcher:
         self,
         index_db: Path,
         priors_db: Path | None = None,
+        synergy_db: Path | None = None,
         repo_root: Path | None = None,
     ) -> None:
         self.index_db = Path(index_db)
         self.priors_db = Path(priors_db) if priors_db else None
+        self.synergy_db = Path(synergy_db) if synergy_db else None
         # repo_root 用于解析索引里的相对 file_path
         if repo_root is None:
             # 从 index 的 metadata 读
@@ -78,6 +80,11 @@ class SkadaIndexFetcher:
         if self.priors_db and self.priors_db.exists():
             self._priors_con = sqlite3.connect(str(self.priors_db))
             self._priors_con.row_factory = sqlite3.Row
+        # 同样连 synergy db
+        self._synergy_con: sqlite3.Connection | None = None
+        if self.synergy_db and self.synergy_db.exists():
+            self._synergy_con = sqlite3.connect(str(self.synergy_db))
+            self._synergy_con.row_factory = sqlite3.Row
 
         # 打开的 file handle 缓存(每个文件只 open 一次)
         self._file_handles: dict[str, Any] = {}
@@ -191,6 +198,71 @@ class SkadaIndexFetcher:
         if self._priors_con is not None:
             self._priors_con.close()
             self._priors_con = None
+        if self._synergy_con is not None:
+            self._synergy_con.close()
+            self._synergy_con = None
+
+    # ------------------------------------------------------------------
+    # Card synergy matrix 查询(build_card_synergy_matrix.py 产出)
+    # ------------------------------------------------------------------
+
+    @lru_cache(maxsize=16384)
+    def _lookup_pair_synergy(self, character: str, a: str, b: str) -> float:
+        """查 (character, card_a, card_b) 的 smoothed_lift + cooccur_pmi 加权。
+
+        表里 card_a < card_b 字典序约束,调用时需排序。返回综合 synergy ∈ [-1,1]。
+        """
+        if self._synergy_con is None:
+            return 0.0
+        if a == b:
+            return 0.0
+        x, y = (a, b) if a < b else (b, a)
+        row = self._synergy_con.execute(
+            "SELECT smoothed_lift, cooccur_pmi, n_runs "
+            "FROM card_pair_synergy "
+            "WHERE character = ? AND card_a = ? AND card_b = ?",
+            (character.upper(), x, y),
+        ).fetchone()
+        if row is None:
+            return 0.0
+        # 组合:win-rate lift 和 co-occurrence PMI 合并
+        # 目的:既捕捉"赢率贡献",也捕捉"经验搭配"(赢率样本少时 PMI 补上)
+        lift = float(row["smoothed_lift"])   # ∈ 实际 [-0.5, 0.5]
+        pmi = float(row["cooccur_pmi"])      # ∈ [-1, 1]
+        # 合并:70% lift,30% PMI
+        combined = 0.7 * (lift * 2.0) + 0.3 * pmi   # lift × 2 放大到近 [-1,1]
+        return max(-1.0, min(1.0, combined))
+
+    def deck_card_synergy(self, character: str, candidate_card: str, deck: list[str]) -> float:
+        """候选卡加进 deck 的 synergy 评分 ∈ [-1, 1](合并所有 deck 卡的 lift)。
+
+        算法:对 deck 里每张现有卡,查 (candidate, card_i) 的 synergy,平均后 tanh 压。
+        未查到的 pair 视作 0(等价"中性")。
+        """
+        if self._synergy_con is None or not deck:
+            return 0.0
+        cand = str(candidate_card or "").lower()
+        # 去 upgrade 后缀,防止 STAMPEDE+ 查不到
+        if cand.endswith("+"):
+            cand = cand.rstrip("+")
+        if not cand:
+            return 0.0
+        total = 0.0
+        n = 0
+        for c in deck:
+            c_base = str(c or "").lower().rstrip("+")
+            if not c_base or c_base == cand:
+                continue
+            s = self._lookup_pair_synergy(character, cand, c_base)
+            if s != 0.0:  # 只算有数据的 pair
+                total += s
+                n += 1
+        if n == 0:
+            return 0.0
+        import math as _m
+        avg = total / n
+        # tanh 压避免累加爆炸
+        return _m.tanh(avg * 2.0)
 
     # ------------------------------------------------------------------
     # Path priors 查询(build_path_priors.py 产出的表)
