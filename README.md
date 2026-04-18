@@ -25,7 +25,7 @@ STS2AI/
 │   ├── datasets/                    离线数据集
 │   └── seeds/                       评测种子
 ├── ENV/                             C# 侧
-│   ├── Sim/                         HeadlessSim（无头模拟器，二进制 pipe 协议）
+│   ├── Sim/                         HeadlessSim（无头模拟器，Named Pipe + protobuf 协议）
 │   └── Spectator/                   Godot 观战 Mod
 ├── Python/                          训练 / 评估 / 数据
 │   ├── networkV2/                   ★ 当前网络与训练主线
@@ -71,10 +71,13 @@ STS2AI/
 ### 2. 构建 HeadlessSim
 
 ```powershell
-dotnet build STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj -c Debug
+dotnet build STS2AI/ENV/Sim/HeadlessSim/HeadlessSim.csproj -c Release
 ```
 
-产物：`STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe`。
+产物：`STS2AI/ENV/Sim/HeadlessSim/bin/Release/net9.0/HeadlessSim.exe`。
+
+Python 端默认走 `--protocol proto`(Named Pipe + protobuf),json 协议仅用于
+观战 / catalog 导出,手写二进制 wire 已在 2026-04-18 废弃。
 
 ### 3. 构建 Spectator Mod（观战用）
 
