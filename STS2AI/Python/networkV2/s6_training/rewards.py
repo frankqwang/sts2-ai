@@ -42,6 +42,9 @@ __all__ = [
     "co_trainer_boss_debuff_bonus",
     "co_trainer_final_reward",
     "boss_damage_ratio",
+    # Gap 1/2 新增
+    "turn_end_reward",
+    "kill_overkill_reward",
     # 常数
     "BOSS_WIN_BONUS_MULT",
     "BOSS_NEAR_LOSS_THRESHOLD",
@@ -170,6 +173,92 @@ def co_trainer_boss_debuff_bonus(
     if "vulnerable" in tag_set or "weak" in tag_set:
         return BOSS_DEBUFF_SETUP_BONUS
     return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Gap 1:turn-end reward(和 turn_damage_lookahead head 形成闭环)
+# ---------------------------------------------------------------------------
+
+def turn_end_reward(
+    turn_total_damage: float,
+    enemy_max_hp_at_turn_start: int,
+    hp_at_turn_start: int,
+    hp_after_turn: int,
+    *,
+    this_step_is_end_turn: bool,
+) -> float:
+    """回合末触发的 dense reward,给 combo 学习即时信号。
+
+    触发条件:this_step_is_end_turn=True。其他步返回 0。
+
+    两个奖励:
+      + 0.03 × turn_total_damage / enemy_max_hp    (combo 积累伤害)
+      + 0.02 if hp_loss_this_turn == 0              (挡住威胁)
+    不给 overkill(敌人打死后就不算 turn damage)
+
+    和 turn_damage_lookahead head 配合:head 预测量 + shaping 反馈 → RL 梯度直接。
+    """
+    if not this_step_is_end_turn:
+        return 0.0
+    enemy_max = max(int(enemy_max_hp_at_turn_start or 0), 1)
+    dmg_bonus = 0.03 * max(float(turn_total_damage), 0.0) / enemy_max
+    hp_loss = max(int(hp_at_turn_start or 0) - int(hp_after_turn or 0), 0)
+    survive_bonus = 0.02 if hp_loss == 0 else 0.0
+    return dmg_bonus + survive_bonus
+
+
+# ---------------------------------------------------------------------------
+# Gap 2:kill bonus + overkill penalty(鼓励精准斩杀)
+# ---------------------------------------------------------------------------
+
+def kill_overkill_reward(
+    prev_state: dict,
+    next_state: dict,
+    action: dict | None,
+) -> float:
+    """每步算 kill 和 overkill:
+
+      + 0.05 per enemy killed this step      (鼓励收尾,不磨血)
+      - 0.02 if action is play_card AND this card's damage_est > target_enemy_hp × 1.3
+          (overkill penalty:用大牌打残血敌人)
+
+    kill 通过比较 prev/next 存活 enemy 数判断,适用任何 damage 方式。
+    overkill 需要 action 里的 damage_est(来自 cand.damage_est,preview),
+    没有时跳过(safe 0)。
+    """
+    # ---- kill bonus ----
+    prev_alive = [
+        e for e in (prev_state.get("battle", {}).get("enemies")
+                    or prev_state.get("enemies") or [])
+        if isinstance(e, dict) and e.get("is_alive", True) and int(e.get("hp", 0) or 0) > 0
+    ]
+    next_alive = [
+        e for e in (next_state.get("battle", {}).get("enemies")
+                    or next_state.get("enemies") or [])
+        if isinstance(e, dict) and e.get("is_alive", True) and int(e.get("hp", 0) or 0) > 0
+    ]
+    killed_count = max(len(prev_alive) - len(next_alive), 0)
+    kill_bonus = 0.05 * killed_count
+
+    # ---- overkill penalty ----
+    overkill_pen = 0.0
+    if isinstance(action, dict) and str(action.get("action", "")).lower() == "play_card":
+        dmg_est = action.get("damage_est") or (action.get("card") or {}).get("damage_est") or 0
+        try:
+            dmg_est = float(dmg_est)
+        except Exception:
+            dmg_est = 0.0
+        target_id = action.get("target_id") or action.get("target_combat_id")
+        if dmg_est > 0 and target_id is not None:
+            # 找 prev 里该 target 的 HP
+            for e in prev_alive:
+                if e.get("combat_id") == target_id or e.get("id") == target_id:
+                    target_hp = int(e.get("hp", 0) or 0)
+                    if target_hp > 0 and dmg_est > target_hp * 1.3:
+                        overkill_pen = -0.02
+                    break
+
+    return kill_bonus + overkill_pen
 
 
 def boss_damage_ratio(

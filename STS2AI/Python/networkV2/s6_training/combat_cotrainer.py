@@ -53,6 +53,8 @@ from networkV2.s6_training.head_targets import (
 from networkV2.s6_training.ppo import UnifiedPPOTrainer, PPOConfig
 from networkV2.s6_training.rewards import (
     combat_step_reward,
+    turn_end_reward,
+    kill_overkill_reward,
     combat_local_tactical_reward,
     dense_combat_shaping,
     co_trainer_boss_damage_bonus,
@@ -360,6 +362,13 @@ def combat_rollout(
     turn_start_sample_idx = 0
     turn_step_damages: list[float] = []
     hp_at_start = int((state.get("player") or {}).get("hp", 0) or 0)
+    # Gap 1:per-turn HP/enemy_max 跟踪,给 turn_end_reward 算 hp_loss_this_turn
+    hp_at_turn_start = hp_at_start
+    enemy_max_hp_at_turn_start = sum(
+        int(e.get("max_hp", 0) or 0)
+        for e in ((state.get("battle") or {}).get("enemies") or state.get("enemies") or [])
+        if isinstance(e, dict)
+    ) or 1
     # boss 战开始时的 enemy 总 max_hp，用于 terminal 时算 near-win ratio
     enemy_max_hp_at_start = sum(
         int(e.get("max_hp", 0) or 0)
@@ -434,6 +443,9 @@ def combat_rollout(
         reward += co_trainer_boss_damage_bonus(state, next_state, room_type)
         # Boss 战：Vuln/Weak 套 boss 身上额外 +0.02（放大 debuff setup 价值）
         reward += co_trainer_boss_debuff_bonus(state, chosen, room_type)
+
+        # Gap 2:kill bonus(+0.05/enemy)+ overkill penalty(-0.02 大牌打残血)
+        reward += kill_overkill_reward(state, next_state, chosen)
 
         chosen_action_name = str(chosen.get("action", "")).lower()
         if chosen_action_name in ("end_turn", "end"):
@@ -528,7 +540,7 @@ def combat_rollout(
                 "combat_won": combat_won,
             })
 
-        # turn boundary → backfill turn_damage
+        # turn boundary → backfill turn_damage + Gap 1 turn_end_reward
         next_st = str(next_state.get("state_type", "")).lower()
         turn_ended = (
             chosen_action_name in ("end_turn", "end")
@@ -537,8 +549,28 @@ def combat_rollout(
         )
         if turn_ended:
             _backfill_turn_damage(samples, turn_start_sample_idx, turn_step_damages)
+            # Gap 1:回合末给 combo / 防守即时 reward,加到本 step(end_turn 这一步)的 reward 上
+            hp_after_turn = int((next_state.get("player") or {}).get("hp", 0) or 0)
+            ter = turn_end_reward(
+                turn_total_damage=sum(turn_step_damages),
+                enemy_max_hp_at_turn_start=enemy_max_hp_at_turn_start,
+                hp_at_turn_start=hp_at_turn_start,
+                hp_after_turn=hp_after_turn,
+                this_step_is_end_turn=True,
+            )
+            if ter != 0.0 and samples:
+                # 加到本 step 产出的最后一个 sample 的 reward 上
+                samples[-1].reward = float(samples[-1].reward) + ter
+
+            # 重置 turn 跟踪
             turn_start_sample_idx = len(samples)
             turn_step_damages = []
+            hp_at_turn_start = hp_after_turn
+            enemy_max_hp_at_turn_start = sum(
+                int(e.get("max_hp", 0) or 0)
+                for e in ((next_state.get("battle") or {}).get("enemies") or [])
+                if isinstance(e, dict) and e.get("is_alive", True)
+            ) or 1
 
         steps += 1
         prev_state = state
