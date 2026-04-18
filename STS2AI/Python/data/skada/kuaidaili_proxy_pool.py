@@ -523,11 +523,11 @@ class KuaidailiTPSTunnel:
     按并发请求数计费（默认 10 QPS 上限）。
 
     环境变量：
-    - KDL_TPS_HOST     必填（订单分配的 sXXX.kdltps.com）
-    - KDL_TPS_PORT     必填（订单控制台给出的端口）
+    - KDL_TPS_HOST     必填（如 s650.kdltps.com）
+    - KDL_TPS_PORT     必填（如 15818）
     - KDL_TPS_USERNAME 账密鉴权用户名
     - KDL_TPS_PASSWORD 账密鉴权密码
-    - KDL_TPS_BACKUP_HOST  备用隧道 host（订单分配的备用 sXXX.kdltps.com），主挂了自动切
+    - KDL_TPS_BACKUP_HOST  备用隧道 host（如 s651.kdltps.com），主挂了自动切
     """
 
     def __init__(
@@ -637,7 +637,7 @@ class KuaidailiFPSTunnel:
     - 每请求换 IP，对"per-IP 滑动窗口"限流几乎免疫
 
     环境变量（与 DPS 的 KDL_ 区隔，避免串配置）：
-    - KDL_FPS_HOST     必填（订单分配的 as.eXXX.kdlfps.com 亚洲区 host）
+    - KDL_FPS_HOST     默认 as.e391.kdlfps.com（亚洲区，大陆站延迟最低）
     - KDL_FPS_PORT     默认 18866
     - KDL_FPS_USERNAME 账密鉴权用户名
     - KDL_FPS_PASSWORD 账密鉴权密码
@@ -678,7 +678,7 @@ class KuaidailiFPSTunnel:
 
     @classmethod
     def from_env(cls, **overrides: Any) -> "KuaidailiFPSTunnel | None":
-        host = os.environ.get("KDL_FPS_HOST", "").strip()
+        host = os.environ.get("KDL_FPS_HOST", "as.e391.kdlfps.com").strip()
         port_s = os.environ.get("KDL_FPS_PORT", "18866").strip()
         user = os.environ.get("KDL_FPS_USERNAME", "").strip() or None
         pwd = os.environ.get("KDL_FPS_PASSWORD", "").strip() or None
