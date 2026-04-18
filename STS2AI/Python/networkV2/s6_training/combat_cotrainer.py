@@ -434,15 +434,18 @@ def combat_rollout(
             rr = graph_runner_holder.get("runner")
             if rr is not None and rr.enabled:
                 forward_fn = rr
-        with torch.no_grad():
+        with torch.inference_mode():
             out = forward_fn(banks=banks, encounter_idx=enc_idx_tensor)
-        logits = out.logits[0, :len(legal)]
-        mask = out.action_mask[0, :len(legal)]
-        logits = torch.nan_to_num(logits.masked_fill(~mask, float("-inf")), nan=0.0)
-        dist = Categorical(logits=logits)
-        idx = logits.argmax().item() if greedy else dist.sample().item()
-        lp = dist.log_prob(torch.tensor(idx, device=logits.device)).item()
-        value = out.values.fight_win.item() if out.values is not None else 0.5
+            logits = out.logits[0, :len(legal)]
+            mask = out.action_mask[0, :len(legal)]
+            logits = torch.nan_to_num(logits.masked_fill(~mask, float("-inf")), nan=0.0)
+            dist = Categorical(logits=logits)
+            idx_t = logits.argmax() if greedy else dist.sample()
+            lp_t = dist.log_prob(idx_t)
+            value_t = out.values.fight_win.squeeze() if out.values is not None else torch.tensor(0.5, device=logits.device)
+            # 单次 GPU→CPU sync 取 3 个 scalar,替代原来 3 次 .item() 单独 sync
+            idx, lp, value = torch.stack([idx_t.float(), lp_t, value_t]).tolist()
+            idx = int(idx)
         chosen = legal[idx]
         _t2 = time.perf_counter()
 
