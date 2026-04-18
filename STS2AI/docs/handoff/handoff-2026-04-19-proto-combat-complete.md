@@ -50,6 +50,61 @@
 | 改 | `diagnostics/training_semantic_audit.py` backend map 去 `headless-binary` | ✓ |
 | 改 | `demo_play_v2.py` CLI choices 去 `pipe-binary`,示例 `--transport pipe-proto` | ✓ |
 | 改 | `Program.cs::HostOptions.Parse` 对 `--protocol bin/binary` 抛 `已废弃` error | ✓ |
+| 改 | `Program.cs::HandlePipeConnectionAsync` 去掉 Binary 分支(简化 handshake + dispatch) | ✓ |
+
+### ERR 根因修复 (2026-04-19 继续)
+
+| 类型 | 根因 | 修复 |
+|-----|------|-----|
+| `RELIC.SILENT not found` × 17 | skada `ancient_choices` 偶尔把 character_id (IRONCLAD/SILENT/REGENT/NECROBINDER) 写进 relic_id 字段;mod relic (EXTRARELICS-*) + skada 自造 relic (NEOWS_*) 也会漏进来 | `skada_state_rebuilder.apply_floor_post` 对 `relic_choices`/`ancient_choices`/`shop_actions` 用 `is_known_relic` 源头过滤 |
+| `Setting must be set!` × 2 | `*_event_encounter` (BattlewornDummy / DenseVegetation / FakeMerchant / MysteriousKnight / PunchOff / TheArchitect) 需要 event 上下文传 DummySetting,独立 `combat_reset` 不能触发 | `_load_sqlite_whitelists` exclude `*_EVENT_ENCOUNTER` + sim rebuild 后 `combat_catalog` 本身也不再 expose 这些 |
+| `CombatSession has no _call or _pipe.call` | proto wire 不支持 catalog API (静态数据不是 hot path) | `load_sim_supported_lists` 增 sqlite fallback;`CombatSession._call` 对 `game_catalog`/`combat_catalog` 抛 `NotImplementedError` 让 `GameCatalog.attach_sim` 降级 sqlite |
+
+### sqlite 更新
+
+| 动作 | 详情 |
+|-----|------|
+| 从最新 sim rebuild `data/source_knowledge.sqlite` | 旧 sqlite 来自别的 worktree,漏了 5 个 relic:`HEFTY_TABLET / NEOWS_BONES / NEOWS_TALISMAN / PHIAL_HOLSTER / WINGED_BOOTS` (skada 里 668 条合法 pickup),训练 deck quality 受损 |
+| 旧 sqlite 备份在 `data/source_knowledge.sqlite.bak_20260419`,不入 git | |
+
+### 恢复误删的 V2 脚本
+
+commit `2cfd79b cleanup: 删 skada_analytics.sqlite 旧 DB` 误删了仍在用的 V2 代码:
+
+| 类别 | 文件 | 用途 |
+|-----|------|-----|
+| V2 BC 三件套 | `train_noncombat_offline.py` | V2 non-combat BC 入口(产 `bc_epoch_*.pt`) |
+|  | `skada_offline_loader.py` | BC 数据加载 (1163 行) |
+|  | `skada_data_validator.py` | BC 数据校验 |
+| diagnostics | `analyze_build_outcomes.py` + `analyze_iteration_replays.py` + `analyze_training_window.py` + `analyze_card_reward_debug.py` + `classify_episode_failures.py` + `compare_training_vs_skada_builds.py` + `mine_boss_cases.py` + `mine_case_patterns.py` + `mine_route_and_shop_patterns.py` + `run_window_mining.py` | 离线分析工具,stdlib 独立,吃 `iter*_episodes.jsonl` dump |
+
+全部从 `2cfd79b^` 按原样恢复(commit `c1d814c`)。
+
+### Combat 长 run v2 进展
+
+命令:
+```bash
+python -u -m networkV2.s6_training.combat_cotrainer \
+    --preset slim --checkpoint ../Artifacts/checkpoints/skada_bc_v7_full/bc_epoch_5.pt \
+    --num-workers 4 --base-port 19600 --max-iterations 120 --episodes-per-iter 10 \
+    --lr 1e-5 --ppo-epochs 3 --mini-batch-size 64 --target-kl 0.03 \
+    --skada-replay-index-db data/skada/derived/skada_runs.sqlite --skada-replay-n-runs 200 \
+    --dump-dir ../Artifacts/runs/combat_rl_proto_v2 \
+    --output-dir ../Artifacts/checkpoints/combat_rl_proto_v2
+```
+
+iter 1-18 Easy / Med / Hard(全部 ERR=0):
+- iter 5: 45.1% / 12.5% / 4.2% (boss 首胜)
+- iter 7: 35.9% / **35.3%** / 3.8% (Med 爆发)
+- iter 9: 45.8% / 14.3% / 7.1% (boss 连胜)
+- iter 15: 49.2% / 20.8% / 0
+- iter 18: 45.7% / 17.4% / 0
+
+和 combat_rl_proto_v1 (老 sqlite 下)对比:
+- 老: iter 11 Easy 峰值 55%,但 Med 多数 0%,Hard 仅 iter 3, 15 命中 (7.7% / 8%)
+- 新: 5 iter 就首次 boss 胜,Med 稳 12-35%,Hard 连续 iter 5/6/7/8/9 命中
+
+新 sqlite 的 deck+relic 完整性对 elite/boss 训练有明显促进。
 
 ---
 
