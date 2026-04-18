@@ -55,9 +55,9 @@ class NetworkConfig:
     d_model: int = 384
     n_heads: int = 8
     dropout: float = 0.1
-    # 48：原 32 不够。deck_card token 需 11 coarse + 34 semantic = 45 维（P1② 修复后），
-    # 其他 token（rbm=32、action=30）还在 32 内。48 留 3 维余量避免截断。
-    max_numeric_dim: int = 48
+    # 58:56 → 58 加 2 维 skada path prior(frequency + efficiency),
+    # 来自 build_path_priors.py 的离线聚合表,data-driven 路径先验。
+    max_numeric_dim: int = 58
 
     # ---- Memory Encoders (Layer 2) ----
     # 每个 encoder 的 self-attention 层数

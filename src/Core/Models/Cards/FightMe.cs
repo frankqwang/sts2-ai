@@ -21,7 +21,7 @@ public sealed class FightMe : CardModel
 	{
 		new DamageVar(5m, ValueProp.Move),
 		new RepeatVar(2),
-		new PowerVar<StrengthPower>(2m),
+		new PowerVar<StrengthPower>(3m),
 		new DynamicVar("EnemyStrength", 1m)
 	});
 

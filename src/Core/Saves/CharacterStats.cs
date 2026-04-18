@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using MegaCrit.Sts2.Core.Models;
 
@@ -31,4 +32,7 @@ public class CharacterStats
 
 	[JsonPropertyName("playtime")]
 	public long Playtime { get; set; }
+
+	[JsonPropertyName("badges")]
+	public List<BadgeStats> Badges { get; set; } = new List<BadgeStats>();
 }

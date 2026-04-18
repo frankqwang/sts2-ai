@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.TestSupport;
 
@@ -106,18 +107,19 @@ public partial class NGroundFireVfx : Node2D
 		_mainFire.Modulate = Colors.Transparent;
 		_mainFire.Scale = Vector2.Zero;
 		_ember.Emitting = true;
+		Task emberDone = _ember.AwaitSignal(GpuParticles2D.SignalName.Finished, this);
 		_tween = CreateTween().SetParallel();
 		_tween.TweenProperty(_mainFire, "scale", Vector2.One * 4f, 0.5).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Back);
 		_tween.TweenProperty(_mainFire, "modulate:a", 0.9f, 0.5).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic);
-		await ToSignal(_tween, Tween.SignalName.Finished);
+		await _tween.AwaitFinished(this);
 		_flameSprites.Emitting = true;
 		_tween = CreateTween().SetParallel();
 		_tween.TweenProperty(_mainFire, "modulate:a", 0f, 0.5);
 		_tween.TweenProperty(_flameSprites, "modulate:a", 0f, 0.5);
 		_tween.TweenProperty(_mainFire, "scale", Vector2.One * 2f, 2.0).SetEase(Tween.EaseType.InOut).SetTrans(Tween.TransitionType.Cubic);
-		await ToSignal(_tween, Tween.SignalName.Finished);
+		await _tween.AwaitFinished(this);
 		_flameSprites.Emitting = false;
-		await ToSignal(_ember, GpuParticles2D.SignalName.Finished);
+		await emberDone;
 		this.QueueFreeSafely();
 	}
 }

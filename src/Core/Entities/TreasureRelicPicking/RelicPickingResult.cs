@@ -12,7 +12,7 @@ public class RelicPickingResult
 
 	public required RelicModel relic;
 
-	public required Player player;
+	public required Player? player;
 
 	public RelicPickingFight? fight;
 

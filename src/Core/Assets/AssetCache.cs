@@ -55,7 +55,11 @@ public class AssetCache
 		{
 			if (!_missedCacheAssets.Contains(item))
 			{
-				RemoveAndGetResource(item)?.Dispose();
+				Resource resource = RemoveAndGetResource(item);
+				if (resource != null)
+				{
+					Callable.From(resource.Dispose).CallDeferred();
+				}
 			}
 		}
 	}

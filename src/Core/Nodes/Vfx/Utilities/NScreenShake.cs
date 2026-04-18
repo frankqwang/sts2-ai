@@ -34,7 +34,7 @@ public partial class NScreenShake : Node
 		_duration.Add(ShakeDuration.Short, 0.3);
 		_duration.Add(ShakeDuration.Normal, 0.8);
 		_duration.Add(ShakeDuration.Long, 1.2);
-		_duration.Add(ShakeDuration.Forever, 999999.0);
+		_duration.Add(ShakeDuration.Forever, 999999999.0);
 	}
 
 	public void SetTarget(Control targetScreen)

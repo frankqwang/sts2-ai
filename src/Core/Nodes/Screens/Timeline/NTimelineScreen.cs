@@ -49,6 +49,10 @@ public partial class NTimelineScreen : NSubmenu
 
 	private NBackButton _backButton;
 
+	private Control _unlockScreenHolder;
+
+	private NTimelineTutorial? _tutorial;
+
 	private ProgressState _save;
 
 	private bool _isUiVisible;
@@ -86,6 +90,8 @@ public partial class NTimelineScreen : NSubmenu
 	}
 
 	public static NTimelineScreen Instance => NGame.Instance.MainMenu.SubmenuStack.GetSubmenuType<NTimelineScreen>();
+
+	public NUnlockScreen? CurrentUnlockScreen { get; set; }
 
 	protected override Control? InitialFocusedControl => _epochSlotContainer.GetChildren().SelectMany((Node c) => c.GetChildren().OfType<NEpochSlot>()).FirstOrDefault((NEpochSlot s) => s.model is NeowEpoch);
 
@@ -159,6 +165,7 @@ public partial class NTimelineScreen : NSubmenu
 		_lineContainer = GetNode<Control>("%LineContainer");
 		_slotsContainer = GetNode<NSlotsContainer>("%SlotsContainer");
 		_backButton = GetNode<NBackButton>("BackButton");
+		_unlockScreenHolder = GetNode<Control>("%UnlockScreenHolder");
 		_backButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnBackButtonPressed));
 		_save = SaveManager.Instance.Progress;
 		Tween tween = CreateTween();
@@ -173,9 +180,9 @@ public partial class NTimelineScreen : NSubmenu
 	private async Task FirstTimeLogic()
 	{
 		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-		NTimelineTutorial nTimelineTutorial = SceneHelper.Instantiate<NTimelineTutorial>("timeline_screen/timeline_tutorial");
-		this.AddChildSafely(nTimelineTutorial);
-		nTimelineTutorial.Init(this);
+		_tutorial = SceneHelper.Instantiate<NTimelineTutorial>("timeline_screen/timeline_tutorial");
+		this.AddChildSafely(_tutorial);
+		_tutorial.Init(this);
 	}
 
 	public async Task SpawnFirstTimeTimeline()
@@ -312,7 +319,7 @@ public partial class NTimelineScreen : NSubmenu
 	private List<Vector2> PredictHBoxLayout(HBoxContainer hbox)
 	{
 		float num = 0f;
-		float num2 = hbox.GetThemeConstant(ThemeConstants.BoxContainer.separation, "HBoxContainer");
+		float num2 = hbox.GetThemeConstant(ThemeConstants.BoxContainer.Separation, "HBoxContainer");
 		List<Control> list = (from c in hbox.GetChildren().OfType<Control>()
 			where c.Visible
 			select c).ToList();
@@ -502,7 +509,7 @@ public partial class NTimelineScreen : NSubmenu
 	public void OpenQueuedScreen()
 	{
 		NUnlockScreen nUnlockScreen = _unlockScreens.Dequeue();
-		this.AddChildSafely(nUnlockScreen);
+		_unlockScreenHolder.AddChildSafely(nUnlockScreen);
 		nUnlockScreen.Open();
 	}
 
@@ -576,7 +583,13 @@ public partial class NTimelineScreen : NSubmenu
 		_queuedInspectScreen = null;
 		_unlockScreens = new Queue<NUnlockScreen>();
 		_epochSlotContainer.FreeChildren();
+		_reminderVfxHolder.FreeChildren();
 		_slotsContainer.Reset();
+		if (_tutorial != null)
+		{
+			_tutorial.QueueFreeSafely();
+			_tutorial = null;
+		}
 	}
 
 	public Control GetReminderVfxHolder()

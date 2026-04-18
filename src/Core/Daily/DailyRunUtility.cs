@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
-using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Leaderboard;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Platform;
-using MegaCrit.Sts2.Core.Runs;
-using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace MegaCrit.Sts2.Core.Daily;
@@ -31,28 +30,22 @@ public static class DailyRunUtility
 		Log.Info($"Uploaded score of {score} for daily {time} to leaderboard {leaderboardName}");
 	}
 
-	public static async Task<bool> ShouldUploadScore(ILeaderboardHandle? handle, IReadOnlyList<ulong> playerIdsInRun)
+	public static async Task<bool> ShouldUploadScore(ILeaderboardHandle? handle, IReadOnlyList<ulong> playerIdsInRun, CancellationToken cancelToken = default(CancellationToken))
 	{
 		if (handle == null)
 		{
 			return true;
 		}
-		return (await LeaderboardManager.QueryLeaderboardForUsers(handle, playerIdsInRun)).Count <= 0;
+		return (await LeaderboardManager.QueryLeaderboardForUsers(handle, playerIdsInRun, cancelToken)).Count <= 0;
 	}
 
 	public static string GetLeaderboardName(DateTimeOffset dateTime, int playerCount)
 	{
-		return $"{dateTime.Year}_{dateTime.Month}_{dateTime.Day}_{playerCount}p";
-	}
-
-	public static void UploadScoreIfNecessary(SerializableRun serializableRun, ulong playerId, bool isVictory)
-	{
-		if (!serializableRun.DailyTime.HasValue)
+		string platformBranch = PlatformUtil.GetPlatformBranch();
+		if ((platformBranch == null || !platformBranch.Contains("beta", StringComparison.OrdinalIgnoreCase)) && NGame.IsReleaseGame())
 		{
-			throw new InvalidOperationException("Tried to upload daily score of a non-daily run!");
+			return $"{dateTime.Year}_{dateTime.Month}_{dateTime.Day}_{playerCount}p";
 		}
-		DateTimeOffset value = serializableRun.DailyTime.Value;
-		int score = ScoreUtility.CalculateScore(serializableRun, isVictory);
-		TaskHelper.RunSafely(UploadScore(value, score, serializableRun.Players));
+		return $"{dateTime.Year}_{dateTime.Month}_{dateTime.Day}_{playerCount}p_BETA";
 	}
 }

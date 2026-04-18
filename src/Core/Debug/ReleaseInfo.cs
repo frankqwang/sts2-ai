@@ -17,4 +17,7 @@ public class ReleaseInfo
 
 	[JsonPropertyName("branch")]
 	public required string Branch { get; init; }
+
+	[JsonPropertyName("main_assembly_hash")]
+	public required int MainAssemblyHash { get; init; }
 }

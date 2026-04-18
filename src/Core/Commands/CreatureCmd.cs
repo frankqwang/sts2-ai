@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Audio.Debug;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -272,12 +273,8 @@ public static class CreatureCmd
 			{
 				killedCreatures.Add(originalTarget);
 			}
-			if (unblockedDamageResult.WasFullyBlocked)
+			if (unblockedDamageResult.WasFullyBlocked && CombatManager.Instance.IsInProgress)
 			{
-				if (!CombatManager.Instance.IsInProgress)
-				{
-					throw new InvalidOperationException("Damage was blocked while combat was not active!");
-				}
 				SfxCmd.Play("event:/sfx/block_hit");
 				Node node = NCombatRoom.Instance?.CombatVfxContainer;
 				node?.AddChildSafely(NBlockSparkVfx.Create(unblockedDamageResult.Receiver));
@@ -315,6 +312,7 @@ public static class CreatureCmd
 			if (TestMode.IsOff)
 			{
 				NRun.Instance.RunMusicController.StopMusic();
+				NDebugAudioManager.Instance?.StopAll();
 				NAudioManager.Instance.PlayMusic("event:/temp/sfx/game_over");
 				SerializableRun serializableRun = RunManager.Instance.OnEnded(isVictory: false);
 				NRun.Instance.ShowGameOverScreen(serializableRun);
@@ -444,7 +442,7 @@ public static class CreatureCmd
 			}
 		}
 		CombatManager.Instance.RemoveCreature(creature);
-		creature.CombatState.CreatureEscaped(creature);
+		creature.CombatState?.CreatureEscaped(creature);
 		return Task.CompletedTask;
 	}
 
@@ -486,7 +484,7 @@ public static class CreatureCmd
 
 	public static async Task LoseBlock(Creature creature, decimal amount)
 	{
-		if (!CombatManager.Instance.IsOverOrEnding && !creature.IsDead)
+		if (!CombatManager.Instance.IsOverOrEnding && !creature.IsDead && !(amount <= 0m))
 		{
 			int block = creature.Block;
 			creature.LoseBlockInternal(amount);
@@ -505,7 +503,6 @@ public static class CreatureCmd
 			return;
 		}
 		bool isDead = creature.IsDead;
-		amount = Hook.ModifyHealAmount(creature.Player?.RunState ?? creature.CombatState?.RunState ?? NullRunState.Instance, creature.CombatState, creature, amount);
 		decimal num = Math.Min(amount, creature.MaxHp - creature.CurrentHp);
 		if (creature == null || !(creature.Monster is Osty))
 		{
@@ -559,7 +556,7 @@ public static class CreatureCmd
 		{
 			await Cmd.CustomScaledWait(0.1f, 0.25f);
 		}
-		if (amount > 0m)
+		if (amount > 0m && creature.CombatState != null)
 		{
 			await Hook.AfterCurrentHpChanged(creature.Player?.RunState ?? creature.CombatState.RunState, creature.CombatState, creature, amount);
 		}

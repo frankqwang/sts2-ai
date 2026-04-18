@@ -18,11 +18,16 @@ public sealed class RadiantPearl : RelicModel
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new CardsVar(1));
 
-	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlyArray<IHoverTip>(new IHoverTip[2]
+	protected override IEnumerable<IHoverTip> ExtraHoverTips
 	{
-		HoverTipFactory.ForEnergy(this),
-		HoverTipFactory.FromCard<Luminesce>()
-	});
+		get
+		{
+			List<IHoverTip> list = new List<IHoverTip>();
+			list.Add(HoverTipFactory.ForEnergy(this));
+			list.AddRange(HoverTipFactory.FromCardWithCardHoverTips<Luminesce>());
+			return new _003C_003Ez__ReadOnlyList<IHoverTip>(list);
+		}
+	}
 
 	public override async Task BeforeHandDraw(Player player, PlayerChoiceContext choiceContext, CombatState combatState)
 	{

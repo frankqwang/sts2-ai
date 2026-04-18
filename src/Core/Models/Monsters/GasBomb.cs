@@ -24,7 +24,7 @@ public sealed class GasBomb : MonsterModel
 
 	private const string _explodeSfx = "event:/sfx/enemy/enemy_attacks/living_fog/living_fog_explode";
 
-	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 12, 10);
+	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 8, 7);
 
 	public override int MaxInitialHp => MinInitialHp;
 

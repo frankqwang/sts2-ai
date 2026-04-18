@@ -49,9 +49,9 @@ public partial class NHyperbeamVfx : Node2D
 		{
 			Vector2 vfxSpawnPosition = nCreature.VfxSpawnPosition;
 			Player player = owner.Player;
-			if (player != null && player.Character is Defect defect)
+			if (player != null && player.Character is Defect)
 			{
-				vfxSpawnPosition += defect.EyelineOffset;
+				vfxSpawnPosition += Defect.EyelineOffset;
 			}
 			return Create(vfxSpawnPosition, nCreature2.VfxSpawnPosition);
 		}

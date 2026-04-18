@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;
@@ -60,8 +58,7 @@ public partial class NPotionLabCategory : VBoxContainer
 				list2.Add(item2);
 			}
 		}
-		StringComparer comparer = StringComparer.Create(LocManager.Instance.CultureInfo, CompareOptions.None);
-		list2.Sort((PotionModel p1, PotionModel p2) => comparer.Compare(p1.Title.GetFormattedText(), p2.Title.GetFormattedText()));
+		list2.Sort((PotionModel p1, PotionModel p2) => LocManager.Instance.StringComparer.Compare(p1.Title.GetFormattedText(), p2.Title.GetFormattedText()));
 		foreach (PotionModel item3 in list2.Concat(list))
 		{
 			ModelVisibility visibility = ((!allUnlockedPotions.Contains(item3)) ? ModelVisibility.Locked : (seenPotions.Contains(item3) ? ModelVisibility.Visible : ModelVisibility.NotSeen));

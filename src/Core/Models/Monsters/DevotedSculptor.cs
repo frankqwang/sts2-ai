@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
 
@@ -43,7 +44,7 @@ public sealed class DevotedSculptor : MonsterModel
 		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0f);
 		await Cmd.Wait(0.3f);
 		VfxCmd.PlayOnCreatureCenter(base.Creature, "vfx/vfx_scream");
-		TalkCmd.Play(_forbiddenIncantationDialogue, base.Creature);
+		TalkCmd.Play(_forbiddenIncantationDialogue, base.Creature, VfxColor.Blue);
 		await Cmd.CustomScaledWait(0.75f, 1f);
 		await PowerCmd.Apply<RitualPower>(base.Creature, _ritualGain, null, null);
 	}

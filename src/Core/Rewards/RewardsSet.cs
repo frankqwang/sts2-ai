@@ -24,13 +24,19 @@ namespace MegaCrit.Sts2.Core.Rewards;
 
 public class RewardsSet
 {
+	public static Func<RewardsSet, Task>? testSelector;
+
 	private bool _allowEmptyRewards;
+
+	private bool _disallowSkipping;
 
 	public AbstractRoom? Room { get; private set; }
 
 	public Player Player { get; }
 
 	public List<Reward> Rewards { get; } = new List<Reward>();
+
+	public bool DisallowSkipping => _disallowSkipping;
 
 	public RewardsSet(Player player)
 	{
@@ -65,6 +71,12 @@ public class RewardsSet
 	public RewardsSet WithCustomRewards(List<Reward> rewards)
 	{
 		Rewards.AddRange(rewards);
+		return this;
+	}
+
+	public RewardsSet WithSkippingDisallowed()
+	{
+		_disallowSkipping = true;
 		return this;
 	}
 
@@ -111,6 +123,11 @@ public class RewardsSet
 		}
 		if (TestMode.IsOn)
 		{
+			if (testSelector != null)
+			{
+				await testSelector(this);
+				return;
+			}
 			foreach (Reward reward in Rewards)
 			{
 				await reward.OnSelectWrapper();
@@ -120,6 +137,10 @@ public class RewardsSet
 		{
 			NRewardsScreen nRewardsScreen = NRewardsScreen.ShowScreen(isTerminal, Player.RunState);
 			nRewardsScreen.SetRewards(Rewards);
+			if (_disallowSkipping)
+			{
+				nRewardsScreen.DisallowSkipping();
+			}
 			await nRewardsScreen.ClosedTask;
 		}
 	}

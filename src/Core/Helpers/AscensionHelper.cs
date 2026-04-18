@@ -58,11 +58,20 @@ public static class AscensionHelper
 		return level.ToString("D2");
 	}
 
-	public static HoverTip GetHoverTip(CharacterModel character, int level)
+	public static HoverTip GetHoverTip(CharacterModel character, int level, bool achievementsLocked)
 	{
-		LocString locString = new LocString("ascension", "PORTRAIT_TITLE");
-		locString.Add("character", character.Title);
-		locString.Add("ascension", level);
+		LocString locString;
+		if (level > 0)
+		{
+			locString = new LocString("ascension", "PORTRAIT_TITLE");
+			locString.Add("character", character.Title);
+			locString.Add("ascension", level);
+		}
+		else
+		{
+			locString = new LocString("ascension", "PORTRAIT_TITLE_NO_ASCENSION");
+			locString.Add("character", character.Title);
+		}
 		LocString locString2 = new LocString("ascension", "PORTRAIT_DESCRIPTION");
 		List<string> list = new List<string>();
 		for (int i = 1; i <= level; i++)
@@ -70,6 +79,16 @@ public static class AscensionHelper
 			list.Add(GetTitle(i).GetFormattedText());
 		}
 		locString2.Add("ascensions", list);
+		if (achievementsLocked)
+		{
+			if (level == 0)
+			{
+				LocString locString3 = new LocString("gameplay_ui", "ACHIEVEMENTS_LOCKED");
+				return new HoverTip(locString, locString2.GetFormattedText() + locString3.GetFormattedText());
+			}
+			LocString locString4 = new LocString("gameplay_ui", "ACHIEVEMENTS_LOCKED");
+			return new HoverTip(locString, locString2.GetFormattedText() + "\n" + locString4.GetFormattedText());
+		}
 		return new HoverTip(locString, locString2);
 	}
 }

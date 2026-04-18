@@ -66,7 +66,7 @@ public sealed class SandpitPower : PowerModel
 		return Task.CompletedTask;
 	}
 
-	public override async Task AfterSideTurnStart(CombatSide side, CombatState combatState)
+	public override async Task AfterSideTurnStartLate(CombatSide side, CombatState combatState)
 	{
 		if (side == CombatSide.Enemy)
 		{

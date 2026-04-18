@@ -13,7 +13,7 @@ public sealed class RefineBlade : CardModel
 {
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[2]
 	{
-		new ForgeVar(6),
+		new ForgeVar(9),
 		new EnergyVar(1)
 	});
 

@@ -88,8 +88,16 @@ public class EventRoomHandler : IRoomHandler, IHandler
 			{
 				break;
 			}
+			List<NEventOptionButton> list3 = list2.Where((NEventOptionButton o) => o.Option.WillKillPlayer == null || o.Event.Owner == null || !o.Option.WillKillPlayer(o.Event.Owner)).ToList();
+			if (list3.Count > 0)
+			{
+				list2 = list3;
+			}
 			NEventOptionButton choice = random.NextItem(list2);
-			AutoSlayLog.Action("Selecting event option: " + choice.Event.Id.Entry);
+			AutoSlayLog.Action($"Selecting event option: {choice.Event.Id.Entry} (option: {choice.Option.Title.GetFormattedText()})");
+			HashSet<NEventOptionButton> previousButtons = new HashSet<NEventOptionButton>(from o in UiHelper.FindAll<NEventOptionButton>(eventRoom)
+				where !o.Option.IsLocked
+				select o);
 			await UiHelper.Click(choice);
 			if (choice.Option.IsProceed)
 			{
@@ -109,13 +117,55 @@ public class EventRoomHandler : IRoomHandler, IHandler
 				{
 					return true;
 				}
-				return !GodotObject.IsInstanceValid(eventRoom) || !eventRoom.IsInsideTree() || UiHelper.FindAll<NEventOptionButton>(eventRoom).Any((NEventOptionButton o) => !o.Option.IsLocked);
-			}, ct, TimeSpan.FromSeconds(5L), "Event options did not reappear after choice");
+				if (!GodotObject.IsInstanceValid(eventRoom) || !eventRoom.IsInsideTree())
+				{
+					return true;
+				}
+				if (CombatManager.Instance.IsInProgress)
+				{
+					return true;
+				}
+				List<NEventOptionButton> list4 = (from o in UiHelper.FindAll<NEventOptionButton>(eventRoom)
+					where !o.Option.IsLocked
+					select o).ToList();
+				return list4.Count == 0 || !previousButtons.SetEquals(list4);
+			}, ct, TimeSpan.FromSeconds(5L), "Event options did not change after choice");
 			NOverlayStack? instance = NOverlayStack.Instance;
 			if (instance != null && instance.ScreenCount > 0)
 			{
 				AutoSlayLog.Action("Overlay screen opened during event, deferring to drain loop");
 				break;
+			}
+			if (CombatManager.Instance.IsInProgress)
+			{
+				AutoSlayLog.Action("Combat started during event (combat layout), handling combat");
+				await HandleEventCombat(ct);
+				if (!GodotObject.IsInstanceValid(eventRoom) || !eventRoom.IsInsideTree())
+				{
+					AutoSlayLog.Action("Event room gone after combat");
+					break;
+				}
+				await WaitHelper.Until(delegate
+				{
+					if (GodotObject.IsInstanceValid(eventRoom) && eventRoom.IsInsideTree())
+					{
+						NMapScreen? instance2 = NMapScreen.Instance;
+						if (instance2 == null || !instance2.IsOpen)
+						{
+							NOverlayStack? instance3 = NOverlayStack.Instance;
+							if (instance3 == null || instance3.ScreenCount <= 0)
+							{
+								return UiHelper.FindAll<NEventOptionButton>(eventRoom).Any((NEventOptionButton o) => !o.Option.IsLocked);
+							}
+						}
+					}
+					return true;
+				}, ct, TimeSpan.FromSeconds(10L), "Event did not resume after combat layout combat");
+				if (!GodotObject.IsInstanceValid(eventRoom) || !eventRoom.IsInsideTree())
+				{
+					AutoSlayLog.Action("Event room gone after combat");
+					break;
+				}
 			}
 			iterations++;
 		}

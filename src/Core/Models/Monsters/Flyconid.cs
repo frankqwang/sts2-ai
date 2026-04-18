@@ -55,8 +55,7 @@ public sealed class Flyconid : MonsterModel
 		if (TestMode.IsOff)
 		{
 			NCreature creatureNode = NCombatRoom.Instance.GetCreatureNode(base.Creature);
-			NFlyconidSporesVfx node = creatureNode.Visuals.Body.GetNode<NFlyconidSporesVfx>("%VfxController");
-			node.SetSporeTypeIsVulnerable(isVulnerable: true);
+			creatureNode.Visuals.GetCurrentBody().GetNode<NFlyconidSporesVfx>("%VfxController")?.SetSporeTypeIsVulnerable(isVulnerable: true);
 		}
 		SfxCmd.Play(CastSfx);
 		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0.5f);
@@ -68,8 +67,7 @@ public sealed class Flyconid : MonsterModel
 		if (TestMode.IsOff)
 		{
 			NCreature creatureNode = NCombatRoom.Instance.GetCreatureNode(base.Creature);
-			NFlyconidSporesVfx node = creatureNode.Visuals.Body.GetNode<NFlyconidSporesVfx>("%VfxController");
-			node.SetSporeTypeIsVulnerable(isVulnerable: false);
+			creatureNode.Visuals.GetCurrentBody().GetNode<NFlyconidSporesVfx>("%VfxController")?.SetSporeTypeIsVulnerable(isVulnerable: false);
 		}
 		await DamageCmd.Attack(SporeDamage).FromMonster(this).WithAttackerAnim("Cast", 0.5f)
 			.WithAttackerFx(null, CastSfx)

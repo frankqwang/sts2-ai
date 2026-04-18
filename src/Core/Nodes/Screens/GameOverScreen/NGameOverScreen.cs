@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Badges;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
@@ -47,7 +48,7 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 
 	private RunHistory _history;
 
-	private Player? _localPlayer;
+	private Player _localPlayer;
 
 	private NGameOverContinueButton _continueButton;
 
@@ -57,9 +58,11 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 
 	private NGameOverContinueButton _leaderboardButton;
 
-	private GridContainer _badgeContainer;
+	private Control _badgeContainer;
 
-	private readonly List<NBadge> _badges = new List<NBadge>();
+	private GridContainer _scoreLineContainer;
+
+	private readonly List<NScoreLine> _scoreLines = new List<NScoreLine>();
 
 	private Control _scoreBar;
 
@@ -133,7 +136,8 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 		_viewRunButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OpenRunHistoryScreen));
 		_mainMenuButton = GetNode<NReturnToMainMenuButton>("%MainMenuButton");
 		_mainMenuButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnMainMenuButtonPressed));
-		_badgeContainer = GetNode<GridContainer>("%BadgeContainer");
+		_scoreLineContainer = GetNode<GridContainer>("%ScoreLineContainer");
+		_badgeContainer = GetNode<Control>("%BadgeContainer");
 		_scoreBar = GetNode<Control>("%ScoreBar");
 		_scoreFg = GetNode<Control>("%ScoreFg");
 		_scoreProgress = GetNode<MegaLabel>("%ScoreProgress");
@@ -171,33 +175,31 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 		ModelId id = _localPlayer.Character.Id;
 		if (_history.Win)
 		{
-			_banner.label.SetTextAutoSize(new LocString("game_over_screen", "BANNER.falseWin").GetFormattedText());
+			_banner.label.SetTextAutoSize(new LocString("game_over_screen", "BANNER.falseWin").GetRawText());
 			_deathQuote.Text = string.Empty;
 			long personalArchitectDamage = StatsManager.GetPersonalArchitectDamage();
 			long? globalArchitectDamage = StatsManager.GetGlobalArchitectDamage();
 			StringBuilder stringBuilder = new StringBuilder();
+			LocString locString;
 			if (globalArchitectDamage.HasValue)
 			{
-				LocString locString = new LocString("game_over_screen", "VICTORY_DAMAGE");
-				locString.Add("PlayerDamage", _score);
-				locString.Add("PersonalDamage", personalArchitectDamage.ToString("N0"));
-				locString.Add("TotalDamage", globalArchitectDamage.Value.ToString("N0"));
-				stringBuilder.Append(locString.GetFormattedText());
+				locString = new LocString("game_over_screen", "VICTORY_DAMAGE");
+				locString.Add("TotalDamage", globalArchitectDamage.Value);
 			}
 			else
 			{
-				LocString locString2 = new LocString("game_over_screen", "VICTORY_DAMAGE_LOCAL");
-				locString2.Add("PlayerDamage", _score);
-				locString2.Add("PersonalDamage", personalArchitectDamage.ToString("N0"));
-				stringBuilder.Append(locString2.GetFormattedText());
+				locString = new LocString("game_over_screen", "VICTORY_DAMAGE_LOCAL");
 			}
+			locString.Add("PlayerDamage", _score);
+			locString.Add("PersonalDamage", personalArchitectDamage);
+			stringBuilder.Append(locString.GetFormattedText());
 			int ascensionLevel = _runState.AscensionLevel;
-			if (ascensionLevel < 10 && ascensionLevel > 0 && _runState.AscensionLevel >= _localPlayer.MaxAscensionWhenRunStarted)
+			if (ascensionLevel < 10 && ascensionLevel > 0 && _runState.AscensionLevel >= _localPlayer.MaxAscensionWhenRunStarted && _runState.GameMode == GameMode.Standard)
 			{
 				stringBuilder.Append("\n\n");
-				LocString locString3 = new LocString("game_over_screen", "VICTORY_UNLOCKED_ASCENSION");
-				locString3.Add("AscensionLevel", _runState.AscensionLevel + 1);
-				stringBuilder.Append(locString3.GetFormattedText());
+				LocString locString2 = new LocString("game_over_screen", "VICTORY_UNLOCKED_ASCENSION");
+				locString2.Add("AscensionLevel", _runState.AscensionLevel + 1);
+				stringBuilder.Append(locString2.GetFormattedText());
 			}
 			_victoryDamageLabel.Text = stringBuilder.ToString();
 		}
@@ -205,7 +207,7 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 		{
 			LocTable table = LocManager.Instance.GetTable("game_over_screen");
 			IReadOnlyList<LocString> locStringsWithPrefix = table.GetLocStringsWithPrefix("BANNER.lose");
-			_banner.label.SetTextAutoSize(Rng.Chaotic.NextItem(locStringsWithPrefix).GetFormattedText());
+			_banner.label.SetTextAutoSize(Rng.Chaotic.NextItem(locStringsWithPrefix).GetRawText());
 			IReadOnlyList<LocString> locStringsWithPrefix2 = table.GetLocStringsWithPrefix("QUOTES");
 			_deathQuote.Text = Rng.Chaotic.NextItem(locStringsWithPrefix2).GetFormattedText();
 		}
@@ -276,6 +278,7 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 		Tween tween = CreateTween();
 		tween.TweenProperty(_banner, "position:y", _banner.Position.Y - 32f, 0.5).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic);
 		_summaryContainer.Visible = true;
+		await AnimateScoreLines();
 		await AnimateBadges();
 		await AnimateScoreBar();
 		await AnimateDiscoveries();
@@ -294,84 +297,79 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 		_mainMenuButton.Enable();
 	}
 
+	private async Task AnimateScoreLines()
+	{
+		_scoreLines.Clear();
+		AddScoreLine("SCORE_LINE.floorsClimbed", "FloorCount", _runState.TotalFloor, $"+{ScoreUtility.GetScoreForFloor(_serializableRun.MapPointHistory)}", "res://images/ui/game_over_screen/score_floor.png");
+		int amount = _serializableRun.MapPointHistory.SelectMany((List<MapPointHistoryEntry> actEntries) => actEntries).Sum((MapPointHistoryEntry e) => e.GetEntry(_localPlayer.NetId).GoldGained);
+		AddScoreLine("SCORE_LINE.goldGained", "GoldAmount", amount, $"+{ScoreUtility.GetScoreForGoldGained(_serializableRun.MapPointHistory, _serializableRun.Players.Count)}", "res://images/ui/game_over_screen/score_gold.png");
+		int elitesKilledCount = ScoreUtility.GetElitesKilledCount(_serializableRun.MapPointHistory);
+		if (elitesKilledCount > 0)
+		{
+			AddScoreLine("SCORE_LINE.elitesKilled", "EliteCount", elitesKilledCount, $"+{ScoreUtility.GetScoreForElitesKilled(elitesKilledCount)}", "res://images/ui/game_over_screen/score_elite.png");
+		}
+		int bossesSlainCount = ScoreUtility.GetBossesSlainCount(_serializableRun.MapPointHistory, _history.Win);
+		if (bossesSlainCount > 0)
+		{
+			AddScoreLine("SCORE_LINE.bossesSlain", "BossCount", bossesSlainCount, $"+{ScoreUtility.GetScoreForBossesSlain(bossesSlainCount)}", "res://images/ui/game_over_screen/score_boss.png");
+		}
+		int ascension = _history.Ascension;
+		if (ascension > 0)
+		{
+			AddScoreLine("SCORE_LINE.ascension", "AscensionLevel", ascension, "x" + GetAscensionMulti(ascension), "res://images/ui/game_over_screen/score_ascension.png");
+		}
+		foreach (NScoreLine scoreLine in _scoreLines)
+		{
+			await scoreLine.AnimateIn();
+		}
+		await Cmd.Wait(0.5f);
+	}
+
 	private async Task AnimateBadges()
 	{
-		_badges.Clear();
-		AddBadge("BADGE.floorsClimbed", "FloorCount", _runState.TotalFloor, "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_floor.tres");
-		List<MapPointRoomHistoryEntry> list = _serializableRun.MapPointHistory.SelectMany((List<MapPointHistoryEntry> actEntries) => actEntries).SelectMany((MapPointHistoryEntry e) => e.Rooms).ToList();
-		int num = list.Count((MapPointRoomHistoryEntry r) => r.RoomType == RoomType.Elite);
-		if (list.Count > 0 && list.Last().RoomType == RoomType.Elite)
+		List<Badge> badges = ScoreUtility.GetBadges(_serializableRun, _localPlayer.NetId, _history.Win);
+		foreach (Badge item in badges)
 		{
-			num--;
+			_badgeContainer.AddChildSafely(NBadge.Create(item));
 		}
-		AddBadge("BADGE.elitesKilled", "EliteCount", num);
-		int amount = _serializableRun.MapPointHistory.SelectMany((List<MapPointHistoryEntry> actEntries) => actEntries).Sum((MapPointHistoryEntry e) => e.GetEntry(_localPlayer.NetId).GoldGained);
-		AddBadge("BADGE.goldGained", "GoldAmount", amount);
-		if (_localPlayer.Relics.Count >= 25)
+		if (!_serializableRun.GameMode.AreAchievementsAndEpochsLocked())
 		{
-			AddBadge("BADGE.iLikeShiny", "RelicCount", _localPlayer.Relics.Count);
+			SaveBadgesToProgress(badges);
 		}
-		int gold = _localPlayer.Gold;
-		if (gold >= 3000)
+		await Cmd.Wait(0.25f);
+		foreach (NBadge item2 in _badgeContainer.GetChildren().OfType<NBadge>())
 		{
-			AddBadge("BADGE.goldenGod", "GoldAmount", gold);
+			await item2.AnimateIn();
 		}
-		else if (gold >= 2000)
-		{
-			AddBadge("BADGE.scrooge", "GoldAmount", gold);
-		}
-		else if (gold >= 1000)
-		{
-			AddBadge("BADGE.miser", "GoldAmount", gold);
-		}
-		if (_history.Win)
-		{
-			int count = _localPlayer.Deck.Cards.Count;
-			if (count <= 10)
-			{
-				AddBadge("BADGE.tinyDeck", "DeckSize", count);
-			}
-			else if (count <= 20)
-			{
-				AddBadge("BADGE.smallDeck", "DeckSize", count);
-			}
-			else if (count >= 60)
-			{
-				AddBadge("BADGE.hugeDeck", "DeckSize", count);
-			}
-			else if (count >= 40)
-			{
-				AddBadge("BADGE.bigDeck", "DeckSize", count);
-			}
-			int startingHp = _localPlayer.Character.StartingHp;
-			int maxHp = _localPlayer.Creature.MaxHp;
-			int num2 = maxHp - startingHp;
-			if ((float)maxHp / (float)startingHp < 0.50001f)
-			{
-				AddBadge("BADGE.famished", "HpDiff", num2);
-			}
-			else if (num2 >= 50)
-			{
-				AddBadge("BADGE.glutton", "HpDiff", num2);
-			}
-			else if (num2 >= 30)
-			{
-				AddBadge("BADGE.stuffed", "HpDiff", num2);
-			}
-			else if (num2 >= 15)
-			{
-				AddBadge("BADGE.wellFed", "HpDiff", num2);
-			}
-		}
-		_badgeContainer.Columns = ((_badges.Count < 6) ? 1 : 2);
 		await Cmd.Wait(0.5f);
-		foreach (NBadge badge in _badges)
+	}
+
+	private void SaveBadgesToProgress(List<Badge> badgesToSave)
+	{
+		CharacterStats characterStats = SaveManager.Instance.Progress.CharacterStats[_localPlayer.Character.Id];
+		foreach (Badge badge in badgesToSave)
 		{
-			await badge.AnimateIn();
+			BadgeStats badgeStats = characterStats.Badges.FirstOrDefault((BadgeStats b) => b.Id.Equals(badge.Id) && b.Rarity == badge.Rarity);
+			if (badgeStats == null)
+			{
+				BadgeStats item = new BadgeStats
+				{
+					Id = badge.Id,
+					Count = 1,
+					Rarity = badge.Rarity
+				};
+				characterStats.Badges.Add(item);
+				Log.Info("You got a new badge: " + badge.Id);
+			}
+			else
+			{
+				badgeStats.Count++;
+				Log.Info($"You got badge: {badge.Id} again. Now you have {badgeStats.Count}!");
+			}
 		}
 	}
 
-	private void AddBadge(string locEntryKey, string? locAmountKey = null, int amount = 0, string? iconPath = null)
+	private void AddScoreLine(string locEntryKey, string? locAmountKey = null, int amount = 0, string scoreLabel = "ERROR", string? iconPath = null)
 	{
 		LocString locString = new LocString("game_over_screen", locEntryKey);
 		if (locAmountKey != null)
@@ -379,9 +377,9 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 			locString.Add(locAmountKey, amount);
 		}
 		Texture2D icon = ((iconPath == null) ? null : PreloadManager.Cache.GetTexture2D(iconPath));
-		NBadge nBadge = NBadge.Create(locString.GetFormattedText(), icon);
-		_badgeContainer.AddChildSafely(nBadge);
-		_badges.Add(nBadge);
+		NScoreLine nScoreLine = NScoreLine.Create(locString.GetFormattedText(), scoreLabel, icon);
+		_scoreLineContainer.AddChildSafely(nScoreLine);
+		_scoreLines.Add(nScoreLine);
 	}
 
 	private async Task AnimateScoreBar()
@@ -519,6 +517,7 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 
 	private void ShowLeaderboard(NButton _)
 	{
+		_banner.ChangeText(new LocString("main_menu_ui", "DAILY_RUN_MENU.LEADERBOARDS.title").GetRawText());
 		Tween tween = CreateTween().SetParallel();
 		NDailyRunLeaderboard leaderboard = _leaderboard;
 		Color modulate = _leaderboard.Modulate;
@@ -607,7 +606,7 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 		{
 			if (NCombatRoom.Instance.Mode == CombatRoomMode.ActiveCombat)
 			{
-				NCombatRoom.Instance.Ui.AnimOut((CombatRoom)_runState.CurrentRoom);
+				NCombatRoom.Instance.Ui.AnimOut();
 			}
 			list2 = NCombatRoom.Instance.CreatureNodes.ToList();
 			list = list2.Select((NCreature c) => c.Visuals).ToList();
@@ -630,7 +629,7 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 				NCreatureVisuals nCreatureVisuals = player.Creature.CreateVisuals();
 				list.Add(nCreatureVisuals);
 				_creatureContainer.AddChildSafely(nCreatureVisuals);
-				nCreatureVisuals.SpineBody.GetAnimationState().SetAnimation("die", loop: false);
+				nCreatureVisuals.SpineAnimation.SetAnimation("die", loop: false);
 				NRestSiteCharacter characterForPlayer = NRestSiteRoom.Instance.GetCharacterForPlayer(player);
 				nCreatureVisuals.GlobalPosition = characterForPlayer.GlobalPosition;
 				nCreatureVisuals.Scale = characterForPlayer.Scale;
@@ -648,7 +647,7 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 				NCreatureVisuals nCreatureVisuals2 = player2.Creature.CreateVisuals();
 				list.Add(nCreatureVisuals2);
 				_creatureContainer.AddChildSafely(nCreatureVisuals2);
-				nCreatureVisuals2.SpineBody.GetAnimationState().SetAnimation("die", loop: false);
+				nCreatureVisuals2.SpineAnimation.SetAnimation("die", loop: false);
 			}
 			float num = Math.Min(250f, (base.Size.X - 200f) / (float)(list.Count - 1));
 			float num2 = (float)(list.Count - 1) * (0f - num) * 0.5f;
@@ -721,5 +720,16 @@ public partial class NGameOverScreen : NClickableControl, IOverlayScreen, IScree
 	public void AfterOverlayHidden()
 	{
 		base.Visible = false;
+	}
+
+	private string GetAscensionMulti(int ascension)
+	{
+		int value = ascension / 10 + 1;
+		int num = ascension % 10;
+		if (num != 0)
+		{
+			return $"{value}.{num}";
+		}
+		return value.ToString();
 	}
 }

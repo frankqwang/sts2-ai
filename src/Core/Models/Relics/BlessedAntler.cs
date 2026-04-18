@@ -22,11 +22,16 @@ public sealed class BlessedAntler : RelicModel
 		new CardsVar(3)
 	});
 
-	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlyArray<IHoverTip>(new IHoverTip[2]
+	protected override IEnumerable<IHoverTip> ExtraHoverTips
 	{
-		HoverTipFactory.ForEnergy(this),
-		HoverTipFactory.FromCard<Dazed>()
-	});
+		get
+		{
+			List<IHoverTip> list = new List<IHoverTip>();
+			list.Add(HoverTipFactory.ForEnergy(this));
+			list.AddRange(HoverTipFactory.FromCardWithCardHoverTips<Dazed>());
+			return new _003C_003Ez__ReadOnlyList<IHoverTip>(list);
+		}
+	}
 
 	public override decimal ModifyMaxEnergy(Player player, decimal amount)
 	{

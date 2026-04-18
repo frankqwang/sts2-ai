@@ -58,6 +58,9 @@ func _ready():
 
 
 func _process(_delta):
+    if (disableScript == true):
+        return
+
     if (Input.is_key_pressed(KEY_SPACE)):
         if ( !keyPressed):
             if ( !isSkipping):

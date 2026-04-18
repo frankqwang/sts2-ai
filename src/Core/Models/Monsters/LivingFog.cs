@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Godot;
@@ -95,7 +94,6 @@ public sealed class LivingFog : MonsterModel
 				await CreatureCmd.Add<GasBomb>(base.CombatState, nextSlot);
 			}
 		}
-		BloatAmount = Math.Min(BloatAmount + 1, 5);
 		await DamageCmd.Attack(BloatDamage).FromMonster(this).WithAttackerAnim("Attack", 0.1f)
 			.WithAttackerFx(null, "event:/sfx/enemy/enemy_attacks/living_fog/living_fog_attack_blow")
 			.WithHitVfxNode((Creature _) => NGaseousImpactVfx.Create(CombatSide.Player, base.CombatState, new Color("#402f45")))

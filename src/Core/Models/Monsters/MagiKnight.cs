@@ -89,8 +89,8 @@ public sealed class MagiKnight : MonsterModel
 				await PowerCmd.Apply(dampenPower, target, 1m, base.Creature, null);
 			}
 		}
-		NCombatRoom.Instance?.CombatVfxContainer.AddChildSafely(NSpeechBubbleVfx.Create(_dampenDialogue.GetFormattedText(), base.Creature, 2.0));
-		await Cmd.Wait(0.25f);
+		TalkCmd.Play(_dampenDialogue, base.Creature, VfxColor.Orange, VfxDuration.Long);
+		await Cmd.Wait(0.5f);
 	}
 
 	private async Task PowerShieldMove(IReadOnlyList<Creature> targets)
@@ -126,7 +126,7 @@ public sealed class MagiKnight : MonsterModel
 			Node2D specialNode = creatureNode2.GetSpecialNode<Node2D>("Visuals/AttackDistanceControl");
 			if (specialNode != null)
 			{
-				float x = creatureNode2.Visuals.Body.Scale.X;
+				float x = creatureNode2.Visuals.GetCurrentBody().Scale.X;
 				specialNode.Position = Vector2.Left * ((creatureNode2.GlobalPosition.X - vector.Value.X - 600f) / x);
 			}
 		}

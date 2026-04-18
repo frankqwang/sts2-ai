@@ -167,13 +167,13 @@ public partial class NControllerManager : Node
 			{
 				ActiveScreenContext.Instance.FocusOnDefaultControl();
 			}).CallDeferred();
+			return;
 		}
-		else
-		{
-			Vector2I vector2I = DisplayServer.MouseGetPosition();
-			Vector2I vector2I2 = DisplayServer.WindowGetPosition();
-			Input.WarpMouse(new Vector2(vector2I.X - vector2I2.X, vector2I.Y - vector2I2.Y));
-		}
+		Vector2 mousePosition = GetViewport().GetMousePosition();
+		using InputEventMouseMotion inputEventMouseMotion = new InputEventMouseMotion();
+		inputEventMouseMotion.Position = mousePosition;
+		inputEventMouseMotion.GlobalPosition = mousePosition;
+		Input.ParseInputEvent(inputEventMouseMotion);
 	}
 
 	public Texture2D? GetHotkeyIcon(string hotkey)

@@ -1,11 +1,14 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Ftue;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
@@ -35,19 +38,21 @@ public partial class NTreasureRoom : Control, IScreenContext, IRoomWithProceedBu
 
 	private NProceedButton _proceedButton;
 
-	private MegaSkin _regularChestSkin;
+	private MegaSkin? _regularChestSkin;
 
-	private MegaSkin _outlineChestSkin;
+	private MegaSkin? _outlineChestSkin;
 
 	private GpuParticles2D _goldParticles;
 
 	private NTreasureRoomRelicCollection _relicCollection;
 
+	private NMultiplayerVoteContainer _skipVoteContainer;
+
 	private static readonly string _scenePath = SceneHelper.GetScenePath("rooms/treasure_room");
 
 	private bool _isRelicCollectionOpen;
 
-	private bool _hasRelicBeenClaimed;
+	private bool _hasChestBeenOpened;
 
 	public NProceedButton ProceedButton => _proceedButton;
 
@@ -82,33 +87,38 @@ public partial class NTreasureRoom : Control, IScreenContext, IRoomWithProceedBu
 		_banner = GetNode<NCommonBanner>("%Banner");
 		if (_runState.Players.Count == 1)
 		{
-			_banner.label.SetTextAutoSize(new LocString("gameplay_ui", "TREASURE_BANNER").GetFormattedText());
+			_banner.label.SetTextAutoSize(new LocString("gameplay_ui", "TREASURE_BANNER").GetRawText());
 		}
 		else
 		{
-			_banner.label.SetTextAutoSize(new LocString("gameplay_ui", "CHOOSE_SHARED_RELIC_HEADER").GetFormattedText());
+			_banner.label.SetTextAutoSize(new LocString("gameplay_ui", "CHOOSE_SHARED_RELIC_HEADER").GetRawText());
 		}
 		_proceedButton = GetNode<NProceedButton>("%ProceedButton");
 		_chestNode = GetNode<Node2D>("%ChestVisual");
 		_chestAnimController = new MegaSprite(_chestNode);
 		_goldParticles = GetNode<GpuParticles2D>("%GoldExplosion");
 		_relicCollection = GetNode<NTreasureRoomRelicCollection>("%RelicCollection");
+		_skipVoteContainer = GetNode<NMultiplayerVoteContainer>("%SkipMultiplayerVoteContainer");
 		_relicCollection.Initialize(_runState);
 		_relicCollection.Visible = false;
 		_chestAnimController.SetSkeletonDataRes(_runState.Act.ChestSpineResource);
 		MegaSkeleton skeleton = _chestAnimController.GetSkeleton();
-		MegaSkeletonDataResource data = skeleton.GetData();
-		_regularChestSkin = data.FindSkin(_runState.Act.ChestSpineSkinNameNormal);
-		_outlineChestSkin = data.FindSkin(_runState.Act.ChestSpineSkinNameStroke);
-		skeleton.SetSlotsToSetupPose();
-		_chestAnimController.GetAnimationState().Apply(skeleton);
-		MegaAnimationState animationState = _chestAnimController.GetAnimationState();
-		animationState.SetAnimation("animation", loop: false);
-		_chestAnimController.GetAnimationState().AddAnimation("shine_fade", 0f, loop: false);
+		if (skeleton != null)
+		{
+			MegaSkeletonDataResource data = skeleton.GetData();
+			_regularChestSkin = data.FindSkin(_runState.Act.ChestSpineSkinNameNormal);
+			_outlineChestSkin = data.FindSkin(_runState.Act.ChestSpineSkinNameStroke);
+			skeleton.SetSlotsToSetupPose();
+			_chestAnimController.GetAnimationState().Apply(skeleton);
+			MegaAnimationState animationState = _chestAnimController.GetAnimationState();
+			animationState.SetAnimation("animation", loop: false);
+			_chestAnimController.GetAnimationState().AddAnimation("shine_fade", 0f, loop: false);
+			animationState.SetTimeScale(0f);
+			UpdateChestSkin(showOutline: false);
+		}
 		_proceedButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(OnProceedButtonPressed));
 		_proceedButton.UpdateText(NProceedButton.ProceedLoc);
-		animationState.SetTimeScale(0f);
-		UpdateChestSkin(showOutline: false);
+		_skipVoteContainer.Initialize(IsPlayerVotingForSkip, _runState.Players);
 		_chestButton = GetNode<NButton>("%Chest");
 		_chestButton.Connect(Control.SignalName.MouseEntered, Callable.From(OnMouseEntered));
 		_chestButton.Connect(Control.SignalName.MouseExited, Callable.From(OnMouseExited));
@@ -118,16 +128,35 @@ public partial class NTreasureRoom : Control, IScreenContext, IRoomWithProceedBu
 	public override void _EnterTree()
 	{
 		ActiveScreenContext.Instance.Updated += OnActiveScreenChanged;
+		RunManager.Instance.TreasureRoomRelicSynchronizer.VotesChanged += RefreshVotes;
 	}
 
 	public override void _ExitTree()
 	{
 		ActiveScreenContext.Instance.Updated -= OnActiveScreenChanged;
+		RunManager.Instance.TreasureRoomRelicSynchronizer.VotesChanged -= RefreshVotes;
 	}
 
 	private void OnProceedButtonPressed(NButton _)
 	{
-		TaskHelper.RunSafely(RunManager.Instance.ProceedFromTerminalRewardsScreen());
+		if (_proceedButton.IsSkip)
+		{
+			RunManager.Instance.TreasureRoomRelicSynchronizer.SkipRelicLocally();
+			if (_runState.Players.Count == 1)
+			{
+				NMapScreen.Instance.SetTravelEnabled(enabled: true);
+				TaskHelper.RunSafely(RunManager.Instance.ProceedFromTerminalRewardsScreen());
+			}
+		}
+		else
+		{
+			TaskHelper.RunSafely(RunManager.Instance.ProceedFromTerminalRewardsScreen());
+		}
+	}
+
+	private void RefreshVotes()
+	{
+		_skipVoteContainer.RefreshPlayerVotes();
 	}
 
 	private void OnProceedButtonReleased(NButton _)
@@ -171,13 +200,33 @@ public partial class NTreasureRoom : Control, IScreenContext, IRoomWithProceedBu
 		_isRelicCollectionOpen = true;
 		ActiveScreenContext.Instance.Update();
 		TaskHelper.RunSafely(RelicFtueCheck());
+		CancellationTokenSource cancelSource = new CancellationTokenSource();
+		if (_runState.Players.Count == 1)
+		{
+			_proceedButton.UpdateText(NProceedButton.SkipLoc);
+			TaskHelper.RunSafely(EnableSkipAfterDelay(2.5f, cancelSource.Token));
+		}
+		_hasChestBeenOpened = true;
+		await _relicCollection.RelicPickingBegan();
+		await cancelSource.CancelAsync();
+		_proceedButton.Disable();
 		await _relicCollection.RelicPickingFinished();
 		_isRelicCollectionOpen = false;
+		_skipVoteContainer.RefreshPlayerVotes();
+		_proceedButton.UpdateText(NProceedButton.ProceedLoc);
+		_proceedButton.Enable();
 		_banner.AnimateOut();
 		NMapScreen.Instance.SetTravelEnabled(enabled: true);
-		_proceedButton.Enable();
-		_hasRelicBeenClaimed = true;
 		_relicCollection.AnimOut(_chestNode);
+	}
+
+	private async Task EnableSkipAfterDelay(float delay, CancellationToken token)
+	{
+		await Cmd.Wait(delay, token);
+		if (!token.IsCancellationRequested)
+		{
+			_proceedButton.Enable();
+		}
 	}
 
 	private async Task RelicFtueCheck()
@@ -196,15 +245,18 @@ public partial class NTreasureRoom : Control, IScreenContext, IRoomWithProceedBu
 	private void UpdateChestSkin(bool showOutline)
 	{
 		MegaSkeleton skeleton = _chestAnimController.GetSkeleton();
-		skeleton.SetSkin(showOutline ? _outlineChestSkin : _regularChestSkin);
-		skeleton.SetSlotsToSetupPose();
-		_chestAnimController.GetAnimationState().Apply(skeleton);
+		if (skeleton != null)
+		{
+			skeleton.SetSkin(showOutline ? _outlineChestSkin : _regularChestSkin);
+			skeleton.SetSlotsToSetupPose();
+			_chestAnimController.GetAnimationState().Apply(skeleton);
+		}
 	}
 
 	private void OnActiveScreenChanged()
 	{
 		this.UpdateControllerNavEnabled();
-		if (ActiveScreenContext.Instance.IsCurrent(this) && _hasRelicBeenClaimed)
+		if (ActiveScreenContext.Instance.IsCurrent(this) && _hasChestBeenOpened)
 		{
 			_proceedButton.Enable();
 		}
@@ -212,5 +264,20 @@ public partial class NTreasureRoom : Control, IScreenContext, IRoomWithProceedBu
 		{
 			_proceedButton.Disable();
 		}
+	}
+
+	private bool IsPlayerVotingForSkip(Player player)
+	{
+		if (RunManager.Instance.TreasureRoomRelicSynchronizer.CurrentRelics == null)
+		{
+			return false;
+		}
+		TreasureRoomRelicSynchronizer.PlayerVote playerVote = RunManager.Instance.TreasureRoomRelicSynchronizer.GetPlayerVote(player);
+		if (playerVote != null && playerVote.voteReceived)
+		{
+			int? index = playerVote.index;
+			return !index.HasValue;
+		}
+		return false;
 	}
 }

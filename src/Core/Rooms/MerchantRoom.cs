@@ -41,7 +41,7 @@ public class MerchantRoom : AbstractRoom
 		}
 	}
 
-	public override async Task Enter(IRunState? runState, bool isRestoringRoomStackBase)
+	public override async Task EnterInternal(IRunState? runState, bool isRestoringRoomStackBase)
 	{
 		if (isRestoringRoomStackBase)
 		{

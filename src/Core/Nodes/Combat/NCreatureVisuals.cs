@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace MegaCrit.Sts2.Core.Nodes.Combat;
 
@@ -17,6 +18,10 @@ public partial class NCreatureVisuals : Node2D
 
 	private const double _baseLiquidOverlayDuration = 1.0;
 
+	private Node2D _body;
+
+	private Node2D? _phobiaModeBody;
+
 	private float _hue = 1f;
 
 	private double _liquidOverlayTimer;
@@ -24,8 +29,6 @@ public partial class NCreatureVisuals : Node2D
 	private Material? _savedNormalMaterial;
 
 	private ShaderMaterial? _currentLiquidOverlayMaterial;
-
-	public Node2D Body { get; private set; }
 
 	public Control Bounds { get; private set; }
 
@@ -35,45 +38,91 @@ public partial class NCreatureVisuals : Node2D
 
 	public Marker2D? TalkPosition { get; private set; }
 
-	public bool HasSpineAnimation
+	private bool IsSpineNode
 	{
 		get
 		{
-			if (GodotObject.IsInstanceValid(Body))
+			if (GodotObject.IsInstanceValid(_body))
 			{
-				return Body.GetClass() == "SpineSprite";
+				return _body.GetClass() == "SpineSprite";
 			}
 			return false;
 		}
 	}
 
+	public bool HasSpineAnimation => SpineBody != null;
+
+	public bool IsUsingPhobiaModeBody => _phobiaModeBody == GetCurrentBody();
+
 	public MegaSprite? SpineBody { get; private set; }
+
+	public SpineAnimationAccess SpineAnimation => new SpineAnimationAccess(SpineBody);
 
 	public Marker2D VfxSpawnPosition { get; private set; }
 
 	public float DefaultScale { get; set; } = 1f;
 
+	public Node2D GetCurrentBody()
+	{
+		Node2D phobiaModeBody = _phobiaModeBody;
+		if (phobiaModeBody == null || !phobiaModeBody.Visible)
+		{
+			return _body;
+		}
+		return _phobiaModeBody;
+	}
+
 	public override void _Ready()
 	{
-		Body = GetNode<Node2D>("%Visuals");
+		_body = GetNode<Node2D>("%Visuals");
+		_phobiaModeBody = GetNodeOrNull<Node2D>("%PhobiaModeVisuals");
 		Bounds = GetNode<Control>("%Bounds");
 		IntentPosition = GetNode<Marker2D>("%IntentPos");
 		VfxSpawnPosition = GetNode<Marker2D>("%CenterPos");
 		OrbPosition = (HasNode("%OrbPos") ? GetNode<Marker2D>("%OrbPos") : IntentPosition);
 		TalkPosition = (HasNode("%TalkPos") ? GetNode<Marker2D>("%TalkPos") : null);
-		if (HasSpineAnimation)
+		if (IsSpineNode)
 		{
-			SpineBody = new MegaSprite(Body);
+			SpineBody = new MegaSprite(_body);
+			if (SpineBody.GetSkeleton()?.GetData() == null)
+			{
+				GD.PushWarning($"Spine skeleton data failed to load for {base.Name}, disabling spine animation.");
+				SpineBody = null;
+			}
 		}
 		_savedNormalMaterial = null;
 		_currentLiquidOverlayMaterial = null;
+		UpdatePhobiaMode();
+	}
+
+	public override void _EnterTree()
+	{
+		NGame.Instance?.Connect(NGame.SignalName.PhobiaModeToggled, Callable.From(UpdatePhobiaMode));
+	}
+
+	public override void _ExitTree()
+	{
+		NGame.Instance?.Disconnect(NGame.SignalName.PhobiaModeToggled, Callable.From(UpdatePhobiaMode));
+	}
+
+	private void UpdatePhobiaMode()
+	{
+		if (_phobiaModeBody != null)
+		{
+			_phobiaModeBody.Visible = SaveManager.Instance.PrefsSave.PhobiaMode;
+			_body.Visible = !_phobiaModeBody.Visible;
+		}
 	}
 
 	public void SetUpSkin(MonsterModel model)
 	{
-		if (SpineBody?.GetSkeleton() != null)
+		if (SpineBody != null)
 		{
-			model.SetupSkins(this);
+			MegaSkeleton skeleton = SpineBody.GetSkeleton();
+			if (skeleton != null)
+			{
+				model.SetupSkins(SpineBody, skeleton);
+			}
 		}
 	}
 
@@ -102,13 +151,7 @@ public partial class NCreatureVisuals : Node2D
 
 	public bool IsPlayingHurtAnimation()
 	{
-		if (SpineBody?.GetSkeleton() != null)
-		{
-			return SpineBody.GetAnimationState().GetCurrent(0).GetAnimation()
-				.GetName()
-				.Equals("hurt");
-		}
-		return false;
+		return SpineAnimation.GetCurrentTrack()?.GetAnimation().GetName().Equals("hurt") ?? false;
 	}
 
 	public void TryApplyLiquidOverlay(Color tint)

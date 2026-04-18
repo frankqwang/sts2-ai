@@ -14,7 +14,7 @@ namespace MegaCrit.Sts2.Core.Models.Cards;
 
 public sealed class Pinpoint : CardModel
 {
-	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new DamageVar(17m, ValueProp.Move));
+	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new DamageVar(15m, ValueProp.Move));
 
 	public Pinpoint()
 		: base(3, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy)
@@ -31,7 +31,7 @@ public sealed class Pinpoint : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars.Damage.UpgradeValueBy(5m);
+		base.DynamicVars.Damage.UpgradeValueBy(4m);
 	}
 
 	public override Task AfterCardEnteredCombat(CardModel card)

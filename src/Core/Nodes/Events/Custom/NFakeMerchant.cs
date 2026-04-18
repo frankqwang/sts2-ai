@@ -80,7 +80,7 @@ public partial class NFakeMerchant : Control, ICustomEventNode, IScreenContext
 			if (me.GetRelic<FakeMerchantsRug>() != null)
 			{
 				MegaSprite megaSprite = new MegaSprite(GetNode<Node2D>("%FakeMerchantBackground"));
-				megaSprite.GetSkeleton().FindBone("rug").Hide();
+				megaSprite.GetSkeleton()?.FindBone("rug")?.Hide();
 			}
 		}
 		else
@@ -178,7 +178,7 @@ public partial class NFakeMerchant : Control, ICustomEventNode, IScreenContext
 
 	private void StartCharacterAnimation(NCreatureVisuals visuals)
 	{
-		MegaTrackEntry megaTrackEntry = visuals.SpineBody.GetAnimationState().SetAnimation("relaxed_loop");
+		MegaTrackEntry megaTrackEntry = visuals.SpineAnimation.SetAnimation("relaxed_loop");
 		if (megaTrackEntry != null)
 		{
 			megaTrackEntry.SetLoop(loop: true);

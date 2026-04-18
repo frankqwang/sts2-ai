@@ -3,13 +3,16 @@ using System.Linq;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Debug;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
+using MegaCrit.Sts2.Core.Exceptions;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
+using MegaCrit.Sts2.Core.Logging;
 
 namespace MegaCrit.Sts2.Core.Models.Relics;
 
@@ -29,6 +32,13 @@ public sealed class ChoicesParadox : RelicModel
 		}
 		Flash();
 		List<CardModel> list = CardFactory.GetDistinctForCombat(base.Owner, base.Owner.Character.CardPool.GetUnlockedCards(base.Owner.UnlockState, base.Owner.RunState.CardMultiplayerConstraint), base.DynamicVars.Cards.IntValue, base.Owner.RunState.Rng.CombatCardGeneration).ToList();
+		if (list.Count == 0)
+		{
+			string text = "ChoicesParadox generated no cards for selection. Returning early to prevent softlock.";
+			Log.Error(text);
+			SentryService.CaptureException(new SoftlockException(text));
+			return;
+		}
 		foreach (CardModel item in list)
 		{
 			CardCmd.ApplyKeyword(item, CardKeyword.Retain);

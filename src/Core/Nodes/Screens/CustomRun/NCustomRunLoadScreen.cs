@@ -143,9 +143,12 @@ public partial class NCustomRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 	{
 		_confirmButton.Disable();
 		_backButton.Disable();
-		_unreadyButton.Enable();
 		_lobby.SetReady(ready: true);
-		_readyAndWaitingContainer.Visible = true;
+		if (!_lobby.IsAboutToBeginGame())
+		{
+			_unreadyButton.Enable();
+			_readyAndWaitingContainer.Visible = true;
+		}
 	}
 
 	private void OnUnreadyPressed(NButton _)
@@ -236,6 +239,8 @@ public partial class NCustomRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 	public void BeginRun()
 	{
 		NAudioManager.Instance?.StopMusic();
+		_confirmButton.Disable();
+		_unreadyButton.Disable();
 		TaskHelper.RunSafely(StartRun());
 	}
 
@@ -245,7 +250,10 @@ public partial class NCustomRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 		{
 			return;
 		}
-		_stack.Pop();
+		if (_stack != null && _stack.Peek() == this)
+		{
+			_stack.Pop();
+		}
 		if (TestMode.IsOff)
 		{
 			NErrorPopup nErrorPopup = NErrorPopup.Create(info);

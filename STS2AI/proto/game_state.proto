@@ -306,11 +306,43 @@ message ActionRequest {
 
 message ResetRequest {
   string mode = 1;                // "full_run" / "combat_sandbox"
-  string build_spec = 2;          // JSON string for combat sandbox builds
+  string build_spec = 2;          // JSON string for combat sandbox builds (deprecated, combat 用 CombatResetRequest)
   string seed = 3;
 }
 
 message PingResponse {
   string version = 1;
   bool ready = 2;
+}
+
+// --- Combat training (精确构造战斗初始 state) ---
+
+message CardSpec {
+  string id = 1;
+  int32 upgrade_level = 2;
+}
+
+message RelicSpec {
+  string id = 1;
+}
+
+message BuildSpec {
+  repeated CardSpec deck = 1;
+  repeated RelicSpec relics = 2;
+  int32 current_hp = 3;
+  int32 max_hp = 4;
+  int32 max_energy = 5;
+  int32 gold = 6;
+}
+
+message CombatResetRequest {
+  string character_id = 1;        // "IRONCLAD"/"SILENT"/"DEFECT"/"WATCHER"
+  string encounter_id = 2;        // 从 sim combat_catalog 获取
+  int32 ascension_level = 3;
+  string seed = 4;
+  BuildSpec build = 5;
+}
+
+message CombatStepRequest {
+  LegalAction action = 1;
 }

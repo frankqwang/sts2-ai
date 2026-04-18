@@ -24,6 +24,12 @@ icudt_godot.dat
 /STS2AI/ENV/Sim/Host/bin/
 /STS2AI/Python/STS2AI
 
+STS2AI\Python\data\skada\runs
+STS2AI/Python/data/skada/runs
+STS2AI/Python/data/skada/runs_victory
+STS2AI/Python/data/skada/runs_full_detail
+STS2AI/Python/data/skada/runs_failure
+STS2AI/Python/data/skada/derived
 # System files
 **/.DS_Store
 Thumbs.db
@@ -173,9 +179,6 @@ tools/python/models/**/*.json
 tools/python/vocab.json
 tools/python/card_tags.json
 tools/python/relic_tags.json
-
-
-
 # ============================================================
 # Slay the Spire 2 source assets
 # Track source assets and external project files in git/LFS.

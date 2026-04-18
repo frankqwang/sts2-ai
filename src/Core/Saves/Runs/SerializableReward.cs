@@ -12,8 +12,11 @@ public class SerializableReward : IPacketSerializable
 	[JsonPropertyName("reward_type")]
 	public RewardType RewardType { get; set; }
 
+	[JsonPropertyName("predetermined_model_id")]
+	public ModelId PredeterminedModelId { get; set; } = ModelId.none;
+
 	[JsonPropertyName("special_card")]
-	public SerializableCard SpecialCard { get; set; }
+	public SerializableCard? SpecialCard { get; set; }
 
 	[JsonPropertyName("gold_amount")]
 	public int GoldAmount { get; set; }
@@ -39,7 +42,11 @@ public class SerializableReward : IPacketSerializable
 	public void Serialize(PacketWriter writer)
 	{
 		writer.WriteInt((int)RewardType);
-		writer.Write(SpecialCard);
+		writer.WriteFullModelId(PredeterminedModelId);
+		if (RewardType == RewardType.SpecialCard)
+		{
+			writer.Write(SpecialCard);
+		}
 		writer.WriteInt(GoldAmount);
 		writer.WriteBool(WasGoldStolenBack);
 		writer.WriteEnum(Source);
@@ -52,7 +59,11 @@ public class SerializableReward : IPacketSerializable
 	public void Deserialize(PacketReader reader)
 	{
 		RewardType = (RewardType)reader.ReadInt();
-		SpecialCard = reader.Read<SerializableCard>();
+		PredeterminedModelId = reader.ReadFullModelId();
+		if (RewardType == RewardType.SpecialCard)
+		{
+			SpecialCard = reader.Read<SerializableCard>();
+		}
 		GoldAmount = reader.ReadInt();
 		WasGoldStolenBack = reader.ReadBool();
 		Source = reader.ReadEnum<CardCreationSource>();

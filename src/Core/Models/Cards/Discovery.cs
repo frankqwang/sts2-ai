@@ -33,7 +33,7 @@ public sealed class Discovery : CardModel
 		}
 		if (cardModel != null)
 		{
-			cardModel.EnergyCost.SetThisTurnOrUntilPlayed(0);
+			cardModel.SetToFreeThisTurn();
 			await CardPileCmd.AddGeneratedCardToCombat(cardModel, PileType.Hand, addedByPlayer: true);
 		}
 	}

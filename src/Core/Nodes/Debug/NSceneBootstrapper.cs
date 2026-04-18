@@ -54,14 +54,14 @@ public partial class NSceneBootstrapper : Node
 		string seed = settings.Seed ?? SeedHelper.GetRandomSeed();
 		List<ActModel> list = ActModel.GetDefaultList().ToList();
 		list[0] = settings.Act;
-		RunState runState = RunState.CreateForNewRun(new global::_003C_003Ez__ReadOnlySingleElementList<Player>(Player.CreateForNewRun(settings.Character, SaveManager.Instance.GenerateUnlockStateFromProgress(), 1uL)), list.Select((ActModel a) => a.ToMutable()).ToList(), settings.Modifiers, settings.Ascension, seed);
+		RunState runState = RunState.CreateForNewRun(new global::_003C_003Ez__ReadOnlySingleElementList<Player>(Player.CreateForNewRun(settings.Character, SaveManager.Instance.GenerateUnlockStateFromProgress(), 1uL)), list.Select((ActModel a) => a.ToMutable()).ToList(), settings.Modifiers, GameMode.Standard, settings.Ascension, seed);
 		RunManager.Instance.SetUpNewSinglePlayer(runState, settings.SaveRunHistory);
 		await PreloadManager.LoadRunAssets(new global::_003C_003Ez__ReadOnlySingleElementList<CharacterModel>(settings.Character));
 		RunManager.Instance.Launch();
 		_game.RootSceneContainer.SetCurrentScene(NRun.Create(runState));
 		await RunManager.Instance.SetActInternal(0);
-		RunManager.Instance.RunLocationTargetedBuffer.OnRunLocationChanged(runState.CurrentLocation);
-		RunManager.Instance.MapSelectionSynchronizer.OnRunLocationChanged(runState.CurrentLocation);
+		RunManager.Instance.RunLocationTargetedBuffer.OnLocationChanged(runState.RunLocation);
+		RunManager.Instance.MapSelectionSynchronizer.OnLocationChanged(runState.MapLocation);
 		await settings.Setup(runState.Players[0]);
 		switch (settings.RoomType)
 		{
@@ -89,10 +89,9 @@ public partial class NSceneBootstrapper : Node
 		}
 		if (_openConsole)
 		{
-			NDevConsole node = GetNode<NDevConsole>("/root/DevConsole/ConsoleScreen");
-			node.ShowConsole();
-			node.MakeFullScreen();
-			node.SetBackgroundColor(Colors.White);
+			NDevConsole.Instance.ShowConsole();
+			NDevConsole.Instance.MakeFullScreen();
+			NDevConsole.Instance.SetBackgroundColor(Colors.White);
 		}
 	}
 }

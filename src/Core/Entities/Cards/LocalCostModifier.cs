@@ -29,4 +29,9 @@ public class LocalCostModifier
 			_ => throw new ArgumentOutOfRangeException("Type", Type, null), 
 		};
 	}
+
+	public LocalCostModifier Clone()
+	{
+		return new LocalCostModifier(Amount, Type, Expiration, IsReduceOnly);
+	}
 }

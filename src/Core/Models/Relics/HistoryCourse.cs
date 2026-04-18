@@ -14,7 +14,7 @@ public sealed class HistoryCourse : RelicModel
 {
 	public override RelicRarity Rarity => RelicRarity.Event;
 
-	public override async Task AfterPlayerTurnStartEarly(PlayerChoiceContext choiceContext, Player player)
+	public override async Task BeforePlayPhaseStart(PlayerChoiceContext choiceContext, Player player)
 	{
 		if (player != base.Owner || base.Owner.Creature.CombatState.RoundNumber == 1)
 		{

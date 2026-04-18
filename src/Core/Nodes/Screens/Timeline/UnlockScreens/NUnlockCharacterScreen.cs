@@ -66,9 +66,9 @@ public partial class NUnlockCharacterScreen : NUnlockScreen
 		_tween.TweenProperty(_topLabel, "modulate", Colors.White, 1.0).SetDelay(1.0);
 		_tween.TweenProperty(_bottomLabel, "modulate", Colors.White, 1.0).SetDelay(1.5);
 		_tween.TweenProperty(_rareGlow, "modulate:a", 1f, 0.5).SetDelay(1.0);
-		_creatureVisuals.SpineBody.GetAnimationState().AddAnimation("idle_loop");
-		_creatureVisuals.SpineBody.GetAnimationState().AddAnimation("attack", 0.5f, loop: false);
-		_creatureVisuals.SpineBody.GetAnimationState().AddAnimation("idle_loop");
+		_creatureVisuals.SpineAnimation.AddAnimation("idle_loop");
+		_creatureVisuals.SpineAnimation.AddAnimation("attack", 0.5f, loop: false);
+		_creatureVisuals.SpineAnimation.AddAnimation("idle_loop");
 	}
 
 	protected override void OnScreenPreClose()

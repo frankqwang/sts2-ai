@@ -2,130 +2,63 @@
 
 杀戮尖塔 2 AI 训练项目。作为子目录放到反编译的游戏工程根目录下使用。
 
-## 当前主线状态（2026-04-14）
+## 当前主线（networkV2）
 
-当前主线已经切到 `main_attention + multi_process + no-MCTS` 路线，训练/诊断/日志链路都围绕这条线展开。最新接手说明放在：
-
-- [STS2AI/docs/当前训练主线与接手说明_2026-04-14.md](STS2AI/docs/当前训练主线与接手说明_2026-04-14.md)
-- [STS2AI/docs/review_summary_2026-04-14_teacherloop_phase1.md](STS2AI/docs/review_summary_2026-04-14_teacherloop_phase1.md)
-- [STS2AI/docs/training_process_and_params_2026-04-14.md](STS2AI/docs/training_process_and_params_2026-04-14.md)
-
-如果只需要一个可直接复现的恢复点，优先使用：
-
-- **2026-04-16 当前 10-iter 冠军**（act1% 3.50%, boss_reach 56.02%）：
-  `STS2AI/Assets/checkpoints/act1/planb_iter2303_selfplay_teacher.pt`
-- 保守稳定起点（作为 fallback）：
-  `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`（2026-04-14 frozen）
-
-两者 SHA256、训练链路、关联 run dir / teacher data / config 都在
-`STS2AI/Assets/checkpoints/act1/manifest.json` 里追溯。`README` 这里只保留入口。
-
-## Python 代码目录结构
-
-```
-STS2AI/Python/
-│
-├── network/                      ← 【核心】网络架构 + 特征工程
-│   ├── combat_network.py          战斗策略-价值网络 (CombatPolicyValueNetwork)
-│   ├── fullrun_policy.py          全局策略网络 (FullRunPolicyNetworkV2 + PPOTrainer)
-│   ├── shared_encoders.py         共享 NN 模块 (EntityEmbeddings, SetEncoder, BilinearActionScorer)
-│   ├── combat_features.py         战斗状态/动作特征构建
-│   └── state_features.py          全局状态特征构建 (StructuredState, build_structured_state)
-│
-├── env/                          ← 游戏环境接口
-│   ├── full_run_env.py            HTTP/Pipe 两种后端的统一客户端
-│   ├── full_run_backend.py        后端适配层（屏蔽 HTTP/Pipe 差异）
-│   ├── binary_pipe_client.py      二进制管道通信（高性能）
-│   ├── pipe_client.py             JSON 管道通信（调试用）
-│   ├── headless_sim_runner.py     无头模拟器进程管理
-│   ├── sim_host_lifecycle.py      多进程环境的进程池和端口分配
-│   ├── inference_server.py        GPU 批量推理服务器
-│   ├── action_semantics.py        动作语义和自动推进规则
-│   └── ...                        combat_training_env, sts2_singleplayer_env 等
-│
-├── training/                     ← 训练/评估基础设施
-│   ├── combat_ppo.py              战斗 PPO buffer + trainer + mcts_train_step
-│   ├── combat_diagnostics.py      战斗诊断/trace/中文日志
-│   ├── game_decisions.py          地图路线/卡牌奖励/商店决策逻辑
-│   ├── eval_action_selection.py   推理动作选择（NN/Teacher/MCTS 路由）
-│   ├── eval_game_state.py         游戏状态追踪/循环检测/自动推进
-│   ├── combat_safety.py           战斗安全遮罩 (R1+R2 规则)
-│   ├── training_health.py         训练异常检测（loss 爆炸、KL 过大等）
-│   └── ...                        episode_data_saver, segment_collector, vectorized_collector 等
-│
-├── core/                         ← 基础工具
-│   ├── vocab.py                   词表管理（卡牌/遗物/药水/怪物 ID ↔ 索引）
-│   ├── rl_reward_shaping.py       奖励塑形（PBRS + 里程碑 + 战斗局部奖励）
-│   ├── symbolic_features_head.py  符号特征头（sqlite cross-attention 零样本先验）
-│   ├── card_tags.py               卡牌 32 维功能标签
-│   ├── card_base_stats.py         卡牌伤害/格挡查找表
-│   └── ...                        relic_tags, checkpoint_compat, full_run_agent 等
-│
-├── search/                       ← MCTS / 求解器 / Teacher
-│   ├── mcts_core.py               蒙特卡洛树搜索核心
-│   ├── combat_mcts_agent.py       战斗 MCTS 代理
-│   ├── combat_turn_solver.py      回合穷举求解器
-│   ├── train_combat_teacher.py    离线 Teacher 训练
-│   └── ...                        turn_solver_planner, counterfactual_scoring 等
-│
-├── data/                         ← 数据
-│   ├── vocab.json / card_tags.json / relic_tags.json  词表和标签数据
-│   ├── skada/                     人类玩家数据采集/清洗/模型
-│   └── ...                        source_knowledge, derived 等
-│
-├── configs/                      ← 训练配置 TOML
-├── diagnostics/                  ← 分析和审计脚本
-├── tools/                        ← 非主线工具（ONNX 导出、审计、演示等）
-├── archive/                      ← 归档的旧实验代码
-│
-├── train_hybrid.py               ← 【主入口】统一训练循环
-├── evaluate_ai.py                ← 【主入口】评估/benchmark
-├── demo_play.py                  ← 【主入口】实时可视化演示
-├── train_combat_only.py          ← 战斗专项训练
-├── test_training_smoke.py        ← 回归测试（185 tests）
-└── constants.py                  ← 全局路径常量
-```
-
-**规范：根目录只放主入口脚本和测试。所有新代码按职责放入对应子目录，不要在根目录写脚本。**
-
-## networkV2 —— 并行下一代架构（实验线）
-
-`STS2AI/Python/networkV2/` 是与 `network/` 并行的**下一代网络架构**，采用分层 schema + 三层时间尺度 memory + 统一 combat/non-combat 路由设计。作为实验线独立迭代，不影响 main_attention 主线 checkpoint/evaluate。
+当前唯一训练主线是 **networkV2** —— 分层 schema + 三层时间尺度 memory + combat/non-combat 统一路由。V1（`train_hybrid.py` / `main_attention` 系列）已于 commit `084fd20` 整体下线。
 
 **核心特点**：
 - 三层时间记忆：TurnPrefix（本回合）/ CombatMemory（本战斗）/ RunBuildMemory（整局）
-- UnifiedPPOTrainer 按 `decision_domain` 拆子批路由，combat/non-combat 独立 loss
-- 多 head 全监督（value / leaf_evaluator / run_evaluator 各 4 个 head），无饥饿 head
-- Relic/Potion 静态语义规则表（`core/relic_rules.py`）
+- UnifiedPPOTrainer 按 `decision_domain` 拆子批路由，combat / non-combat 独立 loss
+- 多 head 全监督（value / leaf_evaluator / run_evaluator 各 head），无饥饿 head
+- 特征工程**数据驱动**：power/card/relic/monster vocab 从 `Python/data/source_knowledge.sqlite` 派生,统一入口 `networkV2/s1_schema/game_vocab.py`
 
-**快速训练**：
+## 项目结构
 
-```powershell
-# 整局训练（推荐）
-python -m networkV2.s6_training.train_full_run_v2 --d-model 384 --n-heads 8 --num-workers 4
-
-# 纯战斗训练
-python -m networkV2.s6_training.train_combat_v2 --builds STS2AI/Assets/builds/combat_sandbox_builds.json
+```
+STS2AI/
+├── Artifacts/                       临时输出：训练 run、checkpoint、评测、录屏、审计
+│   ├── runs/<exp>/                  rollout dump + analysis/
+│   └── checkpoints/<exp>/           模型权重
+├── Assets/                          稳定资产
+│   ├── builds/                      手工 / sandbox build 池
+│   ├── checkpoints/                 promoted checkpoint
+│   ├── datasets/                    离线数据集
+│   └── seeds/                       评测种子
+├── ENV/                             C# 侧
+│   ├── Sim/                         HeadlessSim（无头模拟器，二进制 pipe 协议）
+│   └── Spectator/                   Godot 观战 Mod
+├── Python/                          训练 / 评估 / 数据
+│   ├── networkV2/                   ★ 当前网络与训练主线
+│   │   ├── s0_bridge/               sim pipe client / proto codec
+│   │   ├── s1_schema/               数据结构（含 game_vocab.py）
+│   │   ├── s2_config/               mechanism_registry + auto_modifier_rules
+│   │   ├── s3_state_tracker/        状态追踪
+│   │   ├── s4_compiler/             feature_compiler / bank_assembler
+│   │   ├── s5_net/                  UnifiedNet
+│   │   ├── s6_training/             train_full_run_v2 / combat_cotrainer / deck_eval
+│   │   ├── s7_diagnostics/          live_monitor / plot_win_rates / trajectory_analyzer
+│   │   └── s8_spectate/             V2 demo 播放
+│   ├── core/                        V1 遗留基础设施（rl_reward_shaping 等,仍被部分模块复用）
+│   ├── data/                        数据
+│   │   └── source_knowledge.sqlite  ★ 游戏真值 snapshot（权威）
+│   ├── env/                         环境接口（full_run_env, combat_training_env, ...）
+│   ├── configs/                     训练 TOML
+│   ├── diagnostics/                 跨 V1/V2 审计脚本
+│   ├── scripts/                     PowerShell wrapper（spectate / sim_vs_godot_audit）
+│   └── tests/                       测试
+├── docs/
+│   ├── design/                      架构规范（CONVENTION / HANDOFF / networkV2Final ...）
+│   └── handoff/                     交接文档（handoff-日期-关键词.md）
+└── src/                             反编译游戏源码（只读参考）
 ```
 
-**文档入口**：
-
-| 文档 | 用途 |
-|---|---|
-| [docs/networkV2_guide.md](STS2AI/docs/networkV2_guide.md) | **使用指南**：训练命令、参数、日志解读、诊断、FAQ |
-| [docs/design/networkV2Final.md](STS2AI/docs/design/networkV2Final.md) | **架构设计**：数据流、9 类 schema、token bank、网络层次 |
-| [docs/design/HANDOFF.md](STS2AI/docs/design/HANDOFF.md) | **接手指引**：项目状态快照、已知问题、下一步计划 |
-| [docs/design/nonCombat.md](STS2AI/docs/design/nonCombat.md) | 非战斗 domain（shop/rest/event/map）的特征/网络设计 |
-| [docs/design/proto_bridge_usage.md](STS2AI/docs/design/proto_bridge_usage.md) | proto-pipe 通信协议和 bridge 用法 |
-
 ## 前置准备
-所有环境、ai相关代码都在STS2AI里。
-src下面以及最外层，都是反编译的源码，本项目中反编译部分只包含了游戏逻辑，sim模式只依赖这部分游戏逻辑源码,剔除了godot相关游戏资源。
+
+所有环境、AI 相关代码都在 `STS2AI/` 里。`src/` 以及最外层是反编译源码，项目只依赖其中游戏逻辑部分（剔除 Godot 资源）。
 
 ### 1. 排除编译冲突
-理论上如果你只跑sim的话，本项目已经完全包含了你需要的内容，如果你想完整跑godot进行一致性对比、观战等，需要把反编译的源码直接覆盖到当前仓库。然后执行当前步骤
 
-在游戏工程的 `sts2.csproj` 中 `<Project>` 下添加：
+理论上如果只跑 sim，项目已自包含。若要跑 Godot 做一致性对比或观战，需要把反编译源码覆盖到本仓库，然后在 `sts2.csproj` 的 `<Project>` 下添加：
 
 ```xml
 <ItemGroup>
@@ -133,15 +66,15 @@ src下面以及最外层，都是反编译的源码，本项目中反编译部�
 </ItemGroup>
 ```
 
-如果git有lf/crlf问题，直接用 git add --renormalize . 让 git 重新规范化索引，不需要重写文件。
+如果 git 有 lf/crlf 问题，`git add --renormalize .` 让 git 重新规范化索引。
 
-### 2. 构建 HeadlessSim（无头模拟器）
+### 2. 构建 HeadlessSim
 
 ```powershell
 dotnet build STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj -c Debug
 ```
 
-构建产物在 `STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe`。
+产物：`STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe`。
 
 ### 3. 构建 Spectator Mod（观战用）
 
@@ -149,63 +82,62 @@ dotnet build STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj -c Debug
 dotnet build STS2AI/ENV/Spectator/SpectatorBridgeMod/sts2_mcp_spectator.csproj -c Debug
 ```
 
-将产物复制到 Godot 引擎的 `mods/sts2_mcp_spectator/` 目录下。
+将产物复制到 Godot 的 `mods/sts2_mcp_spectator/`。
 
 ### 4. Python 依赖
 
-需要 Python 3.11+ 和 PyTorch：
+Python 3.11+：
 
 ```powershell
-pip install torch numpy
-```
-
-### 5. Smoke Test
-
-```powershell
-python -m pytest STS2AI/Python/test_training_smoke.py -q
+pip install -r STS2AI/Python/requirements.txt
 ```
 
 ## 训练
 
-从当前工作 checkpoint 继续训练：
+### 整局训练（长 run）
 
 ```powershell
-python STS2AI/Python/train_hybrid.py `
-  --config STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml `
-  --output-dir STS2AI/Artifacts/hybrid_training_main_attention `
-  --run-tag acttransitionfix_resume2275 `
-  --resume STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt `
-  --max-iterations 5 `
-  --save-interval 5 `
-  --act1-no-elite-routes `
-  --combat-pending-stall-threshold 30 `
-  --boss-entry-quality-weight 0.15 `
-  --boss-conditioned-card-guidance-weight 0.8 `
-  --combat-safety-rerank-weight 1.0
+cd STS2AI/Python
+python -u -m networkV2.s6_training.train_full_run_v2 `
+  --preset slim --num-workers 8 --max-iterations 200 `
+  --dump-dir ../Artifacts/runs/<exp> `
+  --output-dir ../Artifacts/checkpoints/<exp>
 ```
 
-参数说明：
-- 默认环境参数仍来自 `STS2AI/Python/configs/hybrid_train_ironclad_teacher_main_attention.toml`
-- 目前实验节奏用 `--max-iterations 5 --save-interval 5` 做短窗口复盘
-- `--act1-no-elite-routes`、boss 条件化选卡、combat safety rerank 是当前主线的一部分
-- `--output-dir` 现在只表示实验族根目录，例如 `STS2AI/Artifacts/hybrid_training_main_attention`
-- `--run-tag` 用来放这次改造标签，例如 `acttransitionfix_resume2275`
-- 每次实际 run 子目录统一为 `时间_环境数_标签`，例如 `20260414-110316_4env_acttransitionfix_resume2275`
-
-训练产物默认输出到 `STS2AI/Artifacts/` 下对应 run 目录。当前主线的详细参数、输出目录和分析脚本请看接手说明。
-
-## 评估
+### 战斗专项（从 full-run checkpoint resume）
 
 ```powershell
-python STS2AI/Python/evaluate_ai.py `
-  --checkpoint STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt `
-  --transport pipe-binary `
-  --auto-launch `
-  --headless-dll STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe `
-  --num-games 50
+cd STS2AI/Python
+python -u -m networkV2.s6_training.combat_cotrainer `
+  --preset slim `
+  --checkpoint ../Artifacts/checkpoints/<prev>/cotrainer_iter120.pt `
+  --dump-dir ../Artifacts/runs/<exp> `
+  --output-dir ../Artifacts/checkpoints/<exp>
 ```
 
-## 观战（可见窗口）(依赖反编译源码，或者godot dll)
+训练产物统一写 `STS2AI/Artifacts/` 下,规范见 [DIAGNOSTICS_CONVENTION.md](STS2AI/docs/design/DIAGNOSTICS_CONVENTION.md)。
+
+## 监控与诊断
+
+```powershell
+cd STS2AI/Python
+python -m networkV2.s7_diagnostics.live_monitor ../Artifacts/runs/<exp> --once
+python -m networkV2.s7_diagnostics.plot_win_rates ../Artifacts/runs/<exp>
+python -m networkV2.s7_diagnostics.trajectory_analyzer ../Artifacts/runs/<exp> --save
+```
+
+所有 `s7_diagnostics/*.py` 默认输出到 `<dump_dir>/analysis/`。
+
+## 评测
+
+```powershell
+cd STS2AI/Python
+python -m networkV2.s6_training.deck_eval_cli `
+  --checkpoint ../Artifacts/checkpoints/<exp>/cotrainer_iter60.pt `
+  --preset slim --n-trials 3
+```
+
+## 观战（可见窗口，依赖反编译源码 / Godot）
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File STS2AI/Python/scripts/spectate.ps1 `
@@ -215,68 +147,20 @@ powershell -ExecutionPolicy Bypass -File STS2AI/Python/scripts/spectate.ps1 `
   -CombatDelay 0.25
 ```
 
-- 自动启动 Godot 游戏窗口，AI 实时操控
-- 窗口默认居中，存档自动隔离（不影响 Steam 存档）
+- 自动启动 Godot + AI 实时操控
+- 窗口默认居中,存档自动隔离（不影响 Steam 存档）
 - 右上角显示 AI 决策 overlay（需要 Spectator Mod）
 - 输出写到 `STS2AI/Artifacts/recording/`
 
-多实例观战用不同端口：
+## 文档入口
 
-```powershell
-# 实例 2（另一个终端，不加 -StopExistingGodot）
-powershell -ExecutionPolicy Bypass -File STS2AI/Python/scripts/spectate.ps1 `
-  -McpPort 15601 -Episodes 1 -StepDelay 0.60 -CombatDelay 0.25
-```
-
-## Skada 社区数据
-
-Skada 提供 549 张卡牌评分、290 个遗物、卡牌协同、Boss 攻略等社区统计数据。
-
-```powershell
-# 查看总览
-python STS2AI/Python/skada/query_skada.py overview
-
-# 卡牌排名
-python STS2AI/Python/skada/query_skada.py card-tier IRONCLAD
-
-# 重新抓取
-python STS2AI/Python/skada/scrape_skada.py --skip-runs
-```
-
-数据位于 `STS2AI/Assets/datasets/skada/skada_analytics.sqlite`，训练时通过 `--skada-prior-weight` 自动加载。
-
-## 目录结构
-
-```
-STS2AI/
-  Assets/        稳定资产：checkpoint、数据集
-  Artifacts/     临时输出：训练结果、评估结果、录屏
-  docs/          文档用中文。sts2ai/docs下面放文档，文档上面开头用2026-0416日期开头，好判断时效性
-  ENV/           HeadlessSim、Spectator Mod 等 C# 代码
-  Python/        训练、评估、数据工具
-    core/        NN 模型、编码器、奖励塑形
-    search/      MCTS、反事实评分、排名损失
-    ipc/         模拟器通信（pipe/HTTP）
-    skada/       Skada 社区数据加载
-    data/        数据生成
-    scripts/     启动脚本
-```
-
-## 当前 Checkpoint
-
-当前推荐恢复点（按 act1% 排序，路径都在规范目录 `STS2AI/Assets/checkpoints/act1/`）：
-
-1. **Plan B 10-iter 冠军**（2026-04-16，act1% 3.50%，boss_reach 56.02%）：
-   `STS2AI/Assets/checkpoints/act1/planb_iter2303_selfplay_teacher.pt`
-2. 保守 baseline（2026-04-14 frozen）：
-   `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
-
-两者都包含：
-- PPO 非战斗脑（选卡/商店/路径/休息）
-- 战斗脑（出牌/药水/目标）
-- SymbolicFeaturesHead（符号特征交叉注意力）
-- main combat rollout `light_attention`
-
-详细追溯见：
-- `STS2AI/docs/session_2026-04-15_skada_vs_selfplay_teacher.md`（本场 teacher 实验完整结果）
-- `STS2AI/Assets/checkpoints/act1/manifest.json`（SHA256 + 历史 champion）
+| 文档 | 用途 |
+|---|---|
+| [docs/design/networkV2Final.md](STS2AI/docs/design/networkV2Final.md) | 架构设计：数据流、schema、token bank、网络层次 |
+| [docs/design/HANDOFF.md](STS2AI/docs/design/HANDOFF.md) | 接手指引：项目状态快照、已知问题、下一步计划 |
+| [docs/design/SCHEMA_CONVENTION.md](STS2AI/docs/design/SCHEMA_CONVENTION.md) | schema / vocab 数据驱动规范（严禁硬编码卡名/power 名） |
+| [docs/design/DIAGNOSTICS_CONVENTION.md](STS2AI/docs/design/DIAGNOSTICS_CONVENTION.md) | 训练产物 / 诊断产物目录规范 |
+| [docs/design/nonCombat.md](STS2AI/docs/design/nonCombat.md) | 非战斗 domain（shop/rest/event/map）的特征/网络设计 |
+| [docs/design/proto_bridge_usage.md](STS2AI/docs/design/proto_bridge_usage.md) | proto-pipe 通信协议与 bridge 用法 |
+| [docs/networkV2_guide.md](STS2AI/docs/networkV2_guide.md) | V2 使用指南：训练命令、参数、日志解读、FAQ |
+| [docs/网络与训练概览.md](STS2AI/docs/网络与训练概览.md) | 现网架构与训练流程中文速览 |

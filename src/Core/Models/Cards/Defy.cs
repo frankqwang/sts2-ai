@@ -40,7 +40,6 @@ public sealed class Defy : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars.Block.UpgradeValueBy(1m);
-		base.DynamicVars.Weak.UpgradeValueBy(1m);
+		base.DynamicVars.Block.UpgradeValueBy(3m);
 	}
 }

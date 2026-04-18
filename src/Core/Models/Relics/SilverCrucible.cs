@@ -78,6 +78,11 @@ public sealed class SilverCrucible : RelicModel
 		}
 	}
 
+	public override bool IsAllowed(IRunState runState)
+	{
+		return runState.Players.Count == 1;
+	}
+
 	private void CheckIfUsedUp()
 	{
 		if (IsUsedUp)

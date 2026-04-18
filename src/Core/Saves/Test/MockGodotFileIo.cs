@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using MegaCrit.Sts2.Core.Platform.Steam;
+using Steamworks;
 
 namespace MegaCrit.Sts2.Core.Saves.Test;
 
@@ -61,6 +63,8 @@ public class MockGodotFileIo : ISaveStore
 	public bool ShouldFailWrites;
 
 	public bool ShouldFailTimestampSync;
+
+	public bool DoSteamSpecificError;
 
 	public List<(string Method, object[] Args)> Calls { get; } = new List<(string, object[])>();
 
@@ -131,6 +135,10 @@ public class MockGodotFileIo : ISaveStore
 
 	public Task<string?> ReadFileAsync(string path)
 	{
+		if (DoSteamSpecificError)
+		{
+			throw new SteamRemoteSaveStoreException("Simulating Steam Error", EResult.k_EResultFileNotFound);
+		}
 		CanonicalizePath(ref path);
 		Calls.Add(("ReadFileAsync", new object[1] { path }));
 		File value;

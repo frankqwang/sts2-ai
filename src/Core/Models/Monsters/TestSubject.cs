@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Ascension;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models.Cards;
@@ -16,6 +17,7 @@ using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.Nodes.Audio;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Saves;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
@@ -37,6 +39,8 @@ public sealed class TestSubject : MonsterModel
 	private const string _deadTrigger = "DeadTrigger";
 
 	private const string _respawnTrigger = "RespawnTrigger";
+
+	private const string _burnTrigger = "BurnTrigger";
 
 	private const string _biteSfx = "event:/sfx/enemy/enemy_attacks/test_subject/test_subject_bite";
 
@@ -79,8 +83,6 @@ public sealed class TestSubject : MonsterModel
 	private int BiteDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 22, 20);
 
 	private int SkullBashDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 16, 14);
-
-	private int PounceDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 32, 30);
 
 	private int MultiClawDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 11, 10);
 
@@ -168,9 +170,14 @@ public sealed class TestSubject : MonsterModel
 		await base.AfterAddedToRoom();
 		await PowerCmd.Apply<AdaptablePower>(base.Creature, 1m, base.Creature, null);
 		await PowerCmd.Apply<EnragePower>(base.Creature, EnrageAmount, base.Creature, null);
-		base.Creature.Died += AfterDeath;
 		base.Creature.PowerApplied += AfterPowerApplied;
 		base.Creature.PowerRemoved += AfterPowerRemoved;
+	}
+
+	public override void BeforeRemovedFromRoom()
+	{
+		base.Creature.PowerApplied -= AfterPowerApplied;
+		base.Creature.PowerRemoved -= AfterPowerRemoved;
 	}
 
 	protected override MonsterMoveStateMachine GenerateMoveStateMachine()
@@ -182,22 +189,20 @@ public sealed class TestSubject : MonsterModel
 		};
 		MoveState moveState = new MoveState("BITE_MOVE", BiteMove, new SingleAttackIntent(BiteDamage));
 		MoveState moveState2 = new MoveState("SKULL_BASH_MOVE", SkullBashMove, new SingleAttackIntent(SkullBashDamage), new DebuffIntent());
-		MoveState moveState3 = new MoveState("POUNCE_MOVE", PounceMove, new SingleAttackIntent(PounceDamage));
-		MoveState moveState4 = new MoveState("MULTI_CLAW_MOVE", MultiClawMove, new MultiAttackIntent(MultiClawDamage, () => MultiClawTotalCount));
-		MoveState moveState5 = new MoveState("PHASE3_LACERATE_MOVE", Phase3LacerateMove, new MultiAttackIntent(Phase3LacerateDamage, 3));
-		MoveState moveState6 = new MoveState("BIG_POUNCE_MOVE", BigPounceMove, new SingleAttackIntent(BigPounceDamage));
-		MoveState moveState7 = new MoveState("BURNING_GROWL_MOVE", BurningGrowlMove, new StatusIntent(BurningGrowlBurnCount), new BuffIntent());
+		MoveState moveState3 = new MoveState("MULTI_CLAW_MOVE", MultiClawMove, new MultiAttackIntent(MultiClawDamage, () => MultiClawTotalCount));
+		MoveState moveState4 = new MoveState("PHASE3_LACERATE_MOVE", Phase3LacerateMove, new MultiAttackIntent(Phase3LacerateDamage, 3));
+		MoveState moveState5 = new MoveState("BIG_POUNCE_MOVE", BigPounceMove, new SingleAttackIntent(BigPounceDamage));
+		MoveState moveState6 = new MoveState("BURNING_GROWL_MOVE", BurningGrowlMove, new StatusIntent(BurningGrowlBurnCount), new BuffIntent());
 		ConditionalBranchState conditionalBranchState = new ConditionalBranchState("REVIVE_BRANCH");
 		moveState.FollowUpState = moveState2;
 		moveState2.FollowUpState = moveState;
-		moveState3.FollowUpState = moveState4;
-		moveState4.FollowUpState = moveState3;
+		moveState3.FollowUpState = moveState3;
+		moveState4.FollowUpState = moveState5;
 		moveState5.FollowUpState = moveState6;
-		moveState6.FollowUpState = moveState7;
-		moveState7.FollowUpState = moveState5;
+		moveState6.FollowUpState = moveState4;
 		DeadState.FollowUpState = conditionalBranchState;
-		conditionalBranchState.AddState(moveState4, () => Respawns < 2);
-		conditionalBranchState.AddState(moveState5, () => Respawns >= 2);
+		conditionalBranchState.AddState(moveState3, () => Respawns < 2);
+		conditionalBranchState.AddState(moveState4, () => Respawns >= 2);
 		list.Add(DeadState);
 		list.Add(moveState);
 		list.Add(moveState2);
@@ -205,21 +210,23 @@ public sealed class TestSubject : MonsterModel
 		list.Add(moveState4);
 		list.Add(moveState5);
 		list.Add(moveState6);
-		list.Add(moveState7);
 		list.Add(conditionalBranchState);
 		return new MonsterMoveStateMachine(list, moveState);
 	}
 
-	private void AfterDeath(Creature _)
+	public override Task AfterDeath(PlayerChoiceContext choiceContext, Creature creature, bool wasRemovalPrevented, float deathAnimLength)
 	{
-		if (!base.Creature.HasPower<AdaptablePower>())
+		if (creature != base.Creature)
 		{
-			base.Creature.Died -= AfterDeath;
-			base.Creature.PowerApplied -= AfterPowerApplied;
-			base.Creature.PowerRemoved -= AfterPowerRemoved;
-			NRunMusicController.Instance?.UpdateMusicParameter("test_subject_progress", 5f);
-			SetColor(Colors.White);
+			return Task.CompletedTask;
 		}
+		if (base.Creature.HasPower<AdaptablePower>())
+		{
+			return Task.CompletedTask;
+		}
+		SetColor(Colors.White);
+		NRunMusicController.Instance?.UpdateMusicParameter("test_subject_progress", 5f);
+		return Task.CompletedTask;
 	}
 
 	private void AfterPowerApplied(PowerModel power)
@@ -247,19 +254,22 @@ public sealed class TestSubject : MonsterModel
 		await Cmd.Wait(0.8f);
 		NCombatRoom.Instance?.GetCreatureNode(base.Creature)?.SetDefaultScaleTo(1f + (float)Respawns * 0.1f, 0.1f);
 		await Cmd.Wait(1.15f);
-		base.Creature.GetPower<AdaptablePower>().DoRevive();
-		switch (Respawns)
+		if (base.Creature.CombatState != null)
 		{
-		case 1:
-			await Revive(SecondFormHp);
-			await PowerCmd.Apply<PainfulStabsPower>(base.Creature, 1m, base.Creature, null);
-			break;
-		case 2:
-			await Revive(ThirdFormHp);
-			await PowerCmd.Apply<NemesisPower>(base.Creature, 1m, base.Creature, null);
-			await PowerCmd.Remove<AdaptablePower>(base.Creature);
-			await PowerCmd.Remove<PainfulStabsPower>(base.Creature);
-			break;
+			base.Creature.GetPower<AdaptablePower>()?.DoRevive();
+			switch (Respawns)
+			{
+			case 1:
+				await Revive(SecondFormHp);
+				await PowerCmd.Apply<PainfulStabsPower>(base.Creature, 1m, base.Creature, null);
+				break;
+			case 2:
+				await Revive(ThirdFormHp);
+				await PowerCmd.Apply<NemesisPower>(base.Creature, 1m, base.Creature, null);
+				await PowerCmd.Remove<AdaptablePower>(base.Creature);
+				await PowerCmd.Remove<PainfulStabsPower>(base.Creature);
+				break;
+			}
 		}
 	}
 
@@ -278,14 +288,6 @@ public sealed class TestSubject : MonsterModel
 			.WithHitFx("vfx/vfx_attack_blunt")
 			.Execute(null);
 		await PowerCmd.Apply<VulnerablePower>(targets, 1m, base.Creature, null);
-	}
-
-	private async Task PounceMove(IReadOnlyList<Creature> targets)
-	{
-		await DamageCmd.Attack(PounceDamage).FromMonster(this).WithAttackerAnim("BiteTrigger", 0.25f)
-			.WithAttackerFx(null, "event:/sfx/enemy/enemy_attacks/test_subject/test_subject_bite")
-			.WithHitFx("vfx/vfx_attack_blunt")
-			.Execute(null);
 	}
 
 	private async Task MultiClawMove(IReadOnlyList<Creature> targets)
@@ -317,6 +319,9 @@ public sealed class TestSubject : MonsterModel
 
 	private async Task BurningGrowlMove(IReadOnlyList<Creature> targets)
 	{
+		SetColor(Colors.White);
+		NCombatRoom.Instance.BackCombatVfxContainer.AddChildSafely(NTestSubjectBurnVfx.Create());
+		await CreatureCmd.TriggerAnim(base.Creature, "BurnTrigger", 1.25f);
 		await CardPileCmd.AddToCombatAndPreview<Burn>(targets, PileType.Discard, BurningGrowlBurnCount, addedByPlayer: false);
 		await PowerCmd.Apply<StrengthPower>(base.Creature, BurningGrowlStrengthGain, base.Creature, null);
 	}
@@ -362,7 +367,8 @@ public sealed class TestSubject : MonsterModel
 		AnimState animState14 = new AnimState("hurt3");
 		AnimState animState15 = new AnimState("attack_double3");
 		AnimState animState16 = new AnimState("attack_big3");
-		AnimState animState17 = new AnimState("heal3");
+		AnimState animState17 = new AnimState("burn");
+		AnimState animState18 = new AnimState("heal3");
 		AnimState state = new AnimState("die");
 		animState5.NextState = animState;
 		animState4.NextState = animState;
@@ -376,9 +382,10 @@ public sealed class TestSubject : MonsterModel
 		animState8.NextState = nextState2;
 		animState12.NextState = nextState3;
 		animState13.NextState = nextState4;
-		animState17.NextState = nextState4;
+		animState18.NextState = nextState4;
 		animState16.NextState = nextState4;
 		animState15.NextState = nextState4;
+		animState17.NextState = nextState4;
 		animState14.NextState = nextState4;
 		CreatureAnimator creatureAnimator = new CreatureAnimator(animState, controller);
 		creatureAnimator.AddAnyState("Hit", animState2, () => Respawns == 0);
@@ -396,7 +403,8 @@ public sealed class TestSubject : MonsterModel
 		creatureAnimator.AddAnyState("Hit", animState14, () => Respawns >= 2);
 		creatureAnimator.AddAnyState("BiteTrigger", animState16, () => Respawns >= 2);
 		creatureAnimator.AddAnyState("MultiAttackTrigger", animState15, () => Respawns >= 2);
-		creatureAnimator.AddAnyState("GrowthSpurtTrigger", animState17, () => Respawns >= 2);
+		creatureAnimator.AddAnyState("GrowthSpurtTrigger", animState18, () => Respawns >= 2);
+		creatureAnimator.AddAnyState("BurnTrigger", animState17, () => Respawns >= 2);
 		creatureAnimator.AddAnyState("Dead", state);
 		return creatureAnimator;
 	}

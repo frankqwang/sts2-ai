@@ -3,7 +3,6 @@ using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;
 using MegaCrit.Sts2.Core.Assets;
-using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Combat;
@@ -26,6 +25,8 @@ public partial class NPowerAppliedVfx : Control
 
 	private int _amount;
 
+	private bool _isBuff;
+
 	private Tween? _textTween;
 
 	private Tween? _spriteTween;
@@ -47,7 +48,7 @@ public partial class NPowerAppliedVfx : Control
 		TaskHelper.RunSafely(StartVfx());
 	}
 
-	public static NPowerAppliedVfx? Create(PowerModel power, int amount)
+	public static NPowerAppliedVfx? Create(PowerModel power, int amount, bool isBuff)
 	{
 		if (TestMode.IsOn)
 		{
@@ -64,6 +65,7 @@ public partial class NPowerAppliedVfx : Control
 		NPowerAppliedVfx nPowerAppliedVfx = PreloadManager.Cache.GetScene("res://scenes/vfx/power_applied_vfx.tscn").Instantiate<NPowerAppliedVfx>(PackedScene.GenEditState.Disabled);
 		nPowerAppliedVfx._power = power;
 		nPowerAppliedVfx._amount = amount;
+		nPowerAppliedVfx._isBuff = isBuff;
 		return nPowerAppliedVfx;
 	}
 
@@ -78,16 +80,17 @@ public partial class NPowerAppliedVfx : Control
 		_powerField.SetTextAutoSize(_power.Title.GetFormattedText());
 		_icon.Texture = _power.BigIcon;
 		_iconEcho.Texture = _power.BigIcon;
-		_powerField.Modulate = ((_power.GetTypeForAmount(_amount) == PowerType.Buff) ? StsColors.green : StsColors.red);
-		_powerField.Position = new Vector2(_powerField.Position.X, _powerField.Position.Y - 200f);
+		_powerField.Modulate = (_isBuff ? StsColors.green : StsColors.red);
+		_powerField.Position = new Vector2(_powerField.Position.X, _powerField.Position.Y + NCreature.PowerAppliedVfxPositionOffset.Y);
 		_spriteTween = CreateTween().SetParallel();
 		_spriteTween.TweenProperty(_icon, "scale", Vector2.One * 0.8f, 1.25).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo)
 			.From(Vector2.One * 0.4f);
 		_spriteTween.TweenProperty(_icon, "modulate:a", 0.5f, 0.25).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Sine);
 		_spriteTween.TweenProperty(_icon, "modulate:a", 0f, 1.0).SetEase(Tween.EaseType.In).SetTrans(Tween.TransitionType.Sine)
 			.SetDelay(0.25);
+		float num = _powerField.Position.Y + (_isBuff ? (-100f) : 100f);
 		_textTween = CreateTween().SetParallel();
-		CreateTween().TweenProperty(_powerField, "position:y", _powerField.Position.Y + 50f, 1.25).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic);
+		CreateTween().TweenProperty(_powerField, "position:y", num, 1.25).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic);
 		_textTween.TweenProperty(_powerField, "modulate:a", 1f, 0.25).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
 		_textTween.TweenProperty(_powerField, "modulate:a", 0f, 0.75).SetEase(Tween.EaseType.In).SetTrans(Tween.TransitionType.Expo)
 			.From(1f)

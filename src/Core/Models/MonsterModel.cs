@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Audio;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Debug;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Hooks;
@@ -26,6 +27,8 @@ namespace MegaCrit.Sts2.Core.Models;
 
 public abstract class MonsterModel : AbstractModel
 {
+	private static readonly string _fallbackVisualsPath = SceneHelper.GetScenePath("creature_visuals/fallback");
+
 	public static readonly Vector2 defaultDeathVfxPadding = 1.2f * Vector2.One;
 
 	public const string stunnedMoveId = "STUNNED";
@@ -234,7 +237,21 @@ public abstract class MonsterModel : AbstractModel
 
 	public NCreatureVisuals CreateVisuals()
 	{
-		return PreloadManager.Cache.GetScene(VisualsPath).Instantiate<NCreatureVisuals>(PackedScene.GenEditState.Disabled);
+		try
+		{
+			return PreloadManager.Cache.GetScene(VisualsPath).Instantiate<NCreatureVisuals>(PackedScene.GenEditState.Disabled);
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"Encountered exception loading the creature visuals for {_creature?.Name}. Falling back to error scene. Exception: {ex}");
+			SentryService.CaptureException(ex);
+			return CreateFallbackVisuals();
+		}
+	}
+
+	private NCreatureVisuals CreateFallbackVisuals()
+	{
+		return PreloadManager.Cache.GetScene(_fallbackVisualsPath).Instantiate<NCreatureVisuals>(PackedScene.GenEditState.Disabled);
 	}
 
 	private List<AbstractIntent> GetIntents()
@@ -266,26 +283,30 @@ public abstract class MonsterModel : AbstractModel
 		MegaSprite spineBody = creatureVisuals.SpineBody;
 		GenerateAnimator(spineBody);
 		creatureVisuals.SetUpSkin(this);
-		MegaSkeletonDataResource data = spineBody.GetSkeleton().GetData();
-		if (data.FindAnimation(BestiaryAttackAnimId) != null)
+		MegaSkeleton skeleton = spineBody.GetSkeleton();
+		if (skeleton != null)
 		{
-			list.Add(new BestiaryMonsterMove("Attack", BestiaryAttackAnimId));
-		}
-		if (data.FindAnimation("cast") != null)
-		{
-			list.Add(new BestiaryMonsterMove("Cast", "cast"));
-		}
-		if (data.FindAnimation("revive") != null)
-		{
-			list.Add(new BestiaryMonsterMove("Revive", "revive"));
-		}
-		if (data.FindAnimation("hurt") != null)
-		{
-			list.Add(new BestiaryMonsterMove("Hurt", "hurt"));
-		}
-		if (data.FindAnimation("die") != null)
-		{
-			list.Add(new BestiaryMonsterMove("Die", "die"));
+			MegaSkeletonDataResource data = skeleton.GetData();
+			if (data.FindAnimation(BestiaryAttackAnimId) != null)
+			{
+				list.Add(new BestiaryMonsterMove("Attack", BestiaryAttackAnimId));
+			}
+			if (data.FindAnimation("cast") != null)
+			{
+				list.Add(new BestiaryMonsterMove("Cast", "cast"));
+			}
+			if (data.FindAnimation("revive") != null)
+			{
+				list.Add(new BestiaryMonsterMove("Revive", "revive"));
+			}
+			if (data.FindAnimation("hurt") != null)
+			{
+				list.Add(new BestiaryMonsterMove("Hurt", "hurt"));
+			}
+			if (data.FindAnimation("die") != null)
+			{
+				list.Add(new BestiaryMonsterMove("Die", "die"));
+			}
 		}
 		return list;
 	}
@@ -337,24 +358,27 @@ public abstract class MonsterModel : AbstractModel
 
 	public async Task PerformMove()
 	{
-		CombatState combatState = CombatState;
-		await Cmd.CustomScaledWait(0.1f, 0.2f);
-		IsPerformingMove = true;
-		MoveState move = NextMove;
-		IReadOnlyList<Creature> targets = combatState.PlayerCreatures;
-		Log.Info("Monster " + base.Id.Entry + " performing move " + move.Id);
-		await move.PerformMove(targets);
-		MoveStateMachine?.OnMovePerformed(move);
-		CombatManager.Instance.History.MonsterPerformedMove(combatState, this, move, targets);
-		IsPerformingMove = false;
-		if (Creature.IsDead && Hook.ShouldCreatureBeRemovedFromCombatAfterDeath(combatState, Creature))
+		if (CombatState != null)
 		{
-			combatState.RemoveCreature(Creature);
+			CombatState combatState = CombatState;
+			await Cmd.CustomScaledWait(0.1f, 0.2f);
+			IsPerformingMove = true;
+			MoveState move = NextMove;
+			IReadOnlyList<Creature> targets = combatState.PlayerCreatures;
+			Log.Info("Monster " + base.Id.Entry + " performing move " + move.Id);
+			await move.PerformMove(targets);
+			MoveStateMachine?.OnMovePerformed(move);
+			CombatManager.Instance.History.MonsterPerformedMove(combatState, this, move, targets);
+			IsPerformingMove = false;
+			if (Creature.IsDead && Hook.ShouldCreatureBeRemovedFromCombatAfterDeath(combatState, Creature))
+			{
+				combatState.RemoveCreature(Creature);
+			}
+			await Cmd.CustomScaledWait(0.1f, 0.4f);
 		}
-		await Cmd.CustomScaledWait(0.1f, 0.4f);
 	}
 
-	public virtual void SetupSkins(NCreatureVisuals visuals)
+	public virtual void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
 	}
 

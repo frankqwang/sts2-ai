@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Ascension;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
@@ -63,7 +64,7 @@ public sealed class WaterfallGiant : MonsterModel
 
 	private const string _ambientSfx = "event:/sfx/enemy/enemy_attacks/waterfall_giant/waterfall_giant_ambient";
 
-	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 260, 250);
+	public override int MinInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 250, 240);
 
 	public override int MaxInitialHp => MinInitialHp;
 
@@ -159,16 +160,21 @@ public sealed class WaterfallGiant : MonsterModel
 		await base.AfterAddedToRoom();
 		CurrentPressureGunDamage = BasePressureGunDamage;
 		SfxCmd.PlayLoop("event:/sfx/enemy/enemy_attacks/waterfall_giant/waterfall_giant_ambient", usesLoopParam: false);
-		base.Creature.Died += AfterDeath;
 	}
 
-	private void AfterDeath(Creature _)
+	public override Task AfterDeath(PlayerChoiceContext choiceContext, Creature creature, bool wasRemovalPrevented, float deathAnimLength)
 	{
-		if (!base.Creature.HasPower<SteamEruptionPower>())
+		if (creature != base.Creature)
 		{
-			base.Creature.Died -= AfterDeath;
-			NRunMusicController.Instance?.UpdateMusicParameter("waterfall_giant_progress", 5f);
+			return Task.CompletedTask;
 		}
+		if (base.Creature.HasPower<SteamEruptionPower>())
+		{
+			return Task.CompletedTask;
+		}
+		NRunMusicController.Instance?.UpdateMusicParameter("waterfall_giant_progress", 5f);
+		StopAmbientSfx();
+		return Task.CompletedTask;
 	}
 
 	public override void BeforeRemovedFromRoom()
@@ -312,7 +318,7 @@ public sealed class WaterfallGiant : MonsterModel
 			PressureBuildupIdx++;
 			int value = Mathf.FloorToInt((float)PressureBuildupIdx * 0.5f);
 			value = Mathf.Clamp(value, 1, 3);
-			NCombatRoom.Instance.GetCreatureNode(base.Creature)?.SpineController.GetAnimationState().SetAnimation($"_tracks/buildup{value}", loop: true, 1);
+			NCombatRoom.Instance.GetCreatureNode(base.Creature)?.SpineAnimation.SetAnimation($"_tracks/buildup{value}", loop: true, 1);
 		}
 	}
 

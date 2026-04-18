@@ -28,7 +28,7 @@ public sealed class Seapunk : MonsterModel
 
 	public override int MaxInitialHp => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 49, 46);
 
-	private int SeaKickDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 12, 11);
+	private int SeaKickDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 13, 11);
 
 	private int SpinningKickDamage => 2;
 

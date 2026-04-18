@@ -45,7 +45,7 @@ public partial class NAncientNameBanner : Control
 		_titleLabel = GetNode<MegaRichTextLabel>("%Title");
 		string text = _ancient.Title.GetFormattedText().ToUpper();
 		_ancientBannerEffect = new RichTextAncientBanner();
-		_ancientBannerEffect.CenterCharacter = GetTextCenterGlyphIndex(text, _titleLabel.GetThemeFont(ThemeConstants.RichTextLabel.normalFont, "RichTextLabel"), _titleLabel.GetThemeFontSize(ThemeConstants.RichTextLabel.normalFontSize, "RichTextLabel"));
+		_ancientBannerEffect.CenterCharacter = GetTextCenterGlyphIndex(text, _titleLabel.GetThemeFont(ThemeConstants.RichTextLabel.NormalFont, "RichTextLabel"), _titleLabel.GetThemeFontSize(ThemeConstants.RichTextLabel.NormalFontSize, "RichTextLabel"));
 		_titleLabel.InstallEffect(_ancientBannerEffect);
 		_titleLabel.BbcodeEnabled = true;
 		_titleLabel.Text = "[ancient_banner]" + text + "[/ancient_banner]";
@@ -81,17 +81,17 @@ public partial class NAncientNameBanner : Control
 		_titleLabel.HorizontalAlignment = HorizontalAlignment.Left;
 		_titleLabel.VerticalAlignment = VerticalAlignment.Bottom;
 		_titleLabel.Position = Vector2.Zero;
-		_titleLabel.AddThemeFontSizeOverride(ThemeConstants.RichTextLabel.normalFontSize, 54);
-		_titleLabel.AddThemeColorOverride(ThemeConstants.RichTextLabel.fontOutlineColor, Colors.Transparent);
-		_titleLabel.AddThemeColorOverride(ThemeConstants.RichTextLabel.fontShadowColor, Colors.Transparent);
-		_titleLabel.AddThemeColorOverride(ThemeConstants.RichTextLabel.defaultColor, StsColors.cream);
+		_titleLabel.AddThemeFontSizeOverride(ThemeConstants.RichTextLabel.NormalFontSize, 54);
+		_titleLabel.AddThemeColorOverride(ThemeConstants.RichTextLabel.FontOutlineColor, Colors.Transparent);
+		_titleLabel.AddThemeColorOverride(ThemeConstants.RichTextLabel.FontShadowColor, Colors.Transparent);
+		_titleLabel.AddThemeColorOverride(ThemeConstants.RichTextLabel.DefaultColor, StsColors.cream);
 		_epithetLabel.HorizontalAlignment = HorizontalAlignment.Left;
 		_epithetLabel.VerticalAlignment = VerticalAlignment.Bottom;
 		_epithetLabel.Modulate = new Color(1f, 1f, 1f, 0f);
-		_epithetLabel.AddThemeFontSizeOverride(ThemeConstants.Label.fontSize, 18);
-		_epithetLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, Colors.Transparent);
-		_epithetLabel.AddThemeColorOverride(ThemeConstants.Label.fontShadowColor, Colors.Transparent);
-		_epithetLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, StsColors.cream);
+		_epithetLabel.AddThemeFontSizeOverride(ThemeConstants.Label.FontSize, 18);
+		_epithetLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, Colors.Transparent);
+		_epithetLabel.AddThemeColorOverride(ThemeConstants.Label.FontShadowColor, Colors.Transparent);
+		_epithetLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, StsColors.cream);
 		_moveTween.TweenProperty(_epithetLabel, "modulate:a", 0.5f, 2.0).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Circ);
 		_moveTween.TweenProperty(this, "position:x", 48f, 2.0).SetEase(Tween.EaseType.Out).From(0)
 			.SetTrans(Tween.TransitionType.Circ);
@@ -138,14 +138,14 @@ public partial class NAncientNameBanner : Control
 	{
 		_moveTween?.Kill();
 		_tween?.Kill();
-		_titleLabel.RemoveThemeFontSizeOverride(ThemeConstants.RichTextLabel.normalFontSize);
-		_titleLabel.RemoveThemeColorOverride(ThemeConstants.RichTextLabel.fontOutlineColor);
-		_titleLabel.RemoveThemeColorOverride(ThemeConstants.RichTextLabel.fontShadowColor);
-		_titleLabel.RemoveThemeColorOverride(ThemeConstants.RichTextLabel.defaultColor);
-		_epithetLabel.RemoveThemeFontSizeOverride(ThemeConstants.Label.fontSize);
-		_epithetLabel.RemoveThemeColorOverride(ThemeConstants.Label.fontOutlineColor);
-		_epithetLabel.RemoveThemeColorOverride(ThemeConstants.Label.fontShadowColor);
-		_epithetLabel.RemoveThemeColorOverride(ThemeConstants.Label.fontColor);
+		_titleLabel.RemoveThemeFontSizeOverride(ThemeConstants.RichTextLabel.NormalFontSize);
+		_titleLabel.RemoveThemeColorOverride(ThemeConstants.RichTextLabel.FontOutlineColor);
+		_titleLabel.RemoveThemeColorOverride(ThemeConstants.RichTextLabel.FontShadowColor);
+		_titleLabel.RemoveThemeColorOverride(ThemeConstants.RichTextLabel.DefaultColor);
+		_epithetLabel.RemoveThemeFontSizeOverride(ThemeConstants.Label.FontSize);
+		_epithetLabel.RemoveThemeColorOverride(ThemeConstants.Label.FontOutlineColor);
+		_epithetLabel.RemoveThemeColorOverride(ThemeConstants.Label.FontShadowColor);
+		_epithetLabel.RemoveThemeColorOverride(ThemeConstants.Label.FontColor);
 		base._ExitTree();
 	}
 }

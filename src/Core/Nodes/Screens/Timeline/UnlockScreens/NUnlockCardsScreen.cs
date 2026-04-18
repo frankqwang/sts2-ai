@@ -11,6 +11,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.Timeline.UnlockScreens;
 
@@ -22,7 +23,7 @@ public partial class NUnlockCardsScreen : NUnlockScreen
 
 	private NCommonBanner _banner;
 
-	private readonly List<NCard> _nodes = new List<NCard>();
+	private readonly List<NGridCardHolder> _holders = new List<NGridCardHolder>();
 
 	private IReadOnlyList<CardModel> _cards;
 
@@ -31,6 +32,18 @@ public partial class NUnlockCardsScreen : NUnlockScreen
 	private const float _cardXOffset = 350f;
 
 	public static IEnumerable<string> AssetPaths => new global::_003C_003Ez__ReadOnlySingleElementList<string>(_scenePath);
+
+	public override Control? DefaultFocusedControl
+	{
+		get
+		{
+			if (_holders.Count != 0)
+			{
+				return _holders[_holders.Count / 2];
+			}
+			return null;
+		}
+	}
 
 	public static NUnlockCardsScreen Create()
 	{
@@ -66,9 +79,10 @@ public partial class NUnlockCardsScreen : NUnlockScreen
 			_cardTween.TweenProperty(nGridCardHolder, "modulate", Colors.White, 1.0).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic)
 				.From(Colors.Black);
 			nCard.ActivateRewardScreenGlow();
-			_nodes.Add(nCard);
+			_holders.Add(nGridCardHolder);
 			num++;
 		}
+		ActiveScreenContext.Instance.FocusOnDefaultControl();
 	}
 
 	public void SetCards(IReadOnlyList<CardModel> cards)
@@ -78,9 +92,9 @@ public partial class NUnlockCardsScreen : NUnlockScreen
 
 	protected override void OnScreenPreClose()
 	{
-		foreach (NCard node in _nodes)
+		foreach (NGridCardHolder holder in _holders)
 		{
-			node.KillRarityGlow();
+			holder.CardNode?.KillRarityGlow();
 		}
 	}
 

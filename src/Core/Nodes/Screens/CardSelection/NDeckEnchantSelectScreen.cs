@@ -206,8 +206,8 @@ public sealed partial class NDeckEnchantSelectScreen : NCardGridSelectionScreen
 				_multiPreview.GetChild(i).QueueFreeSafely();
 			}
 		}
+		_grid.FocusBehaviorRecursive = FocusBehaviorRecursiveEnum.Inherited;
 		_grid.SetCanScroll(canScroll: true);
-		ActiveScreenContext.Instance.Update();
 		if (_prefs.Cancelable)
 		{
 			_closeButton.Enable();
@@ -218,6 +218,7 @@ public sealed partial class NDeckEnchantSelectScreen : NCardGridSelectionScreen
 		}
 		_grid.GetCardHolder(_selectedCards.Last())?.TryGrabFocus();
 		_selectedCards.Clear();
+		ActiveScreenContext.Instance.Update();
 	}
 
 	private void PreviewSelection(NButton _)
@@ -227,31 +228,32 @@ public sealed partial class NDeckEnchantSelectScreen : NCardGridSelectionScreen
 
 	private void PreviewSelection()
 	{
+		_grid.FocusBehaviorRecursive = FocusBehaviorRecursiveEnum.Disabled;
+		_grid.SetCanScroll(canScroll: false);
+		_closeButton.Disable();
+		GetViewport().GuiReleaseFocus();
 		if (UseSingleSelection)
 		{
-			_grid.SetCanScroll(canScroll: false);
-			_closeButton.Disable();
-			GetViewport().GuiReleaseFocus();
 			_enchantSinglePreviewContainer.Visible = true;
 			_enchantSinglePreviewContainer.MouseFilter = MouseFilterEnum.Stop;
 			_singlePreview.Init(_selectedCards.First(), _enchantment, _enchantmentAmount);
 			_singlePreviewCancelButton.Enable();
 			_singlePreviewConfirmButton.Enable();
-			return;
 		}
-		_grid.SetCanScroll(canScroll: false);
-		_closeButton.Disable();
-		GetViewport().GuiReleaseFocus();
-		_enchantMultiPreviewContainer.Visible = true;
-		_enchantMultiPreviewContainer.MouseFilter = MouseFilterEnum.Stop;
-		_multiPreviewCancelButton.Enable();
-		_multiPreviewConfirmButton.Enable();
-		foreach (CardModel selectedCard in _selectedCards)
+		else
 		{
-			NCard nCard = NCard.Create(selectedCard);
-			_multiPreview.AddChildSafely(NPreviewCardHolder.Create(nCard, showHoverTips: true, scaleOnHover: false));
-			nCard.UpdateVisuals(selectedCard.Pile.Type, CardPreviewMode.Normal);
+			_enchantMultiPreviewContainer.Visible = true;
+			_enchantMultiPreviewContainer.MouseFilter = MouseFilterEnum.Stop;
+			_multiPreviewCancelButton.Enable();
+			_multiPreviewConfirmButton.Enable();
+			foreach (CardModel selectedCard in _selectedCards)
+			{
+				NCard nCard = NCard.Create(selectedCard);
+				_multiPreview.AddChildSafely(NPreviewCardHolder.Create(nCard, showHoverTips: true, scaleOnHover: false));
+				nCard.UpdateVisuals(selectedCard.Pile.Type, CardPreviewMode.Normal);
+			}
 		}
+		ActiveScreenContext.Instance.Update();
 	}
 
 	private void ConfirmSelection(NButton inputEvent)

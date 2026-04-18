@@ -7,7 +7,7 @@ namespace MegaCrit.Sts2.Core.Nodes.Ftue;
 
 public partial class NFtue : Control, IScreenContext
 {
-	public Control? DefaultFocusedControl => this;
+	public Control DefaultFocusedControl => this;
 
 	public override void _EnterTree()
 	{

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Platform.Steam;
 using Steamworks;
@@ -225,13 +226,27 @@ public class SteamHost : NetHost
 			SteamNetworkingSockets.CloseConnection(connection.conn, (int)reason.ToSteam(), null, !now);
 		}
 		_connections.Clear();
-		SteamNetworkingSockets.CloseListenSocket(_socket);
 		SteamMatchmaking.LeaveLobby(_lobbyId.Value);
+		if (now)
+		{
+			SteamNetworkingSockets.CloseListenSocket(_socket);
+		}
+		else
+		{
+			TaskHelper.RunSafely(CloseSocketAfterDelay(_socket));
+		}
 		_lobbyId = null;
 		_isConnected = false;
 		_netStatusChangedCallback?.Dispose();
 		_netStatusChangedCallback = null;
 		_handler.OnDisconnected(new NetErrorInfo(reason, selfInitiated: true));
+	}
+
+	private async Task CloseSocketAfterDelay(HSteamListenSocket socket)
+	{
+		await Task.Delay(1000);
+		_logger.Debug("Closing socket after delay.");
+		SteamNetworkingSockets.CloseListenSocket(socket);
 	}
 
 	private bool IsInLobby(SteamNetworkingIdentity id)

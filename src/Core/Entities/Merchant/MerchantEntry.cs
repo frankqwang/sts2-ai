@@ -64,6 +64,11 @@ public abstract class MerchantEntry
 
 	public async Task<bool> OnTryPurchaseWrapper(MerchantInventory? inventory, bool ignoreCost = false)
 	{
+		if (!IsStocked)
+		{
+			InvokePurchaseFailed(PurchaseStatus.FailureOutOfStock);
+			return false;
+		}
 		if (!EnoughGold && !ignoreCost)
 		{
 			InvokePurchaseFailed(PurchaseStatus.FailureGold);

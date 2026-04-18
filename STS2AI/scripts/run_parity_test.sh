@@ -5,7 +5,7 @@ set -u
 
 REPO_ROOT="C:/dev/sts2-ai"
 GODOT_EXE="C:/dev/game/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe"
-SIM_EXE="$REPO_ROOT/STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe"
+SIM_EXE="$REPO_ROOT/STS2AI/ENV/Sim/HeadlessSim/bin/Debug/net9.0/HeadlessSim.exe"
 MOD_SRC="$REPO_ROOT/STS2AI/ENV/Spectator/SpectatorBridgeMod/bin/Debug/net9.0/sts2_mcp_spectator.dll"
 # Real mod path: next to Godot exe, NOT repo mods/
 MOD_DEST="C:/dev/game/Godot_v4.5.1-stable_mono_win64/mods/sts2_mcp_spectator"
@@ -17,7 +17,7 @@ MAX_STEPS="${2:-300}"
 
 cleanup() {
     echo "=== Cleanup ==="
-    taskkill //F //IM headless_sim_host_0991.exe 2>/dev/null || true
+    taskkill //F //IM HeadlessSim.exe 2>/dev/null || true
     taskkill //F //IM Godot_v4.5.1-stable_mono_win64_console.exe 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -38,7 +38,7 @@ echo "[3/7] Build..."
 cd "$REPO_ROOT"
 ERRORS=0
 dotnet build sts2.csproj -v q 2>&1 | tail -1
-dotnet build STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj -v q 2>&1 | tail -1
+dotnet build STS2AI/ENV/Sim/HeadlessSim/HeadlessSim.csproj -v q 2>&1 | tail -1
 dotnet build STS2AI/ENV/Spectator/SpectatorBridgeMod/sts2_mcp_spectator.csproj -v q \
     -p:STS2AssemblyDir="$REPO_ROOT/.godot/mono/temp/bin/Debug" 2>&1 | tail -1
 

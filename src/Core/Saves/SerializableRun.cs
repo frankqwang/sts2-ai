@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Platform;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Runs.History;
 using MegaCrit.Sts2.Core.Saves.MapDrawing;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -83,6 +84,9 @@ public class SerializableRun : ISaveSchema, IPacketSerializable
 	[JsonPropertyName("extra_fields")]
 	public SerializableExtraRunFields ExtraFields { get; set; } = new SerializableExtraRunFields();
 
+	[JsonPropertyName("game_mode")]
+	public GameMode GameMode { get; set; }
+
 	public void Serialize(PacketWriter writer)
 	{
 		writer.WriteInt(SchemaVersion);
@@ -93,6 +97,7 @@ public class SerializableRun : ISaveSchema, IPacketSerializable
 		{
 			writer.WriteLong(DailyTime.Value.ToUnixTimeSeconds());
 		}
+		writer.WriteEnum(GameMode);
 		writer.WriteInt(CurrentActIndex, 4);
 		writer.WriteModelEntriesInList(EventsSeen);
 		writer.WriteBool(PreFinishedRoom != null);
@@ -132,6 +137,7 @@ public class SerializableRun : ISaveSchema, IPacketSerializable
 		{
 			DailyTime = DateTimeOffset.FromUnixTimeSeconds(reader.ReadLong());
 		}
+		GameMode = reader.ReadEnum<GameMode>();
 		CurrentActIndex = reader.ReadInt(4);
 		EventsSeen = reader.ReadModelIdListAssumingType<EventModel>();
 		if (reader.ReadBool())
@@ -171,6 +177,7 @@ public class SerializableRun : ISaveSchema, IPacketSerializable
 			DailyTime = DailyTime,
 			CurrentActIndex = CurrentActIndex,
 			EventsSeen = EventsSeen,
+			GameMode = GameMode,
 			PreFinishedRoom = PreFinishedRoom,
 			SerializableOdds = SerializableOdds,
 			SerializableSharedRelicGrabBag = SerializableSharedRelicGrabBag,

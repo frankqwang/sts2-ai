@@ -53,7 +53,11 @@ public class NullRunState : IRunState, ICardScope, IPlayerCollection
 
 	public MapPoint? CurrentMapPoint => null;
 
-	public RunLocation CurrentLocation => new RunLocation(null, 0);
+	public MapLocation MapLocation => new MapLocation(null, 0);
+
+	public RunLocation RunLocation => new RunLocation(MapLocation, null);
+
+	public GameMode GameMode => GameMode.Standard;
 
 	public int ActFloor
 	{
@@ -150,9 +154,14 @@ public class NullRunState : IRunState, ICardScope, IPlayerCollection
 	{
 	}
 
-	public MapPointHistoryEntry? GetHistoryEntryFor(RunLocation location)
+	public MapPointHistoryEntry? GetHistoryEntryFor(MapLocation location)
 	{
 		return null;
+	}
+
+	public int GetAndIncrementNextRoomId()
+	{
+		return 0;
 	}
 
 	public IEnumerable<AbstractModel> IterateHookListeners(CombatState? childCombatState)

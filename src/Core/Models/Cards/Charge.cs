@@ -12,7 +12,7 @@ namespace MegaCrit.Sts2.Core.Models.Cards;
 
 public sealed class Charge : CardModel
 {
-	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromCard<MinionStrike>(base.IsUpgraded));
+	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromCard<MinionDiveBomb>(base.IsUpgraded));
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new CardsVar(2));
 
@@ -30,7 +30,7 @@ public sealed class Charge : CardModel
 		List<CardModel> list = (await CardSelectCmd.FromSimpleGrid(choiceContext, cardsIn, base.Owner, new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, base.DynamicVars.Cards.IntValue))).ToList();
 		foreach (CardModel item in list)
 		{
-			CardPileAddResult? cardPileAddResult = await CardCmd.TransformTo<MinionStrike>(item);
+			CardPileAddResult? cardPileAddResult = await CardCmd.TransformTo<MinionDiveBomb>(item);
 			if (base.IsUpgraded && cardPileAddResult.HasValue)
 			{
 				CardCmd.Upgrade(cardPileAddResult.Value.cardAdded);

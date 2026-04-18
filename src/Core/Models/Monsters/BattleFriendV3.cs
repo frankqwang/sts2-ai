@@ -6,7 +6,6 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
-using MegaCrit.Sts2.Core.Nodes.Combat;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
 
@@ -16,9 +15,8 @@ public sealed class BattleFriendV3 : MonsterModel
 
 	public override int MaxInitialHp => 300;
 
-	public override void SetupSkins(NCreatureVisuals visuals)
+	public override void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
-		MegaSkeleton skeleton = visuals.SpineBody.GetSkeleton();
 		MegaSkeletonDataResource data = skeleton.GetData();
 		skeleton.SetSkin(data.FindSkin("v3"));
 		skeleton.SetSlotsToSetupPose();

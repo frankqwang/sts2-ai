@@ -14,7 +14,7 @@ public class UnlockState
 {
 	public static readonly UnlockState none = new UnlockState(Array.Empty<string>(), Array.Empty<ModelId>(), 0);
 
-	public static readonly UnlockState all = new UnlockState(EpochModel.AllEpochIds, ModelDb.AllEncounters.Select((EncounterModel e) => e.Id), 9999);
+	public static readonly UnlockState all = new UnlockState(EpochModel.AllEpochIds, ModelDb.AllEncounters.Select((EncounterModel e) => e.Id), 999999999);
 
 	private readonly HashSet<string> _unlockedEpochIds;
 

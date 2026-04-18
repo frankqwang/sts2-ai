@@ -14,10 +14,10 @@
 networkV2 的 proto-pipe 通信需要 HeadlessSim。参考顶层 [README](../../README.md#2-构建-headlesssim无头模拟器)：
 
 ```powershell
-dotnet build STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj -c Debug
+dotnet build STS2AI/ENV/Sim/HeadlessSim/HeadlessSim.csproj -c Debug
 ```
 
-产物：`STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe`。
+产物：`STS2AI/ENV/Sim/HeadlessSim/bin/Debug/net9.0/HeadlessSim.exe`。
 
 ### 1.2 Python 依赖
 
@@ -219,7 +219,7 @@ A: 多半是 advantage 同质化。检查：① reward shaping 是否有效（�
 A: 降 lr 或 clip_eps；启用 `--target-kl`（默认 0.02）做早停。
 
 **Q: sim 启动超时？**
-A: 检查 `STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe` 是否编译好；`BinaryBackedFullRunClient` 的 `auto_launch=True` 会自动起；也可以在独立终端起 sim 后用 `auto_launch=False`。
+A: 检查 `STS2AI/ENV/Sim/HeadlessSim/bin/Debug/net9.0/HeadlessSim.exe` 是否编译好；`BinaryBackedFullRunClient` 的 `auto_launch=True` 会自动起；也可以在独立终端起 sim 后用 `auto_launch=False`。
 
 **Q: `max_numeric_dim` 是什么？**
 A: Token numeric 向量最大长度（默认 32）。超出会被 tokenizer 截断。扩 schema 时要算好各 token 的 numeric 长度不超过这个值。

@@ -76,7 +76,7 @@ public sealed class DollRoom : EventModel
 		new DamageVar("ExamineHpLoss", 15m, ValueProp.Unblockable | ValueProp.Unpowered)
 	});
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		return runState.CurrentActIndex == 1;
 	}
@@ -91,7 +91,7 @@ public sealed class DollRoom : EventModel
 		});
 	}
 
-	protected override Task BeforeEventStarted()
+	protected override Task BeforeEventStarted(bool isPreFinished)
 	{
 		if (LocalContext.IsMe(base.Owner) && TestMode.IsOff)
 		{
@@ -102,7 +102,7 @@ public sealed class DollRoom : EventModel
 
 	private async Task ChooseRandom()
 	{
-		await ChooseDollAndShowDescription(base.Owner.RunState.Rng.Niche.NextItem(_dolls));
+		await ChooseDollAndShowDescription(base.Rng.NextItem(_dolls));
 	}
 
 	private async Task TakeSomeTime()

@@ -202,7 +202,7 @@ public class RewardSynchronizer : IDisposable
 			return;
 		}
 		Player player = _playerCollection.GetPlayer(senderId);
-		MapPointHistoryEntry historyEntryFor = player.RunState.GetHistoryEntryFor(message.location);
+		MapPointHistoryEntry historyEntryFor = player.RunState.GetHistoryEntryFor(message.location.mapLocation);
 		PlayerMapPointHistoryEntry playerMapPointHistoryEntry = null;
 		if (historyEntryFor != null)
 		{

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
@@ -14,57 +15,71 @@ namespace MegaCrit.Sts2.Core.Helpers;
 
 public static class OneTimeInitialization
 {
-	private static bool _initialized;
-
-	private static bool _deferredExecuted;
+	private enum State
+	{
+		None,
+		VeryEarly,
+		Essential,
+		Done
+	}
 
 	private static AtlasResourceLoader? _atlasResourceLoader;
 
+	private static State _state;
+
 	public static ReadSaveResult<SettingsSave> SettingsReadResult { get; private set; }
 
-	public static void Execute()
+	public static void ExecuteVeryEarly()
 	{
-		ExecuteEssential();
-		ExecuteDeferred();
+		if (_state != State.None)
+		{
+			Log.Error($"Tried to call OneTimeInitialization.ExecuteVeryEarly in state {_state}!");
+			return;
+		}
+		_state = State.VeryEarly;
+		if (TestMode.IsOn)
+		{
+			SettingsReadResult = SaveManager.Instance.InitSettingsDataForTest();
+		}
+		else
+		{
+			SettingsReadResult = SaveManager.Instance.InitSettingsData();
+		}
+		ModManager.Initialize(new ModManagerFileIo(), SaveManager.Instance.SettingsSave.ModSettings);
+		UserDataPathProvider.IsRunningModded = ModManager.IsRunningModded();
 	}
 
 	public static void ExecuteEssential()
 	{
-		if (!_initialized)
+		if (_state != State.VeryEarly)
 		{
-			_initialized = true;
-			_atlasResourceLoader = new AtlasResourceLoader();
-			ResourceLoader.AddResourceFormatLoader(_atlasResourceLoader, atFront: true);
-			AtlasManager.LoadEssentialAtlases();
-			if (TestMode.IsOn)
-			{
-				SettingsReadResult = SaveManager.Instance.InitSettingsDataForTest();
-			}
-			else
-			{
-				SettingsReadResult = SaveManager.Instance.InitSettingsData();
-			}
-			ModManager.Initialize(new ModManagerFileIo(), SaveManager.Instance.SettingsSave.ModSettings);
-			UserDataPathProvider.IsRunningModded = ModManager.LoadedMods.Count > 0;
-			LocManager.Initialize();
-			ModelDb.Init();
-			ModelIdSerializationCache.Init();
-			ModelDb.InitIds();
+			Log.Error($"Tried to call OneTimeInitialization.ExecuteEssential in state {_state}!");
+			return;
 		}
+		_state = State.Essential;
+		_atlasResourceLoader = new AtlasResourceLoader();
+		ResourceLoader.AddResourceFormatLoader(_atlasResourceLoader, atFront: true);
+		AtlasManager.LoadEssentialAtlases();
+		LocManager.Initialize();
+		ModelDb.Init();
+		ModelIdSerializationCache.Init();
+		ModelDb.InitIds();
 	}
 
 	public static void ExecuteDeferred()
 	{
-		if (!_deferredExecuted)
+		if (_state != State.Essential)
 		{
-			_deferredExecuted = true;
-			AtlasManager.LoadAllAtlases();
-			if (!OS.HasFeature("editor"))
-			{
-				ModelDb.Preload();
-				PrewarmJit();
-				ConditionalFormatter conditionalFormatter = new ConditionalFormatter();
-			}
+			Log.Error($"Tried to call OneTimeInitialization.ExecuteDeferred in state {_state}!");
+			return;
+		}
+		_state = State.Done;
+		AtlasManager.LoadAllAtlases();
+		if (!OS.HasFeature("editor"))
+		{
+			ModelDb.Preload();
+			PrewarmJit();
+			ConditionalFormatter conditionalFormatter = new ConditionalFormatter();
 		}
 	}
 

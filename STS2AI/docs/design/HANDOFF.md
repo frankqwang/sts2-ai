@@ -205,14 +205,14 @@ dump 文件结构（每 iter 4 个文件）：
 ## 5. simulator + 环境
 
 - Windows + RTX 2070 SUPER 8GB + 20 核
-- simulator：`C:/dev/sts2-ai/STS2AI/ENV/Sim/Host/bin/Debug/net9.0/headless_sim_host_0991.exe`
+- simulator：`C:/dev/sts2-ai/STS2AI/ENV/Sim/HeadlessSim/bin/Debug/net9.0/HeadlessSim.exe`
 - 每个 sim 进程 ~100MB 内存，冷启动 2-5s（.NET JIT）
 - Named Pipe 协议，端口 15527 起
 - 建议训练用 `SimClientPool`（`train_full_run_v2.py` 里已有），warmup 触发 JIT，一次性加载
 
 **如果 sim binary stale**：
 ```bash
-cd STS2AI/ENV/Sim/Host && dotnet build headless_sim_host_0991.csproj -c Debug
+cd STS2AI/ENV/Sim/HeadlessSim && dotnet build HeadlessSim.csproj -c Debug
 ```
 
 ---

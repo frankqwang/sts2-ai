@@ -22,6 +22,8 @@ public class NullPlatformUtilStrategy : IPlatformUtilStrategy
 
 	public bool SupportsInviteDialog => false;
 
+	public bool IsPlatformOverlayOpen => false;
+
 	public NullPlatformUtilStrategy()
 	{
 		if (CommandLineHelper.TryGetValue("clientId", out string value) && ulong.TryParse(value, out var result))

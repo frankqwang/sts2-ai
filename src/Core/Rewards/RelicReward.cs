@@ -14,12 +14,15 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Runs.History;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace MegaCrit.Sts2.Core.Rewards;
 
 public class RelicReward : Reward
 {
 	private readonly RelicRarity _rarity;
+
+	private RelicModel? _predeterminedRelic;
 
 	private RelicModel? _relic;
 
@@ -48,6 +51,7 @@ public class RelicReward : Reward
 		: base(player)
 	{
 		relic.AssertMutable();
+		_predeterminedRelic = relic;
 		_relic = relic;
 	}
 
@@ -95,8 +99,8 @@ public class RelicReward : Reward
 	protected override async Task<bool> OnSelect()
 	{
 		Log.Info($"Obtained {_relic.Id} from relic reward");
-		ClaimedRelic = await RelicCmd.Obtain(_relic, base.Player);
 		RunManager.Instance.RewardSynchronizer.SyncLocalObtainedRelic(_relic);
+		ClaimedRelic = await RelicCmd.Obtain(_relic, base.Player);
 		_wasTaken = true;
 		return true;
 	}
@@ -113,5 +117,15 @@ public class RelicReward : Reward
 	public override void MarkContentAsSeen()
 	{
 		SaveManager.Instance.MarkRelicAsSeen(_relic);
+	}
+
+	public override SerializableReward ToSerializable()
+	{
+		SerializableReward serializableReward = base.ToSerializable();
+		if (_predeterminedRelic != null)
+		{
+			serializableReward.PredeterminedModelId = _predeterminedRelic.Id;
+		}
+		return serializableReward;
 	}
 }

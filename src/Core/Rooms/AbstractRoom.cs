@@ -15,6 +15,8 @@ public abstract class AbstractRoom
 
 	public virtual bool IsPreFinished => false;
 
+	public int? Id { get; private set; }
+
 	public bool IsVictoryRoom
 	{
 		get
@@ -27,7 +29,13 @@ public abstract class AbstractRoom
 		}
 	}
 
-	public abstract Task Enter(IRunState? runState, bool isRestoringRoomStackBase);
+	public Task Enter(IRunState? runState, bool isRestoringRoomStackBase)
+	{
+		Id = runState?.GetAndIncrementNextRoomId();
+		return EnterInternal(runState, isRestoringRoomStackBase);
+	}
+
+	public abstract Task EnterInternal(IRunState? runState, bool isRestoringRoomStackBase);
 
 	public abstract Task Exit(IRunState? runState);
 

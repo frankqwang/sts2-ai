@@ -195,6 +195,10 @@ public sealed class ThievingHopper : MonsterModel
 		List<CardModel> cardsToSteal = new List<CardModel>();
 		foreach (Creature target in targets)
 		{
+			if (target.IsDead)
+			{
+				continue;
+			}
 			List<CardModel> list = (from c in CardPile.GetCards(target.Player ?? target.PetOwner, PileType.Draw, PileType.Discard)
 				where c.DeckVersion != null
 				select c).ToList();

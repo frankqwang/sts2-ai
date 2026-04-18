@@ -74,7 +74,7 @@ public sealed class SpoilsActMap : ActMap
 		StartingMapPoint = new MapPoint(GetColumnCount() / 2, 0);
 		GenerateHourglassMap();
 		AssignPointTypes();
-		MapPathPruning.PruneDuplicateSegments(Grid, startMapPoints, StartingMapPoint, _rng);
+		MapPathPruning.PruneAndRepair(Grid, startMapPoints, this, _pointTypeCounts, _rng, IsValidPointType);
 	}
 
 	private MapPoint GetOrCreatePoint(int col, int row)
@@ -369,18 +369,23 @@ public sealed class SpoilsActMap : ActMap
 
 	private void AssignRemainingTypesToRandomPoints(Queue<MapPointType> pointTypesToBeAssigned)
 	{
-		if (pointTypesToBeAssigned.Count == 0)
+		for (int i = 0; i < 3; i++)
 		{
-			return;
-		}
-		List<MapPoint> list = (from p in GetAllMapPoints()
-			where p != BossMapPoint && p != StartingMapPoint
-			select p).ToList();
-		list.StableShuffle(_rng);
-		foreach (MapPoint item in list)
-		{
-			if (item.PointType == MapPointType.Unassigned)
+			if (pointTypesToBeAssigned.Count <= 0)
 			{
+				break;
+			}
+			List<MapPoint> list = (from p in GetAllMapPoints()
+				where p != BossMapPoint && p != StartingMapPoint
+				where p.PointType == MapPointType.Unassigned
+				select p).ToList();
+			list.StableShuffle(_rng);
+			foreach (MapPoint item in list)
+			{
+				if (pointTypesToBeAssigned.Count == 0)
+				{
+					break;
+				}
 				MapPointType nextValidPointType = GetNextValidPointType(pointTypesToBeAssigned, item);
 				if (nextValidPointType != MapPointType.Unassigned)
 				{
@@ -436,7 +441,7 @@ public sealed class SpoilsActMap : ActMap
 
 	private static bool IsValidForLower(MapPointType pointType, MapPoint mapPoint)
 	{
-		if (mapPoint.coord.row < 5)
+		if (mapPoint.coord.row < 6)
 		{
 			return !_lowerMapPointRestrictions.Contains(pointType);
 		}

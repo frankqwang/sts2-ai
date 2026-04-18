@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Extensions;
+using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Singleton;
 using MegaCrit.Sts2.Core.Random;
@@ -335,6 +336,10 @@ public class CombatState : ICardScope
 			{
 				yield return item;
 			}
+		}
+		foreach (AbstractModel item2 in ModHelper.IterateAllCombatStateSubscribers(this))
+		{
+			yield return item2;
 		}
 	}
 

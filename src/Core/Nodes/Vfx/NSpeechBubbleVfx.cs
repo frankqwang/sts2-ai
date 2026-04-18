@@ -16,11 +16,11 @@ namespace MegaCrit.Sts2.Core.Nodes.Vfx;
 
 public partial class NSpeechBubbleVfx : Control
 {
-	private static readonly StringName _v = new StringName("v");
+	private static readonly StringName _h = new StringName("h");
 
 	private static readonly StringName _s = new StringName("s");
 
-	private static readonly StringName _h = new StringName("h");
+	private static readonly StringName _v = new StringName("v");
 
 	private Control _container;
 
@@ -124,15 +124,30 @@ public partial class NSpeechBubbleVfx : Control
 			_hsv.SetShaderParameter(_s, 1.5f);
 			_hsv.SetShaderParameter(_v, 0.6f);
 			break;
+		case VfxColor.Swamp:
+			_hsv.SetShaderParameter(_h, 0.72f);
+			_hsv.SetShaderParameter(_s, 1.7f);
+			_hsv.SetShaderParameter(_v, 0.5f);
+			break;
 		case VfxColor.Purple:
 			_hsv.SetShaderParameter(_h, 0.3f);
 			_hsv.SetShaderParameter(_s, 0.6f);
 			_hsv.SetShaderParameter(_v, 0.5f);
 			break;
-		case VfxColor.Red:
-			_hsv.SetShaderParameter(_h, 0.48f);
-			_hsv.SetShaderParameter(_s, 2f);
+		case VfxColor.Orange:
+			_hsv.SetShaderParameter(_h, 0.6f);
+			_hsv.SetShaderParameter(_s, 4f);
 			_hsv.SetShaderParameter(_v, 0.5f);
+			break;
+		case VfxColor.Red:
+			_hsv.SetShaderParameter(_h, 0.49f);
+			_hsv.SetShaderParameter(_s, 2.5f);
+			_hsv.SetShaderParameter(_v, 0.38f);
+			break;
+		case VfxColor.DarkGray:
+			_hsv.SetShaderParameter(_h, 0.093f);
+			_hsv.SetShaderParameter(_s, 0.2f);
+			_hsv.SetShaderParameter(_v, 0.4f);
 			break;
 		case VfxColor.Black:
 			_hsv.SetShaderParameter(_h, 1f);

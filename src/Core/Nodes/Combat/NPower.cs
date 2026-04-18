@@ -112,7 +112,7 @@ public partial class NPower : Control
 	{
 		if (_model != null)
 		{
-			_amountLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, Model.AmountLabelColor);
+			_amountLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, Model.AmountLabelColor);
 			_amountLabel.SetTextAutoSize((Model.StackType == PowerStackType.Counter) ? Model.DisplayAmount.ToString() : string.Empty);
 		}
 		else

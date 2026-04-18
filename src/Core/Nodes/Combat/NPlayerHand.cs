@@ -306,8 +306,8 @@ public partial class NPlayerHand : Control
 			_currentCardPlay.CancelPlayCard();
 		}
 		bool flag = holder.HasFocus();
-		holder.Clear();
 		holder.GetParent().RemoveChildSafely(holder);
+		holder.Clear();
 		holder.QueueFreeSafely();
 		RefreshLayout();
 		if (flag)
@@ -508,11 +508,13 @@ public partial class NPlayerHand : Control
 		if (button.IsPeeking)
 		{
 			NCombatRoom.Instance.EnableControllerNavigation();
+			_selectModeConfirmButton.Disable();
 		}
 		else
 		{
 			NCombatRoom.Instance.RestrictControllerNavigation(Array.Empty<Control>());
 			EnableControllerNavigation();
+			_selectModeConfirmButton.Enable();
 		}
 		UpdateSelectModeCardVisibility();
 		ActiveScreenContext.Instance.Update();

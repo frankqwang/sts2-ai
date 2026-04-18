@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Models.Relics;
 
@@ -36,7 +37,7 @@ public sealed class ScrollBoxes : RelicModel
 
 	public static bool CanGenerateBundles(Player player)
 	{
-		IEnumerable<CardModel> unlockedCards = player.Character.CardPool.GetUnlockedCards(player.UnlockState, player.RunState.CardMultiplayerConstraint);
+		IEnumerable<CardModel> unlockedCards = GetCardPool(player.Character).GetUnlockedCards(player.UnlockState, player.RunState.CardMultiplayerConstraint);
 		int num = unlockedCards.Count((CardModel c) => c.Rarity == CardRarity.Common);
 		int num2 = unlockedCards.Count((CardModel c) => c.Rarity == CardRarity.Uncommon);
 		if (num >= 4)
@@ -50,9 +51,10 @@ public sealed class ScrollBoxes : RelicModel
 	{
 		Rng rewards = player.PlayerRng.Rewards;
 		bool flag = player.Character is Defect;
-		CardCreationOptions options = CardCreationOptions.ForNonCombatWithUniformOdds(new global::_003C_003Ez__ReadOnlySingleElementList<CardPoolModel>(player.Character.CardPool), (CardModel c) => c.Rarity == CardRarity.Common).WithFlags(CardCreationFlags.NoRarityModification);
+		CardPoolModel cardPool = GetCardPool(player.Character);
+		CardCreationOptions options = CardCreationOptions.ForNonCombatWithUniformOdds(new global::_003C_003Ez__ReadOnlySingleElementList<CardPoolModel>(cardPool), (CardModel c) => c.Rarity == CardRarity.Common).WithFlags(CardCreationFlags.NoRarityModification);
 		options = Hook.ModifyCardRewardCreationOptions(player.RunState, player, options);
-		CardCreationOptions options2 = CardCreationOptions.ForNonCombatWithUniformOdds(new global::_003C_003Ez__ReadOnlySingleElementList<CardPoolModel>(player.Character.CardPool), (CardModel c) => c.Rarity == CardRarity.Uncommon).WithFlags(CardCreationFlags.NoRarityModification);
+		CardCreationOptions options2 = CardCreationOptions.ForNonCombatWithUniformOdds(new global::_003C_003Ez__ReadOnlySingleElementList<CardPoolModel>(cardPool), (CardModel c) => c.Rarity == CardRarity.Uncommon).WithFlags(CardCreationFlags.NoRarityModification);
 		options2 = Hook.ModifyCardRewardCreationOptions(player.RunState, player, options2);
 		List<CardModel> source = options.GetPossibleCards(player).ToList();
 		List<CardModel> source2 = options2.GetPossibleCards(player).ToList();
@@ -82,5 +84,14 @@ public sealed class ScrollBoxes : RelicModel
 			list.Add(list2);
 		}
 		return list;
+	}
+
+	private static CardPoolModel GetCardPool(CharacterModel character)
+	{
+		if (TestMode.IsOn && character is Deprived)
+		{
+			return ModelDb.Character<Ironclad>().CardPool;
+		}
+		return character.CardPool;
 	}
 }

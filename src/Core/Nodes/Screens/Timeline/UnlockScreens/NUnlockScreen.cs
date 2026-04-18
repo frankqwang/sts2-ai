@@ -4,14 +4,17 @@ using Godot;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.Timeline.UnlockScreens;
 
-public abstract partial class NUnlockScreen : Control
+public abstract partial class NUnlockScreen : Control, IScreenContext
 {
 	private NUnlockConfirmButton? _unlockConfirmButton;
 
 	private Tween? _tween;
+
+	public virtual Control? DefaultFocusedControl => null;
 
 	public override void _Ready()
 	{
@@ -35,6 +38,7 @@ public abstract partial class NUnlockScreen : Control
 	public virtual void Open()
 	{
 		NTimelineScreen.Instance.DisableInput();
+		NTimelineScreen.Instance.CurrentUnlockScreen = this;
 		_unlockConfirmButton?.Disable();
 		_tween?.FastForwardToCompletion();
 		_tween = CreateTween();
@@ -48,6 +52,10 @@ public abstract partial class NUnlockScreen : Control
 	protected async Task Close()
 	{
 		Log.Info($"Closing: {base.Name}");
+		if (NTimelineScreen.Instance.CurrentUnlockScreen == this)
+		{
+			NTimelineScreen.Instance.CurrentUnlockScreen = null;
+		}
 		_tween?.FastForwardToCompletion();
 		OnScreenPreClose();
 		_tween = CreateTween().SetParallel();

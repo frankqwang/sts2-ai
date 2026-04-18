@@ -43,7 +43,7 @@ public sealed class ColossalFlower : EventModel
 		new GoldVar(_prizeKeys[2], _prizeCosts[2])
 	});
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		return runState.Players.All((Player p) => p.Creature.CurrentHp >= 19);
 	}

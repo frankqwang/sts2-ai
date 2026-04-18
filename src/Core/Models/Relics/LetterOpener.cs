@@ -82,9 +82,20 @@ public sealed class LetterOpener : RelicModel
 		InvokeDisplayAmountChanged();
 	}
 
+	public override Task BeforeCombatStart()
+	{
+		SkillsPlayedThisTurn = 0;
+		base.Status = RelicStatus.Normal;
+		return Task.CompletedTask;
+	}
+
 	public override Task AfterSideTurnStart(CombatSide side, CombatState combatState)
 	{
 		if (side != base.Owner.Creature.Side)
+		{
+			return Task.CompletedTask;
+		}
+		if (combatState.RoundNumber == 1)
 		{
 			return Task.CompletedTask;
 		}
@@ -120,5 +131,10 @@ public sealed class LetterOpener : RelicModel
 		base.Status = RelicStatus.Normal;
 		IsActivating = false;
 		return Task.CompletedTask;
+	}
+
+	public int GetSkillsPlayedForTest()
+	{
+		return SkillsPlayedThisTurn;
 	}
 }

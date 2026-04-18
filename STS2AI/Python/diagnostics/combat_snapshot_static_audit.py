@@ -15,7 +15,7 @@ PYTHON_ROOT = THIS_DIR.parent
 REPO_ROOT = PYTHON_ROOT.parent.parent
 
 FACADE_PATH = REPO_ROOT / "STS2AI" / "ENV" / "Sim" / "Overlay" / "Simulation" / "FullRunSimulatorRuntimeFacade.cs"
-COMBAT_ROOM_PATH = REPO_ROOT / "STS2AI" / "ENV" / "Sim" / "Overlay" / "Compat" / "Upstream0991" / "Core" / "Rooms" / "CombatRoom.cs"
+COMBAT_ROOM_PATH = REPO_ROOT / "STS2AI" / "ENV" / "Sim" / "Overlay" / "Compat" / "Source01032" / "Core" / "Rooms" / "CombatRoom.cs"
 DTO_PATH = REPO_ROOT / "STS2AI" / "ENV" / "Sim" / "Overlay" / "Training" / "CombatTrainingDtos.cs"
 DEFAULT_OUTPUT = REPO_ROOT / "STS2AI" / "Artifacts" / "tmp" / "combat_snapshot_static_audit.json"
 

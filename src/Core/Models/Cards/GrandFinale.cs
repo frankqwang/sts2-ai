@@ -12,7 +12,7 @@ public sealed class GrandFinale : CardModel
 {
 	protected override bool ShouldGlowGoldInternal => IsPlayable;
 
-	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new DamageVar(50m, ValueProp.Move));
+	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new DamageVar(60m, ValueProp.Move));
 
 	protected override bool IsPlayable => PileType.Draw.GetPile(base.Owner).Cards.Count == 0;
 
@@ -30,6 +30,6 @@ public sealed class GrandFinale : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars.Damage.UpgradeValueBy(10m);
+		base.DynamicVars.Damage.UpgradeValueBy(15m);
 	}
 }

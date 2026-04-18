@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
 
@@ -74,7 +75,8 @@ public sealed class GremlinMerc : MonsterModel
 		{
 			_hasSpoken = true;
 			LocString line = MonsterModel.L10NMonsterLookup("GREMLIN_MERC.moves.GIMME.banter");
-			TalkCmd.Play(line, base.Creature);
+			TalkCmd.Play(line, base.Creature, VfxColor.Purple, VfxDuration.VeryShort);
+			await Cmd.CustomScaledWait(0.25f, 0.5f);
 		}
 		VfxCmd.PlayOnCreatureCenters(targets, "vfx/vfx_coin_explosion_regular");
 		await DamageCmd.Attack(GimmeDamage).WithHitCount(GimmeRepeat).FromMonster(this)

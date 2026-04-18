@@ -18,7 +18,6 @@ using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Map;
-using MegaCrit.Sts2.Core.Models.Modifiers;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
@@ -373,13 +372,18 @@ public partial class NMapScreen : Control, IScreenContext, INetCursorPositionTra
 	{
 		if (_runState.VisitedMapCoords.Any())
 		{
-			foreach (NMapPoint value in _mapPointDictionary.Values)
+			foreach (NMapPoint value3 in _mapPointDictionary.Values)
 			{
-				value.State = MapPointState.Untravelable;
+				value3.State = MapPointState.Untravelable;
 			}
 			foreach (MapCoord visitedMapCoord in _runState.VisitedMapCoords)
 			{
-				_mapPointDictionary[visitedMapCoord].State = MapPointState.Traveled;
+				if (_mapPointDictionary.TryGetValue(visitedMapCoord, out NMapPoint value))
+				{
+					value.State = MapPointState.Traveled;
+					continue;
+				}
+				Log.Error($"VisitedMapCoord {visitedMapCoord} not found in map point dictionary, map may have been regenerated");
 			}
 			IReadOnlyList<MapCoord> visitedMapCoords = _runState.VisitedMapCoords;
 			MapCoord mapCoord = visitedMapCoords[visitedMapCoords.Count - 1];
@@ -388,9 +392,14 @@ public partial class NMapScreen : Control, IScreenContext, INetCursorPositionTra
 				_secondBossPointNode.State = MapPointState.Travelable;
 				return;
 			}
-			if (mapCoord.row != _map.GetRowCount() - 1)
+			if (mapCoord.row == _map.GetRowCount() - 1)
 			{
-				IEnumerable<MapPoint> enumerable = (_runState.Modifiers.OfType<Flight>().Any() ? _map.GetPointsInRow(mapCoord.row + 1) : _mapPointDictionary[mapCoord].Point.Children);
+				_bossPointNode.State = MapPointState.Travelable;
+				return;
+			}
+			if (_mapPointDictionary.TryGetValue(mapCoord, out NMapPoint value2))
+			{
+				IEnumerable<MapPoint> enumerable = ((!Hook.ShouldAllowFreeTravel(_runState)) ? value2.Point.Children : _map.GetPointsInRow(mapCoord.row + 1));
 				{
 					foreach (MapPoint item in enumerable)
 					{
@@ -399,7 +408,8 @@ public partial class NMapScreen : Control, IScreenContext, INetCursorPositionTra
 					return;
 				}
 			}
-			_bossPointNode.State = MapPointState.Travelable;
+			Log.Error($"Last visited coord {mapCoord} not found in map, falling back to starting point");
+			_startingPointNode.State = MapPointState.Travelable;
 		}
 		else
 		{
@@ -425,7 +435,7 @@ public partial class NMapScreen : Control, IScreenContext, INetCursorPositionTra
 		if (!PlayerVoteDictionary.TryGetValue(me, out var value) || value != point.Point.coord)
 		{
 			OnPlayerVoteChangedInternal(me, RunManager.Instance.MapSelectionSynchronizer.GetVote(me)?.coord, point.Point.coord);
-			RunLocation source = new RunLocation(_runState.CurrentMapCoord, _runState.CurrentActIndex);
+			MapLocation source = new MapLocation(_runState.CurrentMapCoord, _runState.CurrentActIndex);
 			MapVote value2 = new MapVote
 			{
 				coord = point.Point.coord,
@@ -465,9 +475,9 @@ public partial class NMapScreen : Control, IScreenContext, INetCursorPositionTra
 				NMapPoint nMapPoint = _mapPointDictionary[oldCoord.Value];
 				nMapPoint.VoteContainer.RefreshPlayerVotes();
 			}
-			else if (_runState.CurrentLocation.coord.HasValue)
+			else if (_runState.MapLocation.coord.HasValue)
 			{
-				NMapPoint nMapPoint2 = _mapPointDictionary[_runState.CurrentLocation.coord.Value];
+				NMapPoint nMapPoint2 = _mapPointDictionary[_runState.MapLocation.coord.Value];
 				nMapPoint2.VoteContainer.RefreshPlayerVotes();
 			}
 			if (newCoord.HasValue)
@@ -475,9 +485,9 @@ public partial class NMapScreen : Control, IScreenContext, INetCursorPositionTra
 				NMapPoint nMapPoint3 = _mapPointDictionary[newCoord.Value];
 				nMapPoint3.VoteContainer.RefreshPlayerVotes();
 			}
-			else if (_runState.CurrentLocation.coord.HasValue)
+			else if (_runState.MapLocation.coord.HasValue)
 			{
-				NMapPoint nMapPoint4 = _mapPointDictionary[_runState.CurrentLocation.coord.Value];
+				NMapPoint nMapPoint4 = _mapPointDictionary[_runState.MapLocation.coord.Value];
 				nMapPoint4.VoteContainer.RefreshPlayerVotes();
 			}
 		}
@@ -981,11 +991,17 @@ public partial class NMapScreen : Control, IScreenContext, INetCursorPositionTra
 		if (_runState.VisitedMapCoords.Count != 0)
 		{
 			IReadOnlyList<MapCoord> visitedMapCoords = _runState.VisitedMapCoords;
-			MapCoord key = visitedMapCoords[visitedMapCoords.Count - 1];
-			if (_bossPointNode.Point.coord.row != key.row && _startingPointNode.Point.coord.row != key.row)
+			MapCoord mapCoord = visitedMapCoords[visitedMapCoords.Count - 1];
+			if (_bossPointNode.Point.coord.row != mapCoord.row && _startingPointNode.Point.coord.row != mapCoord.row)
 			{
-				NMapPoint mapPoint = _mapPointDictionary[key];
-				_marker.SetMapPoint(mapPoint);
+				if (_mapPointDictionary.TryGetValue(mapCoord, out NMapPoint value))
+				{
+					_marker.SetMapPoint(value);
+				}
+				else
+				{
+					Log.Error($"Last visited coord {mapCoord} not found in map, marker not placed");
+				}
 			}
 		}
 		SfxCmd.Play("event:/sfx/ui/map/map_open");

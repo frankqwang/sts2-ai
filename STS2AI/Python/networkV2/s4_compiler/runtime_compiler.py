@@ -1,9 +1,7 @@
-"""RuntimeInstances 编译器：从 bridge obs 提取运行时状态。
+"""RuntimeInstances 编译器:从 bridge obs 提取运行时状态。
 
-对齐游戏实际发送的字段格式：
-  - binary_pipe_client.py 解码出的 snapshot
-  - combat_training_env.py normalize 后的 snapshot
-  两种格式都兼容。
+对齐 proto state dict 和 combat_training_env 的 normalize 输出。
+历史上也支持 binary_pipe_client snapshot,2026-04-18 binary wire 已废弃。
 """
 
 from __future__ import annotations
@@ -42,9 +40,10 @@ def _safe_int(val: Any, default: int = 0) -> int:
 class RuntimeCompiler:
     """从 bridge obs 编译 RuntimeInstances。
 
-    兼容两种数据源：
-      1. binary_pipe_client 解码后的 raw snapshot（top-level 有 battle dict）
-      2. combat_training_env normalize 后的 flat snapshot（hand/enemies 在 top-level）
+    兼容两种数据源:
+      1. proto GameState → dict (top-level 有 battle dict,和老 binary_pipe_client
+         snapshot 同 shape,V2 训练主路径)
+      2. combat_training_env normalize 后的 flat snapshot (hand/enemies 在 top-level)
     """
 
     def compile(self, obs: dict[str, Any]) -> tuple[

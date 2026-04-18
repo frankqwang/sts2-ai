@@ -19,10 +19,16 @@ public partial class NCombatVfxSpawner : Control
 	private WorldEnvironment _env;
 
 	[Export(PropertyHint.None, "")]
+	private Node2D _playerTopPosition;
+
+	[Export(PropertyHint.None, "")]
 	private Node2D _playerPosition;
 
 	[Export(PropertyHint.None, "")]
 	private Node2D _playerGroundPosition;
+
+	[Export(PropertyHint.None, "")]
+	private Node2D _enemyTopPosition;
 
 	[Export(PropertyHint.None, "")]
 	private Node2D _enemyPosition;

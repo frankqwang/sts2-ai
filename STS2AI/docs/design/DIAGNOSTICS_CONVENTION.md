@@ -40,12 +40,13 @@ STS2AI/Artifacts/
 ├── combat_teacher/                         # (既有) 战斗教师 replay
 ├── combat_trace/                           # (既有) combat trace
 ├── checkpoint_merges/                      # (既有) merge 输出
-├── skada/                                  # (既有) human_victory_builds
-├── combat_training/                        # (既有) v1 combat trainer 输出
 ├── eval/                                   # (既有) evaluation 产物
 ├── recording/                              # (既有) spectator 录制
 ├── verification/                           # (既有) 一致性审计
 └── offline_data/                           # (既有) 离线数据集
+
+> skada 派生数据（索引 sqlite / matchup_bridge 等）不落 Artifacts/,
+> 统一在 `STS2AI/Python/data/skada/derived/`,见 build_skada_index.py 等。
 ```
 
 **好处**：

@@ -117,6 +117,40 @@ class ActionCandidate:
     route_risk: float = 0.0   # [0,1]：该节点的潜在威胁（boss=1, elite=0.7, rest=0）
     route_value: float = 0.0  # [0,1]：该节点的潜在价值（rest=0.7, shop=0.6, boss=0）
 
+    # 路径规划信号:从此 child 到 boss 的**全局路径统计**(覆盖下游所有可达子路径)
+    # 目的:选下一步时等价看到了整条路线的 type 分布,不仅是近邻
+    # 仅 map family 填;所有计数按 "路径长度" 归一化到 [0,1] 防值爆炸
+    route_path_rest_rate: float = 0.0      # 所有下游路径上 rest 占比
+    route_path_shop_rate: float = 0.0      # shop 占比
+    route_path_elite_rate: float = 0.0     # elite 占比
+    route_path_treasure_rate: float = 0.0  # treasure 占比
+    route_path_event_rate: float = 0.0     # event 占比
+    route_path_monster_rate: float = 0.0   # monster 占比
+    route_best_rest_count: float = 0.0     # 所有下游路径里最大 rest 数(归一化 /5)
+    route_path_length_norm: float = 0.0    # 到 boss 最短距离(归一化 /17,约等于 act 长度)
+
+    # Skada victory-runs 挖出的路径先验(build_path_priors.py 产出,loader 查表填):
+    # frequency: 该 fingerprint 在 victory 玩家(同 character+asc)里的出现频率 [0,1]
+    # efficiency: 1 - normalized(avg_duration),越高 = 越快赢;未查到时 0.5(中性)
+    route_prior_frequency: float = 0.0
+    route_prior_efficiency: float = 0.5
+
+    # Skada community priors（social inductive bias,from skada_analytics.sqlite）
+    # 只在 non-combat option 上填;combat 动作默认 0.0(不适用)。
+    # loader 构造 option 时查 SkadaPriors,让 token-level 就含"玩家群体行为"先验。
+    # 关键价值:冷启动就有 baseline,不用靠 long-horizon reward 从零学"好卡"先验。
+    pick_rate_prior: float = 0.0       # [0,1]  全群体选卡率
+    win_rate_delta_prior: float = 0.0  # [-0.5, 0.5] 选 vs 跳的胜率差(近似)
+    deck_win_rate_prior: float = 0.0   # [0,1]  拿过这张卡的 run 胜率均值
+    # TODO(cleanup): synergy_prior 当前永远是 0.0——填值来源 build_card_synergy_matrix.py
+    # + skada_index_dataset.deck_card_synergy() 已于 2026-04-19 删除(死代码)。
+    # 字段本身和 bank_assembler.py:829 的打包逻辑保留,避免改动网络 max_numeric_dim=58
+    # 导致旧 checkpoint 不兼容。下次重训时一起删:
+    #   - 本字段
+    #   - bank_assembler.py skada_prior_axes 去掉这一维
+    #   - network_config.py max_numeric_dim 58→57
+    synergy_prior: float = 0.0         # [-1, 1] 与当前 deck 的 synergy 提升
+
     @property
     def is_play_card(self) -> bool:
         return self.action_type == "play_card"

@@ -16,7 +16,7 @@ public sealed class BundleOfJoy : CardModel
 	public override IEnumerable<CardKeyword> CanonicalKeywords => new global::_003C_003Ez__ReadOnlySingleElementList<CardKeyword>(CardKeyword.Exhaust);
 
 	public BundleOfJoy()
-		: base(2, CardType.Skill, CardRarity.Rare, TargetType.Self)
+		: base(1, CardType.Skill, CardRarity.Rare, TargetType.Self)
 	{
 	}
 

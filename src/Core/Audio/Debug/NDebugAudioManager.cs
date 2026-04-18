@@ -75,10 +75,18 @@ public partial class NDebugAudioManager : Node
 		return item.id;
 	}
 
+	public void StopAll()
+	{
+		List<PlayingSound> list = _playingSounds.ToList();
+		foreach (PlayingSound item in list)
+		{
+			Stop(item.id, 0f);
+		}
+	}
+
 	public void Stop(int id, float fadeTime = 0.5f)
 	{
-		int i;
-		for (i = 0; i < _playingSounds.Count; i++)
+		for (int i = 0; i < _playingSounds.Count; i++)
 		{
 			PlayingSound playingSound = _playingSounds[i];
 			if (playingSound.id != id)
@@ -91,7 +99,7 @@ public partial class NDebugAudioManager : Node
 				tween.TweenProperty(playingSound.player, "volume_linear", 0f, fadeTime);
 				tween.TweenCallback(Callable.From(delegate
 				{
-					StopInternalById(i);
+					StopInternalById(id);
 				}));
 			}
 			else

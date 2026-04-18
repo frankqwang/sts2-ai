@@ -910,8 +910,26 @@ def train_full_run(args: argparse.Namespace) -> None:
     logger.info(f"UnifiedNet: {params:,} params ({params/1e6:.1f}M) on {device}")
 
     if args.checkpoint and Path(args.checkpoint).exists():
-        net.load_state_dict(torch.load(args.checkpoint, map_location=device))
-        logger.info(f"Loaded checkpoint: {args.checkpoint}")
+        state = torch.load(args.checkpoint, map_location=device, weights_only=False)
+        # 兼容多种 checkpoint 格式 (和 combat_cotrainer 对齐):
+        #   {"net": ...}             (cotrainer 自己保存的老格式)
+        #   {"model_state": ..., ...}(BC / train_noncombat_offline 保存)
+        #   裸 state_dict
+        if isinstance(state, dict):
+            if "net" in state:
+                state = state["net"]
+            elif "model_state" in state:
+                state = state["model_state"]
+        try:
+            net.load_state_dict(state)
+            logger.info(f"Loaded checkpoint: {args.checkpoint}")
+        except Exception as e:
+            logger.warning(f"Full load failed: {e}; falling back to load_compatible_params")
+            report = net.load_compatible_params(state, strict_shapes=True)
+            logger.info(
+                f"Partial load: loaded={report['loaded']} skipped_shape={report['skipped_shape']} "
+                f"missing={report['missing']}"
+            )
 
     trainer = UnifiedPPOTrainer(net, PPOConfig(
         lr=args.lr, ppo_epochs=args.ppo_epochs,

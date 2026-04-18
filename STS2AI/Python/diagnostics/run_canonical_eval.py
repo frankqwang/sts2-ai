@@ -33,7 +33,7 @@ def main() -> None:
     cmd = [
         sys.executable, "STS2AI/Python/evaluate_ai.py",
         "--checkpoint", args.checkpoint,
-        "--transport", "pipe-binary",
+        "--transport", "pipe-proto",
         "--port", str(args.port),
         "--auto-launch",
         "--num-games", str(args.num_games),

@@ -51,7 +51,7 @@ public sealed class DoomPower : PowerModel
 
 	public override async Task BeforeTurnEnd(PlayerChoiceContext choiceContext, CombatSide side)
 	{
-		if (side == base.Owner.Side && !base.Owner.IsDead && IsOwnerDoomed())
+		if (!CombatManager.Instance.IsOverOrEnding && side == base.Owner.Side && !base.Owner.IsDead && IsOwnerDoomed())
 		{
 			IReadOnlyList<Creature> doomedCreatures = GetDoomedCreatures(base.Owner.CombatState.GetCreaturesOnSide(side));
 			if (doomedCreatures.First() == base.Owner)
@@ -104,15 +104,14 @@ public sealed class DoomPower : PowerModel
 			Tween tween = creature.AnimDisableUi();
 			tween.TweenCallback(Callable.From(creature.QueueFreeSafely));
 			task = WaitForTween(tween);
-			if (creature.HasSpineAnimation)
+			if (creature.SpineAnimation.IsValid)
 			{
 				creature.SetAnimationTrigger("Hit");
-				if (creature.SpineController.GetAnimationState().GetCurrent(0).GetAnimation()
-					.GetName() == "hurt")
+				MegaTrackEntry currentTrack = creature.SpineAnimation.GetCurrentTrack();
+				if (currentTrack?.GetAnimation().GetName() == "hurt")
 				{
-					MegaTrackEntry current = creature.SpineController.GetAnimationState().GetCurrent(0);
-					current.SetTrackTime(0.1f);
-					current.SetTimeScale(0f);
+					currentTrack.SetTrackTime(0.1f);
+					currentTrack.SetTimeScale(0f);
 				}
 			}
 			NCombatRoom.Instance?.RemoveCreatureNode(creature);

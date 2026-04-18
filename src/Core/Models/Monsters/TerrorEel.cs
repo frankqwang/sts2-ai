@@ -35,7 +35,7 @@ public sealed class TerrorEel : MonsterModel
 
 	private int ShriekAmount => AscensionHelper.GetValueIfAscension(AscensionLevel.ToughEnemies, 75, 70);
 
-	private int CrashDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 19, 17);
+	private int CrashDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 18, 16);
 
 	private int ThrashDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 4, 3);
 
@@ -96,7 +96,7 @@ public sealed class TerrorEel : MonsterModel
 			.WithAttackerFx(null, "event:/sfx/enemy/enemy_attacks/terror_eel/terror_eel_attack_multi")
 			.WithHitFx("vfx/vfx_attack_slash")
 			.Execute(null);
-		await PowerCmd.Apply<VigorPower>(base.Creature, 7m, base.Creature, null);
+		await PowerCmd.Apply<VigorPower>(base.Creature, 6m, base.Creature, null);
 	}
 
 	private Task StunMove(IReadOnlyList<Creature> targets)

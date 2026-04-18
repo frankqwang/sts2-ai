@@ -5,8 +5,8 @@ using MegaCrit.Sts2.addons.mega_text;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Leaderboard;
-using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Platform;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.DailyRun;
@@ -17,15 +17,19 @@ public partial class NDailyRunLeaderboardRow : Control
 
 	private MegaLabel _rank;
 
-	private MegaRichTextLabel _name;
+	private MegaLabel _name;
 
-	private MegaLabel _score;
+	private MegaLabel _floor;
 
-	private LeaderboardEntry? _entry;
+	private MegaLabel _badges;
 
-	private bool _isHeader;
+	private MegaLabel _time;
 
-	public static NDailyRunLeaderboardRow? Create(LeaderboardEntry entry)
+	private LeaderboardEntry _entry;
+
+	private bool _isYou;
+
+	public static NDailyRunLeaderboardRow? Create(LeaderboardEntry entry, bool isYou)
 	{
 		if (TestMode.IsOn)
 		{
@@ -33,37 +37,47 @@ public partial class NDailyRunLeaderboardRow : Control
 		}
 		NDailyRunLeaderboardRow nDailyRunLeaderboardRow = PreloadManager.Cache.GetScene(_scenePath).Instantiate<NDailyRunLeaderboardRow>(PackedScene.GenEditState.Disabled);
 		nDailyRunLeaderboardRow._entry = entry;
-		return nDailyRunLeaderboardRow;
-	}
-
-	public static NDailyRunLeaderboardRow? CreateHeader()
-	{
-		if (TestMode.IsOn)
-		{
-			return null;
-		}
-		NDailyRunLeaderboardRow nDailyRunLeaderboardRow = PreloadManager.Cache.GetScene(_scenePath).Instantiate<NDailyRunLeaderboardRow>(PackedScene.GenEditState.Disabled);
-		nDailyRunLeaderboardRow._isHeader = true;
+		nDailyRunLeaderboardRow._isYou = isYou;
 		return nDailyRunLeaderboardRow;
 	}
 
 	public override void _Ready()
 	{
-		_rank = GetNode<MegaLabel>("Rank");
-		_name = GetNode<MegaRichTextLabel>("Name");
-		_score = GetNode<MegaLabel>("Score");
-		if (_isHeader)
+		_rank = GetNode<MegaLabel>("%Rank");
+		_floor = GetNode<MegaLabel>("%Floor");
+		_name = GetNode<MegaLabel>("%Name");
+		_badges = GetNode<MegaLabel>("%Badges");
+		_time = GetNode<MegaLabel>("%Time");
+		IEnumerable<string> values = _entry.userIds.Select((ulong id) => PlatformUtil.GetPlayerName(LeaderboardManager.CurrentPlatform, id));
+		DecodedDailyScore decodedDailyScore = ScoreUtility.DecodeDailyScore(_entry.score);
+		if (!decodedDailyScore.isValid)
 		{
-			_rank.SetTextAutoSize(" " + new LocString("main_menu_ui", "LEADERBOARDS.rankHeader").GetRawText());
-			_name.SetTextAutoSize(new LocString("main_menu_ui", "LEADERBOARDS.nameHeader").GetRawText());
-			_score.SetTextAutoSize(new LocString("main_menu_ui", "LEADERBOARDS.scoreHeader").GetRawText() + " ");
+			this.QueueFreeSafely();
+			return;
 		}
-		else if (_entry != null)
+		_rank.SetTextAutoSize($"{_entry.rank + 1}");
+		_name.SetTextAutoSize(string.Join(",", values));
+		if (_isYou)
 		{
-			IEnumerable<string> values = _entry.userIds.Select((ulong id) => PlatformUtil.GetPlayerName(LeaderboardManager.CurrentPlatform, id));
-			_rank.SetTextAutoSize($" {_entry.rank + 1}");
-			_name.SetTextAutoSize(string.Join(",", values));
-			_score.SetTextAutoSize($"{_entry.score} ");
+			_name.Modulate = StsColors.blue;
 		}
+		_floor.SetTextAutoSize($"{decodedDailyScore.floors}");
+		if (decodedDailyScore.victory == 2)
+		{
+			GetNode<Control>("%Tick").Visible = true;
+		}
+		_badges.SetTextAutoSize($"{decodedDailyScore.badges}");
+		_time.SetTextAutoSize(FormatHoursAndMinutes(decodedDailyScore.runTime));
+	}
+
+	private static string FormatHoursAndMinutes(int value)
+	{
+		if (value >= 9999)
+		{
+			return "--:--";
+		}
+		int value2 = value / 60;
+		int value3 = value % 60;
+		return $"{value2}:{value3:D2}";
 	}
 }

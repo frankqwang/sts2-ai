@@ -100,17 +100,21 @@ public static class OrbCmd
 			return;
 		}
 		OrbQueue orbQueue = player.PlayerCombatState.OrbQueue;
-		if (orbQueue.Orbs.Count > 0)
+		if (orbQueue.Orbs.Count <= 0)
 		{
-			bool removed = false;
-			if (dequeue)
-			{
-				removed = orbQueue.Remove(evokedOrb);
-				NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.EvokeOrbAnim(evokedOrb);
-			}
-			choiceContext.PushModel(evokedOrb);
-			IEnumerable<Creature> targets = await evokedOrb.Evoke(choiceContext);
-			choiceContext.PopModel(evokedOrb);
+			return;
+		}
+		bool removed = false;
+		if (dequeue)
+		{
+			removed = orbQueue.Remove(evokedOrb);
+			NCombatRoom.Instance?.GetCreatureNode(player.Creature)?.OrbManager?.EvokeOrbAnim(evokedOrb);
+		}
+		choiceContext.PushModel(evokedOrb);
+		IEnumerable<Creature> targets = await evokedOrb.Evoke(choiceContext);
+		choiceContext.PopModel(evokedOrb);
+		if (player.Creature.CombatState != null)
+		{
 			await Hook.AfterOrbEvoked(choiceContext, player.Creature.CombatState, evokedOrb, targets);
 			if (removed)
 			{

@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.ControllerInput.ControllerConfigs;
+using MegaCrit.Sts2.Core.Debug;
+using MegaCrit.Sts2.Core.Exceptions;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Platform.Steam;
@@ -433,11 +435,11 @@ public class SteamControllerInputStrategy : IControllerInputStrategy
 		},
 		{
 			EInputActionOrigin.k_EInputActionOrigin_Switch_X,
-			Controller.faceButtonWest
+			Controller.faceButtonNorth
 		},
 		{
 			EInputActionOrigin.k_EInputActionOrigin_Switch_Y,
-			Controller.faceButtonNorth
+			Controller.faceButtonWest
 		},
 		{
 			EInputActionOrigin.k_EInputActionOrigin_Switch_LeftBumper,
@@ -626,6 +628,11 @@ public class SteamControllerInputStrategy : IControllerInputStrategy
 			catch (InvalidOperationException ex)
 			{
 				Log.Error("Failed to initialize Steam Input: " + ex.Message);
+			}
+			catch (SaveException ex2)
+			{
+				SentryService.CaptureException(ex2);
+				Log.Error("Failed to save default controller mapping during Steam Input init: " + ex2.Message);
 			}
 		}
 		else

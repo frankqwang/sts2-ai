@@ -63,19 +63,4 @@ public sealed class SwordSagePower : PowerModel
 		}
 		return Task.CompletedTask;
 	}
-
-	public override bool TryModifyEnergyCostInCombat(CardModel card, decimal originalCost, out decimal modifiedCost)
-	{
-		modifiedCost = originalCost;
-		if (card.Owner.Creature != base.Owner)
-		{
-			return false;
-		}
-		if (!(card is SovereignBlade))
-		{
-			return false;
-		}
-		modifiedCost += (decimal)base.Amount;
-		return true;
-	}
 }

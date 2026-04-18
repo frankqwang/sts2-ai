@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <!-- Shared DTO types for unified protocol (also compiled into HeadlessSim) -->
-    <Compile Include="..\..\Sim\Overlay\Simulation\FullRunApiStateDtos.cs" Link="Shared\FullRunApiStateDtos.cs" />
+    <Compile Include="..\..\Sim\HeadlessSim\Simulation\FullRunApiStateDtos.cs" Link="Shared\FullRunApiStateDtos.cs" />
 
     <Reference Include="sts2">
       <HintPath>$(STS2AssemblyDir)\sts2.dll</HintPath>

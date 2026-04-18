@@ -45,6 +45,8 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 
 	private MegaLabel _titleLabel;
 
+	private MegaLabel _disclaimer;
+
 	private MegaRichTextLabel _dateLabel;
 
 	private MegaRichTextLabel _timeLeftLabel;
@@ -94,6 +96,7 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 	{
 		ConnectSignals();
 		_titleLabel = GetNode<MegaLabel>("%Title");
+		_disclaimer = GetNode<MegaLabel>("%Disclaimer");
 		_dateLabel = GetNode<MegaRichTextLabel>("%Date");
 		_embarkButton = GetNode<NConfirmButton>("%ConfirmButton");
 		_backButton = GetNode<NBackButton>("%BackButton");
@@ -106,6 +109,7 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 		_remotePlayerContainer = GetNode<NRemoteLobbyPlayerContainer>("%RemotePlayerContainer");
 		_readyAndWaitingContainer = GetNode<Control>("%ReadyAndWaitingPanel");
 		_titleLabel.SetTextAutoSize(new LocString("main_menu_ui", "DAILY_RUN_MENU.DAILY_TITLE").GetFormattedText());
+		_disclaimer.SetTextAutoSize(new LocString("main_menu_ui", "DAILY_RUN_MENU.disclaimer").GetFormattedText());
 		_modifiersTitleLabel.SetTextAutoSize(new LocString("main_menu_ui", "DAILY_RUN_MENU.MODIFIERS").GetFormattedText());
 		_dateLabel.SetTextAutoSize(new LocString("main_menu_ui", "DAILY_RUN_MENU.FETCHING_TIME").GetFormattedText());
 		foreach (NDailyRunScreenModifier item in _modifiersContainer.GetChildren().OfType<NDailyRunScreenModifier>())
@@ -214,7 +218,7 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 				{
 					result = await TimeServer.FetchDailyTime();
 				}
-				catch (HttpRequestException ex)
+				catch (Exception ex) when (((ex is HttpRequestException || ex is TaskCanceledException) ? 1 : 0) != 0)
 				{
 					Log.Error(ex.ToString());
 				}
@@ -226,7 +230,7 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 			{
 				result = await TimeServer.FetchDailyTime();
 			}
-			catch (HttpRequestException ex2)
+			catch (Exception ex2) when (((ex2 is HttpRequestException || ex2 is TaskCanceledException) ? 1 : 0) != 0)
 			{
 				Log.Error(ex2.ToString());
 			}
@@ -396,8 +400,12 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 		UpdateRichPresence();
 	}
 
-	public void PlayerChanged(LobbyPlayer player)
+	public void PlayerChanged(LobbyPlayer player, bool isRandomCharacterResolution)
 	{
+		if (isRandomCharacterResolution)
+		{
+			throw new InvalidOperationException("Random character is not currently allowed in daily!");
+		}
 		_remotePlayerContainer.OnPlayerChanged(player);
 		if (player.id == _netService.NetId && _netService.Type.IsMultiplayer())
 		{
@@ -434,6 +442,8 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 	public void BeginRun(string seed, List<ActModel> acts, IReadOnlyList<ModifierModel> modifiers)
 	{
 		NAudioManager.Instance?.StopMusic();
+		_embarkButton.Disable();
+		_unreadyButton.Disable();
 		if (_lobby.NetService.Type == NetGameType.Singleplayer)
 		{
 			TaskHelper.RunSafely(StartNewSingleplayerRun(seed, acts, modifiers));
@@ -450,7 +460,10 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 		{
 			return;
 		}
-		_stack.Pop();
+		if (_stack != null && _stack.Peek() == this)
+		{
+			_stack.Pop();
+		}
 		if (TestMode.IsOff)
 		{
 			NErrorPopup nErrorPopup = NErrorPopup.Create(info);
@@ -496,7 +509,7 @@ public partial class NDailyRunScreen : NSubmenu, IStartRunLobbyListener
 		Log.Info($"Embarking on a DAILY {_lobby.LocalPlayer.character.Id.Entry} run with {_lobby.Players.Count} players. Ascension: {_lobby.Ascension} Seed: {seed}");
 		SfxCmd.Play(_lobby.LocalPlayer.character.CharacterTransitionSfx);
 		await NGame.Instance.Transition.FadeOut(0.8f, _lobby.LocalPlayer.character.CharacterSelectTransitionPath);
-		await NGame.Instance.StartNewSingleplayerRun(_lobby.LocalPlayer.character, shouldSave: true, acts, modifiers, seed, _lobby.Ascension, _lobby.DailyTime.Value.serverTime);
+		await NGame.Instance.StartNewSingleplayerRun(_lobby.LocalPlayer.character, shouldSave: true, acts, modifiers, seed, GameMode.Daily, _lobby.Ascension, _lobby.DailyTime.Value.serverTime);
 		CleanUpLobby(disconnectSession: false);
 	}
 

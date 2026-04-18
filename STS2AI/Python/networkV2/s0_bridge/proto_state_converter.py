@@ -1,7 +1,8 @@
 """GameState protobuf message → 训练端兼容 dict 转换。
 
-输出格式严格对齐 env.binary_pipe_client.BinaryPipeClient._decode_state()，
-确保上层代码（normalize / 网络输入 / action 选择）零修改即可运行。
+输出格式是 V2 训练的规范 state dict(历史上和已废弃的 `binary_pipe_client`
+保持过一致,现在 binary wire 已删除,只剩 proto)。上层 normalize / 网络输入 /
+action 选择直接消费 dict。
 
 用法::
 
@@ -465,7 +466,7 @@ def _convert_treasure(ts: pb.TreasureState, player: dict[str, Any]) -> dict[str,
 
 
 # ===================================================================
-# Action Label 装饰（复现 binary_pipe_client._decorate_action_labels）
+# Action Label 装饰(历史上由 binary_pipe_client._decorate_action_labels 做,已删)
 # ===================================================================
 
 def _decorate_action_labels(state: dict[str, Any]) -> None:

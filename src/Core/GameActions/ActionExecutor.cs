@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.GameActions;
 
@@ -45,6 +46,8 @@ public class ActionExecutor
 	public GameAction? CurrentlyRunningAction { get; private set; }
 
 	public event Action<GameAction>? BeforeActionExecuted;
+
+	public event Action<GameAction>? JustBeforeActionFinishedExecuting;
 
 	public event Action<GameAction>? AfterActionExecuted;
 
@@ -120,6 +123,7 @@ public class ActionExecutor
 				else
 				{
 					CurrentlyRunningAction = readyAction;
+					readyAction.JustBeforeFinished += JustBeforeActionFinished;
 					readyAction.AfterFinished += AfterActionFinished;
 					Task actionTask = readyAction.Execute();
 					while (!actionTask.IsCompleted && !_actionCancelToken.IsCancellationRequested)
@@ -150,12 +154,13 @@ public class ActionExecutor
 				{
 					_logger.Debug($"Paused execution of action {readyAction} (state is {readyAction.State}), attempting to find new action");
 				}
+				readyAction.JustBeforeFinished -= JustBeforeActionFinished;
 				readyAction.AfterFinished -= AfterActionFinished;
 				readyAction = _actionQueueSet.GetReadyAction();
 			}
 			_queueTaskCompletionSource?.SetResult(result: true);
 		}
-		catch (TaskCanceledException innerException)
+		catch (OperationCanceledException innerException)
 		{
 			InvalidOperationException ex = new InvalidOperationException("ActionExecutor.ExecuteActions should never be canceled!", innerException);
 			_queueTaskCompletionSource?.SetException(ex);
@@ -165,6 +170,18 @@ public class ActionExecutor
 		{
 			_queueTaskCompletionSource?.SetException(exception);
 			throw;
+		}
+	}
+
+	private void JustBeforeActionFinished(GameAction action)
+	{
+		if (CurrentlyRunningAction != action)
+		{
+			Log.Error($"Currently running action {CurrentlyRunningAction} did not match finishing action {action}!");
+		}
+		else if (action.State == GameActionState.Finished)
+		{
+			this.JustBeforeActionFinishedExecuting?.Invoke(action);
 		}
 	}
 
@@ -186,9 +203,17 @@ public class ActionExecutor
 
 	private async Task WaitForUnpause()
 	{
-		if (!NonInteractiveMode.IsActive)
+		if (NonInteractiveMode.AutoSlayerCheck())
 		{
-			while (_isPaused)
+			return;
+		}
+		while (_isPaused)
+		{
+			if (TestMode.IsOn)
+			{
+				await Task.Delay(50);
+			}
+			else
 			{
 				await NGame.Instance.ToSignal(NGame.Instance.GetTree(), SceneTree.SignalName.ProcessFrame);
 			}

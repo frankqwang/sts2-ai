@@ -17,11 +17,13 @@ SEEDS_ROOT = ASSETS_ROOT / "seeds"
 
 MAINLINE_CHECKPOINT = CHECKPOINTS_ROOT / "act1" / "mainline_iter2270_carddebug.pt"
 
-# 优先 Release build（~2x combat step 速度），fallback Debug
-_SIM_RELEASE = ENV_ROOT / "Sim" / "Host" / "bin" / "Release" / "net9.0" / "headless_sim_host_0991.exe"
-_SIM_DEBUG = ENV_ROOT / "Sim" / "Host" / "bin" / "Debug" / "net9.0" / "headless_sim_host_0991.exe"
-SIM_HOST_EXE = _SIM_RELEASE if _SIM_RELEASE.exists() else _SIM_DEBUG
-SIM_LEGACY_DLL = ENV_ROOT / "Sim" / "Runtime" / "HeadlessSim" / "bin" / "Debug" / "net9.0" / "HeadlessSim.dll"
+# 优先新结构 HeadlessSim/bin；旧路径只作兼容 fallback。
+_SIM_CANDIDATES = (
+    ENV_ROOT / "Sim" / "HeadlessSim" / "bin" / "Release" / "net9.0" / "HeadlessSim.exe",
+    ENV_ROOT / "Sim" / "HeadlessSim" / "bin" / "Debug" / "net9.0" / "HeadlessSim.exe",
+)
+SIM_HOST_EXE = next((path for path in _SIM_CANDIDATES if path.exists()), _SIM_CANDIDATES[0])
+SIM_LEGACY_DLL = ENV_ROOT / "Sim" / "HeadlessSim" / "bin" / "Debug" / "net9.0" / "HeadlessSim.dll"
 SPECTATOR_MOD_ROOT = ENV_ROOT / "Spectator" / "SpectatorBridgeMod"
 
 SOURCE_KNOWLEDGE_DB = PYTHON_ROOT / "data" / "source_knowledge.sqlite"

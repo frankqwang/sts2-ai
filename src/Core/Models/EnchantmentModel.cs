@@ -36,9 +36,9 @@ public abstract class EnchantmentModel : AbstractModel
 
 	public LocString Title => new LocString("enchantments", base.Id.Entry + ".title");
 
-	public LocString Description => new LocString("enchantments", base.Id.Entry + ".description");
+	private LocString Description => new LocString("enchantments", base.Id.Entry + ".description");
 
-	public LocString ExtraCardText => new LocString("enchantments", base.Id.Entry + ".extraCardText");
+	private LocString ExtraCardText => new LocString("enchantments", base.Id.Entry + ".extraCardText");
 
 	public virtual bool HasExtraCardText => false;
 
@@ -67,6 +67,14 @@ public abstract class EnchantmentModel : AbstractModel
 			}
 			LocString extraCardText = ExtraCardText;
 			extraCardText.Add("Amount", Amount);
+			if (base.IsCanonical)
+			{
+				extraCardText.Add("TargetType", "None");
+			}
+			else
+			{
+				extraCardText.Add("TargetType", Card.TargetType.ToString());
+			}
 			DynamicVars.AddTo(extraCardText);
 			return extraCardText;
 		}

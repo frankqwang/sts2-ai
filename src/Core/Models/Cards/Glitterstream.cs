@@ -19,7 +19,7 @@ public sealed class Glitterstream : CardModel
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[2]
 	{
 		new BlockVar(11m, ValueProp.Move),
-		new BlockVar("BlockNextTurn", 4m, ValueProp.Move)
+		new BlockVar("BlockNextTurn", 5m, ValueProp.Move)
 	});
 
 	public Glitterstream()

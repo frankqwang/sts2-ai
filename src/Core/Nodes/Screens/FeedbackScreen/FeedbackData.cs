@@ -24,4 +24,10 @@ public struct FeedbackData
 
 	[JsonPropertyName("session_id")]
 	public string sessionId;
+
+	[JsonPropertyName("is_modded")]
+	public bool isModded;
+
+	[JsonPropertyName("is_full_console")]
+	public bool isFullConsole;
 }

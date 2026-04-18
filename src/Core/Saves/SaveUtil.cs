@@ -1,9 +1,12 @@
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Acts;
 using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Models.Enchantments;
 using MegaCrit.Sts2.Core.Models.Encounters;
 using MegaCrit.Sts2.Core.Models.Events;
 using MegaCrit.Sts2.Core.Models.Modifiers;
+using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Relics;
 
@@ -49,5 +52,20 @@ public static class SaveUtil
 	public static EnchantmentModel EnchantmentOrDeprecated(ModelId id)
 	{
 		return ModelDb.GetByIdOrNull<EnchantmentModel>(id) ?? ModelDb.Enchantment<DeprecatedEnchantment>();
+	}
+
+	public static MonsterModel MonsterOrDeprecated(ModelId id)
+	{
+		return ModelDb.GetByIdOrNull<MonsterModel>(id) ?? ModelDb.Monster<DeprecatedMonster>();
+	}
+
+	public static CharacterModel CharacterOrDeprecated(ModelId id)
+	{
+		return ModelDb.GetByIdOrNull<CharacterModel>(id) ?? ModelDb.Character<DeprecatedCharacter>();
+	}
+
+	public static ActModel ActOrDeprecated(ModelId id)
+	{
+		return ModelDb.GetByIdOrNull<ActModel>(id) ?? ModelDb.Act<DeprecatedAct>();
 	}
 }

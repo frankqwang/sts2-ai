@@ -1076,6 +1076,7 @@ public abstract class CardModel : AbstractModel
 		bool variable2 = CombatManager.Instance.IsInProgress && (Pile?.IsCombatPile ?? pileType.IsCombatPile());
 		description.Add("InCombat", variable2);
 		description.Add("IsTargeting", target != null);
+		description.Add("TargetType", TargetType.ToString());
 		string prefix = EnergyIconHelper.GetPrefix(this);
 		description.Add("energyPrefix", prefix);
 		description.Add("singleStarIcon", "[img]res://images/packed/sprite_fonts/star_icon.png[/img]");
@@ -1154,9 +1155,10 @@ public abstract class CardModel : AbstractModel
 			flag2 = flag3 || UpgradePreviewType == CardUpgradePreviewType.Combat;
 		}
 		bool runGlobalHooks = flag2;
-		foreach (DynamicVar value in dynamicVarSet.Values)
+		IEnumerable<DynamicVar> enumerable = dynamicVarSet.Values.ToList();
+		foreach (DynamicVar item in enumerable)
 		{
-			value.UpdateCardPreview(this, previewMode, target, runGlobalHooks);
+			item.UpdateCardPreview(this, previewMode, target, runGlobalHooks);
 		}
 	}
 
@@ -1244,10 +1246,10 @@ public abstract class CardModel : AbstractModel
 		return false;
 	}
 
-	public void RemoveFromCurrentPile()
+	public void RemoveFromCurrentPile(bool silent = false)
 	{
 		AssertMutable();
-		Pile?.RemoveInternal(this);
+		Pile?.RemoveInternal(this, silent);
 	}
 
 	public void RemoveFromState()
@@ -1409,7 +1411,7 @@ public abstract class CardModel : AbstractModel
 
 	private async Task SpendEnergy(int amount)
 	{
-		if (!IsDupe && EnergyCost.CostsX)
+		if (EnergyCost.CostsX)
 		{
 			EnergyCost.CapturedXValue = amount;
 		}
@@ -1423,10 +1425,7 @@ public abstract class CardModel : AbstractModel
 
 	private async Task SpendStars(int amount)
 	{
-		if (!IsDupe)
-		{
-			LastStarsSpent = amount;
-		}
+		LastStarsSpent = amount;
 		if (amount > 0)
 		{
 			Owner.PlayerCombatState.LoseStars(amount);
@@ -1436,7 +1435,6 @@ public abstract class CardModel : AbstractModel
 
 	public async Task OnPlayWrapper(PlayerChoiceContext choiceContext, Creature? target, bool isAutoPlay, ResourceInfo resources, bool skipCardPileVisuals = false)
 	{
-		CombatState combatState = CombatState;
 		choiceContext.PushModel(this);
 		await CombatManager.Instance.WaitForUnpause();
 		CurrentTarget = target;
@@ -1452,6 +1450,11 @@ public abstract class CardModel : AbstractModel
 				await Cmd.CustomScaledWait(0.25f, 0.35f);
 			}
 		}
+		CombatState combatState = CombatState;
+		if (combatState == null)
+		{
+			return;
+		}
 		var (resultPileType, resultPilePosition) = Hook.ModifyCardPlayResultPileTypeAndPosition(combatState, this, isAutoPlay, resources, GetResultPileType(), CardPilePosition.Bottom, out IEnumerable<AbstractModel> modifiers);
 		foreach (AbstractModel item in modifiers)
 		{
@@ -1460,6 +1463,10 @@ public abstract class CardModel : AbstractModel
 		int playCount = GetEnchantedReplayCount() + 1;
 		playCount = Hook.ModifyCardPlayCount(combatState, this, playCount, target, out List<AbstractModel> modifyingModels);
 		await Hook.AfterModifyingCardPlayCount(combatState, this, modifyingModels);
+		if (Owner.Creature.IsDead)
+		{
+			return;
+		}
 		ulong playStartTime = Time.GetTicksMsec();
 		for (int i = 0; i < playCount; i++)
 		{
@@ -1488,22 +1495,38 @@ public abstract class CardModel : AbstractModel
 			await Hook.BeforeCardPlayed(combatState, cardPlay);
 			CombatManager.Instance.History.CardPlayStarted(combatState, cardPlay);
 			await OnPlay(choiceContext, cardPlay);
+			if (Owner.Creature.IsDead)
+			{
+				return;
+			}
 			InvokeExecutionFinished();
 			if (Enchantment != null)
 			{
 				await Enchantment.OnPlay(choiceContext, cardPlay);
+				if (Owner.Creature.IsDead)
+				{
+					return;
+				}
 				Enchantment.InvokeExecutionFinished();
 			}
 			if (Affliction != null)
 			{
 				AfflictionModel affliction = Affliction;
 				await affliction.OnPlay(choiceContext, target);
+				if (Owner.Creature.IsDead)
+				{
+					return;
+				}
 				affliction.InvokeExecutionFinished();
 			}
 			CombatManager.Instance.History.CardPlayFinished(combatState, cardPlay);
 			if (CombatManager.Instance.IsInProgress)
 			{
 				await Hook.AfterCardPlayed(combatState, choiceContext, cardPlay);
+				if (Owner.Creature.IsDead)
+				{
+					return;
+				}
 			}
 		}
 		if (!skipCardPileVisuals)

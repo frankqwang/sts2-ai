@@ -24,9 +24,9 @@ public sealed class HauntedShip : MonsterModel
 
 	public override int MaxInitialHp => MinInitialHp;
 
-	private int RammingSpeedDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 11, 10);
+	private int HauntDazed => 5;
 
-	private int RammingSpeedStatusCount => 2;
+	private int RammingSpeedDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 11, 10);
 
 	private int SwipeDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 14, 13);
 
@@ -39,21 +39,20 @@ public sealed class HauntedShip : MonsterModel
 	protected override MonsterMoveStateMachine GenerateMoveStateMachine()
 	{
 		List<MonsterState> list = new List<MonsterState>();
-		MoveState moveState = new MoveState("RAMMING_SPEED_MOVE", RammingSpeedMove, new SingleAttackIntent(RammingSpeedDamage), new StatusIntent(RammingSpeedStatusCount));
+		MoveState moveState = new MoveState("RAMMING_SPEED_MOVE", RammingSpeedMove, new SingleAttackIntent(RammingSpeedDamage), new DebuffIntent());
 		MoveState moveState2 = new MoveState("SWIPE_MOVE", SwipeMove, new SingleAttackIntent(SwipeDamage));
 		MoveState moveState3 = new MoveState("STOMP_MOVE", StompMove, new MultiAttackIntent(StompDamage, StompRepeat));
-		MoveState moveState4 = new MoveState("HAUNT_MOVE", HauntMove, new DebuffIntent());
+		MoveState moveState4 = new MoveState("HAUNT_MOVE", HauntMove, new StatusIntent(HauntDazed));
 		RandomBranchState randomBranchState = (RandomBranchState)(moveState4.FollowUpState = (moveState3.FollowUpState = (moveState2.FollowUpState = (moveState.FollowUpState = new RandomBranchState("RAND")))));
 		randomBranchState.AddBranch(moveState, MoveRepeatType.CannotRepeat, () => (base.CombatState.RoundNumber % 2 != 0) ? 1 : 0);
 		randomBranchState.AddBranch(moveState2, MoveRepeatType.CannotRepeat, () => (base.CombatState.RoundNumber % 2 != 0) ? 1 : 0);
 		randomBranchState.AddBranch(moveState3, MoveRepeatType.CannotRepeat, () => (base.CombatState.RoundNumber % 2 != 0) ? 1 : 0);
-		randomBranchState.AddBranch(moveState4, MoveRepeatType.UseOnlyOnce, () => (base.CombatState.RoundNumber % 2 == 0) ? 1 : 0);
 		list.Add(randomBranchState);
 		list.Add(moveState);
 		list.Add(moveState2);
 		list.Add(moveState3);
 		list.Add(moveState4);
-		return new MonsterMoveStateMachine(list, moveState);
+		return new MonsterMoveStateMachine(list, moveState4);
 	}
 
 	private async Task RammingSpeedMove(IReadOnlyList<Creature> targets)
@@ -62,7 +61,7 @@ public sealed class HauntedShip : MonsterModel
 			.WithAttackerFx(null, AttackSfx)
 			.WithHitFx("vfx/vfx_attack_blunt")
 			.Execute(null);
-		await CardPileCmd.AddToCombatAndPreview<Wound>(targets, PileType.Discard, RammingSpeedStatusCount, addedByPlayer: false);
+		await PowerCmd.Apply<WeakPower>(targets, 1m, base.Creature, null);
 	}
 
 	private async Task SwipeMove(IReadOnlyList<Creature> targets)
@@ -90,9 +89,7 @@ public sealed class HauntedShip : MonsterModel
 		await Cmd.Wait(0.6f);
 		VfxCmd.PlayOnCreatureCenter(base.Creature, "vfx/vfx_spooky_scream");
 		await Cmd.CustomScaledWait(0.2f, 0.5f);
-		await PowerCmd.Apply<WeakPower>(targets, 2m, base.Creature, null);
-		await PowerCmd.Apply<FrailPower>(targets, 2m, base.Creature, null);
-		await PowerCmd.Apply<VulnerablePower>(targets, 2m, base.Creature, null);
+		await CardPileCmd.AddToCombatAndPreview<Dazed>(targets, PileType.Discard, HauntDazed, addedByPlayer: false);
 	}
 
 	public override CreatureAnimator GenerateAnimator(MegaSprite controller)

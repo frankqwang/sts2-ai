@@ -519,7 +519,7 @@ public sealed class TheArchitect : EventModel
 
 	private void ShowSpeechBubble(AncientDialogueLine line, Creature speaker)
 	{
-		SpeechBubble = TalkCmd.Play(line.LineText, speaker, double.MaxValue);
+		SpeechBubble = TalkCmd.Play(line.LineText, speaker, (line.Speaker == AncientDialogueSpeaker.Ancient) ? VfxColor.DarkGray : base.Owner.Character.SpeechBubbleColor, VfxDuration.Forever);
 	}
 
 	private Creature? GetSpeaker(AncientDialogueSpeaker speaker)
@@ -534,6 +534,6 @@ public sealed class TheArchitect : EventModel
 
 	private MegaAnimationState? GetArchitectAnimationState()
 	{
-		return NCombatRoom.Instance?.GetCreatureNode(ArchitectCreature)?.SpineController?.GetAnimationState();
+		return NCombatRoom.Instance?.GetCreatureNode(ArchitectCreature)?.SpineAnimation.GetAnimationState();
 	}
 }

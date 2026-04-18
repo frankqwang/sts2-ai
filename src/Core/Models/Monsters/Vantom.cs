@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Ascension;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Powers;
@@ -14,7 +15,6 @@ using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Audio;
-using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Utilities;
@@ -71,18 +71,21 @@ public sealed class Vantom : MonsterModel
 	{
 		await base.AfterAddedToRoom();
 		await PowerCmd.Apply<SlipperyPower>(base.Creature, 9m, base.Creature, null);
-		base.Creature.Died += AfterDeath;
 	}
 
-	private void AfterDeath(Creature _)
+	public override Task AfterDeath(PlayerChoiceContext choiceContext, Creature creature, bool wasRemovalPrevented, float deathAnimLength)
 	{
-		base.Creature.Died -= AfterDeath;
+		if (creature != base.Creature)
+		{
+			return Task.CompletedTask;
+		}
 		NRunMusicController.Instance?.UpdateMusicParameter("vantom_progress", 5f);
+		return Task.CompletedTask;
 	}
 
-	public override void SetupSkins(NCreatureVisuals visuals)
+	public override void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
-		MegaAnimationState animationState = visuals.SpineBody.GetAnimationState();
+		MegaAnimationState animationState = spine.GetAnimationState();
 		animationState.SetAnimation("_tracks/charge_up_1", loop: false, 1);
 		animationState.AddAnimation("_tracks/charged_1", 0f, loop: true, 1);
 	}
@@ -117,7 +120,7 @@ public sealed class Vantom : MonsterModel
 			NRunMusicController.Instance?.UpdateMusicParameter("vantom_progress", 1f);
 			SfxCmd.Play("event:/sfx/enemy/enemy_attacks/vantom/vantom_extend_2");
 			await CreatureCmd.TriggerAnim(base.Creature, "CHARGE_UP", 0.15f);
-			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineController?.GetAnimationState();
+			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineAnimation.GetAnimationState();
 			megaAnimationState?.SetAnimation("_tracks/charge_up_2", loop: false, 1);
 			megaAnimationState?.AddAnimation("_tracks/charged_2", 0f, loop: true, 1);
 		}
@@ -135,7 +138,7 @@ public sealed class Vantom : MonsterModel
 			NRunMusicController.Instance?.UpdateMusicParameter("vantom_progress", 2f);
 			await Cmd.CustomScaledWait(1f, 1f);
 			SfxCmd.Play("event:/sfx/enemy/enemy_attacks/vantom/vantom_extend_2");
-			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineController?.GetAnimationState();
+			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineAnimation.GetAnimationState();
 			megaAnimationState?.SetAnimation("_tracks/charge_up_3", loop: false, 1);
 			megaAnimationState?.AddAnimation("_tracks/charged_3", 0f, loop: true, 1);
 			await CreatureCmd.TriggerAnim(base.Creature, "CHARGE_UP", 0.15f);
@@ -146,7 +149,7 @@ public sealed class Vantom : MonsterModel
 	{
 		if (TestMode.IsOff && base.Creature.IsAlive)
 		{
-			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineController?.GetAnimationState();
+			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineAnimation.GetAnimationState();
 			megaAnimationState?.SetAnimation("_tracks/attack_heavy", loop: false, 1);
 			megaAnimationState?.AddAnimation("_tracks/charged_0", 0f, loop: true, 1);
 		}
@@ -172,7 +175,7 @@ public sealed class Vantom : MonsterModel
 		{
 			await Cmd.CustomScaledWait(1f, 1f);
 			SfxCmd.Play("event:/sfx/enemy/enemy_attacks/vantom/vantom_extend_1");
-			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineController?.GetAnimationState();
+			MegaAnimationState megaAnimationState = (NCombatRoom.Instance?.GetCreatureNode(base.Creature))?.SpineAnimation.GetAnimationState();
 			megaAnimationState?.SetAnimation("_tracks/charge_up_1", loop: false, 1);
 			megaAnimationState?.AddAnimation("_tracks/charged_1", 0f, loop: true, 1);
 			await CreatureCmd.TriggerAnim(base.Creature, "CHARGE_UP", 0.25f);

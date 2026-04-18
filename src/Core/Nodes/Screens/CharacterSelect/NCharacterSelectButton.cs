@@ -105,6 +105,8 @@ public partial class NCharacterSelectButton : NButton
 
 	public bool IsLocked => _isLocked;
 
+	public bool IsSelected => _isSelected;
+
 	public override void _Ready()
 	{
 		ConnectSignals();

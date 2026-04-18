@@ -4,6 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using Godot;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.DevConsole.ConsoleCommands;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -241,7 +242,7 @@ public class DevConsole
 		Player me = LocalContext.GetMe(RunManager.Instance.DebugOnlyGetState());
 		if (!RunManager.Instance.IsSinglePlayerOrFakeMultiplayer && _commands.TryGetValue(array[0].ToLowerInvariant(), out AbstractConsoleCmd value) && value.IsNetworked && me != null)
 		{
-			RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new ConsoleCmdGameAction(me, inputValue));
+			RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new ConsoleCmdGameAction(me, inputValue, CombatManager.Instance.IsInProgress));
 			return new CmdResult(success: true, $"Enqueued {array[0]} command: '{inputValue}'");
 		}
 		CmdResult result = ProcessCommandInternal(me, array);
@@ -275,6 +276,7 @@ public class DevConsole
 		}
 		if (_commands.TryGetValue(cmdName.ToLowerInvariant(), out AbstractConsoleCmd value))
 		{
+			Log.Info("DevConsole: " + cmdName + " " + string.Join(" ", args));
 			return value.Process(player, args);
 		}
 		return new CmdResult(success: false, "The command '" + cmdName + "' does not exist.\nYou can use the 'help' to get a list of all possible commands.\n");

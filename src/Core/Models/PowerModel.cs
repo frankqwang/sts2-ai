@@ -169,7 +169,7 @@ public abstract class PowerModel : AbstractModel
 		{
 			return _amount;
 		}
-		set
+		private set
 		{
 			SetAmount(value);
 		}
@@ -440,6 +440,7 @@ public abstract class PowerModel : AbstractModel
 	public void SetAmount(int amount, bool silent = false)
 	{
 		AssertMutable();
+		amount = Math.Clamp(amount, -999999999, 999999999);
 		int num = amount - _amount;
 		if (num != 0)
 		{

@@ -15,7 +15,7 @@ public sealed class HeirloomHammer : CardModel
 {
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[2]
 	{
-		new DamageVar(17m, ValueProp.Move),
+		new DamageVar(20m, ValueProp.Move),
 		new RepeatVar(1)
 	});
 

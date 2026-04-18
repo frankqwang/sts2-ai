@@ -181,7 +181,7 @@ public partial class NGeneralStatsGrid : Control
 		locString = new LocString("stats_screen", "ENTRY_STREAK.top");
 		locString.Add("Amount", progressSave.BestWinStreak);
 		_streakEntry.SetTopText(locString.GetFormattedText());
-		if (aggregateAscensionProgress > 99999999)
+		if (aggregateAscensionProgress > 999999999)
 		{
 			locString = new LocString("stats_screen", "ENTRY_STREAK.bottom");
 			locString.Add("Amount", 5m);

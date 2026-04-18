@@ -27,9 +27,9 @@ public sealed class Hang : CardModel
 			.Execute(choiceContext);
 		int powerAmount = cardPlay.Target.GetPowerAmount<HangPower>();
 		int num = Math.Max(2, powerAmount);
-		if (powerAmount + num > 999)
+		if (powerAmount + num > 999999999)
 		{
-			num = Math.Max(0, 999 - powerAmount);
+			num = Math.Max(0, 999999999 - powerAmount);
 		}
 		await PowerCmd.Apply<HangPower>(cardPlay.Target, num, base.Owner.Creature, this);
 	}

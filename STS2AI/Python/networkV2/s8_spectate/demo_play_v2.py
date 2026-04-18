@@ -14,7 +14,7 @@
 
 或用 pipe transport:
   python -m networkV2.s8_spectate.demo_play_v2 \\
-      --checkpoint ... --use-pipe --port 15527 --transport pipe-binary
+      --checkpoint ... --use-pipe --port 15527 --transport pipe-proto
 """
 
 from __future__ import annotations
@@ -277,8 +277,8 @@ def main():
     ap.add_argument("--port", type=int, default=15527,
                     help="Pipe port (use-pipe 时用)")
     ap.add_argument("--transport", type=str, default=None,
-                    choices=[None, "http", "pipe", "pipe-binary"],
-                    help="pipe 协议（use-pipe 时）")
+                    choices=[None, "http", "pipe", "pipe-proto"],
+                    help="pipe 协议(use-pipe 时)。pipe-binary 已废弃,诊断用 pipe(json),训练用 pipe-proto")
     ap.add_argument("--character-id", type=str, default="IRONCLAD")
     ap.add_argument("--seed", type=str, default=None)
     ap.add_argument("--max-steps", type=int, default=800)

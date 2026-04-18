@@ -1,8 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
-using MegaCrit.Sts2.Core.Entities.Ascension;
-using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models.Encounters;
 using MegaCrit.Sts2.Core.Models.Events;
@@ -68,7 +66,7 @@ public sealed class Hive : ActModel
 
 	public override IEnumerable<EncounterModel> GenerateAllEncounters()
 	{
-		return new global::_003C_003Ez__ReadOnlyArray<EncounterModel>(new EncounterModel[21]
+		return new global::_003C_003Ez__ReadOnlyArray<EncounterModel>(new EncounterModel[20]
 		{
 			ModelDb.Encounter<BowlbugsNormal>(),
 			ModelDb.Encounter<BowlbugsWeak>(),
@@ -89,7 +87,6 @@ public sealed class Hive : ActModel
 			ModelDb.Encounter<TheInsatiableBoss>(),
 			ModelDb.Encounter<TheObscuraNormal>(),
 			ModelDb.Encounter<ThievingHopperWeak>(),
-			ModelDb.Encounter<TunnelerNormal>(),
 			ModelDb.Encounter<TunnelerWeak>()
 		});
 	}
@@ -110,17 +107,8 @@ public sealed class Hive : ActModel
 
 	public override MapPointTypeCounts GetMapPointTypes(Rng mapRng)
 	{
-		Rng rng = new Rng(mapRng.Seed, mapRng.Counter);
-		MapPointTypeCounts mapPointTypeCounts = new MapPointTypeCounts(rng);
-		int num = mapRng.NextGaussianInt(6, 1, 6, 7);
-		if (AscensionHelper.HasAscension(AscensionLevel.Gloom))
-		{
-			num--;
-		}
-		return new MapPointTypeCounts(mapRng)
-		{
-			NumOfUnknowns = mapPointTypeCounts.NumOfUnknowns - 1,
-			NumOfRests = num
-		};
+		int restCount = mapRng.NextGaussianInt(6, 1, 6, 7);
+		int unknownCount = MapPointTypeCounts.StandardRandomUnknownCount(mapRng) - 1;
+		return new MapPointTypeCounts(unknownCount, restCount);
 	}
 }

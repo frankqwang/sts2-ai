@@ -9,5 +9,8 @@ public enum VfxColor
 	Black,
 	White,
 	Cyan,
-	Gold
+	Gold,
+	Orange,
+	Swamp,
+	DarkGray
 }

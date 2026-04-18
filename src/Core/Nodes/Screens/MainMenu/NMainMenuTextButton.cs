@@ -46,7 +46,7 @@ public partial class NMainMenuTextButton : NButton
 	{
 		base.ConnectSignals();
 		label = GetChild<MegaLabel>(0);
-		label.AddThemeStyleboxOverride(ThemeConstants.Control.focus, _emptyStyleBox);
+		label.AddThemeStyleboxOverride(ThemeConstants.Control.Focus, _emptyStyleBox);
 		label.FocusMode = FocusModeEnum.None;
 	}
 
@@ -69,7 +69,7 @@ public partial class NMainMenuTextButton : NButton
 		if (label != null && _locString != null)
 		{
 			label.Text = _locString.GetFormattedText();
-			label.ApplyLocaleFontSubstitution(FontType.Regular, ThemeConstants.Label.font);
+			label.ApplyLocaleFontSubstitution(FontType.Regular, ThemeConstants.Label.Font);
 			TaskHelper.RunSafely(UpdatePivotOffset());
 		}
 	}

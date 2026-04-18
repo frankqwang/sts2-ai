@@ -26,7 +26,7 @@ public sealed class BygoneEffigy : MonsterModel
 
 	public override int MaxInitialHp => MinInitialHp;
 
-	private int SlashDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 17, 15);
+	private int SlashDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 15, 13);
 
 	public override DamageSfxType TakeDamageSfxType => DamageSfxType.Stone;
 
@@ -74,7 +74,7 @@ public sealed class BygoneEffigy : MonsterModel
 		}
 		await PowerCmd.Apply<StrengthPower>(base.Creature, 10m, base.Creature, null);
 		LocString line = MonsterModel.L10NMonsterLookup("BYGONE_EFFIGY.moves.SLEEP.speakLine2");
-		TalkCmd.Play(line, base.Creature);
+		TalkCmd.Play(line, base.Creature, VfxColor.DarkGray, VfxDuration.Long);
 		await Cmd.Wait(0.5f);
 	}
 
