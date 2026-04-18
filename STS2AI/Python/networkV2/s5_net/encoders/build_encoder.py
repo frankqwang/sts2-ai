@@ -30,10 +30,12 @@ class BuildMemoryEncoder(nn.Module):
         Returns: (B, n_slots, d_model)
         """
         # 拼接 build + inventory tokens
+        # 注意:不能用 `inventory_bt.mask.sum() == 0` 做分支 —— 会触发
+        # CPU sync,CUDA graph capture 下会炸 (cudaErrorStreamCaptureInvalidated)。
+        # 直接 concat;空 inventory 的 mask 全 False,slot_attn 内会自动忽略。
         features = build_bt.features
         mask = build_bt.mask
-
-        if inventory_bt is not None and not inventory_bt.mask.sum() == 0:
+        if inventory_bt is not None:
             features = torch.cat([features, inventory_bt.features], dim=1)
             mask = torch.cat([mask, inventory_bt.mask], dim=1)
 

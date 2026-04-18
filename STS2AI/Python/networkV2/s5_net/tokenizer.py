@@ -140,3 +140,118 @@ class BankTokenizer(nn.Module):
             name: self.tokenize_padded_bank(pb, device=device)
             for name, pb in batched_banks.items()
         }
+
+    # ------------------------------------------------------------------
+    # Static buffer path (for CUDA graph support)
+    # ------------------------------------------------------------------
+
+    def fill_static_buffers(
+        self,
+        banks: UnifiedTokenBanks,
+        host_buffers: dict[str, dict[str, torch.Tensor]],
+        gpu_buffers: dict[str, dict[str, torch.Tensor]],
+    ) -> None:
+        """把 banks 的内容写进 pre-allocated host pinned buffers,然后 async copy 到 GPU。
+
+        host_buffers/gpu_buffers: {bank_name: {numeric/type_ids/ts_ids/mask: tensor}}
+
+        host buffer 是 pinned CPU tensor(pin_memory=True),支持 non_blocking DMA 到 GPU。
+        这个 copy **必须在 CUDA graph capture 之外**调用(capture 内会炸)。
+        replay 之前 fill_static_buffers → graph.replay() 自动用 GPU static buffer 里的新数据。
+        """
+        from networkV2.s5_net.bank_max_spec import BankOverflowError
+
+        for bank in banks.all_banks():
+            name = bank.bank_name
+            if name not in host_buffers:
+                # 未在 max_spec 声明的 bank — 跳过(不会进 graph 输入)
+                continue
+            h = host_buffers[name]
+            g = gpu_buffers[name]
+            max_len = h["numeric"].shape[1]
+            if len(bank.tokens) > max_len:
+                raise BankOverflowError(
+                    f"bank '{name}' has {len(bank.tokens)} tokens > max_len {max_len}. "
+                    f"调大 BankMaxSpec.{name} 或分析是否有异常膨胀。"
+                )
+
+            # Zero 整个 host buffer(避免上次残留)
+            h["numeric"].zero_()
+            h["type_ids"].zero_()
+            h["ts_ids"].zero_()
+            h["mask"].zero_()
+
+            for i, tok in enumerate(bank.tokens):
+                n = min(len(tok.numeric), self.max_numeric_dim)
+                h["numeric"][0, i, :n] = torch.tensor(
+                    tok.numeric[:n], dtype=torch.float32,
+                )
+                h["type_ids"][0, i] = tok.type_idx
+                h["ts_ids"][0, i] = tok.time_scale_idx
+                h["mask"][0, i] = True
+
+            # Async DMA to GPU static buffers(不阻塞 CPU,graph replay 前 sync)
+            for key in ("numeric", "type_ids", "ts_ids", "mask"):
+                g[key].copy_(h[key], non_blocking=True)
+
+    def project_static(
+        self,
+        gpu_buffers: dict[str, dict[str, torch.Tensor]],
+    ) -> dict[str, BankTensor]:
+        """用 static GPU buffer 跑 embedding + projection + norm。
+
+        返回 dict[bank_name, BankTensor] 结构与 `tokenize_banks()` 对齐,
+        但所有 tensor 都在 **pre-alloc GPU buffer** 里,不新建。
+        **这个方法 CUDA graph-capturable**。
+        """
+        result: dict[str, BankTensor] = {}
+        for name, bufs in gpu_buffers.items():
+            numeric = bufs["numeric"]
+            ndim = numeric.shape[-1]
+            if ndim < self.max_numeric_dim:
+                pad = torch.zeros(
+                    numeric.shape[0], numeric.shape[1], self.max_numeric_dim - ndim,
+                    device=numeric.device, dtype=numeric.dtype,
+                )
+                numeric = torch.cat([numeric, pad], dim=-1)
+            elif ndim > self.max_numeric_dim:
+                numeric = numeric[:, :, : self.max_numeric_dim]
+
+            h = self.numeric_proj(numeric)
+            h = h + self.type_embed(bufs["type_ids"])
+            h = h + self.time_scale_embed(bufs["ts_ids"])
+            h = self.norm(h)
+            result[name] = BankTensor(h, bufs["mask"], name)
+        return result
+
+
+def alloc_static_bank_buffers(
+    bank_names: list[str],
+    max_spec,
+    device: torch.device,
+    max_numeric_dim: int = 58,
+    batch: int = 1,
+) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, dict[str, torch.Tensor]]]:
+    """预分配 host(pinned) + GPU static buffer 对。
+
+    Returns: (host_buffers, gpu_buffers) 两个 dict,键为 bank_name。
+    """
+    host: dict[str, dict[str, torch.Tensor]] = {}
+    gpu: dict[str, dict[str, torch.Tensor]] = {}
+    for name in bank_names:
+        max_len = max_spec.get(name)
+        # Host pinned
+        host[name] = {
+            "numeric": torch.zeros(batch, max_len, max_numeric_dim, dtype=torch.float32, pin_memory=True),
+            "type_ids": torch.zeros(batch, max_len, dtype=torch.long, pin_memory=True),
+            "ts_ids": torch.zeros(batch, max_len, dtype=torch.long, pin_memory=True),
+            "mask": torch.zeros(batch, max_len, dtype=torch.bool, pin_memory=True),
+        }
+        # GPU
+        gpu[name] = {
+            "numeric": torch.zeros(batch, max_len, max_numeric_dim, device=device, dtype=torch.float32),
+            "type_ids": torch.zeros(batch, max_len, device=device, dtype=torch.long),
+            "ts_ids": torch.zeros(batch, max_len, device=device, dtype=torch.long),
+            "mask": torch.zeros(batch, max_len, device=device, dtype=torch.bool),
+        }
+    return host, gpu
