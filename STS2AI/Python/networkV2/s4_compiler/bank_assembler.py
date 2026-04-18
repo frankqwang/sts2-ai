@@ -822,6 +822,8 @@ class BankAssembler:
         # route_risk / route_value: map 节点的 [0,1] 威胁 / 价值,不走 _DMG/_BLK 归一化
         route_axes = [float(a.route_risk), float(a.route_value)]
         # ---- Skada priors 通道 (4) ----
+        # TODO(cleanup): synergy_prior 现在永远是 0(填值链路已删),重训时砍成 3 维,
+        # 同步 max_numeric_dim 58→57。详见 actions.py:145。
         skada_prior_axes = [
             float(a.pick_rate_prior),
             float(a.win_rate_delta_prior),

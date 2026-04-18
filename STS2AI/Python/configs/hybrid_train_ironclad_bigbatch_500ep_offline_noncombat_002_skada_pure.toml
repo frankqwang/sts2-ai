@@ -73,7 +73,7 @@ saved_offline_metrics_log_enabled = true
 
 [offline_noncombat_ranking]
 # 关键：指向 hybrid_02293 派生的新数据
-offline_noncombat_ranking_data_dir = "STS2AI/Artifacts/skada/ironclad_matchup_bridge_softened"
+offline_noncombat_ranking_data_dir = "STS2AI/Python/data/skada/derived/ironclad_matchup_bridge_softened"
 offline_noncombat_ranking_batch_size = 32
 offline_noncombat_ranking_loss_weight = 0.02
 offline_noncombat_ranking_updates_per_iter = 1

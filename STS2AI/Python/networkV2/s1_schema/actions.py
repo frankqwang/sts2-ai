@@ -142,6 +142,13 @@ class ActionCandidate:
     pick_rate_prior: float = 0.0       # [0,1]  全群体选卡率
     win_rate_delta_prior: float = 0.0  # [-0.5, 0.5] 选 vs 跳的胜率差(近似)
     deck_win_rate_prior: float = 0.0   # [0,1]  拿过这张卡的 run 胜率均值
+    # TODO(cleanup): synergy_prior 当前永远是 0.0——填值来源 build_card_synergy_matrix.py
+    # + skada_index_dataset.deck_card_synergy() 已于 2026-04-19 删除(死代码)。
+    # 字段本身和 bank_assembler.py:829 的打包逻辑保留,避免改动网络 max_numeric_dim=58
+    # 导致旧 checkpoint 不兼容。下次重训时一起删:
+    #   - 本字段
+    #   - bank_assembler.py skada_prior_axes 去掉这一维
+    #   - network_config.py max_numeric_dim 58→57
     synergy_prior: float = 0.0         # [-1, 1] 与当前 deck 的 synergy 提升
 
     @property

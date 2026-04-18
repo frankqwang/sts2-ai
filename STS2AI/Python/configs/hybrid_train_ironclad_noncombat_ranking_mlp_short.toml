@@ -55,7 +55,7 @@ saved_offline_metrics_log_enabled = true
 
 [offline_noncombat_ranking]
 # Bridged Skada card_reward ranking data.
-offline_noncombat_ranking_data_dir = "STS2AI/Artifacts/skada/ironclad_matchup_bridge"
+offline_noncombat_ranking_data_dir = "STS2AI/Python/data/skada/derived/ironclad_matchup_bridge"
 offline_noncombat_ranking_batch_size = 32
 # Keep this moderate: we want the ranking head to matter, but not dominate PPO.
 offline_noncombat_ranking_loss_weight = 0.1

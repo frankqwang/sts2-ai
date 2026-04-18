@@ -62,7 +62,7 @@ saved_offline_replay_traces_enabled = true
 saved_offline_metrics_log_enabled = true
 
 [offline_noncombat_ranking]
-offline_noncombat_ranking_data_dir = "STS2AI/Artifacts/skada/ironclad_matchup_bridge"
+offline_noncombat_ranking_data_dir = "STS2AI/Python/data/skada/derived/ironclad_matchup_bridge"
 offline_noncombat_ranking_batch_size = 64
 offline_noncombat_ranking_loss_weight = 0.3
 offline_noncombat_ranking_updates_per_iter = 8

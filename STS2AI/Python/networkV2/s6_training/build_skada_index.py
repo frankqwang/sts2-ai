@@ -35,7 +35,7 @@ Schema:
 用法:
   python -m networkV2.s6_training.build_skada_index \
       --dir data/skada/runs_victory/details \
-      --output ../Artifacts/skada_runs.sqlite
+      --output data/skada/derived/skada_runs.sqlite
 
 清洗规则(实现在 _is_clean 里):
   - character ∈ KNOWN_CHARACTERS (5 个 STS2 角色)
@@ -228,7 +228,7 @@ def main():
                    default=Path("data/skada/runs_victory/details"),
                    help="skada victory jsonl 目录(相对 cwd)")
     p.add_argument("--output", type=Path,
-                   default=Path("../Artifacts/skada_runs.sqlite"),
+                   default=Path("data/skada/derived/skada_runs.sqlite"),
                    help="输出 sqlite 索引(覆盖写)")
     p.add_argument("--repo-root", type=Path, default=None,
                    help="repo 根目录,用于生成相对 file_path(默认 cwd 的上 2 级)")

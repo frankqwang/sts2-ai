@@ -44,8 +44,8 @@ python crawl_skada_runs_daemon.py \
 #   和 ①② 一样，改 --sort-by run_id --sort-dir asc，去掉 --stop-on-known
 #   可选 --target-detail-count 50000 抓到目标数量就停
 
-# ④ 爬完后提取新结构（map_acts/final_deck 齐全的 run）到 runs_new
-python build_runs_new.py
+# ④ 爬完后提取新结构（map_acts/final_deck 齐全的 run）到 runs_full_detail
+python build_runs_full_detail.py
 
 ---- 注意 ----
 - sts2log detail 窗口只有 3 天；3 天前创建的 run 即使抓详情也只返回 detail_expired=true，没 map_acts
@@ -69,7 +69,7 @@ from typing import Any
 THIS_DIR = Path(__file__).resolve().parent
 RUNNER = THIS_DIR / "crawl_skada_runs_raw.py"
 DEFAULT_OUT_DIR = THIS_DIR / "runs"
-DEFAULT_LOG_DIR = Path(__file__).resolve().parents[2] / "Artifacts" / "skada"
+DEFAULT_LOG_DIR = Path(__file__).resolve().parent / "derived" / "crawl_logs"
 NON_RETRIABLE_EXIT_CODES = {2}
 
 _FAILURE_MIN_VERSION_DAEMON = (0, 99, 0)

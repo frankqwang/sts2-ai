@@ -26,7 +26,7 @@ asc_bucket:  low(0-4) / mid(5-14) / high(15-20) / max(20+)
 用法:
   python -m networkV2.s6_training.build_path_priors \
       --dir data/skada/runs_victory/details \
-      --output ../Artifacts/skada_path_priors.sqlite
+      --output data/skada/derived/skada_path_priors.sqlite
 """
 from __future__ import annotations
 
@@ -310,7 +310,7 @@ def main():
                    default=Path("data/skada/runs_victory/details"),
                    help="skada victory jsonl 目录")
     p.add_argument("--output", type=Path,
-                   default=Path("../Artifacts/skada_path_priors.sqlite"),
+                   default=Path("data/skada/derived/skada_path_priors.sqlite"),
                    help="输出 sqlite(覆盖写)")
     args = p.parse_args()
 

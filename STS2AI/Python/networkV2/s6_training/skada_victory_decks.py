@@ -28,8 +28,8 @@ from typing import Any, Iterable
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_INDEX_DB = Path(__file__).resolve().parents[3] / "Artifacts" / "skada_runs.sqlite"
-_DEFAULT_CACHE_DB = Path(__file__).resolve().parents[3] / "Artifacts" / "skada_victory_decks.sqlite"
+_DEFAULT_INDEX_DB = Path(__file__).resolve().parents[2] / "data" / "skada" / "derived" / "skada_runs.sqlite"
+_DEFAULT_CACHE_DB = Path(__file__).resolve().parents[2] / "data" / "skada" / "derived" / "skada_victory_decks.sqlite"
 
 
 # act 通过 floor_reached 判断:
@@ -236,16 +236,36 @@ def load_skada_victory_decks(
     out: list[dict[str, Any]] = []
     seen: set[tuple] = set()
     for r in rows:
-        deck = json.loads(r["deck_json"])
-        relics = json.loads(r["relics_json"] or "[]")
+        deck_raw = json.loads(r["deck_json"])
+        relics_raw = json.loads(r["relics_json"] or "[]")
         if deduplicate:
-            key = (tuple(sorted(Counter(deck).items())), tuple(sorted(relics)))
+            key = (tuple(sorted(Counter(deck_raw).items())), tuple(sorted(relics_raw)))
             if key in seen:
                 continue
             seen.add(key)
+
+        # sim 认 UPPER_SNAKE + 升级用 upgrade_level 字段,不认 lower/+suffix
+        # skada 存 lower snake + "+" 后缀,这里转成 sim 格式
+        deck_sim: list[dict[str, Any]] = []
+        for cid in deck_raw:
+            s = str(cid or "").strip().lower()
+            upg = 0
+            while s.endswith("+"):
+                s = s[:-1]
+                upg += 1
+            if not s:
+                continue
+            deck_sim.append({"id": s.upper(), "upgrade_level": upg})
+
+        relics_sim: list[dict[str, Any]] = []
+        for rid in relics_raw:
+            s = str(rid or "").strip().lower()
+            if s:
+                relics_sim.append({"id": s.upper()})
+
         out.append({
-            "deck": deck,
-            "relics": relics,
+            "deck": deck_sim,
+            "relics": relics_sim,
             "character": r["character"],
             "ascension": r["ascension"],
             "asc_bucket": r["asc_bucket"],
@@ -253,7 +273,7 @@ def load_skada_victory_decks(
             "act_reached": r["act_reached"],
             "run_id": r["run_id"],
             # combat_cotrainer.build_chain_deck 期望字段
-            "max_hp": 80,      # 默认(可被 cotrainer 覆盖)
+            "max_hp": 80,
             "current_hp": 80,
             "gold": 99,
             "max_energy": 3,
