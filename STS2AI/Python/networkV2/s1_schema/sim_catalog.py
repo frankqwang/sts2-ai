@@ -183,7 +183,7 @@ class GameCatalog:
         try:
             cur = conn.cursor()
             row = cur.execute(
-                "SELECT possible_monsters_json FROM encounters WHERE id=? OR LOWER(id)=?",
+                "SELECT monster_ids_json FROM encounters WHERE id=? OR LOWER(id)=?",
                 (encounter_id, encounter_id.lower()),
             ).fetchone()
             if not row or not row[0]:

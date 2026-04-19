@@ -65,7 +65,7 @@ from networkV2.s6_training.rewards import (
     LOSE_REWARD,
 )
 from networkV2.s6_training.train_full_run_v2 import (
-    _backfill_turn_damage, _enemies_total_hp,
+    _backfill_turn_block, _backfill_turn_damage, _enemies_total_hp, _player_block_total,
 )
 from networkV2.s7_diagnostics.rollout_dumper import RolloutDumper
 
@@ -358,6 +358,7 @@ def combat_rollout(
     greedy: bool = False,
     record_trajectory: bool = False,
     graph_runner_holder: dict | None = None,
+    reward_profile: str = "stochastic_stable",
     defer_gae: bool = False,
 ) -> tuple[list[TrainingSample], dict[str, Any]]:
     """跑一场 combat，收 TrainingSample。
@@ -380,6 +381,7 @@ def combat_rollout(
     steps = 0
     turn_start_sample_idx = 0
     turn_step_damages: list[float] = []
+    turn_step_blocks: list[float] = []
     # Step-level profiling(性能瓶颈定位)。每 phase 累积 ms,combat 结束时写 info["_prof"]
     _prof_compile = 0.0
     _prof_forward = 0.0
@@ -463,11 +465,13 @@ def combat_rollout(
 
         # per-step damage
         step_damage = max(0, _enemies_total_hp(state) - _enemies_total_hp(next_state))
+        step_block = max(0, _player_block_total(next_state) - _player_block_total(state))
         turn_step_damages.append(float(step_damage))
+        turn_step_blocks.append(float(step_block))
 
         tracker.on_step(next_state, chosen, prev_state=state)
 
-        # reward: PBRS + tactical + dense shaping + boss-aware
+        # reward: PBRS + tactical + 通用 dense shaping；boss 专属 bonus 走 profile 开关
         next_outcome = next_state.get("run_outcome") if next_state.get("terminal") else None
         combat_won = None
         terminal_boss_damage_ratio = 0.0
@@ -497,8 +501,11 @@ def combat_rollout(
         shaping_r += combat_local_tactical_reward(state, chosen, legal)
         _player_max_hp = max(int((state.get("player") or {}).get("max_hp", 1) or 1), 1)
         shaping_r += dense_combat_shaping(state, next_state, _player_max_hp)
-        shaping_r += co_trainer_boss_damage_bonus(state, next_state, room_type)
-        shaping_r += co_trainer_boss_debuff_bonus(state, chosen, room_type)
+        if reward_profile == "legacy_boss":
+            # Boss 战：每 step damage 按掉血百分比额外奖励（boss HP 高，damage 珍贵）
+            shaping_r += co_trainer_boss_damage_bonus(state, next_state, room_type)
+            # Boss 战：Vuln/Weak 套 boss 身上额外 +0.02（放大 debuff setup 价值）
+            shaping_r += co_trainer_boss_debuff_bonus(state, chosen, room_type)
         shaping_r += kill_overkill_reward(state, next_state, chosen)
 
         chosen_action_name = str(chosen.get("action", "")).lower()
@@ -535,6 +542,7 @@ def combat_rollout(
             advantage=0.0, value_target=0.0,
             value_estimate=value,
             fight_win_target=-1.0,
+            run_win_target=-1.0,
             hp_loss_target=float(max(hp_at_start - cur_hp, 0)),
             survival_target=hp_ratio,
             leaf_target=0.0,
@@ -544,6 +552,7 @@ def combat_rollout(
             resource_health_target=resource_health_t,
             deck_quality_target=deck_quality_t,
             turn_damage_target=-1.0,
+            turn_block_target=-1.0,
             sample_weight=sw,
             encounter_id=encounter_id.lower(),
             room_type=room_type,
@@ -605,6 +614,7 @@ def combat_rollout(
         )
         if turn_ended:
             _backfill_turn_damage(samples, turn_start_sample_idx, turn_step_damages)
+            _backfill_turn_block(samples, turn_start_sample_idx, turn_step_blocks)
             # Gap 1:回合末给 combo / 防守即时 reward,加到本 step(end_turn 这一步)的 reward 上
             hp_after_turn = int((next_state.get("player") or {}).get("hp", 0) or 0)
             ter = turn_end_reward(
@@ -621,6 +631,7 @@ def combat_rollout(
             # 重置 turn 跟踪
             turn_start_sample_idx = len(samples)
             turn_step_damages = []
+            turn_step_blocks = []
             hp_at_turn_start = hp_after_turn
             enemy_max_hp_at_turn_start = sum(
                 int(e.get("max_hp", 0) or 0)
@@ -725,6 +736,7 @@ def chained_combat_rollout(
     start_full_hp: bool = CHAIN_START_FULL_HP,
     abort_on_defeat: bool = CHAIN_ABORT_ON_DEFEAT,
     graph_runner_holder: dict | None = None,
+    reward_profile: str = "stochastic_stable",
 ) -> tuple[list[TrainingSample], list[dict[str, Any]]]:
     """顺序跑 N 场战斗，HP 跨场保留，场间按 heal_after_combat 回血。
 
@@ -749,6 +761,7 @@ def chained_combat_rollout(
             seed=f"{seed_prefix}-c{i}",
             record_trajectory=record_trajectory,
             graph_runner_holder=graph_runner_holder,
+            reward_profile=reward_profile,
         )
         # 给 sub_info 加 chain 上下文
         info["chain_index"] = i
@@ -785,6 +798,7 @@ def skada_chain_combat_rollout(
     abort_on_defeat: bool = False,
     use_skada_hp_each_combat: bool = False,
     graph_runner_holder: dict | None = None,
+    reward_profile: str = "stochastic_stable",
 ) -> tuple[list[TrainingSample], list[dict[str, Any]]]:
     """按 skada run 的真实 combat 序列顺序跑,每场还原当时的 deck/relics。
 
@@ -827,6 +841,7 @@ def skada_chain_combat_rollout(
             max_steps=max_steps_per_combat, seed=seed,
             record_trajectory=record_trajectory,
             graph_runner_holder=graph_runner_holder,
+            reward_profile=reward_profile,
             defer_gae=True,  # chain 结束后统一算 GAE
         )
         info["chain_index"] = i
@@ -1060,6 +1075,7 @@ def _worker_collect(
     max_steps: int,
     result_q: queue.Queue,
     graph_runner_holder: dict | None = None,  # per-worker runner cache(thread-local)
+    reward_profile: str = "stochastic_stable",
 ) -> None:
     compiler = CombatFeatureCompiler()
     client = pool.get(worker_id)
@@ -1078,6 +1094,7 @@ def _worker_collect(
                     seed_prefix=seed_prefix,
                     record_trajectory=record_traj,
                     graph_runner_holder=graph_runner_holder,
+                    reward_profile=reward_profile,
                 )
                 samples_out.extend(samples)
                 infos.extend(sub_infos)
@@ -1089,6 +1106,7 @@ def _worker_collect(
                     seed_prefix=seed_prefix,
                     record_trajectory=record_traj,
                     graph_runner_holder=graph_runner_holder,
+                    reward_profile=reward_profile,
                 )
                 samples_out.extend(samples)
                 infos.extend(sub_infos)
@@ -1099,6 +1117,7 @@ def _worker_collect(
                     max_steps=max_steps, seed=seed,
                     record_trajectory=record_traj,
                     graph_runner_holder=graph_runner_holder,
+                    reward_profile=reward_profile,
                 )
                 samples_out.extend(samples)
                 infos.append(info)
@@ -1285,7 +1304,10 @@ def run_cotrainer(args: argparse.Namespace) -> None:
     chain_len = sum(c for _, c in CHAIN_STRUCTURE)
 
     print()
-    print(f"Config: preset={args.preset} lr={args.lr} eps/iter={args.episodes_per_iter} workers={args.num_workers}")
+    print(
+        f"Config: preset={args.preset} lr={args.lr} eps/iter={args.episodes_per_iter} "
+        f"workers={args.num_workers} reward={args.reward_profile}"
+    )
     if use_skada_replay:
         print(f"Skada chain replay ENABLED: 1 ep = 1 victory run 的全部 combat 按 floor 顺序")
         print(f"  每场 reset 还原当时 deck/relics,HP 跨场继承(败则用 skada 当时 hp 重置续跑)")
@@ -1400,7 +1422,7 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                 target=_worker_collect,
                 args=(w_idx, pool, compiled_net, tasks_per_worker[w_idx],
                       args.max_steps, result_q,
-                      _worker_graph_holders[w_idx]),
+                      _worker_graph_holders[w_idx], args.reward_profile),
             )
             t.start()
             threads.append(t)
@@ -1587,6 +1609,10 @@ def main():
                     help="采样模式：每 iter 记录 N 条 episode（优先 boss/elite）。"
                          "0=关；与 --record-trajectory 互斥（全量优先）。")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--reward-profile", type=str, default="stochastic_stable",
+                    choices=["stochastic_stable", "legacy_boss"],
+                    help="combat reward profile。stochastic_stable=通用 dense shaping；"
+                         "legacy_boss=额外启用 boss damage/debuff bonus。")
     ap.add_argument("--cpu", action="store_true")
     ap.add_argument("--log-level", type=str, default="INFO")
     ap.add_argument("--compile-net", action="store_true",

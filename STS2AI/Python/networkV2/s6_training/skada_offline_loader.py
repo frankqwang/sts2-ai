@@ -207,6 +207,7 @@ def _make_training_sample(
         # 字段复用:BC loss 把下面 3 个字段当作 run_evaluator.expected_* head 的 target
         # (非战斗训练不走战斗 value_heads / leaf,不会误学)
         fight_win_target=_run_win_target(run_state),               # → run_win_prob target
+        run_win_target=_run_win_target(run_state),
         hp_loss_target=run_state.run_avg_dmg_taken_per_combat,     # → expected_hp_loss target
         turn_damage_target=run_state.run_avg_dmg_dealt_per_combat, # → expected_dmg_output target
         survival_target=run_state.run_floor_clear_prob,            # → floor_clear_prob target

@@ -43,7 +43,7 @@ class PPOConfig:
     mini_batch_size: int = 32
     gamma: float = 0.99
     gae_lambda: float = 0.95
-    max_numeric_dim: int = 48
+    max_numeric_dim: int = 58
     # Value warmup: 前 N 轮 train_step 调用时 policy_coef=0，只训 value head
     value_warmup_iters: int = 0
     # KL 早停：一个 epoch 内 minibatch 的平均 approx_kl 超过阈值就结束当前 epoch
@@ -61,7 +61,7 @@ class CombatPPOTrainerV2:
         # 关键：advantages 在 ppo.py 入口做了一次全局归一化，loss 内不再重算
         loss_cfg = self.cfg.loss_config or LossConfig()
         loss_cfg.normalize_adv = False
-        self.loss_fn = CombatLoss(loss_cfg)
+        self.loss_fn = CombatLoss(loss_cfg, ppo_value_head="fight_win")
 
     def train_step(self, samples: list[TrainingSample]) -> dict[str, float]:
         """对一组 TrainingSample 做 PPO 更新。全部 multi-head targets 传入 loss。"""
@@ -102,6 +102,7 @@ class CombatPPOTrainerV2:
                     advantages=batched.advantages.to(device),
                     returns=batched.returns.to(device),
                     fight_win_targets=batched.fight_win_targets.to(device),
+                    run_win_targets=batched.run_win_targets.to(device),
                     hp_loss_targets=batched.hp_loss_targets.to(device),
                     survival_targets=batched.survival_targets.to(device),
                     leaf_targets=batched.leaf_targets.to(device),
@@ -114,6 +115,9 @@ class CombatPPOTrainerV2:
                     turn_damage_targets=(
                         batched.turn_damage_targets.to(device)
                         if batched.turn_damage_targets is not None else None),
+                    turn_block_targets=(
+                        batched.turn_block_targets.to(device)
+                        if batched.turn_block_targets is not None else None),
                     sample_weights=batched.sample_weights.to(device),
                 )
 
@@ -196,7 +200,7 @@ class UnifiedPPOTrainer:
         # （否则每 minibatch mean(adv)=0，ratio≈1 时 policy_loss=0）
         loss_cfg = self.cfg.loss_config or LossConfig()
         loss_cfg.normalize_adv = False
-        self.combat_loss = CombatLoss(loss_cfg)
+        self.combat_loss = CombatLoss(loss_cfg, ppo_value_head="run_value")
         nc_cfg = nc_loss_config or NonCombatLossConfig()
         nc_cfg.normalize_adv = False
         self.nc_loss = NonCombatLoss(nc_cfg)
@@ -229,12 +233,14 @@ class UnifiedPPOTrainer:
             advantages=batched.advantages.to(device),
             returns=batched.returns.to(device),
             fight_win_targets=batched.fight_win_targets.to(device),
+            run_win_targets=batched.run_win_targets.to(device),
             hp_loss_targets=batched.hp_loss_targets.to(device),
             survival_targets=batched.survival_targets.to(device),
             leaf_targets=batched.leaf_targets.to(device),
             transition_risk_targets=batched.transition_risk_targets.to(device) if batched.transition_risk_targets is not None else None,
             resource_retention_targets=batched.resource_retention_targets.to(device) if batched.resource_retention_targets is not None else None,
             turn_damage_targets=batched.turn_damage_targets.to(device) if batched.turn_damage_targets is not None else None,
+            turn_block_targets=batched.turn_block_targets.to(device) if batched.turn_block_targets is not None else None,
             sample_weights=batched.sample_weights.to(device),
         )
 
@@ -247,16 +253,13 @@ class UnifiedPPOTrainer:
         if enc_idx is not None:
             enc_idx = enc_idx.to(device)
         output = self.net(batched_banks=batched.banks, decision_domain=domain, encounter_idx=enc_idx)
-        # non-combat 样本暂用 fight_win_target 作为 run_win_target 的信号源：
-        # full-run rollout 里终局时写 0/1 硬标签到 fight_win_target，其他为 -1（哨值）
-        # 语义完全一致（整局胜率）
         return self.nc_loss(
             output=output,
             action_indices=batched.action_indices.to(device),
             old_log_probs=batched.old_log_probs.to(device),
             advantages=batched.advantages.to(device),
             returns=batched.returns.to(device),
-            run_win_targets=batched.fight_win_targets.to(device),
+            run_win_targets=batched.run_win_targets.to(device),
             boss_readiness_targets=batched.boss_readiness_targets.to(device) if batched.boss_readiness_targets is not None else None,
             resource_health_targets=batched.resource_health_targets.to(device) if batched.resource_health_targets is not None else None,
             deck_quality_targets=batched.deck_quality_targets.to(device) if batched.deck_quality_targets is not None else None,

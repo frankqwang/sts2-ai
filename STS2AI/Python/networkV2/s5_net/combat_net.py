@@ -47,7 +47,7 @@ class CombatNetV2(nn.Module):
         d_model: int = 384,
         n_heads: int = 8,
         n_build_slots: int = 8,
-        max_numeric_dim: int = 48,
+        max_numeric_dim: int = 58,
         dropout: float = 0.1,
         contextualizer_mode: str = "full",
         enable_encounter_conditioning: bool = False,

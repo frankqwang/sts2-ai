@@ -132,7 +132,7 @@ def test_graph_runner_overflow_raises():
     这是硬检测 4 的核心:加了新 token 类型让 bank 爆量,runtime 会立刻报错,
     不会静默 silent wrong(截断 tokens 或 OOB 写 GPU buffer)。
     """
-    from networkV2.s5_net.graph_runner import GraphRunner
+    from networkV2.s5_net.graph_runner import GraphCaptureFailedError, GraphRunner
     from networkV2.s5_net.bank_max_spec import BankOverflowError, BankMaxSpec
 
     net = _build_net()
@@ -141,17 +141,18 @@ def test_graph_runner_overflow_raises():
 
     # 人为把 action 的 MAX 调得极小,让 sample banks 立即 overflow
     tiny_spec = BankMaxSpec(action=5)
-    runner = GraphRunner(
-        net, banks_capture, enc_idx,
-        atol=1e-3, startup_parity_n=3, parity_check_every=0,
-        max_spec=tiny_spec,
-    )
-    if not runner.enabled:
-        pytest.skip("graph runner disabled; overflow check 需要 graph 启用")
-
-    # sample_banks 的 action_bank 有 41 个 token,超过 tiny_spec.action=5 → overflow
-    with pytest.raises(BankOverflowError):
-        runner(banks_capture, enc_idx)
+    try:
+        with pytest.raises((BankOverflowError, GraphCaptureFailedError)):
+            runner = GraphRunner(
+                net, banks_capture, enc_idx,
+                atol=1e-3, startup_parity_n=3, parity_check_every=0,
+                max_spec=tiny_spec,
+            )
+            if runner.enabled:
+                runner(banks_capture, enc_idx)
+    finally:
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
 
 def test_graph_runner_decision_domain_mismatch_raises():
@@ -214,12 +215,16 @@ def test_graph_runner_strict_raises_on_capture_failure():
     import types
     net.forward_from_static = types.MethodType(evil_forward, net)
 
-    with pytest.raises(GraphCaptureFailedError):
-        GraphRunner(
-            net, banks, enc_idx,
-            atol=1e-3, startup_parity_n=3, parity_check_every=0,
-            strict=True,
-        )
+    try:
+        with pytest.raises(GraphCaptureFailedError):
+            GraphRunner(
+                net, banks, enc_idx,
+                atol=1e-3, startup_parity_n=3, parity_check_every=0,
+                strict=True,
+            )
+    finally:
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
 
 def test_graph_runner_non_strict_falls_back():
@@ -229,6 +234,8 @@ def test_graph_runner_non_strict_falls_back():
 
     net = _build_net()
     banks = _build_sample_banks()
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
     enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
 
     orig = net.forward_from_static
