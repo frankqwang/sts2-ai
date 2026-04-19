@@ -1101,7 +1101,7 @@ def train_full_run(args: argparse.Namespace) -> None:
     runtime = None
     catalog_client = None
     branch_client: BinaryBackedFullRunClient | None = None
-    branch_compiler = CombatFeatureCompiler()
+    branch_compiler = DecisionFeaturizer()
     artifacts_root = (Path(__file__).resolve().parents[3] / "Artifacts").resolve()
     run_name = Path(args.output_dir).resolve().name
     combat_teacher_root = artifacts_root / "combat_teacher" / run_name
@@ -1337,7 +1337,7 @@ def train_full_run(args: argparse.Namespace) -> None:
             try:
                 teacher_entries = load_offline_combat_teacher_entries(
                     teacher_data_path,
-                    compiler=CombatFeatureCompiler(),
+                    compiler=DecisionFeaturizer(),
                 )
                 metrics["combat_teacher_loaded"] = float(len(teacher_entries))
                 teacher_metrics = run_offline_combat_teacher_updates(
