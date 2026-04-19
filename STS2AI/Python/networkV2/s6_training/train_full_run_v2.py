@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import logging
 import math
@@ -27,6 +28,18 @@ from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
 from networkV2.s5_net.unified_net import UnifiedNet, UnifiedNetOutput
 from networkV2.s5_net.network_config import from_preset, NetworkConfig
 from networkV2.s6_training.batch import TrainingSample
+from networkV2.s6_training.combat_teacher_v1 import (
+    OfflineCombatTeacherConfig,
+    generate_branch_rollout_dataset,
+    load_offline_combat_teacher_entries,
+    run_offline_combat_teacher_updates,
+    write_critical_step_queue,
+)
+from networkV2.s6_training.critical_step_pipeline import (
+    annotate_critical_steps,
+    rebalance_training_samples,
+    sort_capture_records,
+)
 from networkV2.s6_training.head_targets import (
     compute_boss_readiness_target,
     compute_deck_quality_target,
@@ -228,6 +241,7 @@ def run_full_episode(
     record_trajectory: bool = False,
     inference_client: Any | None = None,
     task_id: int = 0,
+    capture_root: str = "",
 ) -> tuple[list[TrainingSample], dict[str, Any]]:
     """跑完整一局，收集所有 step 的 TrainingSample。
 
@@ -260,6 +274,7 @@ def run_full_episode(
     # 把原先的"过去累计"proxy 替换成真正 future-looking target。
     combat_sample_trace: list[tuple[int, int]] = []
     hp_max_at_combat: int = 0
+    capture_records: list[dict[str, Any]] = []
 
     for _ in range(max_steps):
         st = str(state.get("state_type", "")).lower()
@@ -566,9 +581,34 @@ def run_full_episode(
             turn_damage_target=-1.0,  # 待 backfill；非战斗保持 -1（loss 跳过）
             turn_block_target=-1.0,   # 待 backfill；非战斗保持 -1（loss 跳过）
             sample_weight=sw,
+            base_sample_weight=sw,
             encounter_id=tracker.encounter_id if is_combat else "",
             room_type=tracker.room_type if is_combat else st,
+            floor=int((state.get("run") or {}).get("floor", 0) or 0),
+            action_name=str(chosen.get("action") or ""),
         ))
+
+        if capture_root and is_combat:
+            sample_index = len(samples) - 1
+            snapshot_dir = Path(capture_root)
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            snapshot_path = snapshot_dir / f"{seed}_sample{sample_index:05d}.json"
+            try:
+                written_snapshot = client.export_state(str(snapshot_path))
+                capture_records.append({
+                    "seed": seed,
+                    "episode_id": seed,
+                    "sample_index": int(sample_index),
+                    "floor": int((state.get("run") or {}).get("floor", 0) or 0),
+                    "encounter_id": tracker.encounter_id if is_combat else "",
+                    "room_type": tracker.room_type if is_combat else st,
+                    "action_name": str(chosen.get("action") or ""),
+                    "legal_actions": copy.deepcopy(legal),
+                    "snapshot_path": str(written_snapshot),
+                    "root_state": copy.deepcopy(state),
+                })
+            except Exception as exc:
+                logger.warning(f"critical-step snapshot export failed: {exc}")
 
         # R1: combat sample trace，记录 sample_idx + 本步结束时的 hp
         # 战斗结束（切出 / terminal）时 _backfill_combat_future_targets 用这个 trace
@@ -637,6 +677,8 @@ def run_full_episode(
     }
     if record_trajectory:
         info["trajectory"] = trajectory
+    if capture_records:
+        info["critical_captures"] = capture_records
     return samples, info
 
 
@@ -789,6 +831,7 @@ def _collect_worker(
     result_q: "queue.Queue",
     record_trajectory_every: int = 0,
     greedy: bool = False,
+    capture_root: str = "",
 ) -> None:
     """单个收集 worker（在独立线程中运行）。
 
@@ -803,12 +846,16 @@ def _collect_worker(
     for ep_i, seed in enumerate(seeds):
         try:
             rec_traj = bool(record_trajectory_every and ep_i % record_trajectory_every == 0)
+            sample_offset = len(samples_out)
             samples, info = run_full_episode(
                 client, net, compiler, seed=seed,
                 max_steps=max_steps,
                 record_trajectory=rec_traj,
                 greedy=greedy,
+                capture_root=capture_root,
             )
+            for capture in info.get("critical_captures") or []:
+                capture["global_sample_index"] = sample_offset + int(capture.get("sample_index") or 0)
             samples_out.extend(samples)
             infos.append(info)
         except Exception as e:
@@ -1047,6 +1094,11 @@ def train_full_run(args: argparse.Namespace) -> None:
     pool: SimClientPool | None = None
     runtime = None
     catalog_client = None
+    branch_client: BinaryBackedFullRunClient | None = None
+    branch_compiler = CombatFeatureCompiler()
+    artifacts_root = (Path(__file__).resolve().parents[3] / "Artifacts").resolve()
+    run_name = Path(args.output_dir).resolve().name
+    combat_teacher_root = artifacts_root / "combat_teacher" / run_name
     if rollout_cfg.use_legacy_thread_rollout:
         pool = SimClientPool(base_port=base_port, size=n_workers)
         pool.warmup()
@@ -1057,6 +1109,11 @@ def train_full_run(args: argparse.Namespace) -> None:
             catalog_client = open_fullrun_catalog_client(helper_port)
         except Exception as e:
             logger.warning(f"Async helper client startup failed: {e}")
+    if args.critical_step_capture:
+        try:
+            branch_client = _make_client(int(base_port) + n_workers + 200)
+        except Exception as e:
+            logger.warning(f"critical-step branch client startup failed: {e}")
 
     # ---- Attach sim 到 GAME_CATALOG：bank_assembler 的 power token 会用
     # game_catalog.powers[].base_classes / is_debuff_hint 精确判定 semantic group
@@ -1117,6 +1174,9 @@ def train_full_run(args: argparse.Namespace) -> None:
         # 分配 seeds 给各 worker
         eps_total = args.episodes_per_iter
         episode_tasks: list[dict[str, Any]] = []
+        capture_root = ""
+        if args.critical_step_capture:
+            capture_root = str(combat_teacher_root / "snapshots" / f"iter_{iteration:04d}")
         seeds_per_worker: list[list[str]] = [[] for _ in range(n_workers)]
         for i in range(eps_total):
             seed = f"fr-{iteration}-{i}-{rng.getrandbits(32):08x}"
@@ -1127,6 +1187,7 @@ def train_full_run(args: argparse.Namespace) -> None:
                 "record_trajectory": False,
                 "greedy": False,
                 "max_steps": args.max_steps,
+                "capture_root": capture_root,
             })
 
         # 并发收集：每个 worker 复用 pool 里的固定 client
@@ -1147,7 +1208,10 @@ def train_full_run(args: argparse.Namespace) -> None:
                 t = threading.Thread(
                     target=_collect_worker,
                     args=(w_idx, pool, net, seeds_per_worker[w_idx], args.max_steps, result_q),
-                    kwargs={"record_trajectory_every": max(1, len(seeds_per_worker[w_idx]))},
+                    kwargs={
+                        "record_trajectory_every": max(1, len(seeds_per_worker[w_idx])),
+                        "capture_root": capture_root,
+                    },
                 )
                 t.start()
                 threads.append(t)
@@ -1157,8 +1221,11 @@ def train_full_run(args: argparse.Namespace) -> None:
 
             while not result_q.empty():
                 r = result_q.get()
+                sample_offset = len(iter_samples)
                 iter_samples.extend(r["samples"])
                 for info in r["infos"]:
+                    for capture in info.get("critical_captures") or []:
+                        capture["global_sample_index"] = sample_offset + int(capture.get("global_sample_index") or 0)
                     iter_episode_infos.append(info)
         else:
             if runtime is None:
@@ -1168,8 +1235,12 @@ def train_full_run(args: argparse.Namespace) -> None:
                 episode_tasks[0]["record_trajectory"] = True
             task_ids = runtime.submit_tasks(episode_tasks)
             for env in runtime.gather_results(len(task_ids)):
+                sample_offset = len(iter_samples)
                 iter_samples.extend(env.samples)
-                iter_episode_infos.extend(env.infos)
+                for info in env.infos:
+                    for capture in info.get("critical_captures") or []:
+                        capture["global_sample_index"] = sample_offset + int(capture.get("sample_index") or 0)
+                    iter_episode_infos.append(info)
             rollout_stats = runtime.stats()
 
         for info in iter_episode_infos:
@@ -1184,11 +1255,102 @@ def train_full_run(args: argparse.Namespace) -> None:
 
         # PPO update
         net.train()
-        metrics = {}
+        metrics: dict[str, Any] = {}
+        need_critical_annotation = bool(
+            args.critical_step_rebalance
+            or args.critical_step_capture
+            or args.offline_combat_teacher_data
+        )
+        if need_critical_annotation:
+            metrics.update(annotate_critical_steps(iter_samples))
+        train_samples = iter_samples
+        if args.critical_step_rebalance:
+            train_samples, rebalance_metrics = rebalance_training_samples(iter_samples, rng=rng)
+            metrics.update(rebalance_metrics)
         if len(iter_samples) >= args.min_update_samples:
-            metrics = trainer.train_step(iter_samples)
+            metrics.update(trainer.train_step(train_samples))
         if rollout_stats:
             metrics.update(runtime_stats_to_metrics("rollout", rollout_stats))
+
+        generated_teacher_path = combat_teacher_root / "critical_step_teacher_v1.jsonl"
+        if args.critical_step_capture:
+            capture_records: list[dict[str, Any]] = []
+            for info in iter_episode_infos:
+                for capture in info.get("critical_captures") or []:
+                    sample_idx = int(capture.get("global_sample_index") or -1)
+                    if not (0 <= sample_idx < len(iter_samples)):
+                        continue
+                    sample = iter_samples[sample_idx]
+                    if float(sample.critical_score) < 0.8:
+                        continue
+                    capture_records.append({
+                        "seed": str(capture.get("seed") or ""),
+                        "episode_id": str(capture.get("episode_id") or ""),
+                        "sample_index": int(capture.get("sample_index") or 0),
+                        "floor": int(capture.get("floor") or sample.floor or 0),
+                        "encounter_id": str(capture.get("encounter_id") or sample.encounter_id or ""),
+                        "room_type": str(capture.get("room_type") or sample.room_type or ""),
+                        "action_name": str(capture.get("action_name") or sample.action_name or ""),
+                        "critical_tags": list(sample.critical_tags),
+                        "critical_score": float(sample.critical_score),
+                        "advantage": float(sample.advantage),
+                        "legal_actions": capture.get("legal_actions") or [],
+                        "snapshot_path": str(capture.get("snapshot_path") or ""),
+                        "root_state": capture.get("root_state") or {},
+                    })
+            sorted_captures = sort_capture_records(capture_records)
+            metrics["critical_capture_candidates"] = float(len(sorted_captures))
+            if sorted_captures:
+                combat_teacher_root.mkdir(parents=True, exist_ok=True)
+                queue_path = combat_teacher_root / "critical_step_queue.jsonl"
+                selected_queue_records = write_critical_step_queue(
+                    sorted_captures,
+                    output_path=queue_path,
+                    top_k=int(args.critical_step_queue_topk),
+                )
+                metrics["critical_queue_size"] = float(len(selected_queue_records))
+                if branch_client is not None:
+                    try:
+                        _branch_records, teacher_records, _raw_path = generate_branch_rollout_dataset(
+                            selected_queue_records,
+                            output_dir=combat_teacher_root,
+                            client=branch_client,
+                            net=net,
+                            compiler=branch_compiler,
+                        )
+                        metrics["critical_teacher_records"] = float(len(teacher_records))
+                    except Exception as exc:
+                        logger.warning(f"critical-step branch generation failed: {exc}")
+                else:
+                    logger.warning("critical-step capture enabled but branch client is unavailable")
+
+        teacher_data_path = str(args.offline_combat_teacher_data or "")
+        if not teacher_data_path and generated_teacher_path.exists():
+            teacher_data_path = str(generated_teacher_path)
+        if teacher_data_path:
+            try:
+                teacher_entries = load_offline_combat_teacher_entries(
+                    teacher_data_path,
+                    compiler=CombatFeatureCompiler(),
+                )
+                metrics["combat_teacher_loaded"] = float(len(teacher_entries))
+                teacher_metrics = run_offline_combat_teacher_updates(
+                    net=net,
+                    optimizer=trainer.optimizer,
+                    entries=teacher_entries,
+                    config=OfflineCombatTeacherConfig(
+                        updates_per_iter=int(args.offline_combat_teacher_updates_per_iter),
+                        batch_size=int(args.offline_combat_teacher_batch_size),
+                        rank_weight=1.0,
+                        cont_weight=1.0,
+                        ce_weight=0.0,
+                    ),
+                    rng=rng,
+                    max_numeric_dim=int(getattr(net.tokenizer, "max_numeric_dim", 58)),
+                )
+                metrics.update(teacher_metrics)
+            except Exception as exc:
+                logger.warning(f"offline combat teacher update failed: {exc}")
 
         # Fight-win head calibration：预测胜率 vs 真实 GAE return 的分桶对齐度
         # ECE（Expected Calibration Error）越小越好。0.1 以上说明 value head 系统性偏差大。
@@ -1226,7 +1388,9 @@ def train_full_run(args: argparse.Namespace) -> None:
         ep = int(metrics.get("epochs_done", 0))
         wm = "W" if metrics.get("warmup", 0) > 0.5 else " "
         print(f" {iteration:3d}{wm} | {w+l:3d} | {len(iter_samples):5d} | {w}/{l} | {cum:4.1f}% | "
-              f"{avg_floor:6.2f} | pl={pl:.5f} vl={vl:.3f} hp={hp:.3f} kl={kl:.4f} ep={ep} | {elapsed:5.1f}s")
+              f"{avg_floor:6.2f} | pl={pl:.5f} vl={vl:.3f} hp={hp:.3f} kl={kl:.4f} ep={ep} "
+              f"cc={int(metrics.get('critical_combat_count', 0))} tq={int(metrics.get('critical_queue_size', 0))} "
+              f"tu={int(metrics.get('combat_teacher_updates', 0))} | {elapsed:5.1f}s")
 
         if iteration % args.save_every == 0:
             p = Path(args.output_dir) / f"unified_v2_iter{iteration}.pt"
@@ -1262,6 +1426,11 @@ def train_full_run(args: argparse.Namespace) -> None:
       if catalog_client is not None:
           try:
               catalog_client.close()
+          except Exception:
+              pass
+      if branch_client is not None:
+          try:
+              branch_client.close()
           except Exception:
               pass
 
@@ -1329,6 +1498,18 @@ def main():
     # 事后用 analyze_rollout.py 分析异常
     p.add_argument("--dump-dir", type=str, default="",
                    help="If set, dump rollout/metrics to this dir. 规范路径：Artifacts/runs/<exp>/")
+    p.add_argument("--critical-step-rebalance", action="store_true",
+                   help="开启关键 combat step 打标后的重采样配额（35/45/20）。")
+    p.add_argument("--critical-step-capture", action="store_true",
+                   help="导出关键 combat step snapshot，并生成 branch teacher 数据。")
+    p.add_argument("--critical-step-queue-topk", type=int, default=64,
+                   help="每 iter 导出的 critical-step queue 上限。")
+    p.add_argument("--offline-combat-teacher-data", type=str, default="",
+                   help="外部 critical_step_teacher_v1.jsonl 路径；为空时可复用本 iter 生成数据。")
+    p.add_argument("--offline-combat-teacher-updates-per-iter", type=int, default=4,
+                   help="每 iter 执行多少次 offline combat teacher update；需配合 capture 或 teacher 数据使用。")
+    p.add_argument("--offline-combat-teacher-batch-size", type=int, default=64,
+                   help="offline combat teacher update 的 batch size。")
     p.add_argument("--cpu", action="store_true")
     p.add_argument("--log-level", type=str, default="INFO")
     add_rollout_engine_args(p)

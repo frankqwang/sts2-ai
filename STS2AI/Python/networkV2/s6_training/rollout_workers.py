@@ -262,6 +262,7 @@ def _run_fullrun_task(
         record_trajectory=bool((payload or {}).get("record_trajectory", False)),
         inference_client=inference_client,
         task_id=task_id,
+        capture_root=str((payload or {}).get("capture_root", "")),
     )
     return samples, [info], {}
 

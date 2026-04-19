@@ -150,6 +150,11 @@ class TrainingSample:
     sample_weight: float = 1.0
     encounter_id: str = ""
     room_type: str = "monster"
+    floor: int = 0
+    action_name: str = ""
+    critical_tags: tuple[str, ...] = field(default_factory=tuple)
+    critical_score: float = 0.0
+    base_sample_weight: float = 1.0
 
 
 def collate_training_samples(
