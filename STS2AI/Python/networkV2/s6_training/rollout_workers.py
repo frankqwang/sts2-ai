@@ -3,7 +3,7 @@
 上层 trainer 只生成任务并消费结果，不再各自维护：
   - actor 进程主循环
   - QueueInferenceClient 初始化
-  - per-actor sim/client/compiler 生命周期
+  - per-actor sim/client/featurizer 生命周期
   - runtime 启停样板
 """
 
@@ -14,13 +14,13 @@ from typing import Any, Callable
 
 import torch
 
-from env.combat_training_env import PipeBackedCombatTrainingClient
-from env.combat_training_env import PipeBackedCombatTrainingClient as JsonCombatCatalogClient
-from env.full_run_env import BinaryBackedFullRunClient
-from env.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT
+from networkV2.s0_bridge.combat_training_env import PipeBackedCombatTrainingClient
+from networkV2.s0_bridge.combat_training_env import PipeBackedCombatTrainingClient as JsonCombatCatalogClient
+from networkV2.s0_bridge.full_run_env import BinaryBackedFullRunClient
+from networkV2.s0_bridge.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT
 from networkV2.s0_bridge.combat_session import CombatSession as ProtoCombatSession
-from networkV2.s3_state_tracker.combat_env_wrapper import CombatStateTracker
-from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+from networkV2.s3_temporal_state.combat_state_tracker import CombatStateTracker
+from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 from networkV2.s6_training.rollout_async_engine import (
     ActorSampleEnvelope,
     PersistentActorRuntime,
@@ -94,7 +94,7 @@ def _close_client_worker(worker_state: dict[str, Any]) -> None:
 
 def _make_cotrainer_worker_state(actor_id: int, actor_init_payload: dict[str, Any]) -> dict[str, Any]:
     return {
-        "compiler": CombatFeatureCompiler(),
+        "featurizer": DecisionFeaturizer(),
         "client": ProtoCombatSession(
             port=int(actor_init_payload["base_port"]) + int(actor_id),
             auto_launch=True,
@@ -117,7 +117,7 @@ def _run_cotrainer_task(
     )
 
     client = worker_state["client"]
-    compiler = worker_state["compiler"]
+    featurizer = worker_state["featurizer"]
     max_steps = int(actor_init_payload["max_steps"])
     samples_out: list[Any] = []
     infos: list[dict[str, Any]] = []
@@ -127,7 +127,7 @@ def _run_cotrainer_task(
         samples, sub_infos = chained_combat_rollout(
             client,
             None,
-            compiler,
+            featurizer,
             sequence,
             chain_deck,
             max_steps_per_combat=max_steps,
@@ -144,7 +144,7 @@ def _run_cotrainer_task(
         samples, sub_infos = skada_chain_combat_rollout(
             client,
             None,
-            compiler,
+            featurizer,
             task_chain,
             max_steps_per_combat=max_steps,
             seed_prefix=seed_prefix,
@@ -160,7 +160,7 @@ def _run_cotrainer_task(
         samples, info = combat_rollout(
             client,
             None,
-            compiler,
+            featurizer,
             enc_id,
             rt,
             deck,
@@ -231,7 +231,7 @@ def open_cotrainer_catalog_client(port: int) -> JsonCombatCatalogClient:
 
 def _make_fullrun_worker_state(actor_id: int, actor_init_payload: dict[str, Any]) -> dict[str, Any]:
     return {
-        "compiler": CombatFeatureCompiler(),
+        "featurizer": DecisionFeaturizer(),
         "client": BinaryBackedFullRunClient(
             port=int(actor_init_payload["base_port"]) + int(actor_id),
             auto_launch=True,
@@ -255,7 +255,7 @@ def _run_fullrun_task(
     samples, info = run_full_episode(
         worker_state["client"],
         None,
-        worker_state["compiler"],
+        worker_state["featurizer"],
         seed=str((payload or {}).get("seed", "")),
         max_steps=int((payload or {}).get("max_steps", actor_init_payload.get("max_steps", 800))),
         greedy=bool((payload or {}).get("greedy", False)),
@@ -326,10 +326,10 @@ def open_fullrun_catalog_client(port: int) -> BinaryBackedFullRunClient:
 
 
 def _make_combat_v2_worker_state(actor_id: int, actor_init_payload: dict[str, Any]) -> dict[str, Any]:
-    from env.combat_training_env import PipeBackedCombatTrainingClient
+    from networkV2.s0_bridge.combat_training_env import PipeBackedCombatTrainingClient
 
     return {
-        "compiler": CombatFeatureCompiler(),
+        "featurizer": DecisionFeaturizer(),
         "client": PipeBackedCombatTrainingClient(
             port=int(actor_init_payload["base_port"]) + int(actor_id),
             auto_launch=True,
@@ -351,7 +351,7 @@ def _run_combat_v2_task(
     samples, info = collect_combat_rollout(
         worker_state["client"],
         None,
-        worker_state["compiler"],
+        worker_state["featurizer"],
         tracker,
         encounter_id=str(payload["encounter_id"]),
         room_type=str(payload["room_type"]),

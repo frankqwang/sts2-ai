@@ -1,0 +1,23 @@
+{
+  "iteration": 1,
+  "metrics": {
+    "rollout_requests": 1.0,
+    "rollout_batches": 1.0,
+    "rollout_graph_hits": 0.0,
+    "rollout_eager_fallbacks": 1.0,
+    "rollout_queue_wait_ms_avg": 66.4297,
+    "rollout_infer_ms_avg": 52.61050001718104,
+    "rollout_batch_hist_1": 1.0,
+    "cal_bin5_count": 1.0,
+    "cal_bin5_pred_mean": 0.5154,
+    "cal_bin5_actual_mean": 0.0369,
+    "cal_ece": 0.4785,
+    "cal_n_samples": 1.0
+  },
+  "n_samples": 1,
+  "extra": {
+    "wall_time_s": 32.85577321052551,
+    "total_runs": 1,
+    "total_wins": 0
+  }
+}

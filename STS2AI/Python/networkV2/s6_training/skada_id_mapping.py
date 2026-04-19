@@ -5,7 +5,7 @@
   - game source_knowledge.sqlite 的 id 风格:lower_snake_case,例如 strike_ironclad
   - 老版本 skada 可能用已重命名的卡名(alpha 版本字段漂移)
   - 不做 mapping 会导致 card_feature_vector() / relic_feature_vector() miss,
-    → bank_assembler 产 0 向量 → 网络看不见关键构筑信号
+    → token_bank_builder 产 0 向量 → 网络看不见关键构筑信号
 
 本模块职责:
   1. normalize_card_id / normalize_relic_id:UPPER → lower(简单 case)
@@ -253,7 +253,7 @@ _ROOM_LETTER_TO_DOMAIN: dict[str, str] = {
     "S": "shop",
     "R": "rest",
     "V": "event",
-    "A": "event",       # ancient -> 暂借 event domain(没有专属 compiler)
+    "A": "event",       # ancient -> 暂借 event domain(没有专属 option builder)
     "T": "event",       # treasure -> 同上
     "?": "",            # 未揭示(skada 存档里没见过,留空)
     "": "",

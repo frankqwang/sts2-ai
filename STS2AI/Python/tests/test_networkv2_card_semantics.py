@@ -16,15 +16,15 @@ if _python_root not in sys.path:
 from constants import GAME_SEMANTIC_INDEX_DB
 from data.build_card_semantic_index import build_card_semantic_index
 from networkV2.s1_schema.card_semantic_catalog import CARD_SEMANTICS
+from networkV2.s1_schema.card_tags import FUNCTIONAL_TAG_TO_IDX
 from networkV2.s1_schema.entities import PlayerRuntime
-from networkV2.s4_compiler.bank_assembler import BankAssembler
-from networkV2.s4_compiler.runtime_compiler import RuntimeCompiler
-from networkV2.s3_state_tracker.combat_env_wrapper import CombatStateTracker
+from networkV2.s3_temporal_state.combat_state_tracker import CombatStateTracker
+from networkV2.s4_featurization.runtime_extractor import RuntimeExtractor
+from networkV2.s4_featurization.token_bank_builder import TokenBankBuilder
 from networkV2.s5_net.combat_net import CombatNetOutput
 from networkV2.s5_net.heads.leaf_evaluator import LeafOutputs
 from networkV2.s5_net.heads.value_heads import ValueOutputs
 from networkV2.s6_training.losses import CombatLoss, LossConfig
-from core.card_tags import FUNCTIONAL_TAG_TO_IDX
 
 
 def _ensure_default_index() -> None:
@@ -93,12 +93,12 @@ def test_build_card_semantic_index_writes_jsonl_and_sqlite(tmp_path: Path):
     assert cards_count is not None and int(cards_count[0]) == stats["cards"]
 
 
-def test_runtime_compiler_pile_from_string_ids_backfills_counts():
+def test_runtime_extractor_pile_from_string_ids_backfills_counts():
     attack_id = _query_card_ids("card_type='attack'", limit=1)[0]
     skill_id = _query_card_ids("card_type='skill'", limit=1)[0]
     zero_cost_id = _query_card_ids("base_cost=0", limit=1)[0]
 
-    pile = RuntimeCompiler()._pile_from_card_ids("draw", [attack_id, skill_id, zero_cost_id])
+    pile = RuntimeExtractor()._pile_from_card_ids("draw", [attack_id, skill_id, zero_cost_id])
 
     assert pile.size == 3
     assert pile.attack_count >= 1
@@ -117,10 +117,10 @@ def test_draw_horizon_probabilities_are_monotonic_and_post_shuffle_uses_discard(
     assert len(draw_tag_id) >= 2
     assert len(filler_ids) >= 2
 
-    compiler = RuntimeCompiler()
-    assembler = BankAssembler()
-    draw = compiler._pile_from_card_ids("draw", [draw_tag_id[0], filler_ids[0], filler_ids[1]])
-    discard = compiler._pile_from_card_ids("discard", [draw_tag_id[1]])
+    extractor = RuntimeExtractor()
+    assembler = TokenBankBuilder()
+    draw = extractor._pile_from_card_ids("draw", [draw_tag_id[0], filler_ids[0], filler_ids[1]])
+    discard = extractor._pile_from_card_ids("discard", [draw_tag_id[1]])
     ctx = assembler._build_draw_context({"draw": draw, "discard": discard})
     draw_idx = FUNCTIONAL_TAG_TO_IDX["draw"]
 
@@ -132,8 +132,8 @@ def test_draw_horizon_probabilities_are_monotonic_and_post_shuffle_uses_discard(
     assert post_shuffle > 0.0
 
     empty_draw_ctx = assembler._build_draw_context({
-        "draw": compiler._pile_from_card_ids("draw", []),
-        "discard": compiler._pile_from_card_ids("discard", [draw_tag_id[0]]),
+        "draw": extractor._pile_from_card_ids("draw", []),
+        "discard": extractor._pile_from_card_ids("discard", [draw_tag_id[0]]),
     })
     assert empty_draw_ctx["post_shuffle"]["tag_probs"][draw_idx] > 0.0
 
@@ -160,8 +160,8 @@ def test_build_profile_and_deck_tokens_share_card_semantics():
     tracker.on_run_start()
     tracker.refresh_build_profile(obs)
 
-    deck_cards = RuntimeCompiler()._compile_deck(obs)
-    shared = BankAssembler()._assemble_shared(
+    deck_cards = RuntimeExtractor()._compile_deck(obs)
+    shared = TokenBankBuilder()._assemble_shared(
         tracker.run_build_memory,
         PlayerRuntime(hp=60, max_hp=80),
         "monster",

@@ -42,7 +42,7 @@ SEMANTIC_ROLES = [
 ]
 
 # R2.1: 非战斗 option 的语义 bucket（event 类型 / reward 类型）
-# bank_assembler._action_token 会把 event_kind 做成 9 维 one-hot，补齐非战斗 option token
+# token_bank_builder._action_token 会把 event_kind 做成 9 维 one-hot，补齐非战斗 option token
 # 原先只靠 family/roles 区分的信号缺口（所有 event option 都是 "resource"、card_reward 选卡
 # 不区分稀有度等）。
 EVENT_KINDS = [
@@ -104,7 +104,7 @@ class ActionCandidate:
     #   basic=0.0, curse/status=-0.3, common=0.25, uncommon=0.5, rare=1.0, special=0.5
     # price_ratio: shop 物品价格 / max(player_gold, 1)，反映"买下占钱包比例"
     # can_afford:  shop 是否买得起（0/1），和 price_ratio 组合给网络"买得起但贵" vs "便宜但买不起" 信号
-    # event_kind:  EVENT_KINDS 中的一个字符串标签，bank_assembler 做 one-hot
+    # event_kind:  EVENT_KINDS 中的一个字符串标签，token_bank_builder 做 one-hot
     rarity_weight: float = 0.0
     price_ratio: float = 0.0
     can_afford: float = 0.0
@@ -112,7 +112,7 @@ class ActionCandidate:
 
     # U8 修复：route 节点专属 risk/value。原先 route_compiler 把 [0,1] risk/value
     # 硬塞进 damage_est/block_est 字段（再乘 30/50 对抗 _action_token 的归一化）——
-    # 是个"字段语义黑客"。现在独立字段承载原始 [0,1] 值，bank_assembler 编码时不
+    # 是个"字段语义黑客"。现在独立字段承载原始 [0,1] 值，token_bank_builder 编码时不
     # 走 _DMG/_BLK 归一化路径，保留 raw 量级。仅 map family 填，其他 action 默认 0。
     route_risk: float = 0.0   # [0,1]：该节点的潜在威胁（boss=1, elite=0.7, rest=0）
     route_value: float = 0.0  # [0,1]：该节点的潜在价值（rest=0.7, shop=0.6, boss=0）
@@ -144,10 +144,10 @@ class ActionCandidate:
     deck_win_rate_prior: float = 0.0   # [0,1]  拿过这张卡的 run 胜率均值
     # TODO(cleanup): synergy_prior 当前永远是 0.0——填值来源 build_card_synergy_matrix.py
     # + skada_index_dataset.deck_card_synergy() 已于 2026-04-19 删除(死代码)。
-    # 字段本身和 bank_assembler.py:829 的打包逻辑保留,避免改动网络 max_numeric_dim=58
+    # 字段本身和 token_bank_builder.py:829 的打包逻辑保留,避免改动网络 max_numeric_dim=58
     # 导致旧 checkpoint 不兼容。下次重训时一起删:
     #   - 本字段
-    #   - bank_assembler.py skada_prior_axes 去掉这一维
+    #   - token_bank_builder.py skada_prior_axes 去掉这一维
     #   - network_config.py max_numeric_dim 58→57
     synergy_prior: float = 0.0         # [-1, 1] 与当前 deck 的 synergy 提升
 

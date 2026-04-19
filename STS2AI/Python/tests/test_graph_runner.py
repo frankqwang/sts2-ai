@@ -28,8 +28,8 @@ pytestmark = pytest.mark.skipif(
 
 def _build_sample_banks():
     """产一个有代表性的 combat banks 作为 capture 输入。"""
-    from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
-    from networkV2.s2_config.mechanism_registry import MechanismRegistry
+    from networkV2.s2_rules.encounter_registry import EncounterRuleRegistry
+    from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 
     obs = {
         "state_type": "monster",
@@ -51,12 +51,12 @@ def _build_sample_banks():
         {"action": "play_card", "hand_index": i, "target_id": j}
         for i in range(10) for j in range(4)
     ] + [{"action": "end_turn"}]
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     with mock.patch(
-        "networkV2.s4_compiler.feature_compiler.get_registry",
-        return_value=MechanismRegistry(),
+        "networkV2.s4_featurization.decision_featurizer.get_encounter_registry",
+        return_value=EncounterRuleRegistry(),
     ):
-        return compiler.compile(
+        return featurizer.featurize(
             obs, legal, encounter_id="jaw_worm_easy", room_type="monster",
         )
 
@@ -97,11 +97,11 @@ def test_shape_signature_stable():
 
 def test_shape_signature_distinguishes_different_banks():
     """不同 hand/enemy 数必须产不同 signature。"""
-    from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
-    from networkV2.s2_config.mechanism_registry import MechanismRegistry
+    from networkV2.s2_rules.encounter_registry import EncounterRuleRegistry
+    from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
     from networkV2.s5_net.graph_runner import BankShapeSignature
 
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     obs_base = {
         "state_type": "monster",
         "player": {"hp": 60, "max_hp": 80, "energy": 3, "max_energy": 3,
@@ -120,11 +120,11 @@ def test_shape_signature_distinguishes_different_banks():
     legal = [{"action": "end_turn"}]
 
     with mock.patch(
-        "networkV2.s4_compiler.feature_compiler.get_registry",
-        return_value=MechanismRegistry(),
+        "networkV2.s4_featurization.decision_featurizer.get_encounter_registry",
+        return_value=EncounterRuleRegistry(),
     ):
-        banks_5 = compiler.compile(obs_5hand, legal, encounter_id="x", room_type="monster")
-        banks_10 = compiler.compile(obs_10hand, legal, encounter_id="x", room_type="monster")
+        banks_5 = featurizer.featurize(obs_5hand, legal, encounter_id="x", room_type="monster")
+        banks_10 = featurizer.featurize(obs_10hand, legal, encounter_id="x", room_type="monster")
     sig_5 = BankShapeSignature.from_banks(banks_5)
     sig_10 = BankShapeSignature.from_banks(banks_10)
     assert sig_5 != sig_10, "不同 hand 数应该产生不同 signature"
@@ -231,11 +231,11 @@ def test_graph_runner_decision_domain_mismatch_raises():
 
 def test_graph_runner_runtime_varlen_supported():
     """runtime 的 hand/action 变长应由内部 padding 吸收，不应因为 shape check 误报。"""
-    from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
-    from networkV2.s2_config.mechanism_registry import MechanismRegistry
+    from networkV2.s2_rules.encounter_registry import EncounterRuleRegistry
+    from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
     from networkV2.s5_net.graph_runner import GraphRunner
 
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     obs = {
         "state_type": "monster",
         "player": {
@@ -249,16 +249,16 @@ def test_graph_runner_runtime_varlen_supported():
     }
     legal = [{"action": "end_turn"}]
     with mock.patch(
-        "networkV2.s4_compiler.feature_compiler.get_registry",
-        return_value=MechanismRegistry(),
+        "networkV2.s4_featurization.decision_featurizer.get_encounter_registry",
+        return_value=EncounterRuleRegistry(),
     ):
-        banks_5 = compiler.compile(
+        banks_5 = featurizer.featurize(
             {**obs, "hand": [{"id": "STRIKE_IRONCLAD", "type": "ATTACK", "cost": 1, "can_play": True, "damage": 6}] * 5},
             legal,
             encounter_id="x",
             room_type="monster",
         )
-        banks_10 = compiler.compile(
+        banks_10 = featurizer.featurize(
             {**obs, "hand": [{"id": "STRIKE_IRONCLAD", "type": "ATTACK", "cost": 1, "can_play": True, "damage": 6}] * 10},
             legal,
             encounter_id="x",

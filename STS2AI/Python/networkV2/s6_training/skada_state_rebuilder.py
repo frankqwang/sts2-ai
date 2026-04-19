@@ -5,7 +5,7 @@
 / elites_seen / bosses_seen / total_hp_lost / room_history 等。
 
 在每个决策点(card_reward / relic_choice / campfire / shop / map),
-直接用 `to_banks_context(...)` 产出 `BankAssembler.assemble(...)` 期望的
+直接用 `to_banks_context(...)` 产出 `TokenBankBuilder.build(...)` 期望的
 PlayerRuntime / CardSemantics / RelicSemantics / PotionSemantics / RunBuildMemory,
 供 loader 进一步构造 TrainingSample。
 
@@ -25,7 +25,7 @@ from networkV2.s1_schema.entities import (
     PlayerRuntime, CardSemantics, RelicSemantics, PotionSemantics,
 )
 from networkV2.s1_schema.memory import RunBuildMemory
-from core.card_tags import card_feature_vector, NUM_FUNCTIONAL_TAGS
+from networkV2.s1_schema.card_tags import card_feature_vector, NUM_FUNCTIONAL_TAGS
 from networkV2.s6_training.skada_id_mapping import (
     normalize_card_id, normalize_relic_id, normalize_potion_id,
     is_known_card, is_known_relic,
@@ -93,7 +93,7 @@ def _card_semantics_from_id(card_id: str) -> CardSemantics:
     """从 card_id 查 CardSemantics(数据驱动,走 source_knowledge)。
 
     输入可以是任意大小写 / 带 "+" 后缀。输出 entity_id 保留原大小写 + "+"
-    (compatible with bank_assembler 的 id 比较)。
+    (compatible with token_bank_builder 的 id 比较)。
     """
     raw = str(card_id or "")
     base_lower, upg_count = normalize_card_id(raw)
@@ -200,7 +200,7 @@ def _aggregate_deck_profile(deck: list[str]) -> dict[str, float]:
 
 @dataclass
 class BanksContext:
-    """供 BankAssembler.assemble() 使用的打包上下文。"""
+    """供 TokenBankBuilder.build() 使用的打包上下文。"""
     player_rt: PlayerRuntime
     deck_cards: list[CardSemantics]
     relics: list[RelicSemantics]
@@ -428,7 +428,7 @@ class SkadaRunState:
     # ------------------------------------------------------------------
 
     def snapshot_banks_context(self) -> BanksContext:
-        """把当前状态打包成 BankAssembler.assemble() 需要的所有 Python 对象。"""
+        """把当前状态打包成 TokenBankBuilder.build() 需要的所有 Python 对象。"""
         player_rt = PlayerRuntime(
             hp=self.hp,
             max_hp=max(self.max_hp, 1),

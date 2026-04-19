@@ -55,7 +55,7 @@ class GameCatalog:
         self._sim_catalog_cache: dict | None = None
         self._game_catalog_cache: dict | None = None  # game_catalog API 缓存
         # Power 元数据（按 class_name 索引）：base_classes + is_debuff_hint
-        # 由 attach_sim 填充，bank_assembler 用来精确判定 semantic group / debuff
+        # 由 attach_sim 填充，token_bank_builder 用来精确判定 semantic group / debuff
         self._power_metadata_by_class: dict[str, dict] = {}
 
     def attach_sim(self, client: Any) -> None:

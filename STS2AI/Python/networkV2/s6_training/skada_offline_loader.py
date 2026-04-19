@@ -27,7 +27,7 @@ from typing import Any, Iterator
 
 from networkV2.s1_schema.actions import ActionCandidate
 from networkV2.s1_schema.token_banks import UnifiedTokenBanks
-from networkV2.s4_compiler.bank_assembler import BankAssembler
+from networkV2.s4_featurization.token_bank_builder import TokenBankBuilder
 from networkV2.s6_training.batch import TrainingSample
 from networkV2.s6_training.skada_state_rebuilder import (
     SkadaRunState, BanksContext, iter_timeline_with_state,
@@ -69,7 +69,7 @@ def _get_skada_priors():
 
 logger = logging.getLogger(__name__)
 
-_assembler = BankAssembler()
+_bank_builder = TokenBankBuilder()
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +182,7 @@ def _make_training_sample(
     if not candidates or chosen_index < 0 or chosen_index >= len(candidates):
         return None
     ctx = run_state.snapshot_banks_context()
-    banks = _assembler.assemble(
+    banks = _bank_builder.build(
         player_rt=ctx.player_rt,
         hand_cards_rt=[],
         enemies_rt=[],
@@ -427,7 +427,7 @@ def _build_campfire_sample(
       - choice 其他值 → 跳过(需要 relic-unlock 上下文才能正确建模,后续扩展)
 
     同时每个 option 加 event_kind 区分(SMITH=upgrade_card / HEAL=gain_hp),
-    让 bank_assembler 的 9 维 event_kind one-hot 把两个 option token 区分开。
+    让 token_bank_builder 的 9 维 event_kind one-hot 把两个 option token 区分开。
     """
     choice = str(floor_data.get("campfire_choice", "") or "").upper()
     # 只产 SMITH/HEAL 二分类 sample

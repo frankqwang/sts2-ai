@@ -5,7 +5,7 @@ RuntimeInstances: 实体"当前状态"，来源于 bridge 运行时数据。
 
 Buff 三级分层:
   Level 1 (通用 power): 存在 powers dict 里，如 strength/weak/vulnerable
-  Level 2 (特殊行为 power): 由 auto_modifier_rules 映射为 RuleModifier
+  Level 2 (特殊行为 power): 由 power_modifier_rules 映射为 RuleModifier
   Level 3 (boss 复杂机制): 由 mechanism_config 配置
 """
 

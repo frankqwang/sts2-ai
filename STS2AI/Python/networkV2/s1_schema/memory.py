@@ -96,7 +96,7 @@ class TurnPrefixMemory:
 
 # U4 修复：原 FightMode enum（RACE/STABILIZE/ATTRITION/BURST_PREP/UNKNOWN）和
 # `fight_mode` 字段是死通道——运行时没有任何写入路径，恒为 UNKNOWN。
-# memory_compiler.py 已经把它从 token encoding 里移除。现在彻底删掉避免误导后续开发。
+# memory_encoder.py 已经把它从 token encoding 里移除。现在彻底删掉避免误导后续开发。
 # 若后续需要 FightMode 分类，应从 HP 趋势/敌人残血/intent 等原始信号通过网络自学，
 # 不应再加显式分类字段。
 
