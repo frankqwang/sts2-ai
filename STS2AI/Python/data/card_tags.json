@@ -120,11 +120,11 @@
       "uncommon"
     ],
     "acrobatics": [
-      "common",
       "discard",
       "draw",
       "self_target",
-      "skill"
+      "skill",
+      "uncommon"
     ],
     "adaptive_strike": [
       "attack",
@@ -218,6 +218,7 @@
       "upgrade_card"
     ],
     "arsenal": [
+      "innate",
       "power",
       "rare",
       "self_target"
@@ -346,10 +347,9 @@
       "status"
     ],
     "begone": [
-      "attack",
       "common",
-      "damage",
-      "single_target",
+      "self_target",
+      "skill",
       "upgrade_card"
     ],
     "believe_in_you": [
@@ -385,10 +385,11 @@
       "skill"
     ],
     "blade_of_ink": [
+      "draw",
+      "generate_card",
       "rare",
       "self_target",
-      "skill",
-      "strength"
+      "skill"
     ],
     "blight_strike": [
       "attack",
@@ -742,9 +743,9 @@
     ],
     "colossus": [
       "block",
-      "rare",
       "self_target",
-      "skill"
+      "skill",
+      "uncommon"
     ],
     "comet": [
       "attack",
@@ -1066,7 +1067,8 @@
       "uncommon"
     ],
     "deprecated_card": [
-      "unplayable"
+      "draw",
+      "exhaust"
     ],
     "devastate": [
       "attack",
@@ -1080,6 +1082,7 @@
       "self_target"
     ],
     "dirge": [
+      "exhaust",
       "self_target",
       "skill",
       "summon",
@@ -1119,7 +1122,8 @@
       "single_target",
       "skill",
       "strength",
-      "uncommon"
+      "uncommon",
+      "vulnerable"
     ],
     "double_energy": [
       "energy_gen",
@@ -1459,14 +1463,15 @@
       "strike_tag"
     ],
     "follow_through": [
-      "aoe",
       "attack",
+      "common",
       "damage",
-      "uncommon",
-      "weak"
+      "multi_hit",
+      "single_target"
     ],
     "folly": [
       "curse",
+      "ethereal",
       "innate",
       "unplayable"
     ],
@@ -1642,8 +1647,7 @@
       "common",
       "draw",
       "self_target",
-      "skill",
-      "upgrade_card"
+      "skill"
     ],
     "greed": [
       "curse",
@@ -1813,6 +1817,7 @@
     ],
     "hotfix": [
       "common",
+      "exhaust",
       "self_target",
       "skill"
     ],
@@ -1825,6 +1830,7 @@
     ],
     "huddle_up": [
       "draw",
+      "exhaust",
       "skill",
       "uncommon"
     ],
@@ -2323,6 +2329,13 @@
       "rare",
       "self_target"
     ],
+    "not_yet": [
+      "exhaust",
+      "heal",
+      "rare",
+      "self_target",
+      "skill"
+    ],
     "noxious_fumes": [
       "poison",
       "power",
@@ -2794,8 +2807,7 @@
       "attack",
       "damage",
       "multi_hit",
-      "random_target",
-      "uncommon"
+      "random_target"
     ],
     "rocket_punch": [
       "attack",
@@ -2884,8 +2896,7 @@
       "ethereal",
       "rare",
       "self_target",
-      "skill",
-      "upgrade_card"
+      "skill"
     ],
     "second_wind": [
       "block",
@@ -3141,6 +3152,7 @@
       "uncommon"
     ],
     "speedster": [
+      "innate",
       "power",
       "self_target",
       "uncommon"
@@ -3159,7 +3171,8 @@
     "spite": [
       "attack",
       "damage",
-      "draw",
+      "multi_hit",
+      "repeat",
       "single_target",
       "uncommon"
     ],
@@ -3176,6 +3189,7 @@
     ],
     "spoils_of_battle": [
       "common",
+      "draw",
       "forge",
       "self_target",
       "skill"
@@ -3222,11 +3236,11 @@
       "uncommon"
     ],
     "stoke": [
-      "draw",
-      "exhaust",
+      "exhaust_other",
       "rare",
       "self_target",
-      "skill"
+      "skill",
+      "upgrade_card"
     ],
     "stomp": [
       "aoe",
@@ -3552,6 +3566,7 @@
     ],
     "tremble": [
       "common",
+      "exhaust",
       "single_target",
       "skill",
       "vulnerable"
@@ -3676,6 +3691,7 @@
       "unplayable"
     ],
     "void_form": [
+      "ethereal",
       "power",
       "rare",
       "self_target"

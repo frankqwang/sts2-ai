@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import random
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -22,8 +23,13 @@ from typing import Any
 import torch
 from torch.distributions import Categorical
 
-from networkV2.s3_state_tracker.combat_env_wrapper import CombatStateTracker
-from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+if __package__ in (None, ""):
+    _PYTHON_ROOT = Path(__file__).resolve().parents[2]
+    if str(_PYTHON_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PYTHON_ROOT))
+
+from networkV2.s3_temporal_state.combat_state_tracker import CombatStateTracker
+from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 from networkV2.s5_net.unified_net import UnifiedNet, UnifiedNetOutput
 from networkV2.s5_net.network_config import from_preset, NetworkConfig
 from networkV2.s6_training.batch import TrainingSample
@@ -49,9 +55,9 @@ from networkV2.s6_training.rewards import (
     combat_step_reward, combat_local_tactical_reward,
     shaped_reward, terminal_reward,
 )
-from env.full_run_env import BinaryBackedFullRunClient
-from env.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT
-from env.run_outcome_vocab import (
+from networkV2.s0_bridge.full_run_env import BinaryBackedFullRunClient
+from networkV2.s0_bridge.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT
+from networkV2.s1_schema.run_outcome_vocab import (
     is_victory_outcome, is_failure_outcome, normalize_run_outcome,
 )
 
@@ -220,7 +226,7 @@ def noncombat_entropy_nudge(chosen: dict, room_type: str) -> float:
 def run_full_episode(
     client: BinaryBackedFullRunClient,
     net: UnifiedNet | None,
-    compiler: CombatFeatureCompiler,
+    featurizer: DecisionFeaturizer,
     *,
     seed: str = "",
     max_steps: int = 800,
@@ -314,7 +320,7 @@ def run_full_episode(
         if is_combat:
             if not in_combat:
                 # P1-1 修复：sim 不返回 encounter_id 时，fallback 要用 registry 注册的
-                # 正式 encounter_id 格式（如 "frog_knight_normal"），否则 feature_compiler.py
+                # 正式 encounter_id 格式（如 "frog_knight_normal"），否则 decision_featurizer.py
                 # 查不到 mechanism config → mechanism/modifier bank 永远为空。
                 # 原 fallback 拼的是 monster-id 小写（"frog_knight" / "jaw_worm,fungi_beast"），
                 # 和 registry 的 "{monster}_{room_type}" 格式对不上。
@@ -329,8 +335,8 @@ def run_full_episode(
                     ]
                     monster_ids = [m for m in monster_ids if m]
                     # 从 registry 反查正式 encounter_id
-                    from networkV2.s2_config.mechanism_registry import get_registry
-                    eid_explicit = get_registry().find_encounter_id(monster_ids, rt) or ""
+                    from networkV2.s2_rules.encounter_registry import get_encounter_registry
+                    eid_explicit = get_encounter_registry().find_encounter_id(monster_ids, rt) or ""
                     # 兜底：若 registry 也查不到（encounter 没注册机制），保留
                     # sorted-monster-id 拼接作为诊断字符串（tracker 仍可当唯一标识用）
                     if not eid_explicit:
@@ -383,7 +389,7 @@ def run_full_episode(
             tracker.refresh_build_profile(state)
 
         cur_encounter_id = tracker.encounter_id if is_combat else ""
-        banks = compiler.compile(
+        banks = featurizer.featurize(
             state, legal,
             combat_memory=tracker.combat_memory if is_combat else None,
             turn_prefix=tracker.turn_prefix if is_combat else None,
@@ -796,7 +802,7 @@ def _collect_worker(
     长 trajectory 占空间，建议每 worker 只记 1-2 局/iter（采样代表）。
     greedy: eval 时传 True（argmax action），训练 rollout 保持 False（sample）。
     """
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     client = pool.get(worker_id)
     samples_out: list[TrainingSample] = []
     infos: list[dict] = []
@@ -804,7 +810,7 @@ def _collect_worker(
         try:
             rec_traj = bool(record_trajectory_every and ep_i % record_trajectory_every == 0)
             samples, info = run_full_episode(
-                client, net, compiler, seed=seed,
+                client, net, featurizer, seed=seed,
                 max_steps=max_steps,
                 record_trajectory=rec_traj,
                 greedy=greedy,
@@ -1058,7 +1064,7 @@ def train_full_run(args: argparse.Namespace) -> None:
         except Exception as e:
             logger.warning(f"Async helper client startup failed: {e}")
 
-    # ---- Attach sim 到 GAME_CATALOG：bank_assembler 的 power token 会用
+    # ---- Attach sim 到 GAME_CATALOG：token_bank_builder 的 power token 会用
     # game_catalog.powers[].base_classes / is_debuff_hint 精确判定 semantic group
     # 和 debuff，覆盖率 ~60% → ~95%+（fallback 到本地 heuristic）。
     try:

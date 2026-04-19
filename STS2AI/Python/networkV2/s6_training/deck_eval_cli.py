@@ -24,7 +24,7 @@ from networkV2.s5_net.unified_net import UnifiedNet
 from networkV2.s6_training.deck_eval import (
     evaluate_deck, baseline_act1_set, ironclad_starter_deck,
 )
-from env.combat_training_env import PipeBackedCombatTrainingClient
+from networkV2.s0_bridge.combat_training_env import PipeBackedCombatTrainingClient
 
 
 def main():

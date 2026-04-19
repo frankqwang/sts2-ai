@@ -2,7 +2,7 @@
 
 使用 networkV2 全套流水线：
   s0_bridge (ProtoPipeClient 或 PipeBackedCombatTrainingClient)
-  → s3_state_tracker → s4_compiler → s5_net → s6_training PPO
+  → s3_temporal_state → s4_featurization → s5_net → s6_training PPO
 
 用法:
   python -m networkV2.s6_training.train_combat_v2 \
@@ -26,8 +26,13 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from networkV2.s3_state_tracker.combat_env_wrapper import CombatStateTracker
-from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+if __package__ in (None, ""):
+    _PYTHON_ROOT = Path(__file__).resolve().parents[2]
+    if str(_PYTHON_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PYTHON_ROOT))
+
+from networkV2.s3_temporal_state.combat_state_tracker import CombatStateTracker
+from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 from networkV2.s5_net.combat_net import CombatNetV2, CombatNetOutput
 from networkV2.s6_training.batch import TrainingSample
 from networkV2.s6_training.ppo import CombatPPOTrainerV2, PPOConfig
@@ -41,13 +46,13 @@ from networkV2.s6_training.rollout_workers import (
     open_combat_v2_catalog_client,
 )
 
-from core.rl_reward_shaping import combat_step_reward, combat_local_tactical_reward
-from env.combat_training_env import (
+from networkV2.s6_training.rl_reward_shaping import combat_step_reward, combat_local_tactical_reward
+from networkV2.s0_bridge.combat_training_env import (
     PipeBackedCombatTrainingClient,
     adapt_combat_snapshot,
     build_combat_legal_actions,
 )
-from env.run_outcome_vocab import is_victory_outcome, is_failure_outcome
+from networkV2.s1_schema.run_outcome_vocab import is_victory_outcome, is_failure_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +184,7 @@ def sample_action_v2(
 def collect_combat_rollout(
     client: PipeBackedCombatTrainingClient,
     net: CombatNetV2 | None,
-    compiler: CombatFeatureCompiler,
+    featurizer: DecisionFeaturizer,
     tracker: CombatStateTracker,
     *,
     encounter_id: str,
@@ -204,7 +209,7 @@ def collect_combat_rollout(
         if not legal_actions:
             break
 
-        banks = compiler.compile(
+        banks = featurizer.featurize(
             state, legal_actions,
             combat_memory=tracker.combat_memory,
             turn_prefix=tracker.turn_prefix,
@@ -342,7 +347,7 @@ def train_v2(args: argparse.Namespace) -> None:
         mini_batch_size=args.mini_batch_size,
         max_numeric_dim=args.max_numeric_dim,
     ))
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     rollout_cfg = build_rollout_engine_config(
         args,
         max_numeric_dim=int(getattr(net.tokenizer, "max_numeric_dim", args.max_numeric_dim)),
@@ -416,7 +421,7 @@ def train_v2(args: argparse.Namespace) -> None:
                 tracker = CombatStateTracker()
                 try:
                     samples, info = collect_combat_rollout(
-                        client, net, compiler, tracker,
+                        client, net, featurizer, tracker,
                         encounter_id=task["encounter_id"],
                         room_type=task["room_type"],
                         build_spec=task.get("build_spec"),

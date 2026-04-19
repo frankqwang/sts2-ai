@@ -145,7 +145,7 @@ class CombatSession:
         dll_path: str | Path | None = None,
     ):
         # 延迟 import 避免循环 import
-        from env.headless_sim_runner import (
+        from networkV2.s0_bridge.headless_sim_runner import (
             DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT, start_headless_sim, stop_process,
         )
         self._repo_root = repo_root or DEFAULT_REPO_ROOT

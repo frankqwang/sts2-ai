@@ -19,7 +19,7 @@ def _prepare():
     """Build net + static buffers + sample banks."""
     from networkV2.s5_net.network_config import from_preset
     from networkV2.s5_net.unified_net import UnifiedNet
-    from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+    from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
     from networkV2.s5_net.tokenizer import alloc_static_bank_buffers
     from networkV2.s5_net.bank_max_spec import DEFAULT_MAX_SPEC
 
@@ -43,8 +43,8 @@ def _prepare():
     }
     legal = [{"action": "play_card", "hand_index": i, "target_id": j}
              for i in range(10) for j in range(4)] + [{"action": "end_turn"}]
-    compiler = CombatFeatureCompiler()
-    banks = compiler.compile(obs, legal, encounter_id="jaw_worm_easy",
+    featurizer = DecisionFeaturizer()
+    banks = featurizer.featurize(obs, legal, encounter_id="jaw_worm_easy",
                              room_type="monster")
 
     bank_names = [b.bank_name for b in banks.all_banks()

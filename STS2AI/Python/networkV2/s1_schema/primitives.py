@@ -54,7 +54,7 @@ class ModifierType(Enum):
 class SourceKind(Enum):
     """数据来源类型。"""
     CONFIG = auto()      # Level 3: 手工 mechanism_config
-    AUTO = auto()        # Level 2: AUTO_MODIFIER_RULES 自动映射
+    AUTO = auto()        # Level 2: POWER_MODIFIER_RULES 自动映射
     INFERRED = auto()    # 运行时推断
 
 

@@ -79,7 +79,7 @@ echo "  Sim: running (pid $SIM_PID)"
 # 7. Run parity test (no --auto-launch, we manage processes ourselves)
 echo "[7/7] Parity test..."
 cd "$REPO_ROOT/STS2AI/Python"
-python test_simulator_consistency.py \
+python -m networkV2.s7_diagnostics.test_simulator_consistency \
     --test parity \
     --baseline-backend godot-http --baseline-port $SPEC_PORT \
     --candidate-backend headless-pipe --candidate-port $SIM_PORT \

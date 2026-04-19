@@ -32,9 +32,9 @@ STS2AI/
 │   ├── networkV2/                   ★ 当前网络与训练主线
 │   │   ├── s0_bridge/               sim pipe client / proto codec
 │   │   ├── s1_schema/               数据结构（含 game_vocab.py）
-│   │   ├── s2_config/               mechanism_registry + auto_modifier_rules
-│   │   ├── s3_state_tracker/        状态追踪
-│   │   ├── s4_compiler/             feature_compiler / bank_assembler
+│   │   ├── s2_rules/                encounter_registry + power_modifier_rules
+│   │   ├── s3_temporal_state/       时序状态追踪
+│   │   ├── s4_featurization/        decision_featurizer / token_bank_builder
 │   │   ├── s5_net/                  UnifiedNet
 │   │   ├── s6_training/             train_full_run_v2 / combat_cotrainer / deck_eval
 │   │   ├── s7_diagnostics/          live_monitor / plot_win_rates / trajectory_analyzer

@@ -3,7 +3,7 @@
 
 和 V1 `demo_play.py` 的关系:
   - 共用 Godot 连接协议（FullRunClientLike via `create_full_run_client`）
-  - 替换 V1 推理（combat_network + fullrun_policy）为 V2 UnifiedNet + CombatFeatureCompiler
+  - 替换 V1 推理（combat_network + fullrun_policy）为 V2 UnifiedNet + DecisionFeaturizer
   - 流程跟 `train_full_run_v2.run_full_episode` 一致，只是 client 从训练 sim 换成 Godot
 
 用法（前提：Godot spectator 已在 port 15526 监听，或按 --base-url）:
@@ -27,14 +27,14 @@ from pathlib import Path
 import torch
 from torch.distributions import Categorical
 
-from networkV2.s3_state_tracker.combat_env_wrapper import CombatStateTracker
-from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+from networkV2.s3_temporal_state.combat_state_tracker import CombatStateTracker
+from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 from networkV2.s5_net.network_config import from_preset
 from networkV2.s5_net.unified_net import UnifiedNet
 from networkV2.s1_schema.encounter_vocab import encounter_to_index
 from networkV2.s1_schema.sim_catalog import GAME_CATALOG
 
-from env.full_run_env import create_full_run_client
+from networkV2.s0_bridge.full_run_env import create_full_run_client
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ def _detect_room_type(state: dict) -> str:
 def play_one_episode(
     client,
     net: UnifiedNet,
-    compiler: CombatFeatureCompiler,
+    featurizer: DecisionFeaturizer,
     *,
     character_id: str = "IRONCLAD",
     seed: str | None = None,
@@ -165,7 +165,7 @@ def play_one_episode(
             tracker.refresh_build_profile(state)
 
         cur_encounter_id = tracker.encounter_id if is_combat else ""
-        banks = compiler.compile(
+        banks = featurizer.featurize(
             state, legal,
             combat_memory=tracker.combat_memory if is_combat else None,
             turn_prefix=tracker.turn_prefix if is_combat else None,
@@ -335,7 +335,7 @@ def main():
     except Exception as e:
         logger.warning(f"GAME_CATALOG attach failed (some features may use sqlite fallback): {e}")
 
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
 
     # overlay
     overlay = OverlayWriter(Path(args.decision_overlay_file)) if args.decision_overlay_file else None
@@ -344,7 +344,7 @@ def main():
 
     # 5) 跑一把
     info = play_one_episode(
-        client, net, compiler,
+        client, net, featurizer,
         character_id=args.character_id,
         seed=args.seed,
         max_steps=args.max_steps,

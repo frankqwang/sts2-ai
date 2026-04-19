@@ -180,10 +180,10 @@ def test_noncombat_loss_masks_invalid_actions():
     assert abs(metrics["nc_approx_kl"]) < 1e-6
 
 
-def test_runtime_compiler_static_fallbacks_for_hand_keywords_and_piles():
-    from networkV2.s4_compiler.runtime_compiler import RuntimeCompiler
+def test_runtime_extractor_static_fallbacks_for_hand_keywords_and_piles():
+    from networkV2.s4_featurization.runtime_extractor import RuntimeExtractor
 
-    compiler = RuntimeCompiler()
+    extractor = RuntimeExtractor()
     obs = {
         "player": {
             "hp": 70,
@@ -205,7 +205,7 @@ def test_runtime_compiler_static_fallbacks_for_hand_keywords_and_piles():
         },
     }
 
-    _, hand, _, piles, _, _, _, _ = compiler.compile(obs)
+    _, hand, _, piles, _, _, _, _ = extractor.extract(obs)
     assert hand[0].exhaust is True
     assert hand[1].ethereal is True
 
@@ -216,10 +216,10 @@ def test_runtime_compiler_static_fallbacks_for_hand_keywords_and_piles():
     assert discard.skill_count >= 1
 
 
-def test_card_reward_compiler_claim_reward_uses_reward_items():
-    from networkV2.s4_compiler.noncombat.card_reward_compiler import CardRewardCompiler
+def test_card_reward_option_builder_claim_reward_uses_reward_items():
+    from networkV2.s4_featurization.noncombat.card_reward_options import CardRewardOptionBuilder
 
-    compiler = CardRewardCompiler()
+    builder = CardRewardOptionBuilder()
     obs = {
         "rewards": {
             "items": [
@@ -227,7 +227,7 @@ def test_card_reward_compiler_claim_reward_uses_reward_items():
             ],
         },
     }
-    candidates = compiler.compile(
+    candidates = builder.build(
         obs,
         [{"action": "claim_reward", "index": 0, "label": "25 Gold"}],
     )
@@ -240,10 +240,10 @@ def test_card_reward_compiler_claim_reward_uses_reward_items():
     assert cand.can_afford == 1.0
 
 
-def test_feature_compiler_routes_treasure_and_relic_select_to_selection():
-    from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+def test_decision_featurizer_routes_treasure_and_relic_select_to_selection():
+    from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     base_player = {
         "hp": 70,
         "max_hp": 80,
@@ -255,7 +255,7 @@ def test_feature_compiler_routes_treasure_and_relic_select_to_selection():
         "potions": [],
     }
 
-    treasure_banks = compiler.compile(
+    treasure_banks = featurizer.featurize(
         {
             "state_type": "treasure",
             "player": dict(base_player),
@@ -264,7 +264,7 @@ def test_feature_compiler_routes_treasure_and_relic_select_to_selection():
         [{"action": "claim_treasure_relic", "index": 0, "label": "burning_blood"}],
         room_type="treasure",
     )
-    relic_banks = compiler.compile(
+    relic_banks = featurizer.featurize(
         {
             "state_type": "relic_select",
             "player": dict(base_player),
