@@ -45,6 +45,8 @@ TK_HAND_CARD = "hand_card"
 TK_ENEMY_CORE = "enemy_core"
 TK_ENEMY_INTENT = "enemy_intent"
 TK_PILE_SUMMARY = "pile_summary"
+TK_DRAW_DIST = "draw_dist"
+TK_DRAW_HORIZON = "draw_horizon"
 
 # --- combat: mechanism_bank ---
 TK_MECHANISM = "mechanism"
@@ -88,6 +90,7 @@ ALL_TOKEN_TYPES = [
     TK_COMBAT_FORECAST,
     # combat banks
     TK_PLAYER, TK_HAND_CARD, TK_ENEMY_CORE, TK_ENEMY_INTENT, TK_PILE_SUMMARY,
+    TK_DRAW_DIST, TK_DRAW_HORIZON,
     TK_MECHANISM,
     TK_MODIFIER,
     TK_POWER_INSTANCE,
@@ -117,6 +120,7 @@ TOKEN_TIME_SCALE = {
     # combat - fast
     TK_PLAYER: "fast", TK_HAND_CARD: "fast",
     TK_ENEMY_CORE: "fast", TK_ENEMY_INTENT: "fast", TK_PILE_SUMMARY: "fast",
+    TK_DRAW_DIST: "fast", TK_DRAW_HORIZON: "fast",
     TK_PLAYED_ACTION: "fast", TK_TURN_SUMMARY: "fast",
     # combat - medium
     TK_MECHANISM: "medium", TK_MODIFIER: "medium", TK_COMBAT_SUMMARY: "medium",

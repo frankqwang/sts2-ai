@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import math
+
 from networkV2.s1_schema.entities import (
     PlayerRuntime, HandCardRuntime, EnemyRuntime, PileSummary,
     CardSemantics, RelicSemantics, PotionSemantics,
@@ -18,7 +20,7 @@ from networkV2.s1_schema.primitives import MechanismType, ModifierType, Modifier
 from networkV2.s1_schema.token_banks import (
     Token, TokenBank, SharedWorldBanks, CombatBanks, UnifiedTokenBanks,
     TK_PLAYER, TK_HAND_CARD, TK_ENEMY_CORE, TK_ENEMY_INTENT,
-    TK_PILE_SUMMARY, TK_MECHANISM, TK_MODIFIER,
+    TK_PILE_SUMMARY, TK_DRAW_DIST, TK_DRAW_HORIZON, TK_MECHANISM, TK_MODIFIER,
     TK_POWER_INSTANCE,
     TK_PLAYED_ACTION, TK_TURN_SUMMARY, TK_COMBAT_SUMMARY,
     TK_BUILD_PROFILE, TK_DECK_CARD, TK_RELIC, TK_POTION, TK_OBJECTIVE,
@@ -29,11 +31,12 @@ from networkV2.s1_schema.game_vocab import (
     power_semantic_group_onehot, power_class_idx_normalized,
     is_debuff_heuristic, N_POWER_SEMANTIC_GROUPS,
 )
+from networkV2.s1_schema.card_semantic_catalog import CARD_SEMANTICS
 from networkV2.s1_schema.sim_catalog import GAME_CATALOG
 from networkV2.s4_compiler.mechanism_compiler import ActiveMechanism
 from networkV2.s4_compiler.memory_compiler import MemoryCompiler
 from core.relic_rules import relic_feature_vector, potion_feature_vector
-from core.card_tags import card_feature_vector, NUM_FUNCTIONAL_TAGS
+from core.card_tags import FUNCTIONAL_TAGS, NUM_FUNCTIONAL_TAGS
 
 
 # 归一化常量
@@ -47,7 +50,7 @@ _COST = 5.0
 def _compute_combo_signals(
     c: HandCardRuntime,
     player: PlayerRuntime | None,
-    piles_by_type: dict[str, PileSummary] | None,
+    draw_ctx: dict[str, object] | None,
 ) -> dict[str, float]:
     """根据手牌 + 玩家 + 牌堆 派生组合/牌序信号。
 
@@ -65,6 +68,7 @@ def _compute_combo_signals(
       pile_after_draw_attack_ratio — draw pile 中 attack 占比
     """
     # is_buff_provider
+    snap = CARD_SEMANTICS.get(c.card_id)
     is_buff_provider = float(
         c.card_type == "power"
         or (c.card_type == "skill" and c.damage_est == 0
@@ -79,13 +83,21 @@ def _compute_combo_signals(
             if str(k).lower() == "strength":
                 strength = int(v)
                 break
-        benefits_from_strength = min(c.damage_est / _DMG, 1.0) * min(strength / 5.0, 1.0)
+        synergy_scale = 1.0
+        if snap.has_functional_tag("multi_hit"):
+            synergy_scale += 0.25
+        if snap.has_functional_tag("aoe"):
+            synergy_scale += 0.10
+        if snap.has_functional_tag("x_cost"):
+            synergy_scale += 0.15
+        base_synergy = min((c.damage_est / _DMG) * synergy_scale, 1.0)
+        benefits_from_strength = base_synergy * min(strength / 5.0, 1.0)
         if strength == 0:
-            benefits_from_strength = 0.3 * min(c.damage_est / _DMG, 1.0)
+            benefits_from_strength = 0.3 * base_synergy
     else:
         benefits_from_strength = 0.0
 
-    is_card_draw = float(c.draw_est > 0)
+    is_card_draw = float(c.draw_est > 0 or snap.has_functional_tag("draw"))
 
     # actions_left_at_cost
     if not c.can_play:
@@ -97,26 +109,11 @@ def _compute_combo_signals(
     else:
         actions_left = 0.0
 
-    # is_discard_card：这张牌打出后会 discard 自己或他牌
-    # 通用特征：keywords 含 "exhaust" 或 card_type "skill" 且 damage=block=draw=0
-    # 实际更精确的是 card.commands_json 含 "Discard"，但那要从 sqlite 查。
-    # 退一步：用 card.keywords（runtime 提供的）看是否含 discard-like 字样。
-    keywords_lower = [str(k).lower() for k in (c.keywords or [])]
-    is_discard_card = float(any(
-        "discard" in kw or "exhaust" in kw
-        for kw in keywords_lower
-    ))
+    is_discard_card = float(snap.has_functional_tag("discard"))
 
-    # pile_after_draw_attack_ratio
-    if piles_by_type and "draw" in piles_by_type:
-        draw_pile = piles_by_type["draw"]
-        if draw_pile.size > 0:
-            pile_attack_ratio = draw_pile.attack_ratio
-        else:
-            disc = piles_by_type.get("discard")
-            pile_attack_ratio = disc.attack_ratio if disc and disc.size > 0 else 0.0
-    else:
-        pile_attack_ratio = 0.0
+    horizon_key = "next4" if is_card_draw > 0 else "next2"
+    horizon = (draw_ctx or {}).get(horizon_key) or {}
+    pile_attack_ratio = float(horizon.get("attack_ratio", 0.0))
 
     return {
         "is_buff_provider": is_buff_provider,
@@ -230,7 +227,7 @@ class BankAssembler:
                 float(card.rarity == "common"),
                 float(card.base_cost == 0),
             ]
-            semantic = card_feature_vector(card.entity_id)  # NUM_FUNCTIONAL_TAGS 维
+            semantic = list(CARD_SEMANTICS.get(card.entity_id).functional_tag_vec)
             shared.build_bank.add(Token(
                 numeric=coarse + semantic,
                 token_type=TK_DECK_CARD,
@@ -409,11 +406,12 @@ class BankAssembler:
 
         # piles 按 type 索引，便于 _hand_card_token 计算 combo signals
         piles_by_type = {p.pile_type: p for p in piles}
+        draw_ctx = self._build_draw_context(piles_by_type)
 
         # --- board_bank ---
         cb.board_bank.add(self._player_token(player_rt, room_type))
         for i, card in enumerate(hand_cards):
-            cb.board_bank.add(self._hand_card_token(card, i, player_rt, piles_by_type))
+            cb.board_bank.add(self._hand_card_token(card, i, player_rt, draw_ctx))
         for i, enemy in enumerate(enemies):
             cb.board_bank.add(self._enemy_core_token(enemy, i))
             # intent token 也带 owner snapshot，让网络知道"这个 intent 来自哪只怪"
@@ -450,6 +448,10 @@ class BankAssembler:
                 owner_id=pile.pile_type,
                 order=i,
             ))
+        for order, pile_name in enumerate(("draw", "discard", "exhaust"), start=len(piles)):
+            cb.board_bank.add(self._draw_dist_token(pile_name, draw_ctx, order))
+        for order, horizon_name in enumerate(("next2", "next4", "post_shuffle"), start=len(piles) + 3):
+            cb.board_bank.add(self._draw_horizon_token(horizon_name, draw_ctx, order))
 
         # --- mechanism_bank ---
         for i, mech in enumerate(mechanisms):
@@ -661,7 +663,7 @@ class BankAssembler:
         c: HandCardRuntime,
         order: int,
         player: PlayerRuntime | None = None,
-        piles_by_type: dict[str, PileSummary] | None = None,
+        draw_ctx: dict[str, object] | None = None,
     ) -> Token:
         # target_type one-hot（常见值）
         tt = c.target_type
@@ -679,7 +681,7 @@ class BankAssembler:
         # ---- Combo / sequencing signals (新增 6 维) ----
         # 修组合/牌序学习的关键派生特征。原 hand_card token 没这些，网络
         # 只能从 attention 间接挖关系，对 buff→damage 链路学得很慢。
-        combo = _compute_combo_signals(c, player, piles_by_type)
+        combo = _compute_combo_signals(c, player, draw_ctx)
 
         return Token(
             numeric=[
@@ -703,6 +705,183 @@ class BankAssembler:
                 combo["pile_after_draw_attack_ratio"],
             ],
             token_type=TK_HAND_CARD, owner_id=c.card_id, order=order,
+        )
+
+    @staticmethod
+    def _pile_or_empty(
+        piles_by_type: dict[str, PileSummary],
+        pile_type: str,
+    ) -> PileSummary:
+        return piles_by_type.get(pile_type, PileSummary(pile_type=pile_type))
+
+    @staticmethod
+    def _no_tag_probability(total_cards: int, tagged_cards: int, draws: int) -> float:
+        draws = max(int(draws), 0)
+        total_cards = max(int(total_cards), 0)
+        tagged_cards = max(int(tagged_cards), 0)
+        if draws <= 0 or total_cards <= 0:
+            return 1.0
+        draws = min(draws, total_cards)
+        untagged = max(total_cards - tagged_cards, 0)
+        if tagged_cards <= 0:
+            return 1.0
+        if draws > untagged:
+            return 0.0
+        return math.comb(untagged, draws) / max(math.comb(total_cards, draws), 1)
+
+    def _card_snaps(self, card_ids: list[str]) -> list:
+        return [snap for cid in card_ids if (snap := CARD_SEMANTICS.get(cid)).card_id]
+
+    def _mean_cost(self, card_ids: list[str]) -> float:
+        snaps = self._card_snaps(card_ids)
+        if not snaps:
+            return 0.0
+        return sum(max(int(s.base_cost), 0) for s in snaps) / len(snaps)
+
+    def _mean_attack_ratio(self, card_ids: list[str]) -> float:
+        snaps = self._card_snaps(card_ids)
+        if not snaps:
+            return 0.0
+        return sum(1.0 for s in snaps if s.card_type == "attack") / len(snaps)
+
+    def _mean_zero_cost_density(self, card_ids: list[str]) -> float:
+        snaps = self._card_snaps(card_ids)
+        if not snaps:
+            return 0.0
+        return sum(1.0 for s in snaps if int(s.base_cost) == 0) / len(snaps)
+
+    def _tagged_card_count(self, card_ids: list[str], tag: str) -> int:
+        return sum(1 for snap in self._card_snaps(card_ids) if snap.has_functional_tag(tag))
+
+    def _weighted_horizon_scalar(
+        self,
+        draw_ids: list[str],
+        discard_ids: list[str],
+        horizon: int,
+        getter,
+    ) -> float:
+        draw_take = min(max(horizon, 0), len(draw_ids))
+        discard_take = min(max(horizon - draw_take, 0), len(discard_ids))
+        total_take = draw_take + discard_take
+        if total_take <= 0:
+            return 0.0
+        acc = 0.0
+        if draw_take > 0:
+            acc += draw_take * getter(draw_ids)
+        if discard_take > 0:
+            acc += discard_take * getter(discard_ids)
+        return acc / total_take
+
+    def _horizon_tag_probabilities(
+        self,
+        draw_ids: list[str],
+        discard_ids: list[str],
+        horizon: int,
+    ) -> list[float]:
+        draw_take = min(max(horizon, 0), len(draw_ids))
+        discard_take = min(max(horizon - draw_take, 0), len(discard_ids))
+        probs: list[float] = []
+        for tag in FUNCTIONAL_TAGS:
+            draw_no = self._no_tag_probability(len(draw_ids), self._tagged_card_count(draw_ids, tag), draw_take)
+            discard_no = self._no_tag_probability(
+                len(discard_ids),
+                self._tagged_card_count(discard_ids, tag),
+                discard_take,
+            )
+            probs.append(1.0 - (draw_no * discard_no))
+        return probs
+
+    def _post_shuffle_tag_probabilities(self, discard_ids: list[str], horizon: int = 4) -> list[float]:
+        draws = min(max(horizon, 0), len(discard_ids))
+        probs: list[float] = []
+        for tag in FUNCTIONAL_TAGS:
+            no_tag = self._no_tag_probability(len(discard_ids), self._tagged_card_count(discard_ids, tag), draws)
+            probs.append(1.0 - no_tag)
+        return probs
+
+    def _build_draw_context(self, piles_by_type: dict[str, PileSummary]) -> dict[str, object]:
+        draw = self._pile_or_empty(piles_by_type, "draw")
+        discard = self._pile_or_empty(piles_by_type, "discard")
+        exhaust = self._pile_or_empty(piles_by_type, "exhaust")
+        draw_ids = list(draw.card_ids)
+        discard_ids = list(discard.card_ids)
+        exhaust_ids = list(exhaust.card_ids)
+
+        ctx: dict[str, object] = {
+            "draw": {
+                "pile": draw,
+                "mean_vec": list(CARD_SEMANTICS.mean_functional_tag_vec(draw_ids)),
+            },
+            "discard": {
+                "pile": discard,
+                "mean_vec": list(CARD_SEMANTICS.mean_functional_tag_vec(discard_ids)),
+            },
+            "exhaust": {
+                "pile": exhaust,
+                "mean_vec": list(CARD_SEMANTICS.mean_functional_tag_vec(exhaust_ids)),
+            },
+        }
+        for horizon_name, horizon in (("next2", 2), ("next4", 4)):
+            draw_take = min(horizon, len(draw_ids))
+            discard_take = min(max(horizon - draw_take, 0), len(discard_ids))
+            ctx[horizon_name] = {
+                "tag_probs": self._horizon_tag_probabilities(draw_ids, discard_ids, horizon),
+                "reshuffle_prob": 1.0 if discard_take > 0 else 0.0,
+                "attack_ratio": self._weighted_horizon_scalar(draw_ids, discard_ids, horizon, self._mean_attack_ratio),
+                "zero_cost_density": self._weighted_horizon_scalar(draw_ids, discard_ids, horizon, self._mean_zero_cost_density),
+                "mean_cost": self._weighted_horizon_scalar(draw_ids, discard_ids, horizon, self._mean_cost),
+                "draw_take": draw_take / max(horizon, 1),
+                "discard_take": discard_take / max(horizon, 1),
+            }
+        ctx["post_shuffle"] = {
+            "tag_probs": self._post_shuffle_tag_probabilities(discard_ids, horizon=4),
+            "reshuffle_prob": 1.0 if discard.size > 0 else 0.0,
+            "attack_ratio": self._mean_attack_ratio(discard_ids),
+            "zero_cost_density": self._mean_zero_cost_density(discard_ids),
+            "mean_cost": self._mean_cost(discard_ids),
+            "draw_take": 0.0,
+            "discard_take": 1.0 if discard.size > 0 else 0.0,
+        }
+        return ctx
+
+    def _draw_dist_token(self, pile_name: str, draw_ctx: dict[str, object], order: int) -> Token:
+        pile_info = draw_ctx.get(pile_name) or {}
+        pile = pile_info.get("pile") or PileSummary(pile_type=pile_name)
+        mean_vec = pile_info.get("mean_vec") or [0.0] * NUM_FUNCTIONAL_TAGS
+        return Token(
+            numeric=[
+                pile.size / 30.0,
+                pile.attack_ratio,
+                pile.skill_ratio,
+                pile.power_count / max(pile.size, 1),
+                pile.zero_cost_density,
+                pile.reshuffle_proximity,
+                float(pile_name == "draw"),
+                float(pile_name == "discard"),
+                float(pile_name == "exhaust"),
+                *mean_vec,
+            ],
+            token_type=TK_DRAW_DIST,
+            owner_id=pile_name,
+            order=order,
+        )
+
+    def _draw_horizon_token(self, horizon_name: str, draw_ctx: dict[str, object], order: int) -> Token:
+        horizon = draw_ctx.get(horizon_name) or {}
+        tag_probs = horizon.get("tag_probs") or [0.0] * NUM_FUNCTIONAL_TAGS
+        return Token(
+            numeric=[
+                *tag_probs,
+                float(horizon.get("reshuffle_prob", 0.0)),
+                float(horizon.get("attack_ratio", 0.0)),
+                float(horizon.get("zero_cost_density", 0.0)),
+                float(horizon.get("mean_cost", 0.0)) / _COST,
+                float(horizon.get("draw_take", 0.0)),
+                float(horizon.get("discard_take", 0.0)),
+            ],
+            token_type=TK_DRAW_HORIZON,
+            owner_id=horizon_name,
+            order=order,
         )
 
     def _enemy_core_token(self, e: EnemyRuntime, order: int) -> Token:

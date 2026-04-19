@@ -64,11 +64,9 @@ class LossConfig:
     survival_coef: float = 0.5
     tempo_coef: float = 0.3
     leaf_coef: float = 0.2
-    # turn_damage_lookahead: combo/牌序学习的关键 head；
-    # 【暂禁用】BC 未监督此 head,RL 中 softplus 输出放飞到 1e7 级,拖爆 total_loss。
-    # 后续若要重启,需要:(1) BC 阶段加 target 监督;(2) target 除 max_hp normalize;
-    # (3) pred 加 clamp(比如 sigmoid * max_hp)。
-    turn_damage_coef: float = 0.0
+    # 稀疏的 turn-level lookahead heads：只在有效子集上归一，避免被整 batch 稀释。
+    turn_damage_coef: float = 0.05
+    turn_block_coef: float = 0.05
     # leaf_evaluator 其余 3 个 head 的权重（小：避免盖过主 head，同时消除"白训"）
     transition_risk_coef: float = 0.1
     survival_margin_coef: float = 0.1
@@ -82,9 +80,21 @@ class LossConfig:
 class CombatLoss(nn.Module):
     """战斗综合 loss：PPO + 4 value heads + leaf + entropy。"""
 
-    def __init__(self, config: LossConfig | None = None):
+    def __init__(self, config: LossConfig | None = None, *, ppo_value_head: str = "fight_win"):
         super().__init__()
         self.cfg = config or LossConfig()
+        if ppo_value_head not in {"fight_win", "run_value"}:
+            raise ValueError(f"unknown ppo_value_head={ppo_value_head}")
+        self.ppo_value_head = ppo_value_head
+
+    @staticmethod
+    def _weighted_valid_mean(
+        values: torch.Tensor,
+        weights: torch.Tensor,
+        valid_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        valid_w = weights * valid_mask
+        return (values * valid_w).sum() / valid_w.sum().clamp(min=1e-8)
 
     def forward(
         self,
@@ -95,12 +105,14 @@ class CombatLoss(nn.Module):
         returns: torch.Tensor,                  # (B,)
         *,
         fight_win_targets: torch.Tensor | None = None,
+        run_win_targets: torch.Tensor | None = None,
         hp_loss_targets: torch.Tensor | None = None,
         survival_targets: torch.Tensor | None = None,
         leaf_targets: torch.Tensor | None = None,
         transition_risk_targets: torch.Tensor | None = None,
         resource_retention_targets: torch.Tensor | None = None,
         turn_damage_targets: torch.Tensor | None = None,
+        turn_block_targets: torch.Tensor | None = None,
         sample_weights: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, float]]:
 
@@ -130,7 +142,7 @@ class CombatLoss(nn.Module):
         # 关键 bug 修复：当 normalize_adv=False 时假设外部已全局归一化，loss 内不再
         # 重算——否则每 minibatch mean(adv)=0，ratio≈1 时 policy_loss 恒为 0。
         if self.cfg.normalize_adv:
-            adv_std = advantages.std()
+            adv_std = advantages.std(unbiased=False)
             adv = (advantages - advantages.mean()) / (adv_std + 1e-8) if adv_std > 1e-8 else advantages * 0.0
         else:
             adv = advantages
@@ -153,19 +165,55 @@ class CombatLoss(nn.Module):
 
         # ---- Value losses (4 heads, 全部接监督) ----
 
-        # fight_win: MSE
-        #   - fight_win_targets >= 0 : 显式监督（终局 0/1 硬标签）
-        #   - fight_win_targets <  0 : 哨值 → 改用 returns (GAE return) 作目标
-        # 这样非终局 step 不再以网络旧 value 为目标（避免自蒸馏）
         returns_clamped = returns.clamp(0, 1)
-        if fight_win_targets is None:
-            win_t = returns_clamped
+        if self.ppo_value_head == "fight_win":
+            if fight_win_targets is None:
+                ppo_value_t = returns_clamped
+            else:
+                ppo_value_t = torch.where(
+                    fight_win_targets >= 0.0,
+                    fight_win_targets.clamp(0, 1),
+                    returns_clamped,
+                )
+            ppo_value_pred = output.values.fight_win
+            vl_run = torch.tensor(0.0, device=device)
+            aux_win = torch.tensor(0.0, device=device)
         else:
-            win_t = torch.where(fight_win_targets >= 0.0, fight_win_targets.clamp(0, 1), returns_clamped)
-        _check_nan("head.fight_win_pred", output.values.fight_win)
-        _check_nan("head.fight_win_target", win_t)
-        vl_win = ((output.values.fight_win - win_t).pow(2) * w).sum()
+            if run_win_targets is None:
+                ppo_value_t = returns_clamped
+            else:
+                ppo_value_t = torch.where(
+                    run_win_targets >= 0.0,
+                    run_win_targets.clamp(0, 1),
+                    returns_clamped,
+                )
+            ppo_value_pred = output.values.run_value
+            valid_win = (
+                (fight_win_targets >= 0.0).float()
+                if fight_win_targets is not None
+                else torch.zeros_like(returns_clamped)
+            )
+            _check_nan("head.fight_win_pred", output.values.fight_win)
+            if fight_win_targets is not None:
+                _check_nan("head.fight_win_target", fight_win_targets)
+            aux_win = torch.tensor(0.0, device=device)
+            if valid_win.sum() > 0:
+                aux_win = self._weighted_valid_mean(
+                    (output.values.fight_win - fight_win_targets.clamp(0, 1)).pow(2),
+                    w,
+                    valid_win,
+                )
+            vl_run = ((output.values.run_value - ppo_value_t).pow(2) * w).sum()
+
+        _check_nan(f"head.{self.ppo_value_head}_pred", ppo_value_pred)
+        _check_nan(f"head.{self.ppo_value_head}_target", ppo_value_t)
+        vl_ppo = ((ppo_value_pred - ppo_value_t).pow(2) * w).sum()
+        vl_win = vl_ppo if self.ppo_value_head == "fight_win" else aux_win
+        if self.ppo_value_head != "run_value":
+            vl_run = torch.tensor(0.0, device=device)
         metrics["vl_fight_win"] = vl_win.item()
+        metrics["vl_run_value"] = vl_run.item()
+        metrics["vl_ppo_value"] = vl_ppo.item()
 
         # hp_loss: smooth L1
         vl_hp = torch.tensor(0.0, device=device)
@@ -204,33 +252,51 @@ class CombatLoss(nn.Module):
                 td_pred = output.values.turn_damage_lookahead
                 td_tgt = turn_damage_targets.clamp(min=0.0)
                 td_per = F.smooth_l1_loss(td_pred, td_tgt, reduction="none")
-                valid_w = w * valid_mask
-                vl_td = (td_per * valid_w).sum() / valid_w.sum().clamp(min=1e-8)
+                vl_td = self._weighted_valid_mean(td_per, w, valid_mask)
         metrics["vl_turn_damage"] = vl_td.item()
+
+        vl_tb = torch.tensor(0.0, device=device)
+        if turn_block_targets is not None:
+            valid_mask = (turn_block_targets >= 0.0).float()
+            if valid_mask.sum() > 0:
+                tb_pred = output.values.turn_block_lookahead
+                tb_tgt = turn_block_targets.clamp(min=0.0)
+                tb_per = F.smooth_l1_loss(tb_pred, tb_tgt, reduction="none")
+                vl_tb = self._weighted_valid_mean(tb_per, w, valid_mask)
+        metrics["vl_turn_block"] = vl_tb.item()
 
         # Per-head safety clamp：防单个 head 的极值 target 让 value_loss 爆 10^5+
         # long6 iter 27/29/30 观察到 vl=199175，无 NaN warning →
         # 某个 target 数值极大(not inf)，梯度反传后即便 grad-clip 也污染 policy。
         # 对每 head 独立 clamp：合理上界的最大 loss 都只到几十。
+        vl_ppo_c  = vl_ppo.clamp(max=10.0)
         vl_win_c  = vl_win.clamp(max=10.0)
+        vl_run_c  = vl_run.clamp(max=10.0)
         vl_hp_c   = vl_hp.clamp(max=1000.0)    # smooth_l1 on [0,80] target 最多 ~80
         vl_surv_c = vl_surv.clamp(max=10.0)     # [0,1] 最大 1
         vl_tempo_c = vl_tempo.clamp(max=10.0)   # [-1,1] 最大 4
         vl_td_c   = vl_td.clamp(max=1000.0)     # smooth_l1 on 0-300 最大 ~300
+        vl_tb_c   = vl_tb.clamp(max=1000.0)
         value_loss = (
-            self.cfg.fight_win_coef * vl_win_c
+            vl_ppo_c
+            + (0.0 if self.ppo_value_head == "fight_win" else self.cfg.fight_win_coef * vl_win_c)
+            + (0.0 if self.ppo_value_head == "run_value" else vl_run_c)
             + self.cfg.hp_loss_coef * vl_hp_c
             + self.cfg.survival_coef * vl_surv_c
             + self.cfg.tempo_coef * vl_tempo_c
             + self.cfg.turn_damage_coef * vl_td_c
+            + self.cfg.turn_block_coef * vl_tb_c
         )
         metrics["value_loss"] = value_loss.item()
         # 诊断：若任一 head 被 clamp 到上界 → 下次能看到
+        metrics["vl_ppo_raw"] = vl_ppo.item()
         metrics["vl_win_raw"] = vl_win.item()
+        metrics["vl_run_raw"] = vl_run.item()
         metrics["vl_hp_raw"] = vl_hp.item()
         metrics["vl_surv_raw"] = vl_surv.item()
         metrics["vl_tempo_raw"] = vl_tempo.item()
         metrics["vl_td_raw"] = vl_td.item()
+        metrics["vl_tb_raw"] = vl_tb.item()
 
         # ---- Leaf evaluator：全 4 个 head 监督（消除饥饿 head）----
         leaf_loss = torch.tensor(0.0, device=device)
@@ -343,7 +409,7 @@ class NonCombatLoss(nn.Module):
         _check_nan("policy.advantages", advantages)
         # 见 CombatLoss 同段注释：normalize_adv=False 时由 ppo.py 全局归一化。
         if self.cfg.normalize_adv:
-            adv_std = advantages.std()
+            adv_std = advantages.std(unbiased=False)
             adv = (advantages - advantages.mean()) / (adv_std + 1e-8) if adv_std > 1e-8 else advantages * 0.0
         else:
             adv = advantages

@@ -171,8 +171,8 @@ class PileSummary:
     curse_count: int = 0
     status_count: int = 0
     zero_cost_count: int = 0
-    # 关键牌追踪
-    key_card_ids: list[str] = field(default_factory=list)
+    # 完整牌堆卡牌 id 列表；旧字段 key_card_ids 保留兼容 property。
+    card_ids: list[str] = field(default_factory=list)
 
     @property
     def attack_ratio(self) -> float:
@@ -192,3 +192,7 @@ class PileSummary:
         if self.pile_type != "draw":
             return 0.0
         return 1.0 - min(self.size / 20.0, 1.0)
+
+    @property
+    def key_card_ids(self) -> list[str]:
+        return self.card_ids

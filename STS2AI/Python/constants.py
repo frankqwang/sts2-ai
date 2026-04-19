@@ -15,6 +15,10 @@ CHECKPOINTS_ROOT = ASSETS_ROOT / "checkpoints"
 DATASETS_ROOT = ASSETS_ROOT / "datasets"
 SEEDS_ROOT = ASSETS_ROOT / "seeds"
 
+GAME_SEMANTIC_INDEX_ROOT = DATASETS_ROOT / "game_semantic_index"
+GAME_SEMANTIC_INDEX_DB = GAME_SEMANTIC_INDEX_ROOT / "index.sqlite"
+GAME_SEMANTIC_CARDS_JSONL = GAME_SEMANTIC_INDEX_ROOT / "cards.jsonl"
+
 MAINLINE_CHECKPOINT = CHECKPOINTS_ROOT / "act1" / "mainline_iter2270_carddebug.pt"
 
 # 优先新结构 HeadlessSim/bin；旧路径只作兼容 fallback。

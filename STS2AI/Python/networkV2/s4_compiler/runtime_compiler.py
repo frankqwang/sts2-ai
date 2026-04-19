@@ -18,6 +18,7 @@ from networkV2.s1_schema.entities import (
     IntentInfo,
     PileSummary,
 )
+from networkV2.s1_schema.card_semantic_catalog import CARD_SEMANTICS
 from core.card_base_stats import base_damage, base_hits, base_block, is_aoe
 
 
@@ -107,16 +108,17 @@ class RuntimeCompiler:
         for i, raw_card in enumerate(raw_hand):
             if not isinstance(raw_card, dict):
                 continue
+            card_id = str(_pick(raw_card, "id", default="") or "").lower()
+            snap = CARD_SEMANTICS.get(card_id)
             # card_type: 游戏发 "ATTACK"/"SKILL"/"POWER" 或 int 0-6
             card_type = self._normalize_card_type(
                 _pick(raw_card, "type", "card_type", "CardType", default="")
-            )
-            keywords = [
+            ) or snap.card_type
+            runtime_keywords = [
                 str(k).lower()
                 for k in (_pick(raw_card, "keywords", default=[]) or [])
             ]
-
-            card_id = str(_pick(raw_card, "id", default="") or "").lower()
+            keywords = sorted(set(runtime_keywords) | set(snap.db_keywords))
             # preview 数值：优先读 obs 透传字段，否则用 card_base_stats 估计
             dmg = _pick(raw_card, "damage", "damage_est", "damage_preview")
             blk = _pick(raw_card, "block", "block_est", "block_preview")
@@ -128,7 +130,7 @@ class RuntimeCompiler:
             # 若 obs 未给 draw，根据关键字做保守估计（"draw" 关键字默认 +1）
             if drw is not None:
                 draw_est = float(drw)
-            elif "draw" in keywords:
+            elif "draw" in keywords or snap.has_functional_tag("draw"):
                 draw_est = 1.0
             else:
                 draw_est = 0.0
@@ -144,14 +146,18 @@ class RuntimeCompiler:
                     upg_count = 1 if bool(upg_raw) else 0
             # target_type：normalize 为小写字符串
             tt_raw = _pick(raw_card, "target_type", "TargetType", default="")
-            target_type = str(tt_raw or "").lower() if not isinstance(tt_raw, int) else f"type_{tt_raw}"
+            target_type = (
+                str(tt_raw or "").lower() if not isinstance(tt_raw, int) else f"type_{tt_raw}"
+            ) or snap.target_type
             # rarity
-            rarity = str(_pick(raw_card, "rarity", "Rarity", default="") or "").lower()
+            rarity = str(_pick(raw_card, "rarity", "Rarity", default="") or "").lower() or snap.rarity
+            raw_cost = _pick(raw_card, "cost", "energy_cost", default=None)
+            current_cost = _safe_int(raw_cost) if raw_cost is not None else int(snap.base_cost or 0)
 
             cards.append(HandCardRuntime(
                 card_id=card_id,
                 hand_index=_safe_int(_pick(raw_card, "index", "hand_index", default=i)),
-                current_cost=_safe_int(_pick(raw_card, "cost", "energy_cost")),
+                current_cost=current_cost,
                 card_type=card_type,
                 is_upgraded=upg_count > 0,
                 upgrade_count=upg_count,
@@ -167,9 +173,9 @@ class RuntimeCompiler:
                 damage_est=damage_est,
                 block_est=block_est,
                 draw_est=draw_est,
-                retain="retain" in keywords,
-                ethereal="ethereal" in keywords,
-                exhaust="exhaust" in keywords,
+                retain=("retain" in keywords) or snap.has_functional_tag("retain"),
+                ethereal=("ethereal" in keywords) or snap.has_functional_tag("ethereal"),
+                exhaust=("exhaust" in keywords) or snap.has_functional_tag("exhaust"),
             ))
         return cards
 
@@ -333,7 +339,6 @@ class RuntimeCompiler:
 
     def _pile_from_card_ids(self, pile_type: str, cards: list) -> PileSummary:
         """从卡牌 ID 列表构建 PileSummary。"""
-        # cards 可能是 [str, str, ...] 或 [dict, dict, ...]
         attack_count = 0
         skill_count = 0
         power_count = 0
@@ -343,26 +348,35 @@ class RuntimeCompiler:
         card_ids: list[str] = []
 
         for c in cards:
+            card_id = ""
+            card_type = ""
+            cost: int | None = None
             if isinstance(c, str):
-                card_ids.append(c.lower())
-                # 纯 ID 列表无法区分类型，只记录 ID
+                card_id = c.lower()
             elif isinstance(c, dict):
-                cid = str(_pick(c, "id", default="") or "").lower()
-                card_ids.append(cid)
-                ct = self._normalize_card_type(_pick(c, "type", "card_type", default=""))
-                if ct == "attack":
-                    attack_count += 1
-                elif ct == "skill":
-                    skill_count += 1
-                elif ct == "power":
-                    power_count += 1
-                elif ct == "curse":
-                    curse_count += 1
-                elif ct == "status":
-                    status_count += 1
+                card_id = str(_pick(c, "id", default="") or "").lower()
+                card_type = self._normalize_card_type(_pick(c, "type", "card_type", default=""))
                 cost = _safe_int(_pick(c, "cost", "energy_cost"))
-                if cost == 0:
-                    zero_cost_count += 1
+            if not card_id:
+                continue
+            snap = CARD_SEMANTICS.get(card_id)
+            if not card_type:
+                card_type = snap.card_type
+            if cost is None:
+                cost = snap.base_cost
+            card_ids.append(card_id)
+            if card_type == "attack":
+                attack_count += 1
+            elif card_type == "skill":
+                skill_count += 1
+            elif card_type == "power":
+                power_count += 1
+            elif card_type == "curse":
+                curse_count += 1
+            elif card_type == "status":
+                status_count += 1
+            if int(cost or 0) == 0:
+                zero_cost_count += 1
 
         return PileSummary(
             pile_type=pile_type,
@@ -373,7 +387,7 @@ class RuntimeCompiler:
             curse_count=curse_count,
             status_count=status_count,
             zero_cost_count=zero_cost_count,
-            key_card_ids=card_ids,
+            card_ids=card_ids,
         )
 
     # ------------------------------------------------------------------
@@ -390,12 +404,20 @@ class RuntimeCompiler:
         for raw_card in raw_deck:
             if not isinstance(raw_card, dict):
                 continue
+            card_id = str(_pick(raw_card, "id", default="") or "").lower()
+            snap = CARD_SEMANTICS.get(card_id)
+            card_type = self._normalize_card_type(_pick(raw_card, "type", "card_type", default=""))
+            rarity = str(_pick(raw_card, "rarity", default="") or "").lower()
+            raw_cost = _pick(raw_card, "cost", "energy_cost", default=None)
+            base_cost = _safe_int(raw_cost) if raw_cost is not None else snap.base_cost
             cards.append(CardSemantics(
-                entity_id=str(_pick(raw_card, "id", default="") or "").lower(),
-                card_type=self._normalize_card_type(_pick(raw_card, "type", "card_type", default="")),
-                rarity=str(_pick(raw_card, "rarity", default="") or "").lower(),
-                base_cost=_safe_int(_pick(raw_card, "cost", "energy_cost")),
+                entity_id=card_id,
+                card_type=card_type or snap.card_type,
+                rarity=rarity or snap.rarity,
+                base_cost=base_cost,
                 is_upgraded=bool(_pick(raw_card, "is_upgraded", default=False)),
+                tags=list(snap.db_tags),
+                keywords=list(snap.db_keywords),
             ))
         return cards
 
