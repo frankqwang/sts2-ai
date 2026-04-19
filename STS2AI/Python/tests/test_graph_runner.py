@@ -14,8 +14,10 @@ Fail 场景:
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 import pytest
 import torch
+from unittest import mock
 
 
 pytestmark = pytest.mark.skipif(
@@ -27,6 +29,7 @@ pytestmark = pytest.mark.skipif(
 def _build_sample_banks():
     """产一个有代表性的 combat banks 作为 capture 输入。"""
     from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+    from networkV2.s2_config.mechanism_registry import MechanismRegistry
 
     obs = {
         "state_type": "monster",
@@ -49,9 +52,13 @@ def _build_sample_banks():
         for i in range(10) for j in range(4)
     ] + [{"action": "end_turn"}]
     compiler = CombatFeatureCompiler()
-    return compiler.compile(
-        obs, legal, encounter_id="jaw_worm_easy", room_type="monster",
-    )
+    with mock.patch(
+        "networkV2.s4_compiler.feature_compiler.get_registry",
+        return_value=MechanismRegistry(),
+    ):
+        return compiler.compile(
+            obs, legal, encounter_id="jaw_worm_easy", room_type="monster",
+        )
 
 
 def _build_net():
@@ -61,6 +68,20 @@ def _build_net():
     cfg = from_preset("slim")
     net = UnifiedNet(config=cfg).cuda().eval()
     return net
+
+
+def _spec_for_banks(*banks_list):
+    from networkV2.s5_net.bank_max_spec import BankMaxSpec, DEFAULT_MAX_SPEC
+
+    fields = asdict(DEFAULT_MAX_SPEC)
+    for banks in banks_list:
+        for bank in banks.all_banks():
+            if bank.is_empty:
+                continue
+            name = bank.bank_name.lower()
+            if name in fields:
+                fields[name] = max(int(fields[name]), len(bank.tokens))
+    return BankMaxSpec(**fields)
 
 
 def test_shape_signature_stable():
@@ -77,6 +98,7 @@ def test_shape_signature_stable():
 def test_shape_signature_distinguishes_different_banks():
     """不同 hand/enemy 数必须产不同 signature。"""
     from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+    from networkV2.s2_config.mechanism_registry import MechanismRegistry
     from networkV2.s5_net.graph_runner import BankShapeSignature
 
     compiler = CombatFeatureCompiler()
@@ -97,8 +119,12 @@ def test_shape_signature_distinguishes_different_banks():
                                          "damage": 6}] * 10}
     legal = [{"action": "end_turn"}]
 
-    banks_5 = compiler.compile(obs_5hand, legal, encounter_id="x", room_type="monster")
-    banks_10 = compiler.compile(obs_10hand, legal, encounter_id="x", room_type="monster")
+    with mock.patch(
+        "networkV2.s4_compiler.feature_compiler.get_registry",
+        return_value=MechanismRegistry(),
+    ):
+        banks_5 = compiler.compile(obs_5hand, legal, encounter_id="x", room_type="monster")
+        banks_10 = compiler.compile(obs_10hand, legal, encounter_id="x", room_type="monster")
     sig_5 = BankShapeSignature.from_banks(banks_5)
     sig_10 = BankShapeSignature.from_banks(banks_10)
     assert sig_5 != sig_10, "不同 hand 数应该产生不同 signature"
@@ -115,10 +141,12 @@ def test_graph_runner_startup_parity():
     net = _build_net()
     banks = _build_sample_banks()
     enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
+    exact_spec = _spec_for_banks(banks)
 
     runner = GraphRunner(
         net, banks, enc_idx,
         atol=1e-3, rtol=1e-3, startup_parity_n=5, parity_check_every=0,
+        max_spec=exact_spec,
         strict=True,
     )
     assert runner.enabled, "strict=True 下 GraphRunner.enabled 必须 True (否则应该早已 raise)"
@@ -126,11 +154,33 @@ def test_graph_runner_startup_parity():
     assert out is not None
 
 
+def test_pad_tokens_do_not_change_eager_logits():
+    """给 banks 追加 masked pad token 后，真实 action logits 不应变化。"""
+    from networkV2.s5_net.graph_runner import pad_banks_to_max
+
+    net = _build_net()
+    banks = _build_sample_banks()
+    enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
+    exact_spec = _spec_for_banks(banks)
+    padded = pad_banks_to_max(banks, exact_spec, numeric_dim=net.tokenizer.max_numeric_dim)
+
+    with torch.inference_mode():
+        eager = net(banks=banks, encounter_idx=enc_idx)
+        eager_padded = net(banks=padded, encounter_idx=enc_idx)
+    real_action_len = len(banks.action_bank.tokens)
+    torch.testing.assert_close(
+        eager.logits[..., :real_action_len],
+        eager_padded.logits[..., :real_action_len],
+        atol=1e-3,
+        rtol=1e-3,
+    )
+
+
 def test_graph_runner_overflow_raises():
     """banks 某个 bank 超过 MAX_LEN 必须 raise BankOverflowError。
 
-    这是硬检测 4 的核心:加了新 token 类型让 bank 爆量,runtime 会立刻报错,
-    不会静默 silent wrong(截断 tokens 或 OOB 写 GPU buffer)。
+    sample_banks 自己就超出 max_spec 时,构造期必须立刻报错,不能等到 runtime
+    再 silent wrong。
     """
     from networkV2.s5_net.graph_runner import GraphCaptureFailedError, GraphRunner
     from networkV2.s5_net.bank_max_spec import BankOverflowError, BankMaxSpec
@@ -162,9 +212,11 @@ def test_graph_runner_decision_domain_mismatch_raises():
     net = _build_net()
     banks = _build_sample_banks()
     enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
+    exact_spec = _spec_for_banks(banks)
     runner = GraphRunner(
         net, banks, enc_idx,
         atol=1e-3, startup_parity_n=3, parity_check_every=0,
+        max_spec=exact_spec,
     )
     if not runner.enabled:
         pytest.skip("graph runner disabled")
@@ -175,6 +227,65 @@ def test_graph_runner_decision_domain_mismatch_raises():
     banks_noncombat.decision_domain = "card_reward"
     with pytest.raises(GraphShapeMismatchError):
         runner(banks_noncombat, enc_idx)
+
+
+def test_graph_runner_runtime_varlen_supported():
+    """runtime 的 hand/action 变长应由内部 padding 吸收，不应因为 shape check 误报。"""
+    from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+    from networkV2.s2_config.mechanism_registry import MechanismRegistry
+    from networkV2.s5_net.graph_runner import GraphRunner
+
+    compiler = CombatFeatureCompiler()
+    obs = {
+        "state_type": "monster",
+        "player": {
+            "hp": 60, "max_hp": 80, "energy": 3, "max_energy": 3,
+            "deck": [{"id": "STRIKE_IRONCLAD", "type": "ATTACK", "rarity": "common", "cost": 1}] * 20,
+            "relics": [], "potions": [],
+        },
+        "battle": {
+            "enemies": [{"id": "JAW_WORM", "hp": 42, "max_hp": 42, "intent": "attack", "powers": []}],
+        },
+    }
+    legal = [{"action": "end_turn"}]
+    with mock.patch(
+        "networkV2.s4_compiler.feature_compiler.get_registry",
+        return_value=MechanismRegistry(),
+    ):
+        banks_5 = compiler.compile(
+            {**obs, "hand": [{"id": "STRIKE_IRONCLAD", "type": "ATTACK", "cost": 1, "can_play": True, "damage": 6}] * 5},
+            legal,
+            encounter_id="x",
+            room_type="monster",
+        )
+        banks_10 = compiler.compile(
+            {**obs, "hand": [{"id": "STRIKE_IRONCLAD", "type": "ATTACK", "cost": 1, "can_play": True, "damage": 6}] * 10},
+            legal,
+            encounter_id="x",
+            room_type="monster",
+        )
+
+    net = _build_net()
+    enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
+    exact_spec = _spec_for_banks(banks_5, banks_10)
+    runner = GraphRunner(
+        net, banks_5, enc_idx,
+        atol=1e-3, startup_parity_n=3, parity_check_every=0,
+        max_spec=exact_spec,
+    )
+    if not runner.enabled:
+        pytest.skip("graph runner disabled")
+
+    out = runner(banks_10, enc_idx)
+    assert out is not None
+    with torch.inference_mode():
+        eager = net(banks=banks_10, encounter_idx=enc_idx)
+    torch.testing.assert_close(
+        eager.logits[..., :len(banks_10.action_bank.tokens)],
+        out.logits[..., :len(banks_10.action_bank.tokens)],
+        atol=1e-3,
+        rtol=1e-3,
+    )
 
 
 def test_bank_signature_persists_across_restart():
@@ -201,6 +312,7 @@ def test_graph_runner_strict_raises_on_capture_failure():
     net = _build_net()
     banks = _build_sample_banks()
     enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
+    exact_spec = _spec_for_banks(banks)
 
     # 把 forward_from_static monkey-patch 加 data-dependent branch
     orig = net.forward_from_static
@@ -220,6 +332,7 @@ def test_graph_runner_strict_raises_on_capture_failure():
             GraphRunner(
                 net, banks, enc_idx,
                 atol=1e-3, startup_parity_n=3, parity_check_every=0,
+                max_spec=exact_spec,
                 strict=True,
             )
     finally:
@@ -237,6 +350,7 @@ def test_graph_runner_non_strict_falls_back():
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
     enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
+    exact_spec = _spec_for_banks(banks)
 
     orig = net.forward_from_static
 
@@ -251,6 +365,7 @@ def test_graph_runner_non_strict_falls_back():
     runner = GraphRunner(
         net, banks, enc_idx,
         atol=1e-3, startup_parity_n=3, parity_check_every=0,
+        max_spec=exact_spec,
         strict=False,
     )
     assert runner.enabled is False, "strict=False + capture 失败应该 enabled=False 不 raise"

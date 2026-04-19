@@ -59,6 +59,11 @@ class OptionContextualizer(nn.Module):
             self.cross_build_slots = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
         elif mode in ("merged", "minimal"):
             self.bank_type_emb = nn.Embedding(_N_BANKS, d_model)
+            self.register_buffer(
+                "_bank_type_ids",
+                torch.arange(_N_BANKS, dtype=torch.long),
+                persistent=False,
+            )
             if mode == "merged":
                 self.cross_shared = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
                 self.cross_build_slots = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)
@@ -68,7 +73,7 @@ class OptionContextualizer(nn.Module):
             raise ValueError(f"Unknown option contextualizer mode: {mode}")
 
     def _tag(self, bt: BankTensor, type_id: int) -> BankTensor:
-        type_emb = self.bank_type_emb(torch.tensor(type_id, device=bt.features.device))
+        type_emb = self.bank_type_emb(self._bank_type_ids[type_id])
         return BankTensor(bt.features + type_emb, bt.mask, bt.bank_name)
 
     @staticmethod

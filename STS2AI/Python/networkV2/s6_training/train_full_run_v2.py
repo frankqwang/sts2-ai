@@ -34,6 +34,15 @@ from networkV2.s6_training.head_targets import (
     compute_resource_retention_target,
 )
 from networkV2.s6_training.ppo import UnifiedPPOTrainer, PPOConfig
+from networkV2.s6_training.rollout_async_engine import (
+    add_rollout_engine_args,
+    build_rollout_engine_config,
+    runtime_stats_to_metrics,
+)
+from networkV2.s6_training.rollout_workers import (
+    create_fullrun_runtime,
+    open_fullrun_catalog_client,
+)
 from networkV2.s7_diagnostics.rollout_dumper import RolloutDumper
 
 from networkV2.s6_training.rewards import (
@@ -41,6 +50,7 @@ from networkV2.s6_training.rewards import (
     shaped_reward, terminal_reward,
 )
 from env.full_run_env import BinaryBackedFullRunClient
+from env.headless_sim_runner import DEFAULT_DLL_PATH, DEFAULT_REPO_ROOT
 from env.run_outcome_vocab import (
     is_victory_outcome, is_failure_outcome, normalize_run_outcome,
 )
@@ -209,13 +219,15 @@ def noncombat_entropy_nudge(chosen: dict, room_type: str) -> float:
 
 def run_full_episode(
     client: BinaryBackedFullRunClient,
-    net: UnifiedNet,
+    net: UnifiedNet | None,
     compiler: CombatFeatureCompiler,
     *,
     seed: str = "",
     max_steps: int = 800,
     greedy: bool = False,
     record_trajectory: bool = False,
+    inference_client: Any | None = None,
+    task_id: int = 0,
 ) -> tuple[list[TrainingSample], dict[str, Any]]:
     """跑完整一局，收集所有 step 的 TrainingSample。
 
@@ -382,26 +394,41 @@ def run_full_episode(
 
         # Encounter conditioning（方案 A: Conditional Policy）
         from networkV2.s1_schema.encounter_vocab import encounter_to_index
-        _dev = next(net.parameters()).device
-        enc_idx_tensor = torch.tensor(
-            [encounter_to_index(cur_encounter_id)], dtype=torch.long, device=_dev,
-        )
-        with torch.no_grad():
-            out = net(banks=banks, encounter_idx=enc_idx_tensor)
-        logits = out.logits[0, :len(legal)]
-        mask = out.action_mask[0, :len(legal)]
-        logits = torch.nan_to_num(logits.masked_fill(~mask, float("-inf")), nan=0.0)
-        dist = Categorical(logits=logits)
-        idx = logits.argmax().item() if greedy else dist.sample().item()
-        lp = dist.log_prob(torch.tensor(idx, device=logits.device)).item()
-
-        # Value 估计
-        if is_combat and out.values is not None:
-            value = out.values.run_value.item()
-        elif out.run_eval is not None:
-            value = out.run_eval.run_win_prob.item()
+        enc_idx_value = int(encounter_to_index(cur_encounter_id))
+        if inference_client is not None:
+            reply = inference_client.infer(
+                banks,
+                encounter_idx=enc_idx_value,
+                legal_len=len(legal),
+                greedy=greedy,
+                task_id=task_id,
+            )
+            idx = int(reply.chosen_action_index)
+            lp = float(reply.old_log_prob)
+            value = float(reply.value_estimate)
         else:
-            value = 0.5
+            if net is None:
+                raise ValueError("run_full_episode requires `net` when inference_client is absent")
+            _dev = next(net.parameters()).device
+            enc_idx_tensor = torch.tensor(
+                [encounter_to_index(cur_encounter_id)], dtype=torch.long, device=_dev,
+            )
+            with torch.no_grad():
+                out = net(banks=banks, encounter_idx=enc_idx_tensor)
+            logits = out.logits[0, :len(legal)]
+            mask = out.action_mask[0, :len(legal)]
+            logits = torch.nan_to_num(logits.masked_fill(~mask, float("-inf")), nan=0.0)
+            dist = Categorical(logits=logits)
+            idx = logits.argmax().item() if greedy else dist.sample().item()
+            lp = dist.log_prob(torch.tensor(idx, device=logits.device)).item()
+
+            # Value 估计
+            if is_combat and out.values is not None:
+                value = out.values.run_value.item()
+            elif out.run_eval is not None:
+                value = out.run_eval.run_win_prob.item()
+            else:
+                value = 0.5
 
         chosen = legal[idx]
 
@@ -843,20 +870,21 @@ def _compute_fight_win_calibration(
 def _run_eval(
     iteration: int,
     net: UnifiedNet,
-    pool: "SimClientPool",
+    pool: "SimClientPool | None",
     eval_episodes: int,
     eval_seed_base: str,
     max_steps: int,
     n_workers: int,
     dumper: RolloutDumper | None,
+    runtime=None,
 ) -> dict:
     """跑一批固定 seed 的 greedy eval；单独 dump；不入 PPO。
 
     固定 seeds 让 eval 之间可比 —— 消除"agent 真变强 vs 抽到好运气"的混淆。
     greedy=True 用 argmax action 让 policy 输出尽可能稳定。
     """
-    import queue
     import statistics
+    import queue
     import threading
 
     # 固定 seeds（不随训练 rng 变化）
@@ -866,25 +894,39 @@ def _run_eval(
         seeds_per_worker[i % n_workers].append(s)
 
     net.eval()
-    result_q: "queue.Queue" = queue.Queue()
-    threads: list = []
-    for w_idx in range(n_workers):
-        if not seeds_per_worker[w_idx]:
-            continue
-        t = threading.Thread(
-            target=_collect_worker,
-            args=(w_idx, pool, net, seeds_per_worker[w_idx], max_steps, result_q),
-            kwargs={"greedy": True},  # eval 用 argmax
-        )
-        t.start()
-        threads.append(t)
-    for t in threads:
-        t.join(timeout=600)
-
     infos: list[dict] = []
-    while not result_q.empty():
-        r = result_q.get()
-        infos.extend(r["infos"])
+    if runtime is not None:
+        eval_tasks = [
+            {
+                "seed": seed,
+                "record_trajectory": False,
+                "greedy": True,
+                "max_steps": max_steps,
+            }
+            for seed in seeds
+        ]
+        task_ids = runtime.submit_tasks(eval_tasks)
+        for env in runtime.gather_results(len(task_ids)):
+            infos.extend(env.infos)
+    else:
+        result_q: "queue.Queue" = queue.Queue()
+        threads: list = []
+        for w_idx in range(n_workers):
+            if not seeds_per_worker[w_idx]:
+                continue
+            t = threading.Thread(
+                target=_collect_worker,
+                args=(w_idx, pool, net, seeds_per_worker[w_idx], max_steps, result_q),
+                kwargs={"greedy": True},  # eval 用 argmax
+            )
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join(timeout=600)
+
+        while not result_q.empty():
+            r = result_q.get()
+            infos.extend(r["infos"])
 
     n_total = len(infos)
     n_wins = sum(1 for info in infos if is_victory_outcome(info.get("outcome", "")))
@@ -992,22 +1034,41 @@ def train_full_run(args: argparse.Namespace) -> None:
         target_kl=args.target_kl,
     ))
 
-    n_workers = args.num_workers
+    rollout_cfg = build_rollout_engine_config(
+        args,
+        max_numeric_dim=int(getattr(net.tokenizer, "max_numeric_dim", 58)),
+    )
+    n_workers = rollout_cfg.rollout_num_actors
     base_port = args.port
     rng = random.Random(args.seed)
     total_wins = 0
     total_runs = 0
 
-    # ---- 一次性启动并预热 simulator 池（复用整个训练过程）----
-    pool = SimClientPool(base_port=base_port, size=n_workers)
-    pool.warmup()
+    pool: SimClientPool | None = None
+    runtime = None
+    catalog_client = None
+    if rollout_cfg.use_legacy_thread_rollout:
+        pool = SimClientPool(base_port=base_port, size=n_workers)
+        pool.warmup()
+    else:
+        runtime = create_fullrun_runtime(args=args, net=net, rollout_cfg=rollout_cfg)
+        helper_port = int(base_port) + n_workers + 100
+        try:
+            catalog_client = open_fullrun_catalog_client(helper_port)
+        except Exception as e:
+            logger.warning(f"Async helper client startup failed: {e}")
 
     # ---- Attach sim 到 GAME_CATALOG：bank_assembler 的 power token 会用
     # game_catalog.powers[].base_classes / is_debuff_hint 精确判定 semantic group
     # 和 debuff，覆盖率 ~60% → ~95%+（fallback 到本地 heuristic）。
     try:
         from networkV2.s1_schema.sim_catalog import GAME_CATALOG
-        GAME_CATALOG.attach_sim(pool.clients[0])
+        if pool is not None:
+            GAME_CATALOG.attach_sim(pool.clients[0])
+        elif catalog_client is not None:
+            GAME_CATALOG.attach_sim(catalog_client)
+        else:
+            raise RuntimeError("no sim client available for GAME_CATALOG.attach_sim")
         n_powers = len(getattr(GAME_CATALOG, "_power_metadata_by_class", {}))
         logger.info(f"Attached sim to GAME_CATALOG: {n_powers} power classes with metadata")
     except Exception as e:
@@ -1032,6 +1093,7 @@ def train_full_run(args: argparse.Namespace) -> None:
             "value_warmup_iters": args.value_warmup_iters,
             "target_kl": args.target_kl,
             "num_workers": n_workers,
+            "rollout_async_default": float(not rollout_cfg.use_legacy_thread_rollout),
             "episodes_per_iter": args.episodes_per_iter,
             "net_params": sum(p.numel() for p in net.parameters()),
         })
@@ -1042,7 +1104,8 @@ def train_full_run(args: argparse.Namespace) -> None:
     actual_d = getattr(net.config, "d_model", args.d_model) if hasattr(net, "config") else args.d_model
     actual_nh = getattr(net.config, "n_heads", args.n_heads) if hasattr(net, "config") else args.n_heads
     print(f"\nConfig: d_model={actual_d} n_heads={actual_nh} lr={args.lr} "
-          f"eps/iter={args.episodes_per_iter} workers={n_workers} ppo_epochs={args.ppo_epochs}")
+          f"eps/iter={args.episodes_per_iter} actors={n_workers} "
+          f"async={not rollout_cfg.use_legacy_thread_rollout} ppo_epochs={args.ppo_epochs}")
     print()
     print("Iter | Eps | Steps | W/L | Cum%  | AvgFlr | Losses                                            | Time")
     print("-----|-----|-------|-----|-------|--------|---------------------------------------------------|------")
@@ -1053,54 +1116,79 @@ def train_full_run(args: argparse.Namespace) -> None:
 
         # 分配 seeds 给各 worker
         eps_total = args.episodes_per_iter
+        episode_tasks: list[dict[str, Any]] = []
         seeds_per_worker: list[list[str]] = [[] for _ in range(n_workers)]
         for i in range(eps_total):
             seed = f"fr-{iteration}-{i}-{rng.getrandbits(32):08x}"
-            seeds_per_worker[i % n_workers].append(seed)
+            if rollout_cfg.use_legacy_thread_rollout:
+                seeds_per_worker[i % n_workers].append(seed)
+            episode_tasks.append({
+                "seed": seed,
+                "record_trajectory": False,
+                "greedy": False,
+                "max_steps": args.max_steps,
+            })
 
         # 并发收集：每个 worker 复用 pool 里的固定 client
         net.eval()
-        result_q: queue.Queue = queue.Queue()
-        threads = []
-        for w_idx in range(n_workers):
-            if not seeds_per_worker[w_idx]:
-                continue
-            # 每 worker 第 1 局记录完整 trajectory（用于诊断 stuck loop / 决策可读性）
-            t = threading.Thread(
-                target=_collect_worker,
-                args=(w_idx, pool, net, seeds_per_worker[w_idx], args.max_steps, result_q),
-                kwargs={"record_trajectory_every": max(1, len(seeds_per_worker[w_idx]))},
-            )
-            t.start()
-            threads.append(t)
-
-        for t in threads:
-            t.join(timeout=300)
-
         # 汇总
         iter_samples: list[TrainingSample] = []
         iter_episode_infos: list[dict] = []
         w, l = 0, 0
         floors = []
-        while not result_q.empty():
-            r = result_q.get()
-            iter_samples.extend(r["samples"])
-            for info in r["infos"]:
-                iter_episode_infos.append(info)
-                total_runs += 1
-                floors.append(info.get("floor", 0))
-                outcome_str = info.get("outcome", "")
-                if is_victory_outcome(outcome_str):
-                    w += 1
-                    total_wins += 1
-                elif outcome_str != "error":
-                    l += 1
+        rollout_stats: dict[str, Any] = {}
+        if rollout_cfg.use_legacy_thread_rollout:
+            result_q: queue.Queue = queue.Queue()
+            threads = []
+            for w_idx in range(n_workers):
+                if not seeds_per_worker[w_idx]:
+                    continue
+                # 每 worker 第 1 局记录完整 trajectory（用于诊断 stuck loop / 决策可读性）
+                t = threading.Thread(
+                    target=_collect_worker,
+                    args=(w_idx, pool, net, seeds_per_worker[w_idx], args.max_steps, result_q),
+                    kwargs={"record_trajectory_every": max(1, len(seeds_per_worker[w_idx]))},
+                )
+                t.start()
+                threads.append(t)
+
+            for t in threads:
+                t.join(timeout=300)
+
+            while not result_q.empty():
+                r = result_q.get()
+                iter_samples.extend(r["samples"])
+                for info in r["infos"]:
+                    iter_episode_infos.append(info)
+        else:
+            if runtime is None:
+                raise RuntimeError("async rollout runtime was not initialized")
+            # 每 iter 取首个样本保留 trajectory，便于诊断 async 路径。
+            if episode_tasks:
+                episode_tasks[0]["record_trajectory"] = True
+            task_ids = runtime.submit_tasks(episode_tasks)
+            for env in runtime.gather_results(len(task_ids)):
+                iter_samples.extend(env.samples)
+                iter_episode_infos.extend(env.infos)
+            rollout_stats = runtime.stats()
+
+        for info in iter_episode_infos:
+            total_runs += 1
+            floors.append(info.get("floor", 0))
+            outcome_str = info.get("outcome", "")
+            if is_victory_outcome(outcome_str):
+                w += 1
+                total_wins += 1
+            elif outcome_str != "error":
+                l += 1
 
         # PPO update
         net.train()
         metrics = {}
         if len(iter_samples) >= args.min_update_samples:
             metrics = trainer.train_step(iter_samples)
+        if rollout_stats:
+            metrics.update(runtime_stats_to_metrics("rollout", rollout_stats))
 
         # Fight-win head calibration：预测胜率 vs 真实 GAE return 的分桶对齐度
         # ECE（Expected Calibration Error）越小越好。0.1 以上说明 value head 系统性偏差大。
@@ -1153,6 +1241,7 @@ def train_full_run(args: argparse.Namespace) -> None:
                     eval_episodes=args.eval_episodes,
                     eval_seed_base=args.eval_seed_base,
                     max_steps=args.max_steps, n_workers=n_workers, dumper=dumper,
+                    runtime=runtime if not rollout_cfg.use_legacy_thread_rollout else None,
                 )
                 logger.info(
                     f"[Eval iter {iteration}] wr={em['eval_win_rate']*100:.1f}% "
@@ -1166,7 +1255,15 @@ def train_full_run(args: argparse.Namespace) -> None:
                 logger.warning(f"Eval failed: {e}")
     finally:
       # 训练结束（或异常退出）时统一关闭所有 sim 进程
-      pool.close_all()
+      if runtime is not None:
+          runtime.shutdown()
+      if pool is not None:
+          pool.close_all()
+      if catalog_client is not None:
+          try:
+              catalog_client.close()
+          except Exception:
+              pass
 
     p = Path(args.output_dir) / "unified_v2_final.pt"
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -1211,7 +1308,8 @@ def main():
     p.add_argument("--min-update-samples", type=int, default=128)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--port", type=int, default=15527)
-    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--num-workers", type=int, default=4,
+                   help="兼容旧参数；默认映射到 --rollout-num-actors。")
     # Eval set：每 N iter 用固定 seeds 跑一批 greedy eval，单独 dump 不入 PPO。
     # 判断 agent 真实水平 vs 训练 rollout 运气波动的关键信号。
     p.add_argument("--eval-every", type=int, default=10,
@@ -1233,6 +1331,7 @@ def main():
                    help="If set, dump rollout/metrics to this dir. 规范路径：Artifacts/runs/<exp>/")
     p.add_argument("--cpu", action="store_true")
     p.add_argument("--log-level", type=str, default="INFO")
+    add_rollout_engine_args(p)
     args = p.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level),
                         format="%(asctime)s %(levelname)s %(message)s")
