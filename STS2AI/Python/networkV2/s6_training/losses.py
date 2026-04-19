@@ -206,14 +206,29 @@ class CombatLoss(nn.Module):
                 vl_td = (td_per * valid_w).sum() / valid_w.sum().clamp(min=1e-8)
         metrics["vl_turn_damage"] = vl_td.item()
 
+        # Per-head safety clamp：防单个 head 的极值 target 让 value_loss 爆 10^5+
+        # long6 iter 27/29/30 观察到 vl=199175，无 NaN warning →
+        # 某个 target 数值极大(not inf)，梯度反传后即便 grad-clip 也污染 policy。
+        # 对每 head 独立 clamp：合理上界的最大 loss 都只到几十。
+        vl_win_c  = vl_win.clamp(max=10.0)
+        vl_hp_c   = vl_hp.clamp(max=1000.0)    # smooth_l1 on [0,80] target 最多 ~80
+        vl_surv_c = vl_surv.clamp(max=10.0)     # [0,1] 最大 1
+        vl_tempo_c = vl_tempo.clamp(max=10.0)   # [-1,1] 最大 4
+        vl_td_c   = vl_td.clamp(max=1000.0)     # smooth_l1 on 0-300 最大 ~300
         value_loss = (
-            self.cfg.fight_win_coef * vl_win
-            + self.cfg.hp_loss_coef * vl_hp
-            + self.cfg.survival_coef * vl_surv
-            + self.cfg.tempo_coef * vl_tempo
-            + self.cfg.turn_damage_coef * vl_td
+            self.cfg.fight_win_coef * vl_win_c
+            + self.cfg.hp_loss_coef * vl_hp_c
+            + self.cfg.survival_coef * vl_surv_c
+            + self.cfg.tempo_coef * vl_tempo_c
+            + self.cfg.turn_damage_coef * vl_td_c
         )
         metrics["value_loss"] = value_loss.item()
+        # 诊断：若任一 head 被 clamp 到上界 → 下次能看到
+        metrics["vl_win_raw"] = vl_win.item()
+        metrics["vl_hp_raw"] = vl_hp.item()
+        metrics["vl_surv_raw"] = vl_surv.item()
+        metrics["vl_tempo_raw"] = vl_tempo.item()
+        metrics["vl_td_raw"] = vl_td.item()
 
         # ---- Leaf evaluator：全 4 个 head 监督（消除饥饿 head）----
         leaf_loss = torch.tensor(0.0, device=device)
