@@ -23,8 +23,8 @@ from typing import Any
 import torch
 from torch.distributions import Categorical
 
-from networkV2.s3_state_tracker.combat_env_wrapper import CombatStateTracker
-from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+from networkV2.s3_temporal_state.combat_state_tracker import CombatStateTracker
+from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 from networkV2.s5_net.unified_net import UnifiedNet
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ def _greedy_combat_rollout(
     seed: str | None = None,
 ) -> dict[str, Any]:
     """跑一场战斗到结束（victory / defeat / max_steps），返回结果字典。"""
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     tracker = CombatStateTracker()
     tracker.on_run_start()
     tracker.on_combat_start({"player": {"hp": 80, "max_hp": 80}}, encounter_id, room_type)
@@ -107,7 +107,7 @@ def _greedy_combat_rollout(
         if not legal:
             break
 
-        banks = compiler.compile(
+        banks = featurizer.featurize(
             state, legal,
             combat_memory=tracker.combat_memory,
             turn_prefix=tracker.turn_prefix,

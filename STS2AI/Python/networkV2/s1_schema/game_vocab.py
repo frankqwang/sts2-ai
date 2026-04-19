@@ -23,6 +23,15 @@ from pathlib import Path
 
 
 _DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "source_knowledge.sqlite"
+_EMPTY_VOCABS = {
+    "monster_powers": [],
+    "monster_powers_freq": {},
+    "card_powers": [],
+    "card_tags": [],
+    "card_keywords": [],
+    "relic_powers": [],
+    "player_powers": [],
+}
 
 
 @lru_cache(maxsize=1)
@@ -30,14 +39,7 @@ def _load_vocabs() -> dict:
     """一次性加载所有 vocab 表，按频次排序返回。"""
     if not _DB_PATH.exists():
         # fallback：sqlite 不存在时返回空（测试环境）
-        return {
-            "monster_powers": [],
-            "monster_powers_freq": {},
-            "card_powers": [],
-            "card_tags": [],
-            "card_keywords": [],
-            "relic_powers": [],
-        }
+        return dict(_EMPTY_VOCABS)
     conn = sqlite3.connect(str(_DB_PATH))
     cur = conn.cursor()
 
@@ -64,7 +66,7 @@ def _load_vocabs() -> dict:
 
     # player powers = card + relic 的 power 合并，按 **合并后频次** 排序。
     # P2-1 修复：原先写成 sorted(set(CARD_POWER_VOCAB) | set(RELIC_POWER_VOCAB))，
-    # 是字母序 → bank_assembler._player_token 取前 17 个当 top-N 时选到的都是 A 开头
+    # 是字母序 → token_bank_builder._player_token 取前 17 个当 top-N 时选到的都是 A 开头
     # 的低频 power (Accelerant/Arsenal/Afterimage…)，而 Strength / Vulnerable /
     # Poison / Focus 这些高频的落不进 vocab slot。
     p_powers = Counter()
@@ -98,7 +100,7 @@ RELIC_POWER_VOCAB: list[str] = _load_vocabs()["relic_powers"]
 """relic 引用的 power class（玩家 power 的一部分来自这些）。"""
 
 # Player power vocab = card + relic powers_json 合并后按真实频次排序的 class 列表。
-# bank_assembler._player_token 会取前 N 个作为"top-N 高频 player power"的 vocab slot，
+# token_bank_builder._player_token 会取前 N 个作为"top-N 高频 player power"的 vocab slot，
 # 所以这里必须是频次序（见 _load_vocabs 里构造 `player_powers`）。
 PLAYER_POWER_VOCAB: list[str] = _load_vocabs()["player_powers"]
 
@@ -109,7 +111,7 @@ def normalize_power_name(raw: str) -> str:
     sim 用 `FROG_KNIGHT_POWER` 格式，sqlite 用 `FrogKnightPower` 格式。
     两者之间需要映射。
 
-    注意：runtime_compiler._normalize_power_id 做了 lowercase + 去后缀，
+    注意：runtime_extractor._normalize_power_id 做了 lowercase + 去后缀，
     但我们需要保持与 sqlite class name 格式一致。
     """
     s = raw.strip()
@@ -122,7 +124,7 @@ def normalize_power_name(raw: str) -> str:
     if "_" in s:
         parts = s.split("_")
         return "".join(p.capitalize() for p in parts)
-    # lower_case → Capitalize (runtime_compiler 已做 lower + 去后缀)
+    # lower_case → Capitalize (runtime_extractor 已做 lower + 去后缀)
     lower = s.lower()
     # 常见 lowercase → class name 映射（由 _compute_lowercase_map 动态派生）
     lower_to_class = _lowercase_to_class_map()
@@ -134,7 +136,7 @@ def normalize_power_name(raw: str) -> str:
 @lru_cache(maxsize=1)
 def _lowercase_to_class_map() -> dict[str, str]:
     """把 sqlite vocab 的 class name 映射到 lowercase stem。
-    使 runtime_compiler._normalize_power_id 输出（lowercase, 去 _Power）
+    使 runtime_extractor._normalize_power_id 输出（lowercase, 去 _Power）
     能查到 sqlite class。"""
     mapping: dict[str, str] = {}
     for cls_name in MONSTER_POWER_VOCAB + PLAYER_POWER_VOCAB:
@@ -172,7 +174,7 @@ def monster_power_slot(stem_lower: str) -> int:
 # / DamageReductionPower / ...），base_classes 本身就是语义分组。优先用 game_catalog
 # API 拿 base_classes；fallback 用 class 名 heuristic。
 #
-# 分组顺序固定，bank_assembler 的 power_instance_token numeric slot 会按此对齐。
+# 分组顺序固定，token_bank_builder 的 power_instance_token numeric slot 会按此对齐。
 
 POWER_SEMANTIC_GROUPS: list[str] = [
     "timed",                # 有时限（TimedPower / DamageNextTurn 等回合末过期）
@@ -248,7 +250,7 @@ _POWER_GROUP_CACHE: dict[str, int] = {}
 def _upgrade_to_class_name(class_name: str) -> str:
     """stem ("thorns") → ClassName ("ThornsPower")；传 ClassName 直接返回。
 
-    runtime_compiler._normalize_power_id 把 sim 返回的 power id 转成了 lowercase stem
+    runtime_extractor._normalize_power_id 把 sim 返回的 power id 转成了 lowercase stem
     （STRENGTH_POWER → strength / HardenedShell → hardenedshell），但 VOCAB 和基类表
     是 ClassName 格式。helper 内部做一次 upgrade，让 caller 传 stem / ClassName 都通。
     """
@@ -318,7 +320,7 @@ def power_class_idx_normalized(class_name: str, is_player: bool) -> float:
     - is_player=False → 在 MONSTER_POWER_VOCAB 里查
     未知 class 返回 0.0（同 index 0 —— 歧义但至少稳定）。
 
-    自动 upgrade：runtime_compiler 传来的 stem ("thorns") 会先转成
+    自动 upgrade：runtime_extractor 传来的 stem ("thorns") 会先转成
     ClassName ("ThornsPower") 再查 vocab，避免 "对齐 bug"。
     """
     vocab = PLAYER_POWER_VOCAB if is_player else MONSTER_POWER_VOCAB

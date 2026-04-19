@@ -11,8 +11,8 @@ close / stats / is_connected),用作兼容层。新代码建议直接:
     conn.connect()
     state = conn.safe_call("combat_reset", {...})
 
-禁止在 V2 任何位置继续 `from env.pipe_client import PipeClient`;
-proto wire 只通过此包装或直接 PipeConnection 使用。
+老 JSON 管道客户端 `networkV2.s0_bridge.pipe_client.PipeClient` 只供
+`combat_training_env` 这类仍走 JSON wire 的兼容路径使用,proto wire 必须走本包装或直接 PipeConnection。
 """
 from __future__ import annotations
 

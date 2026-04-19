@@ -3,7 +3,7 @@
 输入: power_bank tokens (每个 active enemy/player power 一个 token)
 输出: power_tokens (B, L_power, d_model)
 
-每个 power token 已经在 bank_assembler 里带了 owner identity snapshot
+每个 power token 已经在 token_bank_builder 里带了 owner identity snapshot
 (hp_ratio / max_hp / block / is_hittable)，网络通过 self-attention 在 power
 之间交互，也通过下游 cross-attention 把 power 关联到对应 enemy_core / player_token。
 

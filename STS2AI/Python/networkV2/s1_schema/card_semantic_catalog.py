@@ -9,8 +9,8 @@ import sqlite3
 from functools import lru_cache
 
 from constants import GAME_SEMANTIC_INDEX_DB
-from core.card_tags import FUNCTIONAL_TAG_TO_IDX, FUNCTIONAL_TAGS
-from core.vocab import _slugify
+from networkV2.s1_schema.card_tags import FUNCTIONAL_TAG_TO_IDX, FUNCTIONAL_TAGS
+from networkV2.s1_schema.slug_utils import _slugify
 
 
 @dataclass(frozen=True)

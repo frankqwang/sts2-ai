@@ -38,8 +38,8 @@ from typing import Any
 import torch
 from torch.distributions import Categorical
 
-from networkV2.s3_state_tracker.combat_env_wrapper import CombatStateTracker
-from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
+from networkV2.s3_temporal_state.combat_state_tracker import CombatStateTracker
+from networkV2.s4_featurization.decision_featurizer import DecisionFeaturizer
 from networkV2.s5_net.unified_net import UnifiedNet
 from networkV2.s5_net.network_config import from_preset
 from networkV2.s6_training.batch import TrainingSample
@@ -387,7 +387,7 @@ def deck_for_encounter(encounter_id: str, rng: random.Random | None = None) -> d
 def combat_rollout(
     client: PipeBackedCombatTrainingClient,
     net: UnifiedNet | None,
-    compiler: CombatFeatureCompiler,
+    featurizer: DecisionFeaturizer,
     encounter_id: str,
     room_type: str,
     deck: dict[str, Any] | None,
@@ -460,7 +460,7 @@ def combat_rollout(
             break
 
         _t0 = time.perf_counter()
-        banks = compiler.compile(
+        banks = featurizer.featurize(
             state, legal,
             combat_memory=tracker.combat_memory,
             turn_prefix=tracker.turn_prefix,
@@ -787,7 +787,7 @@ def build_chain_sequence(
 def chained_combat_rollout(
     client: PipeBackedCombatTrainingClient,
     net: UnifiedNet,
-    compiler: CombatFeatureCompiler,
+    featurizer: DecisionFeaturizer,
     encounter_sequence: list[tuple[str, str]],
     chain_deck: dict[str, Any],
     max_steps_per_combat: int,
@@ -819,7 +819,7 @@ def chained_combat_rollout(
         combat_deck["max_hp"] = max_hp
 
         samples, info = combat_rollout(
-            client, net, compiler, eid, rt, combat_deck,
+            client, net, featurizer, eid, rt, combat_deck,
             max_steps=max_steps_per_combat,
             seed=f"{seed_prefix}-c{i}",
             record_trajectory=record_trajectory,
@@ -855,7 +855,7 @@ def chained_combat_rollout(
 def skada_chain_combat_rollout(
     client: PipeBackedCombatTrainingClient,
     net: UnifiedNet,
-    compiler: CombatFeatureCompiler,
+    featurizer: DecisionFeaturizer,
     task_chain: list[dict[str, Any]],
     max_steps_per_combat: int,
     seed_prefix: str,
@@ -903,7 +903,7 @@ def skada_chain_combat_rollout(
         seed = f"{seed_prefix}-c{i}"
         start_idx = len(all_samples)
         samples, info = combat_rollout(
-            client, net, compiler,
+            client, net, featurizer,
             task["encounter_id"], task["room_type"], build,
             max_steps=max_steps_per_combat, seed=seed,
             record_trajectory=record_trajectory,
@@ -1146,7 +1146,7 @@ def _worker_collect(
     graph_runner_holder: dict | None = None,  # per-worker runner cache(thread-local)
     reward_profile: str = "stochastic_stable",
 ) -> None:
-    compiler = CombatFeatureCompiler()
+    featurizer = DecisionFeaturizer()
     client = pool.get(worker_id)
     # Per-worker CUDA graph holder(thread-local);first rollout 时 lazy init
     if graph_runner_holder is None:
@@ -1158,7 +1158,7 @@ def _worker_collect(
             if task and task[0] == "chain":
                 _tag, sequence, chain_deck, seed_prefix, record_traj = task
                 samples, sub_infos = chained_combat_rollout(
-                    client, net, compiler, sequence, chain_deck,
+                    client, net, featurizer, sequence, chain_deck,
                     max_steps_per_combat=max_steps,
                     seed_prefix=seed_prefix,
                     record_trajectory=record_traj,
@@ -1170,7 +1170,7 @@ def _worker_collect(
             elif task and task[0] == "skada_chain":
                 _tag, task_chain, seed_prefix, record_traj = task
                 samples, sub_infos = skada_chain_combat_rollout(
-                    client, net, compiler, task_chain,
+                    client, net, featurizer, task_chain,
                     max_steps_per_combat=max_steps,
                     seed_prefix=seed_prefix,
                     record_trajectory=record_traj,
@@ -1182,7 +1182,7 @@ def _worker_collect(
             else:
                 enc_id, rt, deck, seed, record_traj = task
                 samples, info = combat_rollout(
-                    client, net, compiler, enc_id, rt, deck,
+                    client, net, featurizer, enc_id, rt, deck,
                     max_steps=max_steps, seed=seed,
                     record_trajectory=record_traj,
                     graph_runner_holder=graph_runner_holder,

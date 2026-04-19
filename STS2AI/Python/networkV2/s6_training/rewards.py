@@ -1,11 +1,10 @@
 """networkV2 战斗 reward 入口。
 
-目的：V2 trainer 的 combat reward 集中到此文件；V1 老库 `core/rl_reward_shaping.py`
-仅作为基础函数出处（PBRS / tactical / terminal），由本文件 re-export。
-未来如要完全解耦 V1，可把基础函数迁移进来，V1 侧改 import。
+目的：V2 trainer 的 combat reward 集中到此文件，基础函数来自同目录
+`rl_reward_shaping.py`，本文件 re-export 并追加 co-trainer 专属 shaping。
 
 组成：
-- **共享层**：PBRS + tactical + terminal（来自 core.rl_reward_shaping）
+- **共享层**：PBRS + tactical + terminal（来自 rl_reward_shaping）
 - **co-trainer 独有**：dense damage/block shaping + boss-aware final + boss debuff setup bonus
 
 Co-trainer boss-aware 强化（方向 2）：
@@ -19,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.rl_reward_shaping import (
+from networkV2.s6_training.rl_reward_shaping import (
     combat_potential,
     combat_step_reward,
     combat_local_tactical_reward,
