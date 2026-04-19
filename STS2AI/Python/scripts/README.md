@@ -12,10 +12,6 @@
   - 一键开 Godot 游戏窗口 + AI 实时操控 + overlay 观战
   - 依赖 Spectator Mod 和 V2 checkpoint
   - 录屏/日志落到 `STS2AI/Artifacts/recording/`
-- `run_sim_vs_godot_audit.ps1`
-  - headless-pipe（C# sim）vs godot-http（真引擎）一致性审计
-  - 用来验证 sim 侧行为与 Godot 引擎对齐
-  - 输出到 `STS2AI/Artifacts/verification/`
 - `trainer_common.ps1`
   - 公共 PowerShell 函数（`Resolve-CommandOrPath` 等），被 `spectate.ps1` source
 
