@@ -18,6 +18,8 @@ public sealed class PaelsEye : RelicModel
 
 	private bool _anyCardsPlayedThisTurn;
 
+	private bool _wasOwnerPartOfLastPlayerTurn = true;
+
 	public override RelicRarity Rarity => RelicRarity.Ancient;
 
 	private bool UsedThisCombat
@@ -46,7 +48,26 @@ public sealed class PaelsEye : RelicModel
 		}
 	}
 
+	private bool WasOwnerPartOfLastPlayerTurn
+	{
+		get
+		{
+			return _wasOwnerPartOfLastPlayerTurn;
+		}
+		set
+		{
+			AssertMutable();
+			_wasOwnerPartOfLastPlayerTurn = value;
+		}
+	}
+
 	protected override IEnumerable<IHoverTip> ExtraHoverTips => new global::_003C_003Ez__ReadOnlySingleElementList<IHoverTip>(HoverTipFactory.FromKeyword(CardKeyword.Exhaust));
+
+	public override Task AfterObtained()
+	{
+		WasOwnerPartOfLastPlayerTurn = CombatManager.Instance.IsPartOfPlayerTurn(base.Owner);
+		return Task.CompletedTask;
+	}
 
 	public override Task BeforeCardPlayed(CardPlay cardPlay)
 	{
@@ -79,12 +100,13 @@ public sealed class PaelsEye : RelicModel
 		}
 		base.Status = RelicStatus.Active;
 		AnyCardsPlayedThisTurn = false;
+		WasOwnerPartOfLastPlayerTurn = CombatManager.Instance.IsPartOfPlayerTurn(base.Owner);
 		return Task.CompletedTask;
 	}
 
 	public override bool ShouldTakeExtraTurn(Player player)
 	{
-		if (!UsedThisCombat && !AnyCardsPlayedThisTurn)
+		if (!UsedThisCombat && !AnyCardsPlayedThisTurn && WasOwnerPartOfLastPlayerTurn)
 		{
 			return player == base.Owner;
 		}
@@ -93,7 +115,7 @@ public sealed class PaelsEye : RelicModel
 
 	public override async Task BeforeTurnEndEarly(PlayerChoiceContext choiceContext, CombatSide side)
 	{
-		if (UsedThisCombat || AnyCardsPlayedThisTurn || side != CombatSide.Player)
+		if (UsedThisCombat || AnyCardsPlayedThisTurn || !WasOwnerPartOfLastPlayerTurn || side != CombatSide.Player)
 		{
 			return;
 		}

@@ -97,9 +97,9 @@ public static class HoverTipFactory
 		return relic.HoverTipsExcludingRelic;
 	}
 
-	public static IEnumerable<IHoverTip> FromCardWithCardHoverTips<T>(bool inheritsUpgrades = false) where T : CardModel
+	public static IEnumerable<IHoverTip> FromCardWithCardHoverTips<T>(bool upgrade = false) where T : CardModel
 	{
-		return new IHoverTip[1] { FromCard<T>() }.Concat(ModelDb.Card<T>().HoverTips);
+		return new IHoverTip[1] { FromCard<T>(upgrade) }.Concat(ModelDb.Card<T>().HoverTips);
 	}
 
 	public static IHoverTip FromCard<T>(bool upgrade = false) where T : CardModel

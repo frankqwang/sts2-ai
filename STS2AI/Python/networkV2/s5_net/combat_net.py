@@ -22,9 +22,9 @@ from networkV2.s5_net.encoders.build_encoder import BuildMemoryEncoder
 from networkV2.s5_net.encoders.board_encoder import BoardEncoder
 from networkV2.s5_net.encoders.mechanism_encoder import MechanismEncoder
 from networkV2.s5_net.encoders.modifier_encoder import ModifierEncoder
+from networkV2.s5_net.encoders.power_encoder import PowerEncoder
 from networkV2.s5_net.encoders.prefix_encoder import TurnPrefixEncoder
 from networkV2.s5_net.encoders.combat_memory_encoder import CombatMemoryEncoder
-from networkV2.s5_net.encoders.common import CrossAttentionBlock
 from networkV2.s5_net.action_contextualizer import ActionContextualizer
 from networkV2.s5_net.decision_core import DecisionCore
 from networkV2.s5_net.heads.policy_head import PolicyHead
@@ -49,6 +49,9 @@ class CombatNetV2(nn.Module):
         n_build_slots: int = 8,
         max_numeric_dim: int = 48,
         dropout: float = 0.1,
+        contextualizer_mode: str = "full",
+        enable_encounter_conditioning: bool = False,
+        n_encounters: int = 128,
     ):
         super().__init__()
         self.d_model = d_model
@@ -61,6 +64,7 @@ class CombatNetV2(nn.Module):
         self.board_encoder = BoardEncoder(d_model, n_heads, n_layers=3, dropout=dropout)
         self.mechanism_encoder = MechanismEncoder(d_model, max(n_heads // 2, 1), n_layers=2, dropout=dropout)
         self.modifier_encoder = ModifierEncoder(d_model, max(n_heads // 2, 1), n_layers=2, dropout=dropout)
+        self.power_encoder = PowerEncoder(d_model, max(n_heads // 2, 1), n_layers=1, dropout=dropout)
         self.prefix_encoder = TurnPrefixEncoder(d_model, max(n_heads // 2, 1), n_layers=2, dropout=dropout)
         self.combat_memory_encoder = CombatMemoryEncoder(d_model, max(n_heads // 2, 1), n_layers=1, dropout=dropout)
 
@@ -71,8 +75,9 @@ class CombatNetV2(nn.Module):
         )
         self.shared_world_gate = nn.Parameter(torch.tensor(0.1))
 
-        # Layer 3: Action Contextualizer
-        self.action_contextualizer = ActionContextualizer(d_model, n_heads, dropout)
+        # Layer 3: Action Contextualizer (mode 和 UnifiedNet 对齐，支持 slim/full/merged/minimal)
+        self.action_contextualizer = ActionContextualizer(
+            d_model, n_heads, dropout, mode=contextualizer_mode)
 
         # Layer 4: Decision Core
         self.decision_core = DecisionCore(d_model, n_heads, n_layers=3, dropout=dropout)
@@ -82,10 +87,23 @@ class CombatNetV2(nn.Module):
         self.value_heads = ValueHeads(d_model)
         self.leaf_evaluator = LeafEvaluator(d_model)
 
+        # Encounter Conditioning（和 UnifiedNet 对齐；UNKNOWN=0 保证 neutral）
+        self.enable_encounter_conditioning = bool(enable_encounter_conditioning)
+        if self.enable_encounter_conditioning:
+            self.encounter_embed = nn.Embedding(n_encounters, d_model)
+            nn.init.normal_(self.encounter_embed.weight, mean=0.0, std=0.3)
+            with torch.no_grad():
+                self.encounter_embed.weight[0].zero_()  # UNKNOWN slot 显式置零
+            self.encounter_gate = nn.Parameter(torch.tensor(1.0))
+        else:
+            self.encounter_embed = None
+            self.encounter_gate = None
+
     def forward(
         self,
         banks: UnifiedTokenBanks | None = None,
         batched_banks: dict | None = None,
+        encounter_idx: torch.Tensor | None = None,
     ) -> CombatNetOutput:
         device = next(self.parameters()).device
 
@@ -108,6 +126,7 @@ class CombatNetV2(nn.Module):
         board_bt = bank_tensors.get("board", _e())
         mechanism_bt = bank_tensors.get("mechanism", _e())
         modifier_bt = bank_tensors.get("modifier", _e())
+        power_bt = bank_tensors.get("power", _e())
         prefix_bt = bank_tensors.get("turn_prefix", _e())
         combat_mem_bt = bank_tensors.get("combat_memory", _e())
         action_bt = bank_tensors.get("action", _e())
@@ -120,6 +139,7 @@ class CombatNetV2(nn.Module):
         board_enc = self.board_encoder(board_bt) if board_bt.mask.any() else board_bt
         mech_enc = self.mechanism_encoder(mechanism_bt) if mechanism_bt.mask.any() else mechanism_bt
         mod_enc = self.modifier_encoder(modifier_bt) if modifier_bt.mask.any() else modifier_bt
+        power_enc = self.power_encoder(power_bt) if power_bt.mask.any() else power_bt
         prefix_enc = self.prefix_encoder(prefix_bt) if prefix_bt.mask.any() else prefix_bt
         cm_enc = self.combat_memory_encoder(combat_mem_bt) if combat_mem_bt.mask.any() else combat_mem_bt
 
@@ -131,19 +151,20 @@ class CombatNetV2(nn.Module):
         action_features = action_bt.features + self.shared_world_gate * world_ctx.unsqueeze(1)
         action_bt = BankTensor(action_features, action_bt.mask, action_bt.bank_name)
 
-        # Layer 3: Action Contextualizer
+        # Layer 3: Action Contextualizer (v2: 含 power_bt)
         action_hyp = self.action_contextualizer(
-            action_bt, board_enc, mod_enc, mech_enc,
+            action_bt, board_enc, mod_enc, mech_enc, power_enc,
             prefix_enc, cm_enc, build_slots,
         )
 
         # Layer 4: Decision Core
         decision_repr, action_refined = self.decision_core(action_hyp)
+        decision_repr = self._apply_encounter_conditioning(decision_repr, encounter_idx)
 
         # Layer 5: Heads
         logits = self.policy_head(decision_repr, action_refined)
         values = self.value_heads(decision_repr)
-        leaf = self.leaf_evaluator(decision_repr, board_enc, cm_enc, mech_enc, mod_enc)
+        leaf = self.leaf_evaluator(decision_repr, board_enc, cm_enc, mech_enc, mod_enc, power_enc)
 
         return CombatNetOutput(
             logits=logits,
@@ -151,6 +172,26 @@ class CombatNetV2(nn.Module):
             leaf=leaf,
             action_mask=action_bt.mask,
         )
+
+    def _apply_encounter_conditioning(
+        self,
+        decision_repr: torch.Tensor,
+        encounter_idx: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """给 decision_repr 加上 encounter-specific bias。
+
+        encounter_idx == 0 (UNKNOWN) → per-sample 零注入（mask 掉 embed 查询），
+        保证非战斗/未知 encounter 样本是真正 neutral、不被共享 learnable bias 污染。
+        """
+        if not self.enable_encounter_conditioning or encounter_idx is None:
+            return decision_repr
+        idx = encounter_idx.to(device=decision_repr.device, dtype=torch.long)
+        idx = idx.clamp(min=0, max=self.encounter_embed.num_embeddings - 1)
+        if not bool((idx != 0).any()):
+            return decision_repr
+        boss_bias = self.encounter_embed(idx)
+        valid = (idx != 0).to(decision_repr.dtype).unsqueeze(-1)
+        return decision_repr + self.encounter_gate * boss_bias * valid
 
     def _empty_bt(self, device: torch.device, batch_size: int = 1) -> BankTensor:
         return BankTensor(

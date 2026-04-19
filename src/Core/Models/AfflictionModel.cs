@@ -29,9 +29,9 @@ public abstract class AfflictionModel : AbstractModel
 
 	public LocString Title => new LocString("afflictions", base.Id.Entry + ".title");
 
-	public LocString Description => new LocString("afflictions", base.Id.Entry + ".description");
+	private LocString Description => new LocString("afflictions", base.Id.Entry + ".description");
 
-	public LocString ExtraCardText => new LocString("afflictions", base.Id.Entry + ".extraCardText");
+	private LocString ExtraCardText => new LocString("afflictions", base.Id.Entry + ".extraCardText");
 
 	public virtual bool HasExtraCardText => false;
 

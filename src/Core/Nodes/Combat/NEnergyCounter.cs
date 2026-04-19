@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Nodes.HoverTips;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Utilities;
 using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Nodes.Combat;
@@ -25,9 +26,9 @@ public partial class NEnergyCounter : Control
 
 	private Control _rotationLayers;
 
-	private CpuParticles2D _backParticles;
+	private NParticlesContainer? _backVfx;
 
-	private CpuParticles2D _frontParticles;
+	private NParticlesContainer? _frontVfx;
 
 	private HoverTip _hoverTip;
 
@@ -61,8 +62,8 @@ public partial class NEnergyCounter : Control
 		_label = GetNode<MegaLabel>("Label");
 		_layers = GetNode<Control>("%Layers");
 		_rotationLayers = GetNode<Control>("%RotationLayers");
-		_backParticles = GetNode<CpuParticles2D>("%BurstBack");
-		_frontParticles = GetNode<CpuParticles2D>("%BurstFront");
+		_backVfx = GetNode<NParticlesContainer>("%EnergyVfxBack");
+		_frontVfx = GetNode<NParticlesContainer>("%EnergyVfxFront");
 		LocString locString = new LocString("static_hover_tips", "ENERGY_COUNT.description");
 		locString.Add("energyPrefix", EnergyIconHelper.GetPrefix(_player.Character.CardPool));
 		_hoverTip = new HoverTip(new LocString("static_hover_tips", "ENERGY_COUNT.title"), locString);
@@ -105,8 +106,8 @@ public partial class NEnergyCounter : Control
 	{
 		PlayerCombatState playerCombatState = _player.PlayerCombatState;
 		_label.SetTextAutoSize($"{playerCombatState.Energy}/{playerCombatState.MaxEnergy}");
-		_label.AddThemeColorOverride(ThemeConstants.Label.fontColor, (playerCombatState.Energy == 0) ? StsColors.red : StsColors.cream);
-		_label.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, (playerCombatState.Energy == 0) ? StsColors.unplayableEnergyCostOutline : OutlineColor);
+		_label.AddThemeColorOverride(ThemeConstants.Label.FontColor, (playerCombatState.Energy == 0) ? StsColors.red : StsColors.cream);
+		_label.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, (playerCombatState.Energy == 0) ? StsColors.unplayableEnergyCostOutline : OutlineColor);
 		Material material = ((playerCombatState.Energy == 0) ? PreloadManager.Cache.GetMaterial("res://materials/ui/energy_orb_dark.tres") : null);
 		foreach (Control item in _layers.GetChildren().OfType<Control>())
 		{
@@ -123,8 +124,8 @@ public partial class NEnergyCounter : Control
 	{
 		if (oldEnergy < newEnergy)
 		{
-			_frontParticles.Emitting = true;
-			_backParticles.Emitting = true;
+			_backVfx?.Restart();
+			_frontVfx?.Restart();
 		}
 	}
 

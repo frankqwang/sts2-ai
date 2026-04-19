@@ -163,15 +163,19 @@ public class NodePool<T> : INodePool where T : Node, IPoolable
 	private void DisconnectSignal(Callable callable, Signal signal)
 	{
 		GodotObject target = callable.Target;
-		if (target == null && callable.Method == null)
+		if ((target == null && callable.Method == null) || (target != null && !GodotObject.IsInstanceValid(target)))
 		{
 			return;
 		}
 		StringName name = signal.Name;
 		Node node = target as Node;
-		if (node == null || node.IsInsideTree())
+		if (node != null && !node.IsInsideTree())
 		{
-			GodotObject owner = signal.Owner;
+			return;
+		}
+		GodotObject owner = signal.Owner;
+		if (GodotObject.IsInstanceValid(owner))
+		{
 			Node node2 = owner as Node;
 			if (node != null && node.HasSignal(name) && node.IsConnected(name, callable))
 			{

@@ -20,7 +20,16 @@ public sealed class TheForgotten : MonsterModel
 
 	public override int MaxInitialHp => MinInitialHp;
 
-	private int DreadDamage => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 17, 15);
+	private int DreadDamage
+	{
+		get
+		{
+			int valueIfAscension = AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 15, 13);
+			return valueIfAscension + base.Creature.GetPowerAmount<DexterityPower>();
+		}
+	}
+
+	private int DebilitatingSmogDexStealAmount => AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 2, 2);
 
 	public override DamageSfxType TakeDamageSfxType => DamageSfxType.Stone;
 
@@ -33,7 +42,7 @@ public sealed class TheForgotten : MonsterModel
 	{
 		List<MonsterState> list = new List<MonsterState>();
 		MoveState moveState = new MoveState("MIASMA", MiasmaMove, new DebuffIntent(), new DefendIntent(), new BuffIntent());
-		MoveState moveState2 = (MoveState)(moveState.FollowUpState = new MoveState("DREAD", DreadMove, new SingleAttackIntent(DreadDamage)));
+		MoveState moveState2 = (MoveState)(moveState.FollowUpState = new MoveState("DREAD", DreadMove, new SingleAttackIntent(() => DreadDamage)));
 		moveState2.FollowUpState = moveState;
 		list.Add(moveState);
 		list.Add(moveState2);
@@ -44,9 +53,9 @@ public sealed class TheForgotten : MonsterModel
 	{
 		SfxCmd.Play(CastSfx);
 		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0.5f);
-		await PowerCmd.Apply<DexterityPower>(targets, -2m, base.Creature, null);
+		await PowerCmd.Apply<DexterityPower>(targets, -DebilitatingSmogDexStealAmount, base.Creature, null);
 		await CreatureCmd.GainBlock(base.Creature, 8m, ValueProp.Move, null);
-		await PowerCmd.Apply<DexterityPower>(base.Creature, 2m, base.Creature, null);
+		await PowerCmd.Apply<DexterityPower>(base.Creature, DebilitatingSmogDexStealAmount, base.Creature, null);
 	}
 
 	private async Task DreadMove(IReadOnlyList<Creature> targets)

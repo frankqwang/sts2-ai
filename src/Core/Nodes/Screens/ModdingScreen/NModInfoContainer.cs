@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using System.Text;
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Modding;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.ModdingScreen;
@@ -55,6 +57,21 @@ public partial class NModInfoContainer : Control
 		handler = new StringBuilder.AppendInterpolatedStringHandler(0, 1, stringBuilder2);
 		handler.AppendFormatted(mod.manifest?.description ?? "No description");
 		stringBuilder5.AppendLine(ref handler);
+		List<LocString>? errors = mod.errors;
+		if (errors != null && errors.Count > 0)
+		{
+			stringBuilder.AppendLine();
+			foreach (LocString error in mod.errors)
+			{
+				stringBuilder2 = stringBuilder;
+				StringBuilder stringBuilder6 = stringBuilder2;
+				handler = new StringBuilder.AppendInterpolatedStringHandler(11, 1, stringBuilder2);
+				handler.AppendLiteral("[red]");
+				handler.AppendFormatted(error.GetFormattedText());
+				handler.AppendLiteral("[/red]");
+				stringBuilder6.AppendLine(ref handler);
+			}
+		}
 		_description.Text = stringBuilder.ToString();
 	}
 }

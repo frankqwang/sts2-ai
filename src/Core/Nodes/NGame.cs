@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -51,6 +52,9 @@ public partial class NGame : Control
 {
 	[Signal]
 	public delegate void WindowChangeEventHandler();
+
+	[Signal]
+	public delegate void PhobiaModeToggledEventHandler();
 
 	public static readonly Vector2 devResolution = new Vector2(1920f, 1080f);
 
@@ -122,6 +126,8 @@ public partial class NGame : Control
 
 	public override void _EnterTree()
 	{
+		CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+		CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 		if (Instance != null)
 		{
 			Log.Error("NGame already exists.");
@@ -208,13 +214,22 @@ public partial class NGame : Control
 		Log.Error("Encountered error on game startup! Attempting to show error dialog");
 		await TryErrorInit();
 		NGenericPopup nGenericPopup = NGenericPopup.Create();
-		NModalContainer.Instance.Add(nGenericPopup);
-		await nGenericPopup.WaitForConfirmation(new LocString("main_menu_ui", "STARTUP_ERROR.description"), new LocString("main_menu_ui", "STARTUP_ERROR.title"), null, new LocString("main_menu_ui", "QUIT"));
-		GetTree().Quit();
+		if (nGenericPopup == null || NModalContainer.Instance == null)
+		{
+			Log.Error("Cannot show error dialog: UI not initialized. Quitting immediately.");
+			GetTree().Quit();
+		}
+		else
+		{
+			NModalContainer.Instance.Add(nGenericPopup);
+			await nGenericPopup.WaitForConfirmation(new LocString("main_menu_ui", "STARTUP_ERROR.description"), new LocString("main_menu_ui", "STARTUP_ERROR.title"), null, new LocString("main_menu_ui", "QUIT"));
+			GetTree().Quit();
+		}
 	}
 
 	private async Task GameStartup()
 	{
+		OneTimeInitialization.ExecuteVeryEarly();
 		AccountScopeUserDataMigrator.MigrateToUserScopedDirectories();
 		AccountScopeUserDataMigrator.ArchiveLegacyData();
 		ProfileAccountScopeMigrator.MigrateToProfileScopedDirectories();
@@ -242,13 +257,20 @@ public partial class NGame : Control
 		SteamStatsManager.Initialize();
 		if (cloudSavesTask != null)
 		{
-			await cloudSavesTask;
+			while (!cloudSavesTask.IsCompleted)
+			{
+				if (!SteamInitializer.Initialized)
+				{
+					Log.Error("Steam became uninitialized while the cloud sync was in-progress! This might result in unpredictable behavior");
+					break;
+				}
+				await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			}
 		}
 		SaveManager.Instance.InitProfileId();
 		ReadSaveResult<SerializableProgress> progressReadResult = SaveManager.Instance.InitProgressData();
 		ReadSaveResult<PrefsSave> prefsReadResult = SaveManager.Instance.InitPrefsData();
-		SentryService.SetUserContext(SaveManager.Instance.Progress.UniqueId);
-		SentryService.SetPlatformBranch(PlatformUtil.GetPlatformBranch());
+		SentryService.AfterGameInit(PlatformUtil.GetPlatformBranch(), SaveManager.Instance.Progress.UniqueId, GetTree().Root);
 		_screenShake.SetMultiplier(NScreenshakePaginator.GetShakeMultiplier(SaveManager.Instance.PrefsSave.ScreenShakeOptionIndex));
 		if (!OS.HasFeature("editor") && SaveManager.Instance.PrefsSave.FastMode == FastModeType.Instant)
 		{
@@ -616,10 +638,10 @@ public partial class NGame : Control
 		RootSceneContainer.SetCurrentScene(currentScene);
 	}
 
-	public async Task<RunState> StartNewSingleplayerRun(CharacterModel character, bool shouldSave, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, string seed, int ascensionLevel = 0, DateTimeOffset? dailyTime = null)
+	public async Task<RunState> StartNewSingleplayerRun(CharacterModel character, bool shouldSave, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, string seed, GameMode gameMode, int ascensionLevel = 0, DateTimeOffset? dailyTime = null)
 	{
 		UnlockState unlockState = SaveManager.Instance.GenerateUnlockStateFromProgress();
-		RunState runState = RunState.CreateForNewRun(new global::_003C_003Ez__ReadOnlySingleElementList<Player>(Player.CreateForNewRun(character, unlockState, 1uL)), acts.Select((ActModel a) => a.ToMutable()).ToList(), modifiers, ascensionLevel, seed);
+		RunState runState = RunState.CreateForNewRun(new global::_003C_003Ez__ReadOnlySingleElementList<Player>(Player.CreateForNewRun(character, unlockState, 1uL)), acts.Select((ActModel a) => a.ToMutable()).ToList(), modifiers, gameMode, ascensionLevel, seed);
 		RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave, dailyTime);
 		await StartRun(runState);
 		return runState;
@@ -627,7 +649,7 @@ public partial class NGame : Control
 
 	public async Task<RunState> StartNewMultiplayerRun(StartRunLobby lobby, bool shouldSave, IReadOnlyList<ActModel> acts, IReadOnlyList<ModifierModel> modifiers, string seed, int ascensionLevel, DateTimeOffset? dailyTime = null)
 	{
-		RunState runState = RunState.CreateForNewRun(lobby.Players.Select((LobbyPlayer p) => Player.CreateForNewRun(p.character, UnlockState.FromSerializable(p.unlockState), p.id)).ToList(), acts.Select((ActModel a) => a.ToMutable()).ToList(), modifiers, ascensionLevel, seed);
+		RunState runState = RunState.CreateForNewRun(lobby.Players.Select((LobbyPlayer p) => Player.CreateForNewRun(p.character, UnlockState.FromSerializable(p.unlockState), p.id)).ToList(), acts.Select((ActModel a) => a.ToMutable()).ToList(), modifiers, lobby.GameMode, ascensionLevel, seed);
 		RunManager.Instance.SetUpNewMultiPlayer(runState, lobby, shouldSave, dailyTime);
 		await StartRun(runState);
 		return runState;
@@ -650,7 +672,15 @@ public partial class NGame : Control
 
 	private async Task StartRun(RunState runState)
 	{
-		await RunManager.Instance.StartPreparedSinglePlayerRun(runState, doTransition: false);
+		using (new NetLoadingHandle(RunManager.Instance.NetService))
+		{
+			await PreloadManager.LoadRunAssets(runState.Players.Select((Player p) => p.Character));
+			await PreloadManager.LoadActAssets(runState.Acts[0]);
+			await RunManager.Instance.FinalizeStartingRelics();
+			RunManager.Instance.Launch();
+			RootSceneContainer.SetCurrentScene(NRun.Create(runState));
+			await RunManager.Instance.EnterAct(0, doTransition: false);
+		}
 	}
 
 	public override void _Input(InputEvent inputEvent)
@@ -834,6 +864,12 @@ public partial class NGame : Control
 			Log.Error("Failed to initialize Steam! Attempting to show error popup");
 			await TryErrorInit();
 			NGenericPopup nGenericPopup = NGenericPopup.Create();
+			if (nGenericPopup == null || NModalContainer.Instance == null)
+			{
+				Log.Error("Cannot show Steam error dialog: UI not initialized. Quitting immediately.");
+				GetTree().Quit();
+				return false;
+			}
 			NModalContainer.Instance.Add(nGenericPopup);
 			LocString locString = new LocString("main_menu_ui", "STEAM_INIT_ERROR.description");
 			locString.Add("details", $"{SteamInitializer.InitResult}: {SteamInitializer.InitErrorMessage}");

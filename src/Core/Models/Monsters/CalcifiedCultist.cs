@@ -12,7 +12,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
-using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
 
@@ -53,10 +53,9 @@ public sealed class CalcifiedCultist : MonsterModel
 		}
 	}
 
-	public override void SetupSkins(NCreatureVisuals visuals)
+	public override void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
-		MegaSkeleton skeleton = visuals.SpineBody.GetSkeleton();
-		MegaSkin megaSkin = visuals.SpineBody.NewSkin("custom-skin");
+		MegaSkin megaSkin = spine.NewSkin("custom-skin");
 		MegaSkeletonDataResource data = skeleton.GetData();
 		megaSkin.AddSkin(data.FindSkin("coral"));
 		skeleton.SetSkin(megaSkin);
@@ -77,8 +76,9 @@ public sealed class CalcifiedCultist : MonsterModel
 	private async Task IncantationMove(IReadOnlyList<Creature> targets)
 	{
 		SfxCmd.Play("event:/sfx/enemy/enemy_attacks/cultists/cultists_buff_calcified");
-		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0.6f);
-		TalkCmd.Play(_cawCawDialogue, base.Creature);
+		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0.5f);
+		TalkCmd.Play(_cawCawDialogue, base.Creature, VfxColor.Purple, VfxDuration.Standard);
+		await Cmd.CustomScaledWait(0.25f, 0.5f);
 		await PowerCmd.Apply<RitualPower>(base.Creature, IncantationAmount, base.Creature, null);
 	}
 

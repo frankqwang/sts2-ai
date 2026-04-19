@@ -34,13 +34,7 @@ public sealed class Shiv : CardModel
 
 	protected override HashSet<CardTag> CanonicalTags => new HashSet<CardTag> { CardTag.Shiv };
 
-	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[4]
-	{
-		new DamageVar(4m, ValueProp.Move),
-		new CalculationBaseVar(0m),
-		new CalculationExtraVar(1m),
-		new CalculatedVar("FanOfKnivesAmount").WithMultiplier((CardModel card, Creature? _) => (card != null && card.IsMutable && card.Owner != null) ? card.Owner.Creature.GetPowerAmount<FanOfKnivesPower>() : 0)
-	});
+	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new DamageVar(4m, ValueProp.Move));
 
 	public override IEnumerable<CardKeyword> CanonicalKeywords => new global::_003C_003Ez__ReadOnlySingleElementList<CardKeyword>(CardKeyword.Exhaust);
 
@@ -48,7 +42,7 @@ public sealed class Shiv : CardModel
 	{
 		get
 		{
-			if (CombatManager.Instance.IsInProgress)
+			if (base.IsMutable && base.Owner != null)
 			{
 				return base.Owner.Creature.HasPower<FanOfKnivesPower>();
 			}

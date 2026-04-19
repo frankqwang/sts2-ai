@@ -91,11 +91,11 @@ public static class PowerCmd
 		}
 		modifiedAmount = Hook.ModifyPowerAmountReceived(combatState, power, target, modifiedAmount, applier, out IEnumerable<AbstractModel> receivedModifiers);
 		await power.BeforeApplied(target, modifiedAmount, applier, cardSource);
+		power.ApplyInternal(target, modifiedAmount, silent);
 		if (modifiedAmount != 0m)
 		{
 			CombatManager.Instance.History.PowerReceived(combatState, power, modifiedAmount, applier);
 		}
-		power.ApplyInternal(target, modifiedAmount, silent);
 		if (power.IsVisible && CombatManager.Instance.IsInProgress)
 		{
 			await Cmd.CustomScaledWait(0.1f, 0.25f);

@@ -45,7 +45,7 @@ public class MapScreenHandler : IScreenHandler, IHandler
 			AutoSlayLog.Action($"Selecting room at ({child.coord.row}, {child.coord.col})");
 		}
 		await WaitHelper.Until(() => nextRoom.IsEnabled, ct, TimeSpan.FromSeconds(10L), "Map point not enabled");
-		_roomEnteredTcs = new TaskCompletionSource();
+		_roomEnteredTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 		RunManager.Instance.RoomEntered += OnRoomEntered;
 		try
 		{

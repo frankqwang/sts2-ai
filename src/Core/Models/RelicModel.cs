@@ -64,7 +64,7 @@ public abstract class RelicModel : AbstractModel
 
 	protected LocString EventDescription => LocString.GetIfExists("relics", base.Id.Entry + ".eventDescription") ?? Description;
 
-	public LocString Description => new LocString("relics", base.Id.Entry + ".description");
+	private LocString Description => new LocString("relics", base.Id.Entry + ".description");
 
 	protected LocString SelectionScreenPrompt
 	{
@@ -198,6 +198,8 @@ public abstract class RelicModel : AbstractModel
 		}
 	}
 
+	public virtual bool IsAllowedInShops => true;
+
 	public Player Owner
 	{
 		get
@@ -274,13 +276,13 @@ public abstract class RelicModel : AbstractModel
 
 	public virtual int MerchantCost => Rarity switch
 	{
-		RelicRarity.Common => 200, 
-		RelicRarity.Uncommon => 250, 
-		RelicRarity.Rare => 300, 
-		RelicRarity.Shop => 225, 
-		RelicRarity.Ancient => 999, 
-		RelicRarity.Starter => 999, 
-		RelicRarity.Event => 999, 
+		RelicRarity.Common => 175, 
+		RelicRarity.Uncommon => 225, 
+		RelicRarity.Rare => 275, 
+		RelicRarity.Shop => 200, 
+		RelicRarity.Ancient => 999999999, 
+		RelicRarity.Starter => 999999999, 
+		RelicRarity.Event => 999999999, 
 		RelicRarity.None => 1, 
 		_ => throw new InvalidOperationException($"Relic {base.Id} has invalid merchant rarity {Rarity}."), 
 	};

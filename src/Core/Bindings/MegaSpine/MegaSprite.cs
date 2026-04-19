@@ -120,7 +120,7 @@ public class MegaSprite : MegaSpineBinding
 
 	public bool HasAnimation(string animId)
 	{
-		return GetSkeleton().GetData().FindAnimation(animId) != null;
+		return GetSkeleton()?.GetData().FindAnimation(animId) != null;
 	}
 
 	public MegaAnimationState GetAnimationState()
@@ -128,9 +128,14 @@ public class MegaSprite : MegaSpineBinding
 		return new MegaAnimationState(Call("get_animation_state"));
 	}
 
-	public MegaSkeleton GetSkeleton()
+	public MegaSkeleton? GetSkeleton()
 	{
-		return new MegaSkeleton(Call("get_skeleton"));
+		Variant? variant = CallNullable("get_skeleton");
+		if (!variant.HasValue)
+		{
+			return null;
+		}
+		return new MegaSkeleton(variant.Value);
 	}
 
 	public Material? GetAdditiveMaterial()

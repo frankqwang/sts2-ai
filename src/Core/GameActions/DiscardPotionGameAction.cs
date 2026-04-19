@@ -1,11 +1,14 @@
 using System;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.GameActions;
 
@@ -51,6 +54,16 @@ public class DiscardPotionGameAction : GameAction
 		}
 		Log.Info($"Player {potionModel.Owner.NetId} discarding potion {potionModel.Id.Entry}");
 		await PotionCmd.Discard(potionModel);
+	}
+
+	protected override void CancelAction()
+	{
+		PotionModel potionAtSlotIndex = _player.GetPotionAtSlotIndex((int)_potionSlotIndex);
+		if (TestMode.IsOff && NRun.Instance != null && LocalContext.IsMe(_player) && potionAtSlotIndex != null)
+		{
+			NRun.Instance.GlobalUi.TopBar.PotionContainer.OnPotionUseOrDiscardCanceled(potionAtSlotIndex);
+		}
+		potionAtSlotIndex?.AfterUsageCanceled();
 	}
 
 	public override INetAction ToNetAction()

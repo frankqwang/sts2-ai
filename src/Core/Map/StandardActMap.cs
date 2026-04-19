@@ -84,7 +84,7 @@ public sealed class StandardActMap : ActMap
 		AssignPointTypes();
 		if (enablePruning)
 		{
-			MapPathPruning.PruneDuplicateSegments(Grid, startMapPoints, StartingMapPoint, _rng);
+			MapPathPruning.PruneAndRepair(Grid, startMapPoints, this, _pointTypeCounts, _rng, IsValidPointType);
 		}
 		Grid = MapPostProcessing.CenterGrid(Grid);
 		Grid = MapPostProcessing.SpreadAdjacentMapPoints(Grid);
@@ -254,6 +254,7 @@ public sealed class StandardActMap : ActMap
 		ForEachInRow(Grid, 1, delegate(MapPoint p)
 		{
 			p.PointType = MapPointType.Monster;
+			p.CanBeModified = false;
 		});
 		List<MapPointType> list = new List<MapPointType>();
 		for (int num = 0; num < _pointTypeCounts.NumOfRests; num++)
@@ -340,11 +341,24 @@ public sealed class StandardActMap : ActMap
 
 	private void AssignRemainingTypesToRandomPoints(Queue<MapPointType> pointTypesToBeAssigned)
 	{
-		List<MapPoint> list = GetAllMapPoints().ToList();
-		list.StableShuffle(_rng);
-		foreach (MapPoint item in list.Where((MapPoint p) => p.PointType == MapPointType.Unassigned))
+		for (int i = 0; i < 3; i++)
 		{
-			item.PointType = GetNextValidPointType(pointTypesToBeAssigned, item);
+			if (pointTypesToBeAssigned.Count <= 0)
+			{
+				break;
+			}
+			List<MapPoint> list = (from p in GetAllMapPoints()
+				where p.PointType == MapPointType.Unassigned
+				select p).ToList();
+			list.StableShuffle(_rng);
+			foreach (MapPoint item in list)
+			{
+				if (pointTypesToBeAssigned.Count == 0)
+				{
+					break;
+				}
+				item.PointType = GetNextValidPointType(pointTypesToBeAssigned, item);
+			}
 		}
 	}
 
@@ -393,7 +407,7 @@ public sealed class StandardActMap : ActMap
 
 	private static bool IsValidForLower(MapPointType pointType, MapPoint mapPoint)
 	{
-		if (mapPoint.coord.row < 5)
+		if (mapPoint.coord.row < 6)
 		{
 			return !_lowerMapPointRestrictions.Contains(pointType);
 		}

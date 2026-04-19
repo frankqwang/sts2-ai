@@ -49,7 +49,6 @@ public partial class NPotion : Control
 		}
 		set
 		{
-			value.AssertMutable();
 			_model = value;
 			Reload();
 		}

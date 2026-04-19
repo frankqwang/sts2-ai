@@ -819,14 +819,46 @@ class BankAssembler:
         ]
         event_kind_axes = [float(a.event_kind == k) for k in EVENT_KINDS]
         # ---- U8: route 专属通道 (2) ----
-        # route_risk / route_value: map 节点的 [0,1] 威胁 / 价值，不走 _DMG/_BLK 归一化
-        # （原先复用 damage_est/block_est 再 × 30/50 是字段语义黑客，见 route_compiler.py U8 修复）
+        # route_risk / route_value: map 节点的 [0,1] 威胁 / 价值,不走 _DMG/_BLK 归一化
         route_axes = [float(a.route_risk), float(a.route_value)]
-        # 合计 15 + 3 + 5 + 6 + 1 + 3 + 9 + 2 = 44 维（<= tokenizer max_numeric_dim=48）
+        # ---- Skada priors 通道 (4) ----
+        # TODO(cleanup): synergy_prior 现在永远是 0(填值链路已删),重训时砍成 3 维,
+        # 同步 max_numeric_dim 58→57。详见 actions.py:145。
+        skada_prior_axes = [
+            float(a.pick_rate_prior),
+            float(a.win_rate_delta_prior),
+            float(a.deck_win_rate_prior),
+            float(a.synergy_prior),
+        ]
+        # ---- 路径规划通道 (8) ----
+        # 给 route candidate 喂"从此 child 到 boss 的全局路径 stat":
+        # 6 维 type rate(rest/shop/elite/treasure/event/monster 在下游路径上的占比)
+        # + best_rest_count(下游最优路径的 rest 数归一化)
+        # + path_length_norm(到 boss 最短距离归一化)
+        # 让网络能做"全局权衡"而非只看下一个节点。非 map action 默认 0。
+        route_path_axes = [
+            float(a.route_path_rest_rate),
+            float(a.route_path_shop_rate),
+            float(a.route_path_elite_rate),
+            float(a.route_path_treasure_rate),
+            float(a.route_path_event_rate),
+            float(a.route_path_monster_rate),
+            float(a.route_best_rest_count),
+            float(a.route_path_length_norm),
+        ]
+        # Skada victory-runs 挖出的 data-driven 先验(2 维):
+        # frequency:该 fingerprint 在高手群体出现频率 → 等价 "受欢迎的赢法"
+        # efficiency:1 - duration_normalized → 等价 "更快的赢法"
+        route_data_prior_axes = [
+            float(a.route_prior_frequency),
+            float(a.route_prior_efficiency),
+        ]
+        # 合计 15+3+5+6+1+3+9+2+4+8+2 = 58 维(= tokenizer max_numeric_dim=58)
         return Token(
             numeric=(
                 combat_axes + target_axes + family_axes + role_axes
                 + extra_axes + noncombat_axes + event_kind_axes + route_axes
+                + skada_prior_axes + route_path_axes + route_data_prior_axes
             ),
             token_type=TK_ACTION_CANDIDATE,
             owner_id=a.source_card_id or a.source_potion_id or a.action_type,

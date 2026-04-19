@@ -86,7 +86,7 @@ public partial class NTransition : ColorRect
 				}
 				transitionMaterial.SetShaderParameter(_threshold, 1.0 - ((double)time - t));
 				t += GetProcessDeltaTime();
-				await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+				await this.AwaitProcessFrame();
 			}
 			base.MouseFilter = MouseFilterEnum.Stop;
 			transitionMaterial.SetShaderParameter(_threshold, 1);
@@ -138,7 +138,7 @@ public partial class NTransition : ColorRect
 			}
 			transitionMaterial.SetShaderParameter(_threshold, Ease.CubicIn((float)((double)time - t)));
 			t += GetProcessDeltaTime();
-			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			await this.AwaitProcessFrame();
 			if (t / (double)time > 0.75)
 			{
 				InTransition = false;
@@ -178,7 +178,7 @@ public partial class NTransition : ColorRect
 				_tween.TweenProperty(_simpleTransition, "modulate:a", 1f, 0.3).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Quad)
 					.SetDelay(0.3);
 			}
-			await ToSignal(_tween, Tween.SignalName.Finished);
+			await _tween.AwaitFinished(this);
 		}
 	}
 
@@ -227,7 +227,7 @@ public partial class NTransition : ColorRect
 				InTransition = false;
 			})).SetDelay(0.2);
 		}
-		await ToSignal(_tween, Tween.SignalName.Finished);
+		await _tween.AwaitFinished(this);
 		InTransition = false;
 	}
 }

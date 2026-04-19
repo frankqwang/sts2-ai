@@ -28,6 +28,6 @@ public sealed class Arsenal : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars["ArsenalPower"].UpgradeValueBy(1m);
+		AddKeyword(CardKeyword.Innate);
 	}
 }

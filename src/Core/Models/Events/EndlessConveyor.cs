@@ -83,7 +83,7 @@ public sealed class EndlessConveyor : EventModel
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[6]
 	{
-		new GoldVar(35),
+		new GoldVar(40),
 		new GoldVar("GoldenFyshGold", 75),
 		new HealVar("ClamRollHeal", 10m),
 		new MaxHpVar("CaviarMaxHp", 4m),
@@ -91,9 +91,9 @@ public sealed class EndlessConveyor : EventModel
 		new StringVar("LastDishTitle")
 	});
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
-		return runState.Players.All((Player p) => p.Gold >= 105);
+		return runState.Players.All((Player p) => p.Gold >= 120);
 	}
 
 	public override void CalculateVars()

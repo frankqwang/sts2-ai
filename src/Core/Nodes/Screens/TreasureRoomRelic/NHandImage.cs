@@ -52,6 +52,8 @@ public partial class NHandImage : Control
 
 	public bool IsDown { get; private set; }
 
+	public bool IsShown { get; private set; }
+
 	public static NHandImage Create(Player player, int slotIndex)
 	{
 		NHandImage nHandImage = PreloadManager.Cache.GetScene(_scenePath).Instantiate<NHandImage>(PackedScene.GenEditState.Disabled);
@@ -186,6 +188,7 @@ public partial class NHandImage : Control
 		Rect2 viewportRect = GetViewportRect();
 		Vector2 vector = Vector2.Down.Rotated(base.Rotation);
 		_desiredPosition = viewportRect.Size / 2f + viewportRect.Size * vector * 0.8f;
+		IsShown = false;
 	}
 
 	public void AnimateIn()
@@ -196,6 +199,7 @@ public partial class NHandImage : Control
 		{
 			_handAnimateInProgress = v;
 		}), 0f, 1f, 0.6000000238418579).SetTrans(Tween.TransitionType.Expo).SetEase(Tween.EaseType.Out);
+		IsShown = true;
 	}
 
 	public void SetIsDown(bool isDown)
@@ -243,6 +247,11 @@ public partial class NHandImage : Control
 		tween.TweenProperty(this, "global_position", _desiredPosition, 0.5).SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
 		await ToSignal(tween, Tween.SignalName.Finished);
 		_state = oldState;
+	}
+
+	public void SetSkipped()
+	{
+		SetTextureToFightMove(RelicPickingFightMove.Rock);
 	}
 
 	public void SetAnimateInProgress(float animateInProgress)

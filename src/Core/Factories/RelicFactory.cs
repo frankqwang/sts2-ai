@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Models;
@@ -15,29 +14,34 @@ public static class RelicFactory
 
 	public static RelicModel PullNextRelicFromFront(Player player, Rng rng)
 	{
-		return PullNextRelicFromFront(player, RollRarity(rng));
+		return PullNextRelicFromFront(player, RollRarity(rng), (RelicModel _) => true);
 	}
 
 	public static RelicModel PullNextRelicFromFront(Player player)
 	{
-		return PullNextRelicFromFront(player, RollRarity(player));
+		return PullNextRelicFromFront(player, RollRarity(player), (RelicModel _) => true);
 	}
 
 	public static RelicModel PullNextRelicFromFront(Player player, RelicRarity rarity)
 	{
-		RelicModel relicModel = TestRngInjector.ConsumeRelicOverride() ?? player.RelicGrabBag.PullFromFront(rarity, player.RunState) ?? FallbackRelic;
+		return PullNextRelicFromFront(player, rarity, (RelicModel _) => true);
+	}
+
+	public static RelicModel PullNextRelicFromFront(Player player, RelicRarity rarity, Func<RelicModel, bool> filter)
+	{
+		RelicModel relicModel = TestRngInjector.ConsumeRelicOverride() ?? player.RelicGrabBag.PullFromFront(rarity, filter, player.RunState) ?? FallbackRelic;
 		player.RunState.SharedRelicGrabBag.Remove(relicModel);
 		return relicModel;
 	}
 
 	public static RelicModel PullNextRelicFromBack(Player player)
 	{
-		return PullNextRelicFromBack(player, RollRarity(player), Array.Empty<RelicModel>());
+		return PullNextRelicFromBack(player, RollRarity(player), (RelicModel _) => true);
 	}
 
-	public static RelicModel PullNextRelicFromBack(Player player, RelicRarity rarity, IEnumerable<RelicModel> blacklist)
+	public static RelicModel PullNextRelicFromBack(Player player, RelicRarity rarity, Func<RelicModel, bool> filter)
 	{
-		RelicModel relicModel = TestRngInjector.ConsumeRelicOverride() ?? player.RelicGrabBag.PullFromBack(rarity, blacklist, player.RunState) ?? FallbackRelic;
+		RelicModel relicModel = TestRngInjector.ConsumeRelicOverride() ?? player.RelicGrabBag.PullFromBack(rarity, filter, player.RunState) ?? FallbackRelic;
 		player.RunState.SharedRelicGrabBag.Remove(relicModel);
 		return relicModel;
 	}

@@ -8,6 +8,8 @@ public partial class NCommonBanner : Control
 {
 	public MegaLabel label;
 
+	private Tween? _labelTween;
+
 	private Tween? _tween;
 
 	private Vector2 _showPos;
@@ -20,7 +22,7 @@ public partial class NCommonBanner : Control
 
 	public override void _Ready()
 	{
-		label = GetNode<MegaLabel>("MegaLabel");
+		label = GetNode<MegaLabel>("%Label");
 		base.Modulate = StsColors.transparentWhite;
 		_imgOffset = new Vector2(GetViewportRect().Size.X * 0.5f, GetViewportRect().Size.Y * 0.5f) - base.GlobalPosition;
 		GetTree().Root.Connect(Viewport.SignalName.SizeChanged, Callable.From(OnWindowChange));
@@ -48,5 +50,14 @@ public partial class NCommonBanner : Control
 		_tween?.Kill();
 		_tween = CreateTween().SetParallel();
 		_tween.TweenProperty(this, "modulate:a", 0f, 0.4).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
+	}
+
+	public void ChangeText(string text)
+	{
+		label.SetTextAutoSize(text);
+		label.Modulate = StsColors.transparentWhite;
+		_labelTween?.Kill();
+		_labelTween = CreateTween();
+		_labelTween.TweenProperty(label, "modulate:a", 1f, 0.25);
 	}
 }

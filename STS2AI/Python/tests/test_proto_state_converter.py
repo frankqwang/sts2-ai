@@ -1,7 +1,7 @@
 """proto_state_converter 单元测试。
 
 构造 proto GameState 消息 → game_state_to_dict() → 验证输出 dict 格式
-和 binary_pipe_client._decode_state() 的兼容性。
+是 V2 训练的规范 state 形状(历史上对齐过已删除的 binary_pipe_client 输出)。
 
 运行: cd STS2AI/Python && python -m pytest tests/test_proto_state_converter.py -v
 """

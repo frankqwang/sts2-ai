@@ -88,7 +88,7 @@ public class SavedProperties : IPacketSerializable
 										{
 											if (!(value is List<SerializableCard> list))
 											{
-												throw new JsonException($"Property {name} on {id} is not a valid type for [SavedProperty] (type {value?.GetType()}).");
+												throw new JsonException($"Property {name} on {id} is not a valid type for [SavedProperty] (type {value.GetType()}).");
 											}
 											SavedProperties savedProperties2 = savedProperties;
 											if (savedProperties2.cardArrays == null)

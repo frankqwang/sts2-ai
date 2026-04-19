@@ -71,7 +71,7 @@ public partial class NChooseACardSelectionScreen : Control, IOverlayScreen, IScr
 	{
 		get
 		{
-			if (_peekButton.IsPeeking)
+			if (_peekButton.IsPeeking && NCombatRoom.Instance != null)
 			{
 				return NCombatRoom.Instance.DefaultFocusedControl;
 			}
@@ -244,7 +244,10 @@ public partial class NChooseACardSelectionScreen : Control, IOverlayScreen, IScr
 	public void AfterOverlayShown()
 	{
 		base.Visible = true;
-		_peekButton.Enable();
+		if (CombatManager.Instance.IsInProgress)
+		{
+			_peekButton.Enable();
+		}
 		if (_canSkip && !_peekButton.IsPeeking)
 		{
 			_skipButton.Enable();

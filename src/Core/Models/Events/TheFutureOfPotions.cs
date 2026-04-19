@@ -82,12 +82,12 @@ public sealed class TheFutureOfPotions : EventModel
 		}
 	}
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		return runState.Players.All((Player p) => p.Potions.Count() >= 2);
 	}
 
-	protected override Task BeforeEventStarted()
+	protected override Task BeforeEventStarted(bool isPreFinished)
 	{
 		base.Owner.CanRemovePotions = false;
 		return Task.CompletedTask;

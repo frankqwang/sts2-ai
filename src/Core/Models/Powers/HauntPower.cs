@@ -18,7 +18,7 @@ public sealed class HauntPower : PowerModel
 
 	public override async Task AfterCardPlayed(PlayerChoiceContext context, CardPlay cardPlay)
 	{
-		if (cardPlay.Card is Soul)
+		if (cardPlay.Card is Soul && cardPlay.Card.Owner.Creature == base.Owner)
 		{
 			IReadOnlyList<Creature> hittableEnemies = base.CombatState.HittableEnemies;
 			if (hittableEnemies.Count != 0)

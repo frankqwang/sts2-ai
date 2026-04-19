@@ -14,6 +14,10 @@ public class DynamicVar : IConvertible
 
 	private decimal _baseValue;
 
+	private decimal _enchantedValue;
+
+	private decimal _previewValue;
+
 	public string Name { get; }
 
 	public decimal BaseValue
@@ -24,14 +28,34 @@ public class DynamicVar : IConvertible
 		}
 		set
 		{
-			_baseValue = value;
+			_baseValue = Math.Min(value, 999999999m);
 			ResetToBase();
 		}
 	}
 
-	public decimal EnchantedValue { get; protected set; }
+	public decimal EnchantedValue
+	{
+		get
+		{
+			return _enchantedValue;
+		}
+		set
+		{
+			_enchantedValue = Math.Min(value, 999999999m);
+		}
+	}
 
-	public decimal PreviewValue { get; set; }
+	public decimal PreviewValue
+	{
+		get
+		{
+			return _previewValue;
+		}
+		set
+		{
+			_previewValue = Math.Min(value, 999999999m);
+		}
+	}
 
 	public bool WasJustUpgraded { get; protected set; }
 

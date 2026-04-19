@@ -10,6 +10,8 @@ namespace MegaCrit.Sts2.Core.Models.Cards;
 
 public sealed class VoidForm : CardModel
 {
+	public override IEnumerable<CardKeyword> CanonicalKeywords => new global::_003C_003Ez__ReadOnlySingleElementList<CardKeyword>(CardKeyword.Ethereal);
+
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new PowerVar<VoidFormPower>(2m));
 
 	public VoidForm()
@@ -26,6 +28,6 @@ public sealed class VoidForm : CardModel
 
 	protected override void OnUpgrade()
 	{
-		base.DynamicVars["VoidFormPower"].UpgradeValueBy(1m);
+		RemoveKeyword(CardKeyword.Ethereal);
 	}
 }

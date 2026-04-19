@@ -20,7 +20,7 @@ public class MapSelectionSynchronizer
 
 	private readonly RunState _runState;
 
-	private RunLocation _acceptingVotesFromSource;
+	private MapLocation _acceptingVotesFromSource;
 
 	private readonly List<MapVote?> _votes = new List<MapVote?>();
 
@@ -42,10 +42,10 @@ public class MapSelectionSynchronizer
 		_actionQueueSynchronizer = actionQueueSynchronizer;
 		_runState = runState;
 		_multiplayerMapPointSelection = new Rng(_runState.Rng.Seed);
-		OnRunLocationChanged(_runState.CurrentLocation);
+		OnLocationChanged(_runState.MapLocation);
 	}
 
-	public void PlayerVotedForMapCoord(Player player, RunLocation source, MapVote? destination)
+	public void PlayerVotedForMapCoord(Player player, MapLocation source, MapVote? destination)
 	{
 		if (_acceptingVotesFromSource != source)
 		{
@@ -55,6 +55,7 @@ public class MapSelectionSynchronizer
 		if (destination?.mapGenerationCount < MapGenerationCount)
 		{
 			_logger.Warn($"Received map vote from player {player.NetId} for destination {destination}, but the map generation count is lower than our current: {MapGenerationCount}");
+			return;
 		}
 		int playerSlotIndex = _runState.GetPlayerSlotIndex(player);
 		MapVote? arg = _votes[playerSlotIndex];
@@ -93,7 +94,7 @@ public class MapSelectionSynchronizer
 		_actionQueueSynchronizer.RequestEnqueue(action);
 	}
 
-	public void OnRunLocationChanged(RunLocation location)
+	public void OnLocationChanged(MapLocation location)
 	{
 		_acceptingVotesFromSource = location;
 		_votes.Clear();

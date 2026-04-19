@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Relics;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.Timeline.UnlockScreens;
 
@@ -28,6 +29,18 @@ public partial class NUnlockRelicsScreen : NUnlockScreen
 	private static readonly Vector2 _relicScale = Vector2.One * 3f;
 
 	public static IEnumerable<string> AssetPaths => new global::_003C_003Ez__ReadOnlySingleElementList<string>(_scenePath);
+
+	public override Control? DefaultFocusedControl
+	{
+		get
+		{
+			if (_relicRow.GetChildCount() != 0)
+			{
+				return _relicRow.GetChild<Control>(_relicRow.GetChildCount() / 2);
+			}
+			return null;
+		}
+	}
 
 	public static NUnlockRelicsScreen Create()
 	{
@@ -62,6 +75,7 @@ public partial class NUnlockRelicsScreen : NUnlockScreen
 			_relicTween.TweenProperty(nRelicBasicHolder, "modulate", Colors.White, 1.0).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Cubic);
 			num++;
 		}
+		ActiveScreenContext.Instance.FocusOnDefaultControl();
 	}
 
 	public void SetRelics(IReadOnlyList<RelicModel> relics)

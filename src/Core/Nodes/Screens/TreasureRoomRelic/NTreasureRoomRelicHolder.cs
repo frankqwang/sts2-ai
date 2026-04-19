@@ -3,6 +3,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.HoverTips;
@@ -66,7 +67,12 @@ public partial class NTreasureRoomRelicHolder : NButton
 
 	private bool PlayerVotedForRelic(Player player)
 	{
-		return RunManager.Instance.TreasureRoomRelicSynchronizer.GetPlayerVote(player) == Index;
+		TreasureRoomRelicSynchronizer.PlayerVote playerVote = RunManager.Instance.TreasureRoomRelicSynchronizer.GetPlayerVote(player);
+		if (playerVote.voteReceived)
+		{
+			return playerVote.index == Index;
+		}
+		return false;
 	}
 
 	public void AnimateAwayVotes()

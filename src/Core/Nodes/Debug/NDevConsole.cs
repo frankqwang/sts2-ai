@@ -42,28 +42,31 @@ public partial class NDevConsole : Panel
 
 	public static NDevConsole Instance => _instance ?? throw new InvalidOperationException("Dev console used before being created.");
 
-	public override void _Ready()
+	public override void _EnterTree()
 	{
 		if (TestMode.IsOn)
 		{
 			this.QueueFreeSafely();
-			return;
 		}
-		if (_instance != null)
+		else if (_instance != null)
 		{
 			this.QueueFreeSafely();
-			return;
 		}
-		_instance = this;
-		bool shouldAllowDebugCommands = OS.HasFeature("editor") || TestMode.IsOn || ModManager.LoadedMods.Count > 0 || SaveManager.Instance.SettingsSave.FullConsole;
-		HideConsole();
-		_devConsole = new MegaCrit.Sts2.Core.DevConsole.DevConsole(shouldAllowDebugCommands);
+		else
+		{
+			_instance = this;
+		}
+	}
+
+	public override void _Ready()
+	{
 		_outputBuffer = GetNode<RichTextLabel>("OutputContainer/OutputBuffer");
 		_tabBuffer = GetNode<RichTextLabel>("OutputContainer/TabBuffer");
 		_inputContainer = GetNode<Control>("InputContainer");
 		_inputBuffer = GetNode<LineEdit>("InputContainer/InputBufferContainer/InputBuffer");
 		_promptLabel = GetNode<Label>("InputContainer/PromptLabel");
 		_ghostTextLabel = GetNode<Label>("InputContainer/InputBufferContainer/GhostText");
+		HideConsole();
 		MakeHalfScreen();
 		DisableTabBuffer();
 		HideGhostText();
@@ -71,6 +74,8 @@ public partial class NDevConsole : Panel
 		UpdatePromptStyle();
 		_inputBuffer.TextChanged += OnInputTextChanged;
 		PrintUsage();
+		bool shouldAllowDebugCommands = OS.HasFeature("editor") || TestMode.IsOn || ModManager.IsRunningModded() || SaveManager.Instance.SettingsSave.FullConsole;
+		_devConsole = new MegaCrit.Sts2.Core.DevConsole.DevConsole(shouldAllowDebugCommands);
 	}
 
 	public override void _ExitTree()
@@ -727,8 +732,8 @@ public partial class NDevConsole : Panel
 	private void UpdatePromptStyle()
 	{
 		_promptLabel.Text = "➜";
-		_promptLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, new Color(0f, 0.831f, 1f));
-		_promptLabel.AddThemeFontSizeOverride(ThemeConstants.Label.fontSize, 18);
+		_promptLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, new Color(0f, 0.831f, 1f));
+		_promptLabel.AddThemeFontSizeOverride(ThemeConstants.Label.FontSize, 18);
 	}
 
 	public void AddChildToTree(Node node)

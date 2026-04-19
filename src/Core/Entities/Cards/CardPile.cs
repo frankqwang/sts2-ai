@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Random;
+using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Entities.Cards;
 
@@ -59,6 +60,7 @@ public class CardPile(PileType type)
 	public void RandomizeOrderInternal(Player player, Rng rng, CombatState state)
 	{
 		_cards.UnstableShuffle(rng);
+		TestRngInjector.ConsumeInitialShuffleOverride()?.Invoke(_cards);
 		Hook.ModifyShuffleOrder(state, player, _cards, isInitialShuffle: true);
 	}
 

@@ -29,11 +29,6 @@ config/windows_native_icon="res://images/icon.ico"
 [autoload]
 
 SentryInit="*res://addons/sentry/SentryInit.gd"
-OneTimeInitialization="*res://scenes/one_time_initialization.tscn"
-AssetLoader="*res://scenes/asset_loader.tscn"
-DevConsole="*res://scenes/debug/dev_console.tscn"
-CommandHistory="*res://scenes/debug/command_history.tscn"
-MemoryMonitor="res://scenes/debug/memory_monitor.tscn"
 FmodManager="*res://addons/fmod/FmodManager.gd"
 
 [debug]
@@ -536,18 +531,26 @@ rendering_device/driver.windows="d3d12"
 textures/vram_compression/import_etc2_astc=true
 anti_aliasing/screen_space_roughness_limiter/enabled=false
 environment/defaults/default_clear_color=Color(0.0923724, 0.122398, 0.116929, 1)
+rendering_device/driver.windows.prefer_vulkan_on_devices=[{
+"device": "0x5917",
+"vendor": "0x8086"
+}]
 
 [sentry]
 
-config/dsn="https://3cf34d7bba83fafb74443e332e366f91@o102851.ingest.us.sentry.io/4506843924725760"
-config/disabled_in_editor=true
-config/attach_screenshot=true
-config/attach_log=true
+config/dsn="https://844048999098444b18620dd2e506d820@o102851.ingest.us.sentry.io/4506843924725760"
+config/disabled_in_editor=false
+config/attach_screenshot=false
+config/attach_log=false
 config/logger_messages_as_breadcrumbs=false
 config/max_breadcrumbs=100
+options/auto_init=false
 options/debug_printing=0
 options/diagnostic_level=2
-options/enable_logs=false
+options/attach_log=false
+logger/messages_as_breadcrumbs=false
+logger/events=9
+logger/breadcrumbs=11
 
 [xr]
 

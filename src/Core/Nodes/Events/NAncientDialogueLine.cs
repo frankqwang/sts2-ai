@@ -91,7 +91,7 @@ public partial class NAncientDialogueLine : NButton
 		Control node2 = GetNode<Control>("%DialogueTailLeft");
 		node2.Visible = true;
 		MarginContainer node3 = GetNode<MarginContainer>("%TextContainer");
-		node3.AddThemeConstantOverride(ThemeConstants.MarginContainer.marginLeft, 48);
+		node3.AddThemeConstantOverride(ThemeConstants.MarginContainer.MarginLeft, 48);
 		GetNode<Control>("%Bubble").SelfModulate = _ancient.DialogueColor;
 		node2.SelfModulate = _ancient.DialogueColor;
 	}
@@ -105,7 +105,7 @@ public partial class NAncientDialogueLine : NButton
 		Control node2 = GetNode<Control>("%DialogueTailRight");
 		node2.Visible = true;
 		MarginContainer node3 = GetNode<MarginContainer>("%TextContainer");
-		node3.AddThemeConstantOverride(ThemeConstants.MarginContainer.marginRight, 46);
+		node3.AddThemeConstantOverride(ThemeConstants.MarginContainer.MarginRight, 46);
 		GetNode<Control>("%Bubble").SelfModulate = _character.DialogueColor;
 		node2.SelfModulate = _character.DialogueColor;
 	}

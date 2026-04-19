@@ -44,7 +44,7 @@ public class EventRoom : AbstractRoom
 		}
 	}
 
-	public override async Task Enter(IRunState? runState, bool isRestoringRoomStackBase)
+	public override async Task EnterInternal(IRunState? runState, bool isRestoringRoomStackBase)
 	{
 		await PreloadManager.LoadRoomEventAssets(CanonicalEvent, runState ?? NullRunState.Instance);
 		RunManager.Instance.EventSynchronizer.BeginEvent(CanonicalEvent, IsPreFinished, OnStart);
@@ -75,9 +75,14 @@ public class EventRoom : AbstractRoom
 
 	public override Task Exit(IRunState? runState)
 	{
-		if (CanonicalEvent.IsDeterministic)
+		EventModel localEvent = RunManager.Instance.EventSynchronizer.GetLocalEvent();
+		if (localEvent.IsDeterministic)
 		{
-			RunManager.Instance.ChecksumTracker.GenerateChecksum($"Exiting event room {CanonicalEvent.Id}", null);
+			RunManager.Instance.ChecksumTracker.GenerateChecksum($"Exiting event room {localEvent.Id}", null);
+		}
+		if (localEvent.LayoutType == EventLayoutType.Combat)
+		{
+			localEvent.ResetInternalCombatState();
 		}
 		foreach (EventModel @event in RunManager.Instance.EventSynchronizer.Events)
 		{

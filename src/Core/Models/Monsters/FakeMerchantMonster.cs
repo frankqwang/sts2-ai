@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Random;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
@@ -93,7 +94,7 @@ public sealed class FakeMerchantMonster : MonsterModel
 	private async Task ThrowRelicMove(IReadOnlyList<Creature> targets)
 	{
 		await ShowDialogueForMove("THROW_RELIC");
-		await DamageCmd.Attack(SwipeDamage).FromMonster(this).WithAttackerAnim("throw", 0.15f)
+		await DamageCmd.Attack(ThrowRelicDamage).FromMonster(this).WithAttackerAnim("throw", 0.15f)
 			.WithAttackerFx(null, AttackSfx)
 			.WithHitFx("vfx/vfx_attack_slash")
 			.Execute(null);
@@ -136,7 +137,7 @@ public sealed class FakeMerchantMonster : MonsterModel
 		LocString locString = MegaCrit.Sts2.Core.Random.Rng.Chaotic.NextItem(GetLinesForMove(moveId));
 		if (locString != null)
 		{
-			TalkCmd.Play(locString, base.Creature);
+			TalkCmd.Play(locString, base.Creature, VfxColor.Cyan);
 			await Cmd.Wait(0.5f);
 		}
 	}

@@ -32,6 +32,7 @@ from networkV2.s5_net.action_contextualizer import ActionContextualizer
 from networkV2.s5_net.option_contextualizer import OptionContextualizer
 from networkV2.s5_net.decision_core import DecisionCore
 from networkV2.s5_net.heads.policy_head import PolicyHead
+from networkV2.s5_net.heads.multi_domain_policy_head import MultiDomainPolicyHead
 from networkV2.s5_net.heads.value_heads import ValueHeads, ValueOutputs
 from networkV2.s5_net.heads.leaf_evaluator import LeafEvaluator, LeafOutputs
 from networkV2.s5_net.heads.run_evaluator import RunEvaluator, RunEvalOutputs
@@ -83,7 +84,10 @@ class UnifiedNet(nn.Module):
         self.build_encoder = BuildMemoryEncoder(
             d, config.n_build_slots, n_iters=config.build_n_iters, n_heads=nh_half)
         self.decision_core = DecisionCore(d, nh, n_layers=config.decision_n_layers, dropout=drop)
+        # 保留原 policy_head 供 checkpoint 兼容加载(warm start 给 multi_domain_policy_head)。
+        # 实际前向走 multi_domain_policy_head,per-domain 独立 bilinear scorer。
         self.policy_head = PolicyHead(d)
+        self.multi_domain_policy_head = MultiDomainPolicyHead(d)
 
         # Shared world context injection
         self.shared_world_proj = nn.Sequential(nn.Linear(d * 2, d), nn.GELU())
@@ -126,6 +130,12 @@ class UnifiedNet(nn.Module):
             n_enc = int(getattr(config, "n_encounters", 128))
             self.encounter_embed = nn.Embedding(n_enc, d)
             nn.init.normal_(self.encounter_embed.weight, mean=0.0, std=0.3)
+            with torch.no_grad():
+                # UNKNOWN slot（index 0）显式置零，和 encounter_vocab.py 的注释对齐：
+                # "0 = UNKNOWN / 非战斗（safe fallback，embedding 0 初始化）"。
+                # 配合 _apply_encounter_conditioning 的 per-sample mask，这个 slot
+                # 在 forward 永远不会被读取 → 梯度为零 → 永远保持零。
+                self.encounter_embed.weight[0].zero_()
             self.encounter_gate = nn.Parameter(torch.tensor(1.0))
         else:
             self.encounter_embed = None
@@ -136,13 +146,24 @@ class UnifiedNet(nn.Module):
         decision_repr: torch.Tensor,
         encounter_idx: torch.Tensor | None,
     ) -> torch.Tensor:
-        """给 decision_repr 加上 encounter-specific bias。"""
+        """给 decision_repr 加上 encounter-specific bias。
+
+        encounter_idx == 0 (UNKNOWN / 非战斗 / 未在 catalog) → per-sample 零注入。
+        保证 non-combat 样本和 UNKNOWN encounter 不被共享 learnable bias 污染；
+        历史 bug：原实现只守 `is None`，全 0 tensor 会被当真实 encounter 条件化，
+        导致所有非战斗 step 共享一个被训练的随机偏置向量（std=0.3, gate=1.0 量级约 0.3）。
+        """
         if not self.enable_encounter_conditioning or encounter_idx is None:
             return decision_repr
         idx = encounter_idx.to(device=decision_repr.device, dtype=torch.long)
         idx = idx.clamp(min=0, max=self.encounter_embed.num_embeddings - 1)
+        # 不能用 `if not bool((idx != 0).any())` 做 early-exit —— CUDA graph 下会挂
+        # (CPU sync)。直接 embed + valid mask:idx=0 的样本 valid=0,bias 被抹零。
+        # 额外代价:UNKNOWN case 也会 embed lookup,但 embed[0] 已经 init=0,开销可忽略。
         boss_bias = self.encounter_embed(idx)
-        return decision_repr + self.encounter_gate * boss_bias
+        # Per-sample mask：idx=0 的样本不加 bias，idx>0 正常加
+        valid = (idx != 0).to(decision_repr.dtype).unsqueeze(-1)
+        return decision_repr + self.encounter_gate * boss_bias * valid
 
     def forward(
         self,
@@ -194,6 +215,58 @@ class UnifiedNet(nn.Module):
                                            objective_bt, forecast_bt, decision_domain,
                                            encounter_idx=encounter_idx)
 
+    def forward_from_static(
+        self,
+        gpu_buffers: dict[str, dict[str, torch.Tensor]],
+        encounter_idx: torch.Tensor,
+        decision_domain: str = "combat",
+    ) -> UnifiedNetOutput:
+        """CUDA graph-capturable forward path。
+
+        gpu_buffers: {bank_name: {numeric/type_ids/ts_ids/mask: GPU tensor}}
+          预分配的 static GPU tensor,由外部(GraphRunner)fill 数据后调用。
+        encounter_idx: 预分配的 GPU tensor(不能每次新建,否则破坏 graph 地址稳定性)。
+
+        与 `forward(banks=...)` 的区别:
+          1. 跳过 tokenizer.tokenize_banks(那里有 CPU→GPU 拷贝,graph capture 禁止)
+          2. 使用外部预 alloc 的 GPU buffer,地址稳定
+          3. 全程纯 GPU op,可被 CUDA graph capture
+        """
+        device = next(self.parameters()).device
+        bt = self.tokenizer.project_static(gpu_buffers)
+
+        B = next(iter(bt.values())).features.size(0) if bt else 1
+        _e = lambda: self._empty_bt(device, B)
+
+        build_bt = bt.get("build", _e())
+        inventory_bt = bt.get("inventory")
+        economy_bt = bt.get("economy", _e())
+        objective_bt = bt.get("objective", _e())
+        forecast_bt = bt.get("forecast", _e())
+        action_bt = bt.get("action", _e())
+
+        build_slots = self.build_encoder(build_bt, inventory_bt)
+
+        obj_pool = self._masked_mean(objective_bt)
+        fcast_pool = self._masked_mean(forecast_bt)
+        world_ctx = self.shared_world_proj(torch.cat([obj_pool, fcast_pool], dim=-1))
+        action_features = action_bt.features + self.shared_world_gate * world_ctx.unsqueeze(1)
+        action_bt = BankTensor(action_features, action_bt.mask, action_bt.bank_name)
+
+        if decision_domain == "combat":
+            return self._combat_forward(
+                bt, B, device, action_bt, build_slots,
+                build_bt, inventory_bt, objective_bt, forecast_bt,
+                encounter_idx=encounter_idx,
+            )
+        else:
+            return self._noncombat_forward(
+                bt, B, device, action_bt, build_slots,
+                build_bt, inventory_bt, economy_bt,
+                objective_bt, forecast_bt, decision_domain,
+                encounter_idx=encounter_idx,
+            )
+
     def _combat_forward(self, bt, B, device, action_bt, build_slots,
                         build_bt, inventory_bt, objective_bt, forecast_bt,
                         encounter_idx=None):
@@ -205,12 +278,16 @@ class UnifiedNet(nn.Module):
         prefix_bt = bt.get("turn_prefix", _e())
         combat_mem_bt = bt.get("combat_memory", _e())
 
-        board_enc = self.board_encoder(board_bt) if board_bt.mask.any() else board_bt
-        mech_enc = self.mechanism_encoder(mechanism_bt) if mechanism_bt.mask.any() else mechanism_bt
-        mod_enc = self.modifier_encoder(modifier_bt) if modifier_bt.mask.any() else modifier_bt
-        power_enc = self.power_encoder(power_bt) if power_bt.mask.any() else power_bt
-        prefix_enc = self.prefix_encoder(prefix_bt) if prefix_bt.mask.any() else prefix_bt
-        cm_enc = self.combat_memory_encoder(combat_mem_bt) if combat_mem_bt.mask.any() else combat_mem_bt
+        # 注意:以前用 `if bt.mask.any() else bt` 跳过空 bank 的 encoder —
+        # 这是 data-dependent 分支,CUDA graph capture 下会挂 (CPU sync)。
+        # 改为始终跑 encoder;encoder 内部用 masked attention,空 bank 输出 0/NaN,
+        # nan_to_num 下游兜底(已有)。
+        board_enc = self.board_encoder(board_bt)
+        mech_enc = self.mechanism_encoder(mechanism_bt)
+        mod_enc = self.modifier_encoder(modifier_bt)
+        power_enc = self.power_encoder(power_bt)
+        prefix_enc = self.prefix_encoder(prefix_bt)
+        cm_enc = self.combat_memory_encoder(combat_mem_bt)
 
         action_hyp = self.action_contextualizer(
             action_bt, board_enc, mod_enc, mech_enc, power_enc, prefix_enc, cm_enc, build_slots)
@@ -218,7 +295,7 @@ class UnifiedNet(nn.Module):
         decision_repr, action_refined = self.decision_core(action_hyp)
         decision_repr = self._apply_encounter_conditioning(decision_repr, encounter_idx)
 
-        logits = self.policy_head(decision_repr, action_refined)
+        logits = self.multi_domain_policy_head(decision_repr, action_refined, domain="combat")
         values = self.value_heads(decision_repr)
         leaf = self.leaf_evaluator(decision_repr, board_enc, cm_enc, mech_enc, mod_enc, power_enc)
 
@@ -238,7 +315,8 @@ class UnifiedNet(nn.Module):
         decision_repr, option_refined = self.decision_core(option_hyp)
         decision_repr = self._apply_encounter_conditioning(decision_repr, encounter_idx)
 
-        logits = self.policy_head(decision_repr, option_refined)
+        # Per-domain policy head(decision_domain 已 route 到 card_reward/shop/route/rest/event/selection 之一)
+        logits = self.multi_domain_policy_head(decision_repr, option_refined, domain=domain)
         run_eval = self.run_evaluator(decision_repr, build_bt, inv_bt, objective_bt, forecast_bt)
 
         return UnifiedNetOutput(

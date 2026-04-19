@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Events;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.Helpers;
@@ -117,7 +118,7 @@ public sealed class Trial : EventModel
 		EventOption[] eventOptions = new EventOption[2]
 		{
 			new EventOption(this, Accept, "TRIAL.pages.REJECT.options.ACCEPT"),
-			new EventOption(this, DoubleDown, "TRIAL.pages.REJECT.options.DOUBLE_DOWN", false, true).ThatDoesDamage(9999m)
+			new EventOption(this, DoubleDown, "TRIAL.pages.REJECT.options.DOUBLE_DOWN", false, true).ThatWillKillPlayerIf((Player _) => true)
 		};
 		LocString description = L10NLookup("TRIAL.pages.REJECT.description");
 		SetEventState(description, eventOptions);

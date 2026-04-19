@@ -35,7 +35,7 @@ public partial class NControllerCardPlay : NCardPlay
 			{
 				EmitSignal(SignalName.Confirmed);
 			}
-			if (inputEventAction.IsActionPressed(MegaInput.cancel))
+			if (inputEventAction.IsActionPressed(MegaInput.cancel) || inputEventAction.IsActionPressed(MegaInput.topPanel))
 			{
 				EmitSignal(SignalName.Canceled);
 			}
@@ -107,8 +107,14 @@ public partial class NControllerCardPlay : NCardPlay
 			CancelPlayCard();
 			return;
 		}
-		NCombatRoom.Instance.RestrictControllerNavigation(list.Select((Creature c) => NCombatRoom.Instance.GetCreatureNode(c).Hitbox));
-		NCombatRoom.Instance.GetCreatureNode(list.First()).Hitbox.TryGrabFocus();
+		List<NCreature> list2 = list.Select((Creature c) => NCombatRoom.Instance.GetCreatureNode(c)).OfType<NCreature>().ToList();
+		if (list2.Count == 0)
+		{
+			CancelPlayCard();
+			return;
+		}
+		NCombatRoom.Instance.RestrictControllerNavigation(list2.Select((NCreature n) => n.Hitbox));
+		list2.First().Hitbox.TryGrabFocus();
 		NCreature nCreature = (NCreature)(await targetManager.SelectionFinished());
 		if (GodotObject.IsInstanceValid(this))
 		{
@@ -141,9 +147,9 @@ public partial class NControllerCardPlay : NCardPlay
 		base.Holder.TryGrabFocus();
 	}
 
-	protected override void Cleanup()
+	protected override void Cleanup(bool isFinished)
 	{
-		base.Cleanup();
+		base.Cleanup(isFinished);
 		NCombatRoom.Instance.EnableControllerNavigation();
 		NCombatRoom.Instance.Ui.Hand.DefaultFocusedControl.TryGrabFocus();
 	}

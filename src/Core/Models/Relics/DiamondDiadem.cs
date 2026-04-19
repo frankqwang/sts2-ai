@@ -23,6 +23,19 @@ public sealed class DiamondDiadem : RelicModel
 
 	public override RelicRarity Rarity => RelicRarity.Ancient;
 
+	public int CardsPlayedThisTurn
+	{
+		get
+		{
+			return _cardsPlayedThisTurn;
+		}
+		set
+		{
+			AssertMutable();
+			_cardsPlayedThisTurn = value;
+		}
+	}
+
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new DynamicVar("CardThreshold", 2m));
 
 	public override Task AfterCardPlayed(PlayerChoiceContext context, CardPlay cardPlay)
@@ -35,14 +48,14 @@ public sealed class DiamondDiadem : RelicModel
 		{
 			return Task.CompletedTask;
 		}
-		_cardsPlayedThisTurn++;
+		CardsPlayedThisTurn++;
 		RefreshCounter();
 		return Task.CompletedTask;
 	}
 
 	public override async Task BeforeTurnEnd(PlayerChoiceContext choiceContext, CombatSide side)
 	{
-		if (side == base.Owner.Creature.Side && !((decimal)_cardsPlayedThisTurn > base.DynamicVars["CardThreshold"].BaseValue))
+		if (side == base.Owner.Creature.Side && !((decimal)CardsPlayedThisTurn > base.DynamicVars["CardThreshold"].BaseValue))
 		{
 			Flash();
 			await PowerCmd.Apply<DiamondDiademPower>(base.Owner.Creature, 1m, base.Owner.Creature, null);
@@ -53,7 +66,7 @@ public sealed class DiamondDiadem : RelicModel
 	{
 		if (side == base.Owner.Creature.Side)
 		{
-			_cardsPlayedThisTurn = 0;
+			CardsPlayedThisTurn = 0;
 			RefreshCounter();
 		}
 		return Task.CompletedTask;
@@ -61,13 +74,13 @@ public sealed class DiamondDiadem : RelicModel
 
 	private void RefreshCounter()
 	{
-		base.Status = (((decimal)_cardsPlayedThisTurn <= base.DynamicVars["CardThreshold"].BaseValue) ? RelicStatus.Active : RelicStatus.Normal);
+		base.Status = (((decimal)CardsPlayedThisTurn <= base.DynamicVars["CardThreshold"].BaseValue) ? RelicStatus.Active : RelicStatus.Normal);
 		InvokeDisplayAmountChanged();
 	}
 
 	public override Task AfterCombatEnd(CombatRoom _)
 	{
-		_cardsPlayedThisTurn = 0;
+		CardsPlayedThisTurn = 0;
 		base.Status = RelicStatus.Normal;
 		InvokeDisplayAmountChanged();
 		return Task.CompletedTask;

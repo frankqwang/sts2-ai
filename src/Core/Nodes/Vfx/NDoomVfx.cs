@@ -84,11 +84,12 @@ public partial class NDoomVfx : Node2D
 			node.Size = (Vector2I)vector;
 			if (shouldDie)
 			{
-				Vector2 creatureOffset = new Vector2(vector.X / 2f, node.Size.Y) + creatureVisuals.Body.Position;
-				Vector2 originalGlobalScale = creatureVisuals.Body.GlobalScale;
-				await Reparent(creatureVisuals.Body, node);
-				creatureVisuals.Body.Position = creatureOffset;
-				creatureVisuals.Body.Scale = originalGlobalScale;
+				Node2D creatureBody = creatureVisuals.GetCurrentBody();
+				Vector2 creatureOffset = new Vector2(vector.X / 2f, node.Size.Y) + creatureBody.Position;
+				Vector2 originalGlobalScale = creatureBody.GlobalScale;
+				await Reparent(creatureBody, node);
+				creatureBody.Position = creatureOffset;
+				creatureBody.Scale = originalGlobalScale;
 			}
 			if (!_cancelToken.IsCancellationRequested)
 			{

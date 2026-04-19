@@ -4,5 +4,6 @@ public enum RelicPickingResultType
 {
 	OnlyOnePlayerVoted,
 	FoughtOver,
-	ConsolationPrize
+	ConsolationPrize,
+	Skipped
 }

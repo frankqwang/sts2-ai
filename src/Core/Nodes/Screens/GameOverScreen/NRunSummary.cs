@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen;
 
@@ -84,28 +85,28 @@ public partial class NRunSummary : Control
 		await Task.Delay(100);
 		if (player.DiscoveredCards.Count > 0)
 		{
-			string discoveryBodyText = GetDiscoveryBodyText(player.DiscoveredCards, (ModelId id) => ModelDb.GetById<CardModel>(id).Title, "game_over_screen", "DISCOVERY_BODY_CARD", "CardCount");
+			string discoveryBodyText = GetDiscoveryBodyText(player.DiscoveredCards, (ModelId id) => SaveUtil.CardOrDeprecated(id).Title, "game_over_screen", "DISCOVERY_BODY_CARD", "CardCount");
 			_discoveredCards.SetHoverTip(new HoverTip(new LocString("game_over_screen", "DISCOVERY_HEADER_CARD"), discoveryBodyText));
 			_discoveredCards.Visible = true;
 			_discoveredCards.Modulate = StsColors.transparentBlack;
 		}
 		if (player.DiscoveredRelics.Count > 0)
 		{
-			string discoveryBodyText2 = GetDiscoveryBodyText(player.DiscoveredRelics, (ModelId id) => ModelDb.GetById<RelicModel>(id).Title.GetFormattedText(), "game_over_screen", "DISCOVERY_BODY_RELIC", "RelicCount");
+			string discoveryBodyText2 = GetDiscoveryBodyText(player.DiscoveredRelics, (ModelId id) => SaveUtil.RelicOrDeprecated(id).Title.GetFormattedText(), "game_over_screen", "DISCOVERY_BODY_RELIC", "RelicCount");
 			_discoveredRelics.SetHoverTip(new HoverTip(new LocString("game_over_screen", "DISCOVERY_HEADER_RELIC"), discoveryBodyText2));
 			_discoveredRelics.Visible = true;
 			_discoveredRelics.Modulate = StsColors.transparentBlack;
 		}
 		if (player.DiscoveredPotions.Count > 0)
 		{
-			string discoveryBodyText3 = GetDiscoveryBodyText(player.DiscoveredPotions, (ModelId id) => ModelDb.GetById<PotionModel>(id).Title.GetFormattedText(), "game_over_screen", "DISCOVERY_BODY_POTION", "PotionCount");
+			string discoveryBodyText3 = GetDiscoveryBodyText(player.DiscoveredPotions, (ModelId id) => SaveUtil.PotionOrDeprecated(id).Title.GetFormattedText(), "game_over_screen", "DISCOVERY_BODY_POTION", "PotionCount");
 			_discoveredPotions.SetHoverTip(new HoverTip(new LocString("game_over_screen", "DISCOVERY_HEADER_POTION"), discoveryBodyText3));
 			_discoveredPotions.Visible = true;
 			_discoveredPotions.Modulate = StsColors.transparentBlack;
 		}
 		if (player.DiscoveredEnemies.Count > 0)
 		{
-			string discoveryBodyText4 = GetDiscoveryBodyText(player.DiscoveredEnemies, (ModelId id) => ModelDb.GetById<MonsterModel>(id).Title.GetFormattedText(), "game_over_screen", "DISCOVERY_BODY_ENEMY", "EnemyCount");
+			string discoveryBodyText4 = GetDiscoveryBodyText(player.DiscoveredEnemies, (ModelId id) => SaveUtil.MonsterOrDeprecated(id).Title.GetFormattedText(), "game_over_screen", "DISCOVERY_BODY_ENEMY", "EnemyCount");
 			_discoveredEnemies.SetHoverTip(new HoverTip(new LocString("game_over_screen", "DISCOVERY_HEADER_ENEMY"), discoveryBodyText4));
 			_discoveredEnemies.Visible = true;
 			_discoveredEnemies.Modulate = StsColors.transparentBlack;

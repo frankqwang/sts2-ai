@@ -24,7 +24,7 @@ public sealed class CrabRagePower : PowerModel
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[2]
 	{
-		new PowerVar<StrengthPower>(5m),
+		new PowerVar<StrengthPower>(6m),
 		new BlockVar(99m, ValueProp.Unpowered)
 	});
 

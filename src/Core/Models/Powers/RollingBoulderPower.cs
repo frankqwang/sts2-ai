@@ -57,8 +57,7 @@ public sealed class RollingBoulderPower : PowerModel
 			await vfx.ToSignal(vfx, Node.SignalName.TreeExiting);
 			await Task.WhenAll(damageTasks);
 		}
-		base.Amount += base.DynamicVars.Damage.IntValue;
-		InvokeDisplayAmountChanged();
+		SetAmount(base.Amount + base.DynamicVars.Damage.IntValue);
 	}
 
 	private Task<IEnumerable<DamageResult>> DoDamage(PlayerChoiceContext choiceContext, IEnumerable<Creature> targets)

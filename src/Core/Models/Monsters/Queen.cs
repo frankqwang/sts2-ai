@@ -2,16 +2,17 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Audio;
+using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Ascension;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.Nodes.Audio;
-using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.ValueProps;
@@ -100,33 +101,24 @@ public sealed class Queen : MonsterModel
 		}
 	}
 
-	public override void SetupSkins(NCreatureVisuals visuals)
+	public override void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
-		visuals.SpineBody.GetAnimationState().SetAnimation("tracks/writhe", loop: true, 1);
+		spine.GetAnimationState().SetAnimation("tracks/writhe", loop: true, 1);
 	}
 
 	public override void BeforeRemovedFromRoom()
 	{
 		if (!base.CombatState.RunState.IsGameOver)
 		{
-			NCombatRoom.Instance.GetCreatureNode(base.Creature)?.SpineController.GetAnimationState().SetAnimation("tracks/empty", loop: true, 1);
+			NCombatRoom.Instance.GetCreatureNode(base.Creature)?.SpineAnimation.SetAnimation("tracks/empty", loop: true, 1);
 		}
 	}
 
 	public override async Task AfterAddedToRoom()
 	{
 		await base.AfterAddedToRoom();
-		base.Creature.Died += AfterDeath;
 		Amalgam = base.CombatState.Enemies.First((Creature c) => c.Monster is TorchHeadAmalgam);
-		Amalgam.Died += AmalgamDeathResponse;
 		NRunMusicController.Instance?.UpdateMusicParameter("queen_progress", 1f);
-	}
-
-	private void AfterDeath(Creature _)
-	{
-		base.Creature.Died -= AfterDeath;
-		NRunMusicController.Instance?.UpdateMusicParameter("queen_progress", 5f);
-		NCombatRoom.Instance.GetCreatureNode(base.Creature)?.SpineController.GetAnimationState().SetAnimation("tracks/empty", loop: true, 1);
 	}
 
 	protected override MonsterMoveStateMachine GenerateMoveStateMachine()
@@ -171,7 +163,7 @@ public sealed class Queen : MonsterModel
 	private async Task YoureMineMove(IReadOnlyList<Creature> targets)
 	{
 		LocString line = MonsterModel.L10NMonsterLookup("QUEEN.banter");
-		TalkCmd.Play(line, base.Creature, -1.0, VfxColor.Purple);
+		TalkCmd.Play(line, base.Creature, VfxColor.Purple);
 		SfxCmd.Play("event:/sfx/enemy/enemy_attacks/queen/queen_cast");
 		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0.5f);
 		await PowerCmd.Apply<FrailPower>(targets, 99m, base.Creature, null);
@@ -184,13 +176,10 @@ public sealed class Queen : MonsterModel
 		SfxCmd.Play("event:/sfx/enemy/enemy_attacks/queen/queen_cast");
 		await CreatureCmd.TriggerAnim(base.Creature, "Cast", 0.8f);
 		int strengthAmount = AscensionHelper.GetValueIfAscension(AscensionLevel.DeadlyEnemies, 1, 1);
-		List<Creature> list = base.Creature.CombatState.GetTeammatesOf(base.Creature).ToList();
-		foreach (Creature item in list)
+		List<Creature> source = base.Creature.CombatState.GetTeammatesOf(base.Creature).ToList();
+		foreach (Creature item in source.Where((Creature teammate) => teammate != base.Creature))
 		{
-			if (item != base.Creature)
-			{
-				await PowerCmd.Apply<StrengthPower>(item, strengthAmount, base.Creature, null);
-			}
+			await PowerCmd.Apply<StrengthPower>(item, strengthAmount, base.Creature, null);
 		}
 		await CreatureCmd.GainBlock(base.Creature, 20m, ValueProp.Move, null);
 	}
@@ -221,20 +210,25 @@ public sealed class Queen : MonsterModel
 		await PowerCmd.Apply<StrengthPower>(base.Creature, 2m, base.Creature, null);
 	}
 
-	private void AmalgamDeathResponse(Creature _)
+	public override Task AfterDeath(PlayerChoiceContext choiceContext, Creature creature, bool wasRemovalPrevented, float deathAnimLength)
 	{
-		NRunMusicController.Instance?.UpdateMusicParameter("queen_progress", 2f);
-		Amalgam.Died -= AmalgamDeathResponse;
-		if (!base.Creature.IsDead)
+		if (creature.Monster is TorchHeadAmalgam && base.Creature.IsAlive)
 		{
+			NRunMusicController.Instance?.UpdateMusicParameter("queen_progress", 2f);
 			HasAmalgamDied = true;
 			Amalgam = null;
 			LocString line = MonsterModel.L10NMonsterLookup("QUEEN.amalgamDeathSpeakLine");
-			TalkCmd.Play(line, base.Creature, -1.0, VfxColor.Purple);
+			TalkCmd.Play(line, base.Creature, VfxColor.Purple);
 			if (base.NextMove == BurnBrightForMeState)
 			{
 				SetMoveImmediate(EnragedState);
 			}
 		}
+		if (creature == base.Creature)
+		{
+			NRunMusicController.Instance?.UpdateMusicParameter("queen_progress", 5f);
+			NCombatRoom.Instance.GetCreatureNode(base.Creature)?.SpineAnimation.SetAnimation("tracks/empty", loop: true, 1);
+		}
+		return Task.CompletedTask;
 	}
 }

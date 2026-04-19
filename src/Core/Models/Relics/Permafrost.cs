@@ -15,7 +15,7 @@ public sealed class Permafrost : RelicModel
 {
 	private bool _activatedThisCombat;
 
-	public override RelicRarity Rarity => RelicRarity.Common;
+	public override RelicRarity Rarity => RelicRarity.Uncommon;
 
 	private bool ActivatedThisCombat
 	{
@@ -30,7 +30,7 @@ public sealed class Permafrost : RelicModel
 		}
 	}
 
-	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new BlockVar(6m, ValueProp.Unpowered));
+	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new BlockVar(7m, ValueProp.Unpowered));
 
 	public override Task AfterRoomEntered(AbstractRoom room)
 	{

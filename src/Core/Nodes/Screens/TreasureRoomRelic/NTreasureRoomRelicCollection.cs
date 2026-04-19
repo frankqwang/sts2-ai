@@ -13,8 +13,8 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Relics;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
-using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
@@ -27,34 +27,25 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 
 	private Control _fightBackstop;
 
+	private MegaLabel _fightLabel;
+
+	private Tween? _emptyVfxTween;
+
 	private NHandImageCollection _hands;
 
 	private readonly List<NTreasureRoomRelicHolder> _multiplayerHolders = new List<NTreasureRoomRelicHolder>();
 
 	private List<NTreasureRoomRelicHolder> _holdersInUse = new List<NTreasureRoomRelicHolder>();
 
-	private TaskCompletionSource? _relicPickingTaskCompletionSource;
+	private readonly TaskCompletionSource _relicPickingBeganTaskCompletionSource = new TaskCompletionSource();
+
+	private readonly TaskCompletionSource _relicPickingCompleteTaskCompletionSource = new TaskCompletionSource();
 
 	private ulong _openedTicks;
 
 	private IRunState _runState;
 
-	private Label? _emptyLabel;
-
 	private bool _isEmptyChest;
-
-	private static string ScenePath => SceneHelper.GetScenePath("screens/shared_relic_picking_screen");
-
-	public static IEnumerable<string> AssetPaths
-	{
-		get
-		{
-			List<string> list = new List<string>();
-			list.Add(ScenePath);
-			list.AddRange(NCardRewardAlternativeButton.AssetPaths);
-			return new _003C_003Ez__ReadOnlyList<string>(list);
-		}
-	}
 
 	public NTreasureRoomRelicHolder SingleplayerRelicHolder { get; private set; }
 
@@ -88,6 +79,8 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 		modulate.A = 0f;
 		fightBackstop.Modulate = modulate;
 		_fightBackstop.Visible = false;
+		_fightLabel = GetNode<MegaLabel>("%FightLabel");
+		_fightLabel.Text = new LocString("gameplay_ui", "TREASURE_FIGHT_TEXT").GetFormattedText();
 		RunManager.Instance.TreasureRoomRelicSynchronizer.VotesChanged += RefreshVotes;
 		RunManager.Instance.TreasureRoomRelicSynchronizer.RelicsAwarded += OnRelicsAwarded;
 	}
@@ -115,17 +108,7 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 			{
 				multiplayerHolder.Visible = false;
 			}
-			_emptyLabel = new MegaLabel
-			{
-				Text = new LocString("gameplay_ui", "TREASURE_EMPTY").GetFormattedText(),
-				HorizontalAlignment = HorizontalAlignment.Center,
-				VerticalAlignment = VerticalAlignment.Center,
-				CustomMinimumSize = new Vector2(400f, 100f),
-				LayoutMode = 1,
-				AnchorsPreset = 8
-			};
-			_emptyLabel.AddThemeFontSizeOverride(ThemeConstants.Label.fontSize, 48);
-			this.AddChildSafely(_emptyLabel);
+			SpawnEmptyChestVfx();
 			return;
 		}
 		if (currentRelics.Count == 1)
@@ -199,6 +182,22 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 		}
 	}
 
+	private void SpawnEmptyChestVfx()
+	{
+		MegaLabel node = GetNode<MegaLabel>("%EmptyLabel");
+		node.Text = new LocString("gameplay_ui", "TREASURE_EMPTY").GetFormattedText();
+		node.Visible = true;
+		_emptyVfxTween = CreateTween().SetParallel();
+		_emptyVfxTween.TweenProperty(node, "self_modulate:a", 1f, 0.25);
+		_emptyVfxTween.TweenProperty(node, "position:y", node.Position.Y, 1.0).From(node.Position.Y + 64f).SetEase(Tween.EaseType.Out)
+			.SetTrans(Tween.TransitionType.Spring);
+		_emptyVfxTween.Chain().TweenInterval(1.0);
+		_emptyVfxTween.Chain();
+		_emptyVfxTween.TweenProperty(node, "self_modulate:a", 0f, 1.0);
+		GpuParticles2D node2 = GetNode<GpuParticles2D>("%SmokePuffVfx");
+		node2.Emitting = true;
+	}
+
 	public void SetSelectionEnabled(bool isEnabled)
 	{
 		if (isEnabled)
@@ -219,10 +218,14 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 		}
 	}
 
+	public Task RelicPickingBegan()
+	{
+		return _relicPickingBeganTaskCompletionSource.Task;
+	}
+
 	public Task RelicPickingFinished()
 	{
-		_relicPickingTaskCompletionSource = new TaskCompletionSource();
-		return _relicPickingTaskCompletionSource.Task;
+		return _relicPickingCompleteTaskCompletionSource.Task;
 	}
 
 	public void AnimIn(Node chestVisual)
@@ -255,7 +258,7 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 			tween2.TweenProperty(holder, "modulate", Colors.White, 0.2).SetDelay(num2);
 			tween2.TweenProperty(holder, "position:y", holder.Position.Y - num, 0.6).SetDelay(num2).SetEase(Tween.EaseType.Out)
 				.SetTrans(Tween.TransitionType.Back);
-			tween2.TweenCallback(Callable.From(() => holder.MouseFilter = MouseFilterEnum.Stop)).SetDelay(num2 + 0.6f);
+			tween2.TweenCallback(Callable.From(() => holder.MouseFilter = MouseFilterEnum.Stop)).SetDelay((double)num2 + 0.6);
 		}
 		NRun.Instance.ScreenStateTracker.SetIsInSharedRelicPickingScreen(isInSharedRelicPicking: true);
 		_hands.AnimateHandsIn();
@@ -286,9 +289,18 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 
 	private async Task AnimateRelicAwards(List<RelicPickingResult> results)
 	{
-		for (int i = 0; i < _holdersInUse.Count; i++)
+		foreach (NTreasureRoomRelicHolder item in _holdersInUse)
 		{
-			_holdersInUse[i].SetFocusMode(FocusModeEnum.None);
+			item.SetFocusMode(FocusModeEnum.None);
+		}
+		_relicPickingBeganTaskCompletionSource.SetResult();
+		foreach (Player player in _runState.Players)
+		{
+			TreasureRoomRelicSynchronizer.PlayerVote playerVote = RunManager.Instance.TreasureRoomRelicSynchronizer.GetPlayerVote(player);
+			if (playerVote.voteReceived && !playerVote.index.HasValue)
+			{
+				_hands.GetHand(player.NetId)?.SetSkipped();
+			}
 		}
 		_hands.BeforeRelicsAwarded();
 		List<Task> tasksToWait = new List<Task>();
@@ -319,7 +331,7 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 				_fightBackstop.Visible = false;
 				holder.ZIndex = 0;
 			}
-			else
+			else if (result.type != RelicPickingResultType.Skipped)
 			{
 				NHandImage hand = _hands.GetHand(result.player.NetId);
 				if (hand != null)
@@ -331,29 +343,36 @@ public partial class NTreasureRoomRelicCollection : Control, IScreenContext
 			relicPickingResultType = result.type;
 		}
 		await Task.WhenAll(tasksToWait);
-		_hands.AnimateHandsAway();
+		if (tasksToWait.Count == 0 && _runState.Players.Count > 1)
+		{
+			await Cmd.Wait(0.7f);
+		}
 		foreach (RelicPickingResult result2 in results)
 		{
 			NTreasureRoomRelicHolder nTreasureRoomRelicHolder = _holdersInUse.First((NTreasureRoomRelicHolder h) => h.Relic.Model == result2.relic);
 			RelicModel relic = result2.relic.ToMutable();
-			TaskHelper.RunSafely(RelicCmd.Obtain(relic, result2.player));
-			if (LocalContext.IsMe(result2.player))
+			nTreasureRoomRelicHolder.Disable();
+			if (result2.type != RelicPickingResultType.Skipped)
 			{
-				NRun.Instance.GlobalUi.RelicInventory.AnimateRelic(relic, nTreasureRoomRelicHolder.GlobalPosition, nTreasureRoomRelicHolder.Scale);
-			}
-			if (_runState.Players.Count == 1)
-			{
-				nTreasureRoomRelicHolder.Visible = false;
-			}
-			foreach (Player player in result2.player.RunState.Players)
-			{
-				if (player != result2.player)
+				TaskHelper.RunSafely(RelicCmd.Obtain(relic, result2.player));
+				if (LocalContext.IsMe(result2.player))
 				{
-					player.RelicGrabBag.MoveToFallback(result2.relic);
+					NRun.Instance.GlobalUi.RelicInventory.AnimateRelic(relic, nTreasureRoomRelicHolder.GlobalPosition, nTreasureRoomRelicHolder.Scale);
+				}
+				if (_runState.Players.Count == 1)
+				{
+					nTreasureRoomRelicHolder.Visible = false;
+				}
+			}
+			foreach (Player player2 in _runState.Players)
+			{
+				if (player2 != result2.player)
+				{
+					player2.RelicGrabBag.MoveToFallback(result2.relic);
 				}
 			}
 		}
-		_relicPickingTaskCompletionSource.SetResult();
+		_relicPickingCompleteTaskCompletionSource.SetResult();
 	}
 
 	private void RefreshVotes()

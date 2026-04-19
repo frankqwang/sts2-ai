@@ -126,7 +126,7 @@ public partial class NPotionHolder : NClickableControl
 
 	protected override void OnPress()
 	{
-		if (Potion != null)
+		if (Potion != null && _isUsable)
 		{
 			GetViewport().SetInputAsHandled();
 		}
@@ -138,7 +138,7 @@ public partial class NPotionHolder : NClickableControl
 		{
 			OpenPotionPopup();
 		}
-		if (Potion != null)
+		if (Potion != null && _isUsable)
 		{
 			GetViewport().SetInputAsHandled();
 		}
@@ -189,7 +189,7 @@ public partial class NPotionHolder : NClickableControl
 		}
 	}
 
-	public void CancelPotionUse()
+	public void CancelPotionUseOrDiscard()
 	{
 		_cancelGrayOutPotionSource?.Cancel();
 		_disabledUntilPotionRemoved = false;
@@ -375,7 +375,7 @@ public partial class NPotionHolder : NClickableControl
 
 	public async Task ShineOnStartOfCombat()
 	{
-		if (HasPotion)
+		if (HasPotion && Potion.IsValid())
 		{
 			Potion.DoBounce();
 			await Cmd.Wait(0.25f);

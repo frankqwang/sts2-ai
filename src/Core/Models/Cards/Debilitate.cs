@@ -21,7 +21,7 @@ public sealed class Debilitate : CardModel
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[2]
 	{
-		new DamageVar(7m, ValueProp.Move),
+		new DamageVar(10m, ValueProp.Move),
 		new PowerVar<DebilitatePower>(3m)
 	});
 

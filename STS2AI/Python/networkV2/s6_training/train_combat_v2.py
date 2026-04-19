@@ -116,9 +116,20 @@ def sample_action_v2(
     num_actions: int,
     *,
     greedy: bool = False,
+    encounter_id: str = "",
 ) -> tuple[int, float, float]:
+    # rollout 必须传 encounter_idx，否则 conditioning 下 rollout/train 策略不一致
+    # （PPO 训练时 collate_training_samples 会给每个 sample 注入 encounter_idx）
+    enc_idx = None
+    if getattr(net, "enable_encounter_conditioning", False):
+        from networkV2.s1_schema.encounter_vocab import encounter_to_index
+        device = next(net.parameters()).device
+        enc_idx = torch.tensor(
+            [encounter_to_index(encounter_id)], dtype=torch.long, device=device,
+        )
+
     with torch.no_grad():
-        output: CombatNetOutput = net(banks=banks)
+        output: CombatNetOutput = net(banks=banks, encounter_idx=enc_idx)
 
     logits = output.logits[0, :num_actions]
     mask = output.action_mask[0, :num_actions]
@@ -172,6 +183,7 @@ def collect_combat_rollout(
 
         action_idx, log_prob, value = sample_action_v2(
             net, banks, len(legal_actions), greedy=greedy,
+            encounter_id=encounter_id,
         )
         chosen = legal_actions[action_idx]
 
@@ -283,6 +295,8 @@ def train_v2(args: argparse.Namespace) -> None:
         n_build_slots=args.n_build_slots,
         max_numeric_dim=args.max_numeric_dim,
         dropout=args.dropout,
+        contextualizer_mode=args.contextualizer_mode,
+        enable_encounter_conditioning=args.encounter_conditioning,
     ).to(device)
     logger.info(f"CombatNetV2: {sum(p.numel() for p in net.parameters()):,} params")
 
@@ -393,6 +407,11 @@ def main():
     p.add_argument("--n-build-slots", type=int, default=8)
     p.add_argument("--max-numeric-dim", type=int, default=48)
     p.add_argument("--dropout", type=float, default=0.1)
+    p.add_argument("--contextualizer-mode", type=str, default="full",
+                   choices=["full", "merged", "minimal"],
+                   help="ActionContextualizer 模式，和 UnifiedNet 的 preset 对齐")
+    p.add_argument("--encounter-conditioning", action="store_true",
+                   help="启用 encounter-conditioning embedding（UNKNOWN=0 保持 neutral）")
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--ppo-epochs", type=int, default=4)
     p.add_argument("--mini-batch-size", type=int, default=32)

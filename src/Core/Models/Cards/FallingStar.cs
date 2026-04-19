@@ -17,7 +17,7 @@ public sealed class FallingStar : CardModel
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlyArray<DynamicVar>(new DynamicVar[3]
 	{
-		new DamageVar(7m, ValueProp.Move),
+		new DamageVar(8m, ValueProp.Move),
 		new PowerVar<VulnerablePower>(1m),
 		new PowerVar<WeakPower>(1m)
 	});

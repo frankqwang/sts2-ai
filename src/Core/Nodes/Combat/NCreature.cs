@@ -60,6 +60,8 @@ public partial class NCreature : Control
 
 	public static IEnumerable<string> AssetPaths => new global::_003C_003Ez__ReadOnlySingleElementList<string>(_scenePath);
 
+	public static Vector2 PowerAppliedVfxPositionOffset => new Vector2(0f, -200f);
+
 	public Task? DeathAnimationTask { get; set; }
 
 	public CancellationTokenSource DeathAnimCancelToken { get; } = new CancellationTokenSource();
@@ -74,9 +76,11 @@ public partial class NCreature : Control
 
 	public Vector2 VfxSpawnPosition => Visuals.VfxSpawnPosition.GlobalPosition;
 
+	public Vector2 PowerAppliedVfxSpawnPosition => VfxSpawnPosition + PowerAppliedVfxPositionOffset;
+
 	public NCreatureVisuals Visuals { get; private set; }
 
-	public Node2D Body => Visuals.Body;
+	public Node2D Body => Visuals.GetCurrentBody();
 
 	public Control IntentContainer { get; private set; }
 
@@ -84,7 +88,7 @@ public partial class NCreature : Control
 
 	public bool HasSpineAnimation => Visuals.HasSpineAnimation;
 
-	public MegaSprite? SpineController => Visuals.SpineBody;
+	public SpineAnimationAccess SpineAnimation => Visuals.SpineAnimation;
 
 	public bool IsFocused { get; private set; }
 
@@ -92,7 +96,7 @@ public partial class NCreature : Control
 
 	public T? GetSpecialNode<T>(string name) where T : Node
 	{
-		return Visuals.GetNode<T>(name);
+		return Visuals.GetNodeOrNull<T>(name);
 	}
 
 	public static NCreature? Create(Creature entity)
@@ -156,19 +160,19 @@ public partial class NCreature : Control
 		{
 			if (Entity.Player != null)
 			{
-				_spineAnimator = Entity.Player.Character.GenerateAnimator(SpineController);
+				_spineAnimator = Entity.Player.Character.GenerateAnimator(Visuals.SpineBody);
 			}
 			else
 			{
-				_spineAnimator = Entity.Monster.GenerateAnimator(SpineController);
+				_spineAnimator = Entity.Monster.GenerateAnimator(Visuals.SpineBody);
 				Visuals.SetUpSkin(Entity.Monster);
 			}
 			ConnectSpineAnimatorSignals();
 			if (Entity.IsDead)
 			{
 				SetAnimationTrigger("Dead");
-				MegaTrackEntry current = Visuals.SpineBody.GetAnimationState().GetCurrent(0);
-				current.SetTrackTime(current.GetAnimationEnd());
+				MegaTrackEntry currentTrack = SpineAnimation.GetCurrentTrack();
+				currentTrack?.SetTrackTime(currentTrack.GetAnimationEnd());
 			}
 		}
 		SetOrbManagerPosition();
@@ -430,9 +434,26 @@ public partial class NCreature : Control
 		{
 			return;
 		}
-		NPowerAppliedVfx vfx = NPowerAppliedVfx.Create(power, amount);
+		bool flag = power.GetTypeForAmount(power.Amount) == PowerType.Buff;
+		NPowerAppliedVfx vfx = NPowerAppliedVfx.Create(power, amount, flag);
 		if (vfx != null)
 		{
+			if (flag)
+			{
+				NPowerAppliedBuffVfx buffVfx = NPowerAppliedBuffVfx.Create(PowerAppliedVfxSpawnPosition);
+				Callable.From(delegate
+				{
+					NCombatRoom.Instance?.CombatVfxContainer.AddChildSafely(buffVfx);
+				}).CallDeferred();
+			}
+			else
+			{
+				NPowerAppliedDebuffVfx debuffVfx = NPowerAppliedDebuffVfx.Create(PowerAppliedVfxSpawnPosition);
+				Callable.From(delegate
+				{
+					NCombatRoom.Instance?.CombatVfxContainer.AddChildSafely(debuffVfx);
+				}).CallDeferred();
+			}
 			Callable.From(delegate
 			{
 				NCombatRoom.Instance?.CombatVfxContainer.AddChildSafely(vfx);
@@ -440,9 +461,9 @@ public partial class NCreature : Control
 		}
 		if (power.ShouldPlayVfx)
 		{
-			SfxCmd.Play((power.GetTypeForAmount(amount) == PowerType.Buff) ? "event:/sfx/buff" : "event:/sfx/debuff");
+			SfxCmd.Play(flag ? "event:/sfx/buff" : "event:/sfx/debuff");
 		}
-		if (power.GetTypeForAmount(power.Amount) == PowerType.Debuff)
+		if (!flag)
 		{
 			AnimShake();
 		}
@@ -486,14 +507,17 @@ public partial class NCreature : Control
 
 	public float GetCurrentAnimationLength()
 	{
-		return SpineController.GetAnimationState().GetCurrent(0).GetAnimation()
-			.GetDuration();
+		return SpineAnimation.GetCurrentTrack()?.GetAnimation().GetDuration() ?? 0f;
 	}
 
 	public float GetCurrentAnimationTimeRemaining()
 	{
-		MegaTrackEntry current = SpineController.GetAnimationState().GetCurrent(0);
-		return current.GetTrackComplete() - current.GetTrackTime();
+		MegaTrackEntry currentTrack = SpineAnimation.GetCurrentTrack();
+		if (currentTrack == null)
+		{
+			return 0f;
+		}
+		return currentTrack.GetTrackComplete() - currentTrack.GetTrackTime();
 	}
 
 	public void ToggleIsInteractable(bool on)
@@ -594,9 +618,12 @@ public partial class NCreature : Control
 	private void ImmediatelySetIdle()
 	{
 		_spineAnimator?.SetTrigger("Idle");
-		MegaTrackEntry current = Visuals.SpineBody.GetAnimationState().GetCurrent(0);
-		current.SetMixDuration(0f);
-		current.SetTrackTime(current.GetAnimationEnd());
+		MegaTrackEntry currentTrack = SpineAnimation.GetCurrentTrack();
+		if (currentTrack != null)
+		{
+			currentTrack.SetMixDuration(0f);
+			currentTrack.SetTrackTime(currentTrack.GetAnimationEnd());
+		}
 	}
 
 	private async Task AnimDie(bool shouldRemove, CancellationToken cancelToken)
@@ -644,7 +671,7 @@ public partial class NCreature : Control
 			{
 				if (disableUiTween.IsValid() && disableUiTween.IsRunning())
 				{
-					await ToSignal(disableUiTween, Tween.SignalName.Finished);
+					await disableUiTween.AwaitFinished(this);
 				}
 				foreach (IDeathDelayer item in this.GetChildrenRecursive<IDeathDelayer>())
 				{

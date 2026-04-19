@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
+using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 
@@ -161,6 +162,7 @@ public sealed partial class NDeckTransformSelectScreen : NCardGridSelectionScree
 	private void CancelSelection(NButton _)
 	{
 		_previewContainer.Visible = false;
+		_grid.FocusBehaviorRecursive = FocusBehaviorRecursiveEnum.Inherited;
 		_previewContainer.MouseFilter = MouseFilterEnum.Ignore;
 		_transformPreview.Uninitialize();
 		_previewCancelButton.Disable();
@@ -176,6 +178,7 @@ public sealed partial class NDeckTransformSelectScreen : NCardGridSelectionScree
 		}
 		_grid.GetCardHolder(_selectedCards.Last())?.TryGrabFocus();
 		_selectedCards.Clear();
+		ActiveScreenContext.Instance.Update();
 	}
 
 	private void ConfirmSelection(NButton _)
@@ -196,6 +199,7 @@ public sealed partial class NDeckTransformSelectScreen : NCardGridSelectionScree
 	private void OpenPreviewScreen()
 	{
 		GetViewport().GuiReleaseFocus();
+		_grid.FocusBehaviorRecursive = FocusBehaviorRecursiveEnum.Disabled;
 		_previewContainer.Visible = true;
 		_previewContainer.MouseFilter = MouseFilterEnum.Stop;
 		_previewCancelButton.Enable();
@@ -206,6 +210,7 @@ public sealed partial class NDeckTransformSelectScreen : NCardGridSelectionScree
 		}
 		_transformPreview.Initialize(_selectedCards.Select(_cardToTransformation));
 		_closeButton.Disable();
+		ActiveScreenContext.Instance.Update();
 	}
 
 	private void CompleteSelection(NButton _)

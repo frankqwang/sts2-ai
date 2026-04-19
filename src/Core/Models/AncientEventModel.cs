@@ -140,24 +140,27 @@ public abstract class AncientEventModel : EventModel
 		return ModelDb.Character<T>().Id.Entry;
 	}
 
-	protected override async Task BeforeEventStarted()
+	protected override async Task BeforeEventStarted(bool isPreFinished)
 	{
-		if (this is Neow)
+		if (!isPreFinished)
 		{
-			base.Owner.Creature.SetCurrentHpInternal(0m);
+			if (this is Neow)
+			{
+				base.Owner.Creature.SetCurrentHpInternal(0m);
+			}
+			int oldHp = base.Owner.Creature.CurrentHp;
+			decimal amount = base.Owner.Creature.MaxHp - base.Owner.Creature.CurrentHp;
+			if (RunManager.Instance.HasAscension(AscensionLevel.WearyTraveler))
+			{
+				amount *= 0.8m;
+			}
+			await CreatureCmd.Heal(base.Owner.Creature, amount, playAnim: false);
+			if (NRun.Instance != null && this is Neow)
+			{
+				TaskHelper.RunSafely(NRun.Instance.GlobalUi.TopBar.Hp.LerpAtNeow());
+			}
+			HealedAmount = base.Owner.Creature.CurrentHp - oldHp;
 		}
-		int oldHp = base.Owner.Creature.CurrentHp;
-		decimal amount = base.Owner.Creature.MaxHp - base.Owner.Creature.CurrentHp;
-		if (RunManager.Instance.HasAscension(AscensionLevel.WearyTraveler))
-		{
-			amount *= 0.8m;
-		}
-		await CreatureCmd.Heal(base.Owner.Creature, amount, playAnim: false);
-		if (NRun.Instance != null && this is Neow)
-		{
-			TaskHelper.RunSafely(NRun.Instance.GlobalUi.TopBar.Hp.LerpAtNeow());
-		}
-		HealedAmount = base.Owner.Creature.CurrentHp - oldHp;
 	}
 
 	protected sealed override IReadOnlyList<EventOption> GenerateInitialOptionsWrapper()

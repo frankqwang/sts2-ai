@@ -151,6 +151,9 @@ public partial class NErrorPopup : NVerticalPopup, IScreenContext
 		case NetError.UnknownNetworkError:
 			text = "NETWORK_ERROR.UNKNOWN_ERROR.body";
 			break;
+		case NetError.RateLimited:
+			text = "NETWORK_ERROR.RATE_LIMITED.body";
+			break;
 		case NetError.TryAgainLater:
 			text = "NETWORK_ERROR.TRY_AGAIN_LATER.body";
 			break;

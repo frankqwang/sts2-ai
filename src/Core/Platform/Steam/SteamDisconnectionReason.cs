@@ -24,5 +24,6 @@ public enum SteamDisconnectionReason
 	MiscTimeout = 5003,
 	RelayConnectivity = 5004,
 	SteamConnectivity = 5005,
-	NoRelaySessions = 5006
+	NoRelaySessions = 5006,
+	RelayReceivedUnexpectedNoConnectionPacket = 5010
 }

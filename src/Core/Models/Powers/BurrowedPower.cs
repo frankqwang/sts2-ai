@@ -32,6 +32,6 @@ public sealed class BurrowedPower : PowerModel
 
 	public override async Task AfterRemoved(Creature oldOwner)
 	{
-		await CreatureCmd.LoseBlock(oldOwner, 999m);
+		await CreatureCmd.LoseBlock(oldOwner, 999999999m);
 	}
 }

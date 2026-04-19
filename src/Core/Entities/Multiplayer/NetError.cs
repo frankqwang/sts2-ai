@@ -21,6 +21,7 @@ public enum NetError
 	Timeout,
 	InternalError,
 	UnknownNetworkError,
+	RateLimited,
 	TryAgainLater,
 	FailedToHost
 }

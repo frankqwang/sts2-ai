@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using System.Runtime.ExceptionServices;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Logging;
 
@@ -19,7 +20,10 @@ public static class TimeServer
 
 	private static async Task<TimeServerResult?> RequestTime(string url)
 	{
-		using HttpClient client = new HttpClient();
+		using HttpClient client = new HttpClient
+		{
+			Timeout = TimeSpan.FromSeconds(5L)
+		};
 		Exception exception = null;
 		int retries = 0;
 		while (retries < 2)
@@ -51,10 +55,10 @@ public static class TimeServer
 				await Task.Delay(TimeSpan.FromSeconds(seconds));
 			}
 		}
-		_logger.Warn("Gave up trying to retrieve server time. Will use local time instead");
+		_logger.Warn("Gave up trying to retrieve server time");
 		if (exception != null)
 		{
-			throw exception;
+			ExceptionDispatchInfo.Capture(exception).Throw();
 		}
 		return null;
 	}

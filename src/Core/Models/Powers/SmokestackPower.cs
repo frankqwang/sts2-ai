@@ -15,7 +15,7 @@ public sealed class SmokestackPower : PowerModel
 
 	public override async Task AfterCardGeneratedForCombat(CardModel card, bool addedByPlayer)
 	{
-		if (addedByPlayer && card.Type == CardType.Status)
+		if (addedByPlayer && card.Type == CardType.Status && card.Owner.Creature == base.Owner)
 		{
 			Flash();
 			await CreatureCmd.Damage(new ThrowingPlayerChoiceContext(), base.CombatState.HittableEnemies, base.Amount, ValueProp.Unpowered, base.Owner, null);

@@ -12,7 +12,6 @@ using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
-using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Random;
 
 namespace MegaCrit.Sts2.Core.Models.Monsters;
@@ -96,10 +95,9 @@ public sealed class TwoTailedRat : MonsterModel
 		}
 	}
 
-	public override void SetupSkins(NCreatureVisuals visuals)
+	public override void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
-		MegaSkeleton skeleton = visuals.SpineBody.GetSkeleton();
-		MegaSkin megaSkin = visuals.SpineBody.NewSkin("custom-skin");
+		MegaSkin megaSkin = spine.NewSkin("custom-skin");
 		MegaSkeletonDataResource data = skeleton.GetData();
 		megaSkin.AddSkin(data.FindSkin(MegaCrit.Sts2.Core.Random.Rng.Chaotic.NextItem(_barnacleOptions)));
 		megaSkin.AddSkin(data.FindSkin(MegaCrit.Sts2.Core.Random.Rng.Chaotic.NextItem(_headOptions)));
@@ -153,8 +151,8 @@ public sealed class TwoTailedRat : MonsterModel
 	private async Task DiseaseBiteMove(IReadOnlyList<Creature> targets)
 	{
 		TurnsUntilSummonable--;
-		await DamageCmd.Attack(DiseaseBiteDamage).FromMonster(this).WithAttackerAnim("Cast", 0.25f)
-			.WithAttackerFx(null, "event:/sfx/enemy/enemy_attacks/two_tail_rats/two_tail_rats_attack_bite")
+		await DamageCmd.Attack(DiseaseBiteDamage).FromMonster(this).WithAttackerAnim("Attack", 0.25f)
+			.WithAttackerFx(null, "event:/sfx/enemy/enemy_attacks/two_tail_rats/two_tail_rats_attack_hands")
 			.WithHitFx("vfx/vfx_attack_slash")
 			.Execute(null);
 	}

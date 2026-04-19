@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Models.CardPools;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Factories;
 
@@ -92,6 +93,11 @@ public static class CardFactory
 
 	public static IEnumerable<CardModel> GetDistinctForCombat(Player player, IEnumerable<CardModel> cards, int count, Rng rng)
 	{
+		List<CardModel> list = TestRngInjector.ConsumeCombatCardGenerationOverride();
+		if (list != null)
+		{
+			return list;
+		}
 		cards = FilterForPlayerCount(player.RunState, cards);
 		return from c in FilterForCombat(cards).TakeRandom(count, rng)
 			select player.Creature.CombatState.CreateCard(c, player);

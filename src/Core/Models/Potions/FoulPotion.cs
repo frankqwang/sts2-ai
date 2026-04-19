@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.Core.Assets;
@@ -72,7 +73,7 @@ public sealed class FoulPotion : PotionModel
 		{
 			Creature creature = base.Owner.Creature;
 			DamageVar damage = base.DynamicVars.Damage;
-			await CreatureCmd.Damage(choiceContext, base.Owner.Creature.CombatState.Creatures, damage.BaseValue, damage.Props, creature, null);
+			await CreatureCmd.Damage(choiceContext, base.Owner.Creature.CombatState.Creatures.Where((Creature c) => !c.IsPet), damage.BaseValue, damage.Props, creature, null);
 		}
 		else if (base.Owner.RunState.CurrentRoom is MerchantRoom)
 		{

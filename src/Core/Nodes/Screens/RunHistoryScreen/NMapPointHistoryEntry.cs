@@ -305,21 +305,21 @@ public partial class NMapPointHistoryEntry : NClickableControl
 
 	private async Task DoCombatAnimateInEffects(RoomType roomType)
 	{
-		CharacterModel byId = ModelDb.GetById<CharacterModel>(_player.Character);
+		CharacterModel character = SaveUtil.CharacterOrDeprecated(_player.Character);
 		ShakeStrength? shakeStrength = null;
 		switch (roomType)
 		{
 		case RoomType.Monster:
 			shakeStrength = ShakeStrength.Weak;
-			await PlaySfx(GetSmallHitSfx(byId));
+			await PlaySfx(GetSmallHitSfx(character));
 			break;
 		case RoomType.Elite:
 			shakeStrength = ShakeStrength.Medium;
-			await PlaySfx(GetBigHitSfx(byId));
+			await PlaySfx(GetBigHitSfx(character));
 			break;
 		case RoomType.Boss:
 			shakeStrength = ShakeStrength.Strong;
-			await PlaySfx(GetBigHitSfx(byId));
+			await PlaySfx(GetBigHitSfx(character));
 			break;
 		}
 		if (shakeStrength.HasValue)
@@ -329,10 +329,10 @@ public partial class NMapPointHistoryEntry : NClickableControl
 		await Cmd.Wait(0.25f);
 		foreach (ModelId monsterId in _entry.Rooms.Last().MonsterIds)
 		{
-			MonsterModel byId2 = ModelDb.GetById<MonsterModel>(monsterId);
-			if (byId2.HasDeathSfx)
+			MonsterModel monsterModel = SaveUtil.MonsterOrDeprecated(monsterId);
+			if (monsterModel.HasDeathSfx)
 			{
-				SfxCmd.Play(byId2.DeathSfx);
+				SfxCmd.Play(monsterModel.DeathSfx);
 				await Cmd.Wait(0.25f);
 			}
 		}

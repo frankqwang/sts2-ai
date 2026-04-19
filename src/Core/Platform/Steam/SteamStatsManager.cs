@@ -8,7 +8,7 @@ namespace MegaCrit.Sts2.Core.Platform.Steam;
 
 public static class SteamStatsManager
 {
-	private const string ArchitectDamageStat = "architect_damage";
+	private const string _architectDamageStat = "architect_damage";
 
 	private static Callback<UserStatsReceived_t>? _userStatsReceivedCallback;
 

@@ -35,8 +35,8 @@ public static class ReflectionHelper
 		{
 			if (_modTypes == null)
 			{
-				_modTypes = ModManager.LoadedMods.Select((Mod m) => m.assembly).OfType<Assembly>().SelectMany((Assembly a) => a.GetTypes())
-					.ToArray();
+				_modTypes = (from m in ModManager.GetLoadedMods()
+					select m.assembly).OfType<Assembly>().SelectMany((Assembly a) => a.GetTypes()).ToArray();
 			}
 			return _modTypes;
 		}
@@ -44,14 +44,22 @@ public static class ReflectionHelper
 
 	public static IEnumerable<Type> GetSubtypes(Type parentType)
 	{
-		return from type in AllTypes.Concat(ModTypes)
-			where (object)type != null && !type.IsAbstract && !type.IsInterface && InheritsOrImplements(type, parentType)
-			select type;
+		return GetSubtypesFromList(AllTypes, parentType);
 	}
 
 	public static IEnumerable<Type> GetSubtypesInMods(Type parentType)
 	{
-		return ModTypes.Where((Type type) => (object)type != null && !type.IsAbstract && !type.IsInterface && InheritsOrImplements(type, parentType));
+		return GetSubtypesFromList(ModTypes, parentType);
+	}
+
+	public static IEnumerable<Type> GetSubtypesFromAssembly(Assembly assembly, Type parentType)
+	{
+		return GetSubtypesFromList(assembly.GetTypes(), parentType);
+	}
+
+	private static IEnumerable<Type> GetSubtypesFromList(IList<Type> list, Type parentType)
+	{
+		return list.Where((Type type) => (object)type != null && !type.IsAbstract && !type.IsInterface && InheritsOrImplements(type, parentType));
 	}
 
 	public static IEnumerable<Type> GetSubtypes<T>() where T : class

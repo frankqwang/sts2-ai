@@ -162,11 +162,14 @@ public partial class NHandImageCollection : Control
 		{
 			NetScreenType netScreenType = ((!RunManager.Instance.IsSinglePlayerOrFakeMultiplayer) ? _synchronizer.GetScreenType(hand.Player.NetId) : NetScreenType.SharedRelicPicking);
 			bool flag = netScreenType == NetScreenType.SharedRelicPicking && screenType == NetScreenType.SharedRelicPicking;
-			if (!hand.Visible && flag)
+			if (!hand.IsShown && flag)
 			{
 				hand.AnimateIn();
 			}
-			hand.Visible = flag;
+			else if (hand.IsShown && !flag)
+			{
+				hand.AnimateAway();
+			}
 		}
 		NGame.Instance.CursorManager.SetCursorShown(screenType != NetScreenType.SharedRelicPicking);
 	}
@@ -196,14 +199,6 @@ public partial class NHandImageCollection : Control
 			{
 				hand.AnimateIn();
 			}
-		}
-	}
-
-	public void AnimateHandsAway()
-	{
-		foreach (NHandImage hand in _hands)
-		{
-			hand.AnimateAway();
 		}
 	}
 

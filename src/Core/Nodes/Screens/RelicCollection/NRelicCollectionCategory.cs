@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Godot;
@@ -130,9 +129,8 @@ public partial class NRelicCollectionCategory : VBoxContainer
 					_subCategories.Add(nRelicCollectionCategory3);
 					this.AddChildSafely(nRelicCollectionCategory3);
 					MoveChild(nRelicCollectionCategory3, _headerLabel.GetIndex() + num3 + 1);
-					StringComparer comparer = StringComparer.Create(LocManager.Instance.CultureInfo, CompareOptions.None);
 					RelicModel[] array = ancientEventModel.AllPossibleOptions.Select((EventOption o) => o.Relic?.CanonicalInstance).OfType<RelicModel>().Intersect(_relicModelCache)
-						.OrderBy<RelicModel, string>((RelicModel r) => r.Title.GetFormattedText(), comparer)
+						.OrderBy<RelicModel, string>((RelicModel r) => r.Title.GetFormattedText(), LocManager.Instance.StringComparer)
 						.ToArray();
 					bool flag = ancientStats.ContainsKey(ancientEventModel.Id) || array.Any((RelicModel r) => seenRelics.Contains(r));
 					LocString locString2 = new LocString("relic_collection", "ANCIENT_SUBCATEGORY");
@@ -162,8 +160,7 @@ public partial class NRelicCollectionCategory : VBoxContainer
 				list6.Add(item2);
 			}
 		}
-		StringComparer comparer2 = StringComparer.Create(LocManager.Instance.CultureInfo, CompareOptions.None);
-		list6.Sort((RelicModel p1, RelicModel p2) => comparer2.Compare(p1.Title.GetFormattedText(), p2.Title.GetFormattedText()));
+		list6.Sort((RelicModel p1, RelicModel p2) => LocManager.Instance.StringComparer.Compare(p1.Title.GetFormattedText(), p2.Title.GetFormattedText()));
 		LoadRelicNodes(list6.Concat(list5), seenRelics, allUnlockedRelics);
 		_collection.AddRelics(list6);
 		_collection.AddRelics(list5);

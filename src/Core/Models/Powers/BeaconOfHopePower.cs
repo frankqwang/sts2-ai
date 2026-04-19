@@ -14,7 +14,7 @@ public sealed class BeaconOfHopePower : PowerModel
 
 	public override PowerType Type => PowerType.Buff;
 
-	public override PowerStackType StackType => PowerStackType.Counter;
+	public override PowerStackType StackType => PowerStackType.Single;
 
 	private bool HasAlreadyBeenGivenBlock
 	{
@@ -35,14 +35,14 @@ public sealed class BeaconOfHopePower : PowerModel
 		{
 			return;
 		}
-		IEnumerable<Creature> enumerable = from c in base.CombatState.GetTeammatesOf(base.Owner)
-			where c != null && c.IsAlive && c.IsPlayer && c.Player.Creature != base.Owner
-			select c;
-		decimal amountToGive = amount * 0.5m * (decimal)base.Amount;
+		decimal amountToGive = amount * 0.5m;
 		if (amountToGive < 1m)
 		{
 			return;
 		}
+		IEnumerable<Creature> enumerable = from c in base.CombatState.GetTeammatesOf(base.Owner)
+			where c != null && c.IsAlive && c.IsPlayer && c.Player.Creature != base.Owner
+			select c;
 		HasAlreadyBeenGivenBlock = true;
 		foreach (Creature item in enumerable)
 		{

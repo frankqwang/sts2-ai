@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Models;
 
@@ -8,6 +10,10 @@ public static class TestRngInjector
 	private static RelicModel? _relicOverride;
 
 	private static RelicRarity? _relicRarityOverride;
+
+	private static Action<List<CardModel>>? _initialShuffleOverride;
+
+	private static List<CardModel>? _combatCardGenerationOverride;
 
 	public static void SetRelicOverride<T>() where T : RelicModel
 	{
@@ -31,8 +37,35 @@ public static class TestRngInjector
 		return _relicRarityOverride;
 	}
 
+	public static void SetCombatCardGenerationOverride(List<CardModel> cards)
+	{
+		_combatCardGenerationOverride = cards;
+	}
+
+	public static List<CardModel>? ConsumeCombatCardGenerationOverride()
+	{
+		List<CardModel> combatCardGenerationOverride = _combatCardGenerationOverride;
+		_combatCardGenerationOverride = null;
+		return combatCardGenerationOverride;
+	}
+
+	public static void SetInitialShuffleOverride(Action<List<CardModel>> reorder)
+	{
+		_initialShuffleOverride = reorder;
+	}
+
+	public static Action<List<CardModel>>? ConsumeInitialShuffleOverride()
+	{
+		Action<List<CardModel>> initialShuffleOverride = _initialShuffleOverride;
+		_initialShuffleOverride = null;
+		return initialShuffleOverride;
+	}
+
 	public static void Cleanup()
 	{
 		_relicOverride = null;
+		_relicRarityOverride = null;
+		_initialShuffleOverride = null;
+		_combatCardGenerationOverride = null;
 	}
 }

@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;
+using MegaCrit.Sts2.Core.Audio.Debug;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
@@ -170,6 +171,7 @@ public partial class NPauseMenu : NSubmenu
 		_saveAndQuitButton.Disable();
 		_backButton.Disable();
 		NRunMusicController.Instance.StopMusic();
+		NDebugAudioManager.Instance?.StopAll();
 		await NGame.Instance.ReturnToMainMenu();
 	}
 

@@ -35,8 +35,8 @@
 
 旧的 reward flow 修复后，runtime 已经把 `combat_pending` 拆成了更细的过渡态，但 `card_reward` restore 这条链还有一个专门问题：
 
-- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:2317) 原来在恢复 `CardRewardSelection` 时，调用的是 `reward.OnSelectWrapper()`
-- 但 full-run overlay 自己真正接管卡奖流程的代码是 [ResolveCardRewardAsync(...)](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:2441)
+- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:2317) 原来在恢复 `CardRewardSelection` 时，调用的是 `reward.OnSelectWrapper()`
+- 但 full-run overlay 自己真正接管卡奖流程的代码是 [ResolveCardRewardAsync(...)](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:2441)
 
 结果是：
 
@@ -82,12 +82,12 @@
 
 修改：
 
-- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:2317)
+- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:2317)
 
 修法：
 
 - 恢复 `CardRewardSelection` 时，不再调用 `reward.OnSelectWrapper()`
-- 改为直接启动 [ResolveCardRewardAsync(...)](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:2441)
+- 改为直接启动 [ResolveCardRewardAsync(...)](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:2441)
 - 等待条件也从泛化的 `IsSelectionActive` 收紧到 `IsCardRewardSelectionActive`
 
 效果：
@@ -98,13 +98,13 @@
 
 新增：
 
-- [FullRunSimulationSerializerContext.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulationSerializerContext.cs:1)
+- [FullRunSimulationSerializerContext.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulationSerializerContext.cs:1)
 
 修改：
 
-- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:40)
-- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:1842)
-- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:2152)
+- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:40)
+- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:1842)
+- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:2152)
 
 修法：
 

@@ -38,8 +38,6 @@ public partial class NMerchantRoom : Control, IScreenContext, IRoomWithProceedBu
 
 	private Control _characterContainer;
 
-	private Control _inputBlocker;
-
 	private readonly List<NMerchantCharacter> _playerVisuals = new List<NMerchantCharacter>();
 
 	public static IEnumerable<string> AssetPaths => new global::_003C_003Ez__ReadOnlySingleElementList<string>(_scenePath);
@@ -86,7 +84,6 @@ public partial class NMerchantRoom : Control, IScreenContext, IRoomWithProceedBu
 		Inventory.MouseFilter = MouseFilterEnum.Ignore;
 		Inventory.Initialize(Room.Inventory, _dialogue);
 		_characterContainer = GetNode<Control>("%CharacterContainer");
-		_inputBlocker = GetNode<Control>("%InputBlocker");
 		NMapScreen.Instance.SetTravelEnabled(enabled: true);
 		NGame.Instance.SetScreenShakeTarget(this);
 		AfterRoomIsLoaded();
@@ -209,17 +206,5 @@ public partial class NMerchantRoom : Control, IScreenContext, IRoomWithProceedBu
 			MerchantButton.Disable();
 			_proceedButton.Disable();
 		}
-	}
-
-	public void BlockInput()
-	{
-		_inputBlocker.MouseFilter = MouseFilterEnum.Stop;
-		NHotkeyManager.Instance.AddBlockingScreen(_inputBlocker);
-	}
-
-	public void UnblockInput()
-	{
-		_inputBlocker.MouseFilter = MouseFilterEnum.Ignore;
-		NHotkeyManager.Instance.RemoveBlockingScreen(_inputBlocker);
 	}
 }

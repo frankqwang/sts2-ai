@@ -14,7 +14,7 @@ public sealed class TrashToTreasurePower : PowerModel
 
 	public override async Task AfterCardGeneratedForCombat(CardModel card, bool addedByPlayer)
 	{
-		if (addedByPlayer && card.Type == CardType.Status)
+		if (addedByPlayer && card.Type == CardType.Status && card.Owner.Creature == base.Owner)
 		{
 			Flash();
 			for (int i = 0; i < base.Amount; i++)

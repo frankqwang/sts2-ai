@@ -55,7 +55,7 @@ public partial class NCharacterStats : Node
 		_nameLabel = GetNode<MegaLabel>("%NameLabel");
 		_unlocksLabel = GetNode<MegaLabel>("%UnlocksLabel");
 		_nameLabel.SetTextAutoSize(byId.Title.GetRawText());
-		_nameLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, byId.NameColor);
+		_nameLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, byId.NameColor);
 		LoadStats();
 	}
 

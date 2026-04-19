@@ -121,6 +121,10 @@ public sealed class UnsettlingLamp : RelicModel
 		{
 			return amount;
 		}
+		if (power.GetTypeForAmount(amount) != PowerType.Debuff)
+		{
+			return amount;
+		}
 		return amount * 2m;
 	}
 

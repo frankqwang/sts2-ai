@@ -103,7 +103,7 @@
 
 所以 restore 完房间后，必须再把保存下来的 run/player RNG 灌回去。对应代码在：
 
-- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/Overlay/Simulation/FullRunSimulatorRuntimeFacade.cs:1704)
+- [FullRunSimulatorRuntimeFacade.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunSimulatorRuntimeFacade.cs:1704)
 
 否则即使表面状态一样，后续随机分支也会漂。
 

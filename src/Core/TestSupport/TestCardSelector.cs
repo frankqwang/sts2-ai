@@ -12,9 +12,9 @@ public class TestCardSelector : ICardSelector
 {
 	public delegate CardModel? CardRewardSelectionDelegate(IReadOnlyList<CardCreationResult> options, IReadOnlyList<CardRewardAlternative> alternatives);
 
-	private TaskCompletionSource<IEnumerable<CardModel>>? _cardsToSelectTask;
+	private readonly Queue<TaskCompletionSource<IEnumerable<CardModel>>> _cardsToSelectTaskQueue = new Queue<TaskCompletionSource<IEnumerable<CardModel>>>();
 
-	private TaskCompletionSource<IEnumerable<int>>? _indicesToSelectTask;
+	private readonly Queue<TaskCompletionSource<IEnumerable<int>>> _indicesToSelectTaskQueue = new Queue<TaskCompletionSource<IEnumerable<int>>>();
 
 	private CardRewardSelectionDelegate? _cardRewardSelectionDelegate;
 
@@ -22,46 +22,38 @@ public class TestCardSelector : ICardSelector
 
 	public void Cleanup()
 	{
-		_cardsToSelectTask = null;
-		_indicesToSelectTask = null;
+		_cardsToSelectTaskQueue.Clear();
+		_indicesToSelectTaskQueue.Clear();
 		_shouldBlock = false;
 		_cardRewardSelectionDelegate = null;
 	}
 
-	public void SetupForAsyncCardSelection()
+	public TaskCompletionSource<IEnumerable<CardModel>> SetupForAsyncCardSelection()
 	{
-		if (_indicesToSelectTask != null || _cardsToSelectTask != null)
-		{
-			throw new InvalidOperationException("Can only set up once!");
-		}
-		_cardsToSelectTask = new TaskCompletionSource<IEnumerable<CardModel>>();
+		TaskCompletionSource<IEnumerable<CardModel>> taskCompletionSource = new TaskCompletionSource<IEnumerable<CardModel>>();
+		_cardsToSelectTaskQueue.Enqueue(taskCompletionSource);
+		return taskCompletionSource;
 	}
 
-	public void SetupForAsyncIndexSelection()
+	public TaskCompletionSource<IEnumerable<int>> SetupForAsyncIndexSelection()
 	{
-		if (_indicesToSelectTask != null || _cardsToSelectTask != null)
-		{
-			throw new InvalidOperationException("Can only set up once!");
-		}
-		_indicesToSelectTask = new TaskCompletionSource<IEnumerable<int>>();
+		TaskCompletionSource<IEnumerable<int>> taskCompletionSource = new TaskCompletionSource<IEnumerable<int>>();
+		_indicesToSelectTaskQueue.Enqueue(taskCompletionSource);
+		return taskCompletionSource;
 	}
 
 	public void PrepareToSelect(IEnumerable<CardModel> cards)
 	{
-		if (_cardsToSelectTask == null)
-		{
-			_cardsToSelectTask = new TaskCompletionSource<IEnumerable<CardModel>>();
-		}
-		_cardsToSelectTask.SetResult(cards);
+		TaskCompletionSource<IEnumerable<CardModel>> taskCompletionSource = new TaskCompletionSource<IEnumerable<CardModel>>();
+		taskCompletionSource.SetResult(cards);
+		_cardsToSelectTaskQueue.Enqueue(taskCompletionSource);
 	}
 
 	public void PrepareToSelect(IEnumerable<int> indices)
 	{
-		if (_indicesToSelectTask == null)
-		{
-			_indicesToSelectTask = new TaskCompletionSource<IEnumerable<int>>();
-		}
-		_indicesToSelectTask.SetResult(indices);
+		TaskCompletionSource<IEnumerable<int>> taskCompletionSource = new TaskCompletionSource<IEnumerable<int>>();
+		taskCompletionSource.SetResult(indices);
+		_indicesToSelectTaskQueue.Enqueue(taskCompletionSource);
 	}
 
 	public void PrepareToSelectCardReward(CardRewardSelectionDelegate del)
@@ -90,18 +82,18 @@ public class TestCardSelector : ICardSelector
 			await Task.Delay(5000);
 			throw new InvalidOperationException("Test told us to block, but it did not finish within 5 seconds!");
 		}
-		if (_cardsToSelectTask != null)
+		if (_cardsToSelectTaskQueue.Count > 0)
 		{
-			IEnumerable<CardModel> enumerable = await _cardsToSelectTask.Task;
+			IEnumerable<CardModel> enumerable = await _cardsToSelectTaskQueue.Dequeue().Task;
 			if (enumerable.Any((CardModel c) => !options.Contains(c)))
 			{
 				throw new InvalidOperationException("Selected card missing from options.");
 			}
 			return enumerable;
 		}
-		if (_indicesToSelectTask != null)
+		if (_indicesToSelectTaskQueue.Count > 0)
 		{
-			return (await _indicesToSelectTask.Task).Select(options.ElementAt);
+			return (await _indicesToSelectTaskQueue.Dequeue().Task).Select(options.ElementAt);
 		}
 		return Array.Empty<CardModel>();
 	}

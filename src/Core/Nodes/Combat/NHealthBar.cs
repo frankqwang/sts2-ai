@@ -313,19 +313,18 @@ public partial class NHealthBar : Control
 	{
 		if (_creature.CurrentHp <= 0)
 		{
-			_hpLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, _defaultFontColor);
-			_hpLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, _defaultFontOutlineColor);
+			_hpLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, _defaultFontColor);
+			_hpLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, _defaultFontOutlineColor);
 			_hpLabel.SetTextAutoSize(_healthBarDead.GetRawText());
 			return;
 		}
+		_doomForeground.Modulate = (_creature.ShowsInfiniteHp ? Colors.Transparent : Colors.White);
+		_infinityTex.Visible = _creature.ShowsInfiniteHp;
+		_hpLabel.Visible = !_creature.ShowsInfiniteHp;
 		if (_creature.ShowsInfiniteHp)
 		{
-			_infinityTex.Visible = _creature.IsAlive;
-			_doomForeground.Modulate = Colors.Transparent;
-			_hpLabel.Visible = !_infinityTex.Visible;
 			return;
 		}
-		_hpLabel.Visible = true;
 		int poisonDamage = _creature.GetPower<PoisonPower>()?.CalculateTotalDamageNextTurn() ?? 0;
 		int powerAmount = _creature.GetPowerAmount<DoomPower>();
 		Color color;
@@ -349,16 +348,16 @@ public partial class NHealthBar : Control
 				{
 					color = _defaultFontColor;
 					color2 = _defaultFontOutlineColor;
-					goto IL_0151;
+					goto IL_0159;
 				}
 			}
 			color = _defaultFontColor;
 			color2 = _blockOutlineColor;
 		}
-		goto IL_0151;
-		IL_0151:
-		_hpLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, color);
-		_hpLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, color2);
+		goto IL_0159;
+		IL_0159:
+		_hpLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, color);
+		_hpLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, color2);
 		_hpLabel.SetTextAutoSize($"{_creature.CurrentHp}/{_creature.MaxHp}");
 	}
 

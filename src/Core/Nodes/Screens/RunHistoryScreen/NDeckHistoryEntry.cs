@@ -73,11 +73,11 @@ public partial class NDeckHistoryEntry : NButton
 		_titleLabel.SetTextAutoSize(text);
 		if (flag2)
 		{
-			_titleLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, StsColors.purple);
+			_titleLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, StsColors.purple);
 		}
 		else if (flag)
 		{
-			_titleLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, StsColors.green);
+			_titleLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, StsColors.green);
 		}
 		_cardImage.SetCard(Card);
 		if (Card.Enchantment != null)

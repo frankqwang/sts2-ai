@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Daily;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Leaderboard;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Platform;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.DailyRun;
 
@@ -16,8 +17,6 @@ public partial class NDailyRunLeaderboard : Control
 	private static readonly string _scenePath = SceneHelper.GetScenePath("screens/daily_run/daily_run_leaderboard");
 
 	private const int _maxEntries = 10;
-
-	private MegaLabel _titleLabel;
 
 	private NLeaderboardDayPaginator _paginator;
 
@@ -59,7 +58,6 @@ public partial class NDailyRunLeaderboard : Control
 
 	public override void _Ready()
 	{
-		_titleLabel = GetNode<MegaLabel>("%Title");
 		_paginator = GetNode<NLeaderboardDayPaginator>("Paginator");
 		_scoreContainer = GetNodeOrNull<VBoxContainer>("%ScoreContainer") ?? GetNodeOrNull<VBoxContainer>("%LeaderboardScoreContainer") ?? throw new InvalidOperationException("Couldn't find score container");
 		_leftArrow = GetNode<NLeaderboardPageArrow>("%LeftArrow");
@@ -82,15 +80,16 @@ public partial class NDailyRunLeaderboard : Control
 
 	private void SetLocalizedText()
 	{
-		_titleLabel.SetTextAutoSize(_titleLoc.GetFormattedText());
-		_noScoresIndicator.SetTextAutoSize(_scoreLoc.GetFormattedText());
-		_noFriendsIndicator.SetTextAutoSize(_friendsLoc.GetFormattedText());
+		GetNodeOrNull<MegaLabel>("%Title")?.SetTextAutoSize(_titleLoc.GetRawText());
+		_noScoresIndicator.SetTextAutoSize(_scoreLoc.GetRawText());
+		_noFriendsIndicator.SetTextAutoSize(_friendsLoc.GetRawText());
 	}
 
 	public void Cleanup()
 	{
 		_loadCts?.Cancel();
 		_loadCts?.Dispose();
+		_loadCts = null;
 		_leftArrow.Visible = false;
 		_rightArrow.Visible = false;
 		_loadingIndicator.Visible = false;
@@ -128,12 +127,16 @@ public partial class NDailyRunLeaderboard : Control
 	private void SetPage(int page)
 	{
 		_currentPage = page;
-		TaskHelper.RunSafely(LoadLeaderboard(_leaderboardTime, _currentPage));
+		TaskHelper.RunSafely(LoadLeaderboard(_leaderboardTime, _currentPage, LeaderboardQueryType.FriendsOnly));
 	}
 
-	private async Task LoadLeaderboard(DateTimeOffset dateTime, int page)
+	private async Task LoadLeaderboard(DateTimeOffset dateTime, int page, LeaderboardQueryType queryType)
 	{
-		_loadCts?.Dispose();
+		if (_loadCts != null)
+		{
+			await _loadCts.CancelAsync();
+			_loadCts.Dispose();
+		}
 		_loadCts = new CancellationTokenSource();
 		CancellationToken ct = _loadCts.Token;
 		ClearEntries();
@@ -148,20 +151,29 @@ public partial class NDailyRunLeaderboard : Control
 			string leaderboardName = DailyRunUtility.GetLeaderboardName(dateTime, _playersInRun.Count);
 			DateTimeOffset dateTime2 = dateTime - TimeSpan.FromDays(1);
 			DateTimeOffset rightLeaderboardTime = dateTime + TimeSpan.FromDays(1);
-			Task<ILeaderboardHandle?> mainTask = LeaderboardManager.GetLeaderboard(leaderboardName);
-			Task<ILeaderboardHandle?> leftTask = LeaderboardManager.GetLeaderboard(DailyRunUtility.GetLeaderboardName(dateTime2, _playersInRun.Count));
-			Task<ILeaderboardHandle?> rightTask = LeaderboardManager.GetLeaderboard(DailyRunUtility.GetLeaderboardName(rightLeaderboardTime, _playersInRun.Count));
+			Task<ILeaderboardHandle?> mainTask = LeaderboardManager.GetLeaderboard(leaderboardName, ct);
+			Task<ILeaderboardHandle?> leftTask = LeaderboardManager.GetLeaderboard(DailyRunUtility.GetLeaderboardName(dateTime2, _playersInRun.Count), ct);
+			Task<ILeaderboardHandle?> rightTask = LeaderboardManager.GetLeaderboard(DailyRunUtility.GetLeaderboardName(rightLeaderboardTime, _playersInRun.Count), ct);
 			global::_003C_003Ey__InlineArray3<Task<ILeaderboardHandle>> buffer = default(global::_003C_003Ey__InlineArray3<Task<ILeaderboardHandle>>);
 			buffer[0] = mainTask;
 			buffer[1] = leftTask;
 			buffer[2] = rightTask;
-			await Task.WhenAll<ILeaderboardHandle>(buffer).WaitAsync(ct);
+			await Task.WhenAll<ILeaderboardHandle>(buffer);
 			ILeaderboardHandle handle = await mainTask;
+			if (ct.IsCancellationRequested)
+			{
+				return;
+			}
 			if (handle != null)
 			{
-				List<LeaderboardEntry> list = await LeaderboardManager.QueryLeaderboard(handle, LeaderboardQueryType.Global, page * 10, 10).WaitAsync(ct);
+				List<LeaderboardEntry> list = await LeaderboardManager.QueryLeaderboard(handle, queryType, page * 10, 10, ct);
+				if (ct.IsCancellationRequested)
+				{
+					return;
+				}
 				_noScoresIndicator.Visible = list.Count <= 0;
 				FillEntries(list);
+				GetNode<Control>("%Separators").Visible = true;
 				_leftArrow.Visible = true;
 				_rightArrow.Visible = true;
 				if (page > 0)
@@ -194,8 +206,11 @@ public partial class NDailyRunLeaderboard : Control
 			_loadingIndicator.Visible = false;
 			if (_noScoreUploadIndicator != null && _todaysDailyTime == dateTime)
 			{
-				bool flag = await DailyRunUtility.ShouldUploadScore(handle, _playersInRun).WaitAsync(ct);
-				_noScoreUploadIndicator.Visible = !flag;
+				bool flag = await DailyRunUtility.ShouldUploadScore(handle, _playersInRun, ct);
+				if (!ct.IsCancellationRequested)
+				{
+					_noScoreUploadIndicator.Visible = !flag;
+				}
 			}
 		}
 		catch (OperationCanceledException)
@@ -210,10 +225,11 @@ public partial class NDailyRunLeaderboard : Control
 			return;
 		}
 		_hasNegativeScore = false;
-		NDailyRunLeaderboardRow child = NDailyRunLeaderboardRow.CreateHeader();
+		NDailyRunLeaderboardHeader child = NDailyRunLeaderboardHeader.Create();
 		_scoreContainer.AddChildSafely(child);
 		NDailyRunLeaderboardSeparator child2 = NDailyRunLeaderboardSeparator.Create();
 		_scoreContainer.AddChildSafely(child2);
+		ulong localPlayerId = PlatformUtil.GetLocalPlayerId(LeaderboardManager.CurrentPlatform);
 		foreach (LeaderboardEntry entry in entries)
 		{
 			if (entry.score < 0)
@@ -221,7 +237,7 @@ public partial class NDailyRunLeaderboard : Control
 				_hasNegativeScore = true;
 				continue;
 			}
-			_scoreContainer.AddChildSafely(NDailyRunLeaderboardRow.Create(entry));
+			_scoreContainer.AddChildSafely(NDailyRunLeaderboardRow.Create(entry, entry.userIds.Contains(localPlayerId)));
 			_scoreContainer.AddChildSafely(NDailyRunLeaderboardSeparator.Create());
 		}
 	}
@@ -234,5 +250,12 @@ public partial class NDailyRunLeaderboard : Control
 		{
 			child.QueueFreeSafely();
 		}
+	}
+
+	public override void _ExitTree()
+	{
+		_loadCts?.Cancel();
+		_loadCts?.Dispose();
+		_loadCts = null;
 	}
 }

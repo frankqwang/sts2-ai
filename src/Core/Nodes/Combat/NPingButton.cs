@@ -83,6 +83,9 @@ public partial class NPingButton : NButton
 	public override void _ExitTree()
 	{
 		base._ExitTree();
+		_showCancelTokenSource?.Cancel();
+		_showCancelTokenSource?.Dispose();
+		_showCancelTokenSource = null;
 		CombatManager.Instance.AboutToSwitchToEnemyTurn -= OnAboutToSwitchToEnemyTurn;
 		CombatManager.Instance.PlayerEndedTurn -= AfterPlayerEndedTurn;
 		CombatManager.Instance.PlayerUnendedTurn -= AfterPlayerUnendedTurn;

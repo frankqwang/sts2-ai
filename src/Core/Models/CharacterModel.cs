@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Entities.Characters;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Unlocks;
 
@@ -85,7 +86,7 @@ public abstract class CharacterModel : AbstractModel
 
 	public Texture2D IconOutlineTexture => PreloadManager.Cache.GetTexture2D(IconOutlineTexturePath);
 
-	private string IconPath => SceneHelper.GetScenePath("ui/character_icons/" + base.Id.Entry.ToLowerInvariant() + "_icon");
+	protected virtual string IconPath => SceneHelper.GetScenePath("ui/character_icons/" + base.Id.Entry.ToLowerInvariant() + "_icon");
 
 	public Control Icon => PreloadManager.Cache.GetScene(IconPath).Instantiate<Control>(PackedScene.GenEditState.Disabled);
 
@@ -136,6 +137,8 @@ public abstract class CharacterModel : AbstractModel
 	public CompressedTexture2D MapMarker => PreloadManager.Cache.GetCompressedTexture2D(MapMarkerPath);
 
 	public virtual Color DialogueColor { get; } = new Color("28454f");
+
+	public virtual VfxColor SpeechBubbleColor { get; } = VfxColor.Cyan;
 
 	public virtual Color MapDrawingColor => Colors.Black;
 

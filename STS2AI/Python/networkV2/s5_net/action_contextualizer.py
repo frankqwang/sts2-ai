@@ -69,6 +69,13 @@ class ActionContextualizer(nn.Module):
         elif mode in ("merged", "minimal"):
             # 合并模式：用 bank_type_emb 标记 kv 来源，少数几次 cross
             self.bank_type_emb = nn.Embedding(_N_BANK_TYPES, d_model)
+            # 预计算 bank_type id tensor 作为 buffer(而非每次 torch.tensor(int))
+            # 避免 CPU→GPU copy,CUDA graph capture 要求。
+            self.register_buffer(
+                "_bank_type_ids",
+                torch.arange(_N_BANK_TYPES, dtype=torch.long),
+                persistent=False,
+            )
             if mode == "merged":
                 self.cross_fast = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)  # board+mod+mech
                 self.cross_slow = CrossAttentionBlock(d_model, n_heads, ffn_dim, dropout)  # prefix+cm+build
@@ -78,8 +85,12 @@ class ActionContextualizer(nn.Module):
             raise ValueError(f"Unknown contextualizer mode: {mode}")
 
     def _tag(self, bt: BankTensor, bank_type_id: int) -> BankTensor:
-        """给 bank tensor 加上 bank_type_embedding，供合并模式区分来源。"""
-        type_emb = self.bank_type_emb(torch.tensor(bank_type_id, device=bt.features.device))
+        """给 bank tensor 加上 bank_type_embedding，供合并模式区分来源。
+
+        不用 torch.tensor(int, device=...) —— 会 CPU→GPU copy 破坏 CUDA graph。
+        从预分配的 _bank_type_ids buffer(已经在 GPU 上)取对应 index。
+        """
+        type_emb = self.bank_type_emb(self._bank_type_ids[bank_type_id])
         return BankTensor(bt.features + type_emb, bt.mask, bt.bank_name)
 
     @staticmethod

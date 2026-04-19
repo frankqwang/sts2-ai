@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Leaderboard;
@@ -23,7 +24,7 @@ public class NullLeaderboardStrategy : ILeaderboardStrategy
 		_leaderboards = Read();
 	}
 
-	public Task<ILeaderboardHandle?> GetLeaderboard(string name)
+	public Task<ILeaderboardHandle?> GetLeaderboard(string name, CancellationToken cancelToken)
 	{
 		foreach (NullLeaderboard leaderboard in _leaderboards)
 		{
@@ -38,10 +39,10 @@ public class NullLeaderboardStrategy : ILeaderboardStrategy
 		return Task.FromResult<ILeaderboardHandle>(null);
 	}
 
-	public async Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name)
+	public async Task<ILeaderboardHandle> GetOrCreateLeaderboard(string name, CancellationToken cancelToken)
 	{
 		await CheckRefreshLeaderboard(null, PlatformUtil.GetLocalPlayerId(PlatformType.None));
-		ILeaderboardHandle leaderboardHandle = await GetLeaderboard(name);
+		ILeaderboardHandle leaderboardHandle = await GetLeaderboard(name, cancelToken);
 		if (leaderboardHandle != null)
 		{
 			return leaderboardHandle;
@@ -75,7 +76,7 @@ public class NullLeaderboardStrategy : ILeaderboardStrategy
 		Write(_leaderboards);
 	}
 
-	public async Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handleInterface, LeaderboardQueryType type, int startIndex, int count)
+	public async Task<List<LeaderboardEntry>> QueryLeaderboard(ILeaderboardHandle handleInterface, LeaderboardQueryType type, int startIndex, int count, CancellationToken cancelToken)
 	{
 		NullLeaderboardHandle handle = (NullLeaderboardHandle)handleInterface;
 		ulong id = PlatformUtil.GetLocalPlayerId(PlatformType.None);
@@ -108,7 +109,7 @@ public class NullLeaderboardStrategy : ILeaderboardStrategy
 		}
 	}
 
-	public async Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handleInterface, IReadOnlyList<ulong> userIds)
+	public async Task<List<LeaderboardEntry>> QueryLeaderboardForUsers(ILeaderboardHandle handleInterface, IReadOnlyList<ulong> userIds, CancellationToken cancelToken)
 	{
 		NullLeaderboardHandle handle = (NullLeaderboardHandle)handleInterface;
 		ulong localPlayerId = PlatformUtil.GetLocalPlayerId(PlatformType.None);

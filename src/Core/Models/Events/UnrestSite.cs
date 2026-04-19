@@ -23,7 +23,7 @@ public sealed class UnrestSite : EventModel
 		new DynamicVar("MaxHpLoss", 8m)
 	});
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		return runState.Players.All((Player p) => (decimal)p.Creature.CurrentHp <= (decimal)p.Creature.MaxHp * 0.70m);
 	}

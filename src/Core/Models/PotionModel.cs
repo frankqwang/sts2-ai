@@ -39,11 +39,9 @@ public abstract class PotionModel : AbstractModel
 
 	public LocString Title => new LocString("potions", base.Id.Entry + ".title");
 
-	public LocString Description => new LocString("potions", base.Id.Entry + ".description");
+	private LocString Description => new LocString("potions", base.Id.Entry + ".description");
 
 	public LocString SelectionScreenPrompt => new LocString("potions", base.Id.Entry + ".selectionScreenPrompt");
-
-	public LocString StaticDescription => Description;
 
 	public LocString DynamicDescription
 	{
@@ -226,12 +224,11 @@ public abstract class PotionModel : AbstractModel
 		await Hook.BeforePotionUsed(Owner.RunState, combatState, this, target);
 		if (TestMode.IsOff && combatState != null)
 		{
-			NCreature creatureNode = NCombatRoom.Instance.GetCreatureNode(Owner.Creature);
+			NCreature nCreature = NCombatRoom.Instance?.GetCreatureNode(Owner.Creature);
 			Vector2 targetPosition = Vector2.Zero;
 			if (TargetType.IsSingleTarget())
 			{
-				NCreature creatureNode2 = NCombatRoom.Instance.GetCreatureNode(target);
-				targetPosition = creatureNode2.GetBottomOfHitbox();
+				targetPosition = (NCombatRoom.Instance?.GetCreatureNode(target))?.GetBottomOfHitbox() ?? Vector2.Zero;
 			}
 			else
 			{
@@ -242,13 +239,13 @@ public abstract class PotionModel : AbstractModel
 					select c).ToList());
 				foreach (Creature item in readOnlyList)
 				{
-					NCreature creatureNode3 = NCombatRoom.Instance.GetCreatureNode(item);
-					targetPosition += creatureNode3.VfxSpawnPosition;
+					targetPosition += (NCombatRoom.Instance?.GetCreatureNode(item))?.VfxSpawnPosition ?? Vector2.Zero;
 				}
 				targetPosition /= (float)readOnlyList.Count;
 			}
-			NItemThrowVfx child = NItemThrowVfx.Create(creatureNode.VfxSpawnPosition, targetPosition, Image);
-			NCombatRoom.Instance.CombatVfxContainer.AddChildSafely(child);
+			Vector2 sourcePosition = nCreature?.VfxSpawnPosition ?? Vector2.Zero;
+			NItemThrowVfx child = NItemThrowVfx.Create(sourcePosition, targetPosition, Image);
+			NCombatRoom.Instance?.CombatVfxContainer.AddChildSafely(child);
 			await Cmd.Wait(0.5f);
 		}
 		await OnUse(choiceContext, target);

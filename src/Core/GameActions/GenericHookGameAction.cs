@@ -60,6 +60,6 @@ public class GenericHookGameAction : GameAction
 
 	public override string ToString()
 	{
-		return $"{"GenericHookGameAction"} id {HookId} owner {OwnerId}";
+		return $"{"GenericHookGameAction"} id {HookId} owner {OwnerId} source {ChoiceContext?.Source}";
 	}
 }

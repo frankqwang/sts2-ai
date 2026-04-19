@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace MegaCrit.Sts2.Core.Models.Relics;
@@ -131,5 +132,11 @@ public sealed class JossPaper : RelicModel
 		Flash();
 		await Cmd.Wait(1f);
 		IsActivating = false;
+	}
+
+	public override Task AfterCombatEnd(CombatRoom room)
+	{
+		EtherealCount = 0;
+		return Task.CompletedTask;
 	}
 }

@@ -1,6 +1,7 @@
-using System;
 using System.Threading.Tasks;
+using MegaCrit.Sts2.Core.Entities.Ascension;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Runs;
@@ -13,6 +14,10 @@ public sealed class MerchantCardRemovalEntry : MerchantEntry
 
 	public override bool IsStocked => !Used;
 
+	private static int BaseCost => AscensionHelper.GetValueIfAscension(AscensionLevel.Inflation, 100, 75);
+
+	public static int PriceIncrease => AscensionHelper.GetValueIfAscension(AscensionLevel.Inflation, 50, 25);
+
 	public MerchantCardRemovalEntry(Player player)
 		: base(player)
 	{
@@ -21,13 +26,7 @@ public sealed class MerchantCardRemovalEntry : MerchantEntry
 
 	public override void CalcCost()
 	{
-		_cost = 75 + 25 * _player.ExtraFields.CardShopRemovalsUsed;
-	}
-
-	public int CalcPriceIncrease()
-	{
-		decimal d = 25m;
-		return (int)Math.Round(d);
+		_cost = BaseCost + PriceIncrease * _player.ExtraFields.CardShopRemovalsUsed;
 	}
 
 	public async Task<bool> OnTryPurchaseWrapper(MerchantInventory? inventory, bool ignoreCost = false, bool cancelable = true)

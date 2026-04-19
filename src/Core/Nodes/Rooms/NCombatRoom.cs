@@ -88,7 +88,7 @@ public partial class NCombatRoom : Control, IScreenContext, IRoomWithProceedButt
 
 	public NProceedButton ProceedButton => _proceedButton;
 
-	public Node BackCombatVfxContainer { get; private set; }
+	public Control BackCombatVfxContainer { get; private set; }
 
 	public Control CombatVfxContainer { get; private set; }
 
@@ -102,7 +102,7 @@ public partial class NCombatRoom : Control, IScreenContext, IRoomWithProceedButt
 
 	public Control DefaultFocusedControl => Ui.Hand.CardHolderContainer;
 
-	public Control? FocusedControlFromTopBar => _creatureNodes.FirstOrDefault(delegate(NCreature c)
+	public Control FocusedControlFromTopBar => _creatureNodes.FirstOrDefault(delegate(NCreature c)
 	{
 		if (c != null && c.IsInteractable)
 		{
@@ -136,7 +136,7 @@ public partial class NCombatRoom : Control, IScreenContext, IRoomWithProceedButt
 		SceneContainer = GetNode<Control>("%CombatSceneContainer");
 		_allyContainer = GetNode<Control>("%AllyContainer");
 		_enemyContainer = GetNode<Control>("%EnemyContainer");
-		BackCombatVfxContainer = GetNode<Node2D>("%BackCombatVfxContainer");
+		BackCombatVfxContainer = GetNode<Control>("%BackCombatVfxContainer");
 		CombatVfxContainer = GetNode<Control>("%CombatVfxContainer");
 		_radialBlur = GetNode<NRadialBlurVfx>("RadialBlur");
 		_waitingForOtherPlayersOverlay = GetNode<Control>("%WaitingForOtherPlayers");

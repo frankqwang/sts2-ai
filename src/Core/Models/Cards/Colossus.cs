@@ -25,7 +25,7 @@ public sealed class Colossus : CardModel
 	});
 
 	public Colossus()
-		: base(1, CardType.Skill, CardRarity.Rare, TargetType.Self)
+		: base(1, CardType.Skill, CardRarity.Uncommon, TargetType.Self)
 	{
 	}
 

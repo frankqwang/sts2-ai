@@ -127,7 +127,7 @@ public abstract partial class NMapPoint : NButton
 		{
 			return value == Point.coord;
 		}
-		return _runState.CurrentLocation.coord == Point.coord;
+		return _runState.MapLocation.coord == Point.coord;
 	}
 
 	public void RefreshVisualsInstantly()
@@ -175,11 +175,11 @@ public abstract partial class NMapPoint : NButton
 		{
 			_controllerSelectionReticle.OnSelect();
 		}
-		if (_state != MapPointState.Traveled || !(_runState.CurrentLocation.coord != Point.coord) || NControllerManager.Instance.IsUsingController)
+		if (_state != MapPointState.Traveled || !(_runState.MapLocation.coord != Point.coord) || NControllerManager.Instance.IsUsingController)
 		{
 			return;
 		}
-		MapPointHistoryEntry historyEntryFor = _runState.GetHistoryEntryFor(new RunLocation(Point.coord, _runState.CurrentActIndex));
+		MapPointHistoryEntry historyEntryFor = _runState.GetHistoryEntryFor(new MapLocation(Point.coord, _runState.CurrentActIndex));
 		if (historyEntryFor != null)
 		{
 			int num = Point.coord.row + 1;

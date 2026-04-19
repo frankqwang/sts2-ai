@@ -1,33 +1,49 @@
-# STS2AI Script Wrappers
+# STS2AI 启动脚本（PowerShell Wrapper）
 
-These wrappers are the self-contained entrypoints intended to travel with the
-`STS2AI` folder when it is copied into a fresh decompiled project.
+`STS2AI` 目录独立可移植到新反编译工程时，这些 wrapper 也跟着走。
 
-## Mainline Entry Points
+> 训练主入口现在全部在 `networkV2/s6_training/` 下（V1 入口已下线）。
+> 直接用 `python -m networkV2.s6_training.<entry>` 调就行,无需 wrapper。
+> 本目录只保留那些"非 python 主训练"的工具 wrapper。
 
-- `start-hybrid-training.ps1`
-  - launches `STS2AI/Python/train_hybrid.py`
-- `start-hybrid-training-mcts.ps1`
-  - launches `STS2AI/Python/train_hybrid.py` with the formal MCTS hybrid config
-- `canonical-eval.ps1`
-  - launches `STS2AI/Python/evaluate_ai.py`
-- `run-ironclad-teacher-eval.ps1`
-  - fixed-protocol wrapper for `IRONCLAD` teacher A/B checks
-  - defaults to `20` or `50` deterministic evaluation seeds
-  - exposes `hard_override` / `full_replace` teacher modes
-- `run_full_run_recording.ps1`
-  - visible demo / recording wrapper
-  - defaults to `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
-  - writes output to `STS2AI/Artifacts/recording`
+## 当前 wrapper
+
+- `spectate.ps1`
+  - 一键开 Godot 游戏窗口 + AI 实时操控 + overlay 观战
+  - 依赖 Spectator Mod 和 V2 checkpoint
+  - 录屏/日志落到 `STS2AI/Artifacts/recording/`
 - `run_sim_vs_godot_audit.ps1`
-  - unified sim-vs-Godot audit wrapper
-  - defaults to `STS2AI/Assets/checkpoints/act1/mainline_iter2270_carddebug.pt`
-  - writes output to `STS2AI/Artifacts/verification`
-- `merge_hybrid_checkpoints.py`
-  - merges a separately trained `ppo_model` checkpoint and `combat_model` checkpoint
-  - writes canonical hybrid v2 checkpoints using `combat_model` / `combat_model_config`
-  - keeps PPO-owned shared weights such as `entity_emb.*` and `symbolic_head.*`
+  - headless-pipe（C# sim）vs godot-http（真引擎）一致性审计
+  - 用来验证 sim 侧行为与 Godot 引擎对齐
+  - 输出到 `STS2AI/Artifacts/verification/`
+- `trainer_common.ps1`
+  - 公共 PowerShell 函数（`Resolve-CommandOrPath` 等），被 `spectate.ps1` source
 
-Both PowerShell wrappers still resolve the real game project root one level
-above `STS2AI`, so they work after copying `STS2AI` into a new upstream
-workspace without needing the legacy `tools/python` or `tools/scripts` paths.
+## V2 训练命令速查（不通过 wrapper）
+
+```powershell
+cd STS2AI/Python
+
+# 整局训练
+python -u -m networkV2.s6_training.train_full_run_v2 `
+  --preset slim --num-workers 8 --max-iterations 200 `
+  --dump-dir ../Artifacts/runs/<exp> `
+  --output-dir ../Artifacts/checkpoints/<exp>
+
+# 战斗专项训练（硬战斗）
+python -u -m networkV2.s6_training.combat_cotrainer `
+  --preset slim `
+  --checkpoint ../Artifacts/checkpoints/<prev>/cotrainer_iter120.pt `
+  --dump-dir ../Artifacts/runs/<exp> `
+  --output-dir ../Artifacts/checkpoints/<exp>
+
+# checkpoint 评测
+python -m networkV2.s6_training.deck_eval_cli `
+  --checkpoint ../Artifacts/checkpoints/<exp>/cotrainer_iter60.pt `
+  --preset slim --n-trials 3
+```
+
+## 诊断工具
+
+所有 `networkV2/s7_diagnostics/*.py` 诊断脚本都可 `python -m` 直接跑，默认输出到
+`<dump_dir>/analysis/`，规范详见 `STS2AI/docs/design/DIAGNOSTICS_CONVENTION.md`。

@@ -34,6 +34,8 @@ public abstract class GameAction
 
 	public virtual bool RecordableToReplay => true;
 
+	public event Action<GameAction>? JustBeforeFinished;
+
 	public event Action<GameAction>? AfterFinished;
 
 	public event Action<GameAction>? BeforeExecuted;
@@ -87,6 +89,7 @@ public abstract class GameAction
 			{
 				_logger.VeryDebug($"Action {this} finished execution");
 				State = GameActionState.Finished;
+				this.JustBeforeFinished?.Invoke(this);
 				_completionSource.SetResult();
 				this.AfterFinished?.Invoke(this);
 			}

@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.PotionPools;
 using MegaCrit.Sts2.Core.Models.RelicPools;
 using MegaCrit.Sts2.Core.Models.Relics;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 
 namespace MegaCrit.Sts2.Core.Models.Characters;
 
@@ -57,6 +58,8 @@ public sealed class Regent : CharacterModel
 	public override Color EnergyLabelOutlineColor => new Color("784000FF");
 
 	public override Color DialogueColor => new Color("52371D");
+
+	public override VfxColor SpeechBubbleColor => VfxColor.Orange;
 
 	public override Color MapDrawingColor => new Color("935206");
 

@@ -54,7 +54,8 @@ public class SteamRemoteSaveStore : ICloudSaveStore, ISaveStore
 		RemoteStorageFileReadAsyncComplete_t remoteStorageFileReadAsyncComplete_t = await callResult.Task;
 		if (remoteStorageFileReadAsyncComplete_t.m_eResult != EResult.k_EResultOK)
 		{
-			throw new InvalidOperationException($"Steam remote storage async read request returned error {remoteStorageFileReadAsyncComplete_t.m_eResult} for path {path}");
+			SteamRemoteSaveStoreException ex = new SteamRemoteSaveStoreException($"Steam remote storage async read request returned error {remoteStorageFileReadAsyncComplete_t.m_eResult} for path {path}", remoteStorageFileReadAsyncComplete_t.m_eResult);
+			throw ex;
 		}
 		byte[] array = new byte[byteCount];
 		SteamRemoteStorage.FileReadAsyncComplete(remoteStorageFileReadAsyncComplete_t.m_hFileReadAsync, array, remoteStorageFileReadAsyncComplete_t.m_cubRead);

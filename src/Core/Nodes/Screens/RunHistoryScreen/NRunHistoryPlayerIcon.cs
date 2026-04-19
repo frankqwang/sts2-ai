@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.HoverTips;
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace MegaCrit.Sts2.Core.Nodes.Screens.RunHistoryScreen;
 
@@ -18,6 +19,8 @@ public partial class NRunHistoryPlayerIcon : NClickableControl
 	public static readonly string scenePath = SceneHelper.GetScenePath("screens/run_history_screen/run_history_player_icon");
 
 	private readonly List<IHoverTip> _hoverTips = new List<IHoverTip>();
+
+	private Control _achievementLock;
 
 	private Control _ascensionIcon;
 
@@ -31,6 +34,7 @@ public partial class NRunHistoryPlayerIcon : NClickableControl
 
 	public override void _Ready()
 	{
+		_achievementLock = GetNode<Control>("%AchievementLock");
 		_ascensionIcon = GetNode<Control>("%AscensionIcon");
 		_ascensionLabel = GetNode<MegaLabel>("%AscensionLabel");
 		_selectionReticle = GetNode<NSelectionReticle>("%SelectionReticle");
@@ -40,13 +44,13 @@ public partial class NRunHistoryPlayerIcon : NClickableControl
 	public void LoadRun(RunHistoryPlayer player, RunHistory history)
 	{
 		Player = player;
-		CharacterModel byId = ModelDb.GetById<CharacterModel>(player.Character);
+		CharacterModel characterModel = SaveUtil.CharacterOrDeprecated(player.Character);
 		_currentIcon?.QueueFreeSafely();
-		_currentIcon = byId.Icon;
+		_currentIcon = characterModel.Icon;
 		this.AddChildSafely(_currentIcon);
 		MoveChild(_currentIcon, 0);
 		LocString locString = new LocString("ascension", "PORTRAIT_TITLE");
-		locString.Add("character", byId.Title);
+		locString.Add("character", characterModel.Title);
 		locString.Add("ascension", history.Ascension);
 		LocString locString2 = new LocString("ascension", "PORTRAIT_DESCRIPTION");
 		List<string> list = new List<string>();
@@ -56,23 +60,27 @@ public partial class NRunHistoryPlayerIcon : NClickableControl
 		}
 		locString2.Add("ascensions", list);
 		_selectionReticle.Visible = history.Players.Count > 1;
+		_achievementLock.Visible = history.GameMode.AreAchievementsAndEpochsLocked();
 		_ascensionIcon.Visible = false;
 		_ascensionLabel.SetTextAutoSize((history.Ascension > 0) ? history.Ascension.ToString() : string.Empty);
 		LocString locString3 = new LocString("run_history", "PLAYER_HOVER");
 		if (history.Players.Count > 1)
 		{
 			locString3.Add("PlayerName", PlatformUtil.GetPlayerName(history.PlatformType, player.Id));
-			locString3.Add("CharacterName", byId.Title.GetFormattedText());
+			locString3.Add("CharacterName", characterModel.Title.GetFormattedText());
 		}
 		else
 		{
-			locString3.Add("PlayerName", byId.Title.GetFormattedText());
+			locString3.Add("PlayerName", characterModel.Title.GetFormattedText());
 			locString3.Add("CharacterName", string.Empty);
 		}
-		_hoverTips.Add(new HoverTip(locString3));
-		if (history.Ascension > 0)
+		if (history.Ascension > 0 || history.GameMode.AreAchievementsAndEpochsLocked())
 		{
-			_hoverTips.Add(AscensionHelper.GetHoverTip(byId, history.Ascension));
+			_hoverTips.Add(AscensionHelper.GetHoverTip(characterModel, history.Ascension, history.GameMode.AreAchievementsAndEpochsLocked()));
+		}
+		else
+		{
+			_hoverTips.Add(new HoverTip(locString3));
 		}
 	}
 

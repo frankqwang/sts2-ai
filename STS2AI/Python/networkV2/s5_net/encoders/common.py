@@ -79,9 +79,9 @@ class CrossAttentionBlock(nn.Module):
             kv: (B, Lkv, d_model)
             kv_mask: (B, Lkv) bool, True = valid
         """
-        # 如果 kv 全部被 mask 掉（空 bank），跳过 attention 直接走 FFN
-        if kv_mask is not None and not kv_mask.any():
-            return query + self.ffn(self.norm2(query))
+        # 注意:不能用 `not kv_mask.any()` 做 early-exit 分支 —— 会强制 CPU sync,
+        # CUDA graph capture 下会炸 (cudaErrorStreamCaptureInvalidated)。
+        # nan_to_num 已经兜底,空 mask 时 attention 输出 NaN → 替换为 0。
         kpm = ~kv_mask if kv_mask is not None else None
         q = self.norm_q(query)
         k = self.norm_kv(kv)

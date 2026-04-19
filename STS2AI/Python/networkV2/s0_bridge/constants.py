@@ -1,6 +1,7 @@
 """协议常量 — 操作码、类型映射、枚举值。
 
-从 env.binary_pipe_client 提取，供 proto_pipe_client 和 proto_state_converter 共用。
+proto / transport 层共用。2026-04-18:手写 binary wire 已废弃,
+这些 opcode 值只对应 sim 侧的 BinaryOpcode enum(proto 响应共用同一套编号)。
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ PROTO_PROTOCOL_VERSION = 1
 PROTO_SCHEMA_ID = "sts2-proto-v1"
 
 # ---------------------------------------------------------------------------
-# 操作码（保持与 binary_pipe_client 一致，C# 端复用）
+# 操作码(和 sim C# BinaryOpcode enum 一致,proto 侧同一套编码)
 # ---------------------------------------------------------------------------
 OP_HANDSHAKE = 0x00
 OP_RESET = 0x01
@@ -30,6 +31,9 @@ OP_EXPORT_STATE = 0x0D
 OP_IMPORT_STATE = 0x0E
 OP_SKIP_COMBAT = 0x0F
 OP_SEARCH_COMBAT_MCTS = 0x10
+OP_COMBAT_RESET = 0x11             # 精确构造战斗 (deck/relics/hp 用 BuildSpec)
+OP_COMBAT_STEP = 0x12              # 战斗内 step;response 含权威 legal_actions
+OP_COMBAT_STATE = 0x13             # 当前战斗 state(含 legal_actions)
 
 # ---------------------------------------------------------------------------
 # 响应状态码
@@ -51,6 +55,7 @@ STATE_BEARING_OPCODES = frozenset({
     OP_RESET, OP_STATE, OP_STEP, OP_BATCH_STEP,
     OP_LOAD_STATE, OP_IMPORT_STATE, OP_LOAD_ORT_MODEL,
     OP_RUN_COMBAT_LOCAL, OP_SKIP_COMBAT,
+    OP_COMBAT_RESET, OP_COMBAT_STEP, OP_COMBAT_STATE,
 })
 
 # ---------------------------------------------------------------------------

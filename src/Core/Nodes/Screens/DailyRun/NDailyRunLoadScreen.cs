@@ -35,7 +35,7 @@ public partial class NDailyRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 
 	public static readonly string dateFormat = LocManager.Instance.GetTable("main_menu_ui").GetRawText("DAILY_RUN_MENU.DATE_FORMAT");
 
-	private MegaLabel _dateLabel;
+	private MegaRichTextLabel _dateLabel;
 
 	private NConfirmButton _embarkButton;
 
@@ -78,11 +78,11 @@ public partial class NDailyRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 		_embarkButton = GetNode<NConfirmButton>("%ConfirmButton");
 		_backButton = GetNode<NBackButton>("%BackButton");
 		_unreadyButton = GetNode<NBackButton>("%UnreadyButton");
-		_dateLabel = GetNode<MegaLabel>("%Date");
+		_dateLabel = GetNode<MegaRichTextLabel>("%Date");
 		_leaderboard = GetNode<NDailyRunLeaderboard>("%Leaderboards");
 		_modifiersTitleLabel = GetNode<MegaLabel>("%ModifiersLabel");
 		_modifiersContainer = GetNode<Control>("%ModifiersContainer");
-		_characterContainer = GetNode<NDailyRunCharacterContainer>("%CharacterContainer");
+		_characterContainer = GetNode<NDailyRunCharacterContainer>("ChallengeContainer/CenterContainer/HBoxContainer/CharacterContainer");
 		_remotePlayerContainer = GetNode<NRemoteLoadLobbyPlayerContainer>("%RemotePlayerLoadContainer");
 		_readyAndWaitingContainer = GetNode<Control>("%ReadyAndWaitingPanel");
 		foreach (NDailyRunScreenModifier item in _modifiersContainer.GetChildren().OfType<NDailyRunScreenModifier>())
@@ -182,7 +182,7 @@ public partial class NDailyRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 		_embarkButton.Disable();
 		_backButton.Disable();
 		_lobby.SetReady(ready: true);
-		if (_lobby.NetService.Type.IsMultiplayer() && _lobby.Run.Players.Any((SerializablePlayer p) => !_lobby.IsPlayerReady(p.NetId)))
+		if (!_lobby.IsAboutToBeginGame())
 		{
 			_readyAndWaitingContainer.Visible = true;
 			_unreadyButton.Enable();
@@ -279,6 +279,8 @@ public partial class NDailyRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 	public void BeginRun()
 	{
 		NAudioManager.Instance?.StopMusic();
+		_embarkButton.Disable();
+		_unreadyButton.Disable();
 		TaskHelper.RunSafely(StartRun());
 	}
 
@@ -288,7 +290,10 @@ public partial class NDailyRunLoadScreen : NSubmenu, ILoadRunLobbyListener
 		{
 			return;
 		}
-		_stack.Pop();
+		if (_stack != null && _stack.Peek() == this)
+		{
+			_stack.Pop();
+		}
 		if (TestMode.IsOff)
 		{
 			NErrorPopup nErrorPopup = NErrorPopup.Create(info);

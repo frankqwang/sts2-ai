@@ -118,8 +118,7 @@ public partial class NCombatUi : Control
 
 	public void Activate(CombatState state)
 	{
-		CombatManager.Instance.CombatEnded += AnimOut;
-		CombatManager.Instance.CombatEnded += PostCombatCleanUp;
+		CombatManager.Instance.CombatEnded += OnCombatEnded;
 		CombatManager.Instance.CombatWon += OnCombatWon;
 		_state = state;
 		Player me = LocalContext.GetMe(_state);
@@ -145,8 +144,7 @@ public partial class NCombatUi : Control
 
 	private void DisconnectSignals()
 	{
-		CombatManager.Instance.CombatEnded -= AnimOut;
-		CombatManager.Instance.CombatEnded -= PostCombatCleanUp;
+		CombatManager.Instance.CombatEnded -= OnCombatEnded;
 		CombatManager.Instance.CombatWon -= OnCombatWon;
 	}
 
@@ -159,6 +157,12 @@ public partial class NCombatUi : Control
 	public NCard? GetCardFromPlayContainer(CardModel model)
 	{
 		return PlayContainerCards.FirstOrDefault((NCard n) => n.Model == model);
+	}
+
+	private void OnCombatEnded(CombatRoom combatRoom)
+	{
+		AnimOut();
+		PostCombatCleanUp();
 	}
 
 	private void OnCombatWon(CombatRoom room)
@@ -218,7 +222,7 @@ public partial class NCombatUi : Control
 		_combatPilesContainer.AnimIn();
 	}
 
-	public void AnimOut(CombatRoom _)
+	public void AnimOut()
 	{
 		Hand.AnimOut();
 		PlayQueue.AnimOut();
@@ -228,7 +232,7 @@ public partial class NCombatUi : Control
 		_combatPilesContainer.AnimOut();
 	}
 
-	private void PostCombatCleanUp(CombatRoom _)
+	private void PostCombatCleanUp()
 	{
 		Tween tween = CreateTween();
 		tween.TweenProperty(PlayContainer, "modulate", Colors.Transparent, 0.25);

@@ -38,6 +38,8 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 
 	private const string _sceneCharSelectButtonPath = "res://scenes/screens/char_select/char_select_button.tscn";
 
+	private MegaLabel _disclaimer;
+
 	private NCharacterSelectButton? _selectedButton;
 
 	private Control _charButtonContainer;
@@ -84,6 +86,7 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 	public override void _Ready()
 	{
 		ConnectSignals();
+		_disclaimer = GetNode<MegaLabel>("%Disclaimer");
 		_charButtonContainer = GetNode<Control>("LeftContainer/CharSelectButtons/ButtonContainer");
 		_ascensionPanel = GetNode<NAscensionPanel>("%AscensionPanel");
 		_remotePlayerContainer = GetNode<NRemoteLobbyPlayerContainer>("%RemotePlayerContainer");
@@ -99,6 +102,7 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 		_ascensionPanel.Connect(NAscensionPanel.SignalName.AscensionLevelChanged, Callable.From(OnAscensionPanelLevelChanged));
 		_modifiersList.Connect(NCustomRunModifiersList.SignalName.ModifiersChanged, Callable.From(OnModifiersListChanged));
 		base.ProcessMode = ProcessModeEnum.Disabled;
+		_disclaimer.SetTextAutoSize(new LocString("main_menu_ui", "CUSTOM_RUN_SCREEN.disclaimer").GetFormattedText());
 		GetNode<MegaLabel>("%CustomModeTitle").SetTextAutoSize(new LocString("main_menu_ui", "CUSTOM_RUN_SCREEN.CUSTOM_MODE_TITLE").GetFormattedText());
 		GetNode<MegaLabel>("%ModifiersTitle").SetTextAutoSize(new LocString("main_menu_ui", "CUSTOM_RUN_SCREEN.MODIFIERS_TITLE").GetFormattedText());
 		GetNode<MegaLabel>("%SeedLabel").SetTextAutoSize(new LocString("main_menu_ui", "CUSTOM_RUN_SCREEN.SEED_LABEL").GetFormattedText());
@@ -123,6 +127,7 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 		_uiMode = MultiplayerUiMode.Host;
 		_remotePlayerContainer.Visible = true;
 		UpdateControllerButton();
+		OnAscensionPanelLevelChanged();
 		AfterInitialized();
 	}
 
@@ -306,7 +311,7 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 		Log.Info($"Embarking on a CUSTOM {_lobby.LocalPlayer.character.Id.Entry} run. Ascension: {_lobby.Ascension} Seed: {_lobby.Seed} Modifiers: {GetModifiersString()}");
 		SfxCmd.Play(_lobby.LocalPlayer.character.CharacterTransitionSfx);
 		await NGame.Instance.Transition.FadeOut(0.8f, _lobby.LocalPlayer.character.CharacterSelectTransitionPath);
-		await NGame.Instance.StartNewSingleplayerRun(_lobby.LocalPlayer.character, shouldSave: true, acts, modifiers, seed, _lobby.Ascension);
+		await NGame.Instance.StartNewSingleplayerRun(_lobby.LocalPlayer.character, shouldSave: true, acts, modifiers, seed, GameMode.Custom, _lobby.Ascension);
 		CleanUpLobby(disconnectSession: false);
 	}
 
@@ -370,8 +375,12 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 		UpdateRichPresence();
 	}
 
-	public void PlayerChanged(LobbyPlayer player)
+	public void PlayerChanged(LobbyPlayer player, bool isRandomCharacterResolution)
 	{
+		if (isRandomCharacterResolution)
+		{
+			throw new InvalidOperationException("Random character is not currently allowed in custom!");
+		}
 		_remotePlayerContainer.OnPlayerChanged(player);
 		RefreshButtonSelectionForPlayer(player);
 	}
@@ -438,6 +447,8 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 	public void BeginRun(string seed, List<ActModel> acts, IReadOnlyList<ModifierModel> modifiers)
 	{
 		NAudioManager.Instance?.StopMusic();
+		_confirmButton.Disable();
+		_unreadyButton.Disable();
 		if (_lobby.NetService.Type == NetGameType.Singleplayer)
 		{
 			TaskHelper.RunSafely(StartNewSingleplayerRun(seed, acts, modifiers));
@@ -454,7 +465,10 @@ public partial class NCustomRunScreen : NSubmenu, IStartRunLobbyListener, IChara
 		{
 			return;
 		}
-		_stack.Pop();
+		if (_stack != null && _stack.Peek() == this)
+		{
+			_stack.Pop();
+		}
 		if (TestMode.IsOff)
 		{
 			NErrorPopup nErrorPopup = NErrorPopup.Create(info);

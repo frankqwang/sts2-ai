@@ -49,7 +49,7 @@ public sealed class StoneOfAllTime : EventModel
 		new DynamicVar("PushVigorousAmount", 8m)
 	});
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		if (runState.CurrentActIndex == 1)
 		{
@@ -58,7 +58,7 @@ public sealed class StoneOfAllTime : EventModel
 		return false;
 	}
 
-	protected override Task BeforeEventStarted()
+	protected override Task BeforeEventStarted(bool isPreFinished)
 	{
 		base.Owner.CanRemovePotions = false;
 		return Task.CompletedTask;

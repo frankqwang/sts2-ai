@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Godot;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Relics;
@@ -24,6 +23,13 @@ namespace MegaCrit.Sts2.Core.Multiplayer.Game;
 
 public class TreasureRoomRelicSynchronizer
 {
+	public class PlayerVote
+	{
+		public int? index;
+
+		public bool voteReceived;
+	}
+
 	private readonly IPlayerCollection _playerCollection;
 
 	private readonly ulong _localPlayerId;
@@ -34,13 +40,15 @@ public class TreasureRoomRelicSynchronizer
 
 	private readonly Rng _rng;
 
-	private readonly MegaCrit.Sts2.Core.Logging.Logger _logger = new MegaCrit.Sts2.Core.Logging.Logger("TreasureRoomRelicSynchronizer", LogType.GameSync);
+	private readonly Logger _logger = new Logger("TreasureRoomRelicSynchronizer", LogType.GameSync);
 
 	private List<RelicModel>? _currentRelics;
 
-	private readonly List<int?> _votes = new List<int?>();
+	private readonly List<PlayerVote> _votes = new List<PlayerVote>();
 
-	private int? _predictedVote;
+	private PlayerVote? _predictedVote;
+
+	private bool _singlePlayerSkipped;
 
 	public IReadOnlyList<RelicModel>? CurrentRelics => _currentRelics;
 
@@ -70,7 +78,10 @@ public class TreasureRoomRelicSynchronizer
 		_predictedVote = null;
 		foreach (Player player in _playerCollection.Players)
 		{
-			_votes.Add(null);
+			_votes.Add(new PlayerVote
+			{
+				voteReceived = false
+			});
 			IRunState runState = player.RunState;
 			if (Hook.ShouldGenerateTreasure(runState, player))
 			{
@@ -87,7 +98,9 @@ public class TreasureRoomRelicSynchronizer
 				{
 					if (player2 != LocalPlayer)
 					{
-						_votes[_playerCollection.GetPlayerSlotIndex(player2)] = _rng.NextInt(_currentRelics.Count);
+						PlayerVote playerVote = _votes[_playerCollection.GetPlayerSlotIndex(player2)];
+						playerVote.index = _rng.NextInt(_currentRelics.Count);
+						playerVote.voteReceived = true;
 					}
 				}
 			}
@@ -99,21 +112,44 @@ public class TreasureRoomRelicSynchronizer
 		}
 	}
 
-	public void PickRelicLocally(int index)
+	public void SkipRelicLocally()
 	{
-		_logger.Debug($"Relic index {index} ({_currentRelics?[index]}) is being picked by local player {LocalPlayer.NetId}");
+		PickRelicLocally(null);
+	}
+
+	public void PickRelicLocally(int? index)
+	{
+		if (index.HasValue)
+		{
+			_logger.Debug($"Relic index {index} ({_currentRelics?[index.Value]}) is being picked by local player {LocalPlayer.NetId}");
+		}
+		else
+		{
+			_logger.Debug($"Relic has been skipped by local player {LocalPlayer.NetId}");
+		}
 		if (_currentRelics == null)
 		{
 			throw new InvalidOperationException("Attempted to pick relic while relic picking is not active!");
 		}
-		_predictedVote = index;
+		_predictedVote = new PlayerVote
+		{
+			index = index,
+			voteReceived = true
+		};
 		_actionQueueSynchronizer.RequestEnqueue(new PickRelicAction(LocalPlayer, index));
 		this.VotesChanged?.Invoke();
 	}
 
-	public void OnPicked(Player player, int index)
+	public void OnPicked(Player player, int? index)
 	{
-		_logger.Debug($"Player {player} picked relic at index {index}: {_currentRelics?[index]}");
+		if (index.HasValue)
+		{
+			_logger.Debug($"Player {player} picked relic at index {index}: {_currentRelics?[index.Value]}");
+		}
+		else
+		{
+			_logger.Debug($"Player {player} skipped relic");
+		}
 		if (_currentRelics == null)
 		{
 			_logger.Warn("Attempted to pick relic while relic picking is not active!");
@@ -123,17 +159,24 @@ public class TreasureRoomRelicSynchronizer
 		{
 			throw new IndexOutOfRangeException($"Attempted to pick relic at index {index}, but there are only {_currentRelics.Count} to choose from!");
 		}
-		_votes[_playerCollection.GetPlayerSlotIndex(player)] = index;
+		if (!index.HasValue && _playerCollection.Players.Count == 1)
+		{
+			_singlePlayerSkipped = true;
+			return;
+		}
+		PlayerVote playerVote = _votes[_playerCollection.GetPlayerSlotIndex(player)];
+		playerVote.index = index;
+		playerVote.voteReceived = true;
 		this.VotesChanged?.Invoke();
-		if (!_votes.All((int? v) => v.HasValue))
+		if (!_votes.All((PlayerVote v) => v.voteReceived))
 		{
 			return;
 		}
-		if (_predictedVote.HasValue)
+		if (_predictedVote != null)
 		{
-			int value = _predictedVote.Value;
+			PlayerVote predictedVote = _predictedVote;
 			_predictedVote = null;
-			if (_votes[_playerCollection.GetPlayerSlotIndex(LocalPlayer)] != value)
+			if (_votes[_playerCollection.GetPlayerSlotIndex(LocalPlayer)].index != predictedVote.index)
 			{
 				this.VotesChanged?.Invoke();
 			}
@@ -152,10 +195,13 @@ public class TreasureRoomRelicSynchronizer
 		for (int j = 0; j < _votes.Count; j++)
 		{
 			Player item = _playerCollection.Players[j];
-			int value = _votes[j].Value;
-			List<Player> valueOrDefault = dictionary.GetValueOrDefault(value, new List<Player>());
-			valueOrDefault.Add(item);
-			dictionary[value] = valueOrDefault;
+			PlayerVote playerVote = _votes[j];
+			if (playerVote.index.HasValue)
+			{
+				List<Player> valueOrDefault = dictionary.GetValueOrDefault(playerVote.index.Value, new List<Player>());
+				valueOrDefault.Add(item);
+				dictionary[playerVote.index.Value] = valueOrDefault;
+			}
 		}
 		List<RelicPickingResult> results = new List<RelicPickingResult>();
 		List<RelicModel> list = new List<RelicModel>();
@@ -181,28 +227,55 @@ public class TreasureRoomRelicSynchronizer
 				results.Add(RelicPickingResult.GenerateRelicFight(item2.Value, relicModel, () => _rng.NextItem(possibleMoves)));
 			}
 		}
-		List<Player> list2 = _playerCollection.Players.Where((Player p) => results.Find((RelicPickingResult r) => r.player == p) == null).ToList();
-		list.StableShuffle(_rng);
-		for (int num = 0; num < Mathf.Min(list.Count, list2.Count); num++)
+		List<Player> list2 = _playerCollection.Players.Where(delegate(Player p)
 		{
-			results.Add(new RelicPickingResult
+			bool flag = results.Find((RelicPickingResult r) => r.player == p) != null;
+			PlayerVote playerVote2 = _votes[_playerCollection.GetPlayerSlotIndex(p)];
+			bool flag2 = playerVote2.voteReceived && !playerVote2.index.HasValue;
+			return !flag && !flag2;
+		}).ToList();
+		list.StableShuffle(_rng);
+		for (int num = 0; num < list.Count; num++)
+		{
+			if (num < list2.Count)
 			{
-				type = RelicPickingResultType.ConsolationPrize,
-				player = list2[num],
-				relic = list[num]
-			});
+				results.Add(new RelicPickingResult
+				{
+					type = RelicPickingResultType.ConsolationPrize,
+					player = list2[num],
+					relic = list[num]
+				});
+			}
+			else
+			{
+				results.Add(new RelicPickingResult
+				{
+					type = RelicPickingResultType.Skipped,
+					player = null,
+					relic = list[num]
+				});
+			}
 		}
 		this.RelicsAwarded?.Invoke(results);
+	}
+
+	public void OnRoomExited()
+	{
+		if (_singlePlayerSkipped)
+		{
+			EndRelicVoting();
+		}
 	}
 
 	private void EndRelicVoting()
 	{
 		_currentRelics = null;
+		_singlePlayerSkipped = false;
 	}
 
-	public int? GetPlayerVote(Player player)
+	public PlayerVote GetPlayerVote(Player player)
 	{
-		if (player == LocalPlayer && _predictedVote.HasValue)
+		if (player == LocalPlayer && _predictedVote != null)
 		{
 			return _predictedVote;
 		}

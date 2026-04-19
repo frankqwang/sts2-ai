@@ -32,9 +32,8 @@ public sealed class BowlbugSilk : MonsterModel
 
 	public override string DeathSfx => "event:/sfx/enemy/enemy_attacks/workbug_silk/workbug_silk_die";
 
-	public override void SetupSkins(NCreatureVisuals visuals)
+	public override void SetupSkins(MegaSprite spine, MegaSkeleton skeleton)
 	{
-		MegaSkeleton skeleton = visuals.SpineBody.GetSkeleton();
 		skeleton.SetSkin(skeleton.GetData().FindSkin("web"));
 		skeleton.SetSlotsToSetupPose();
 	}

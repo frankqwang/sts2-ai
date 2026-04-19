@@ -76,25 +76,21 @@ public abstract partial class NTopBarButton : NButton
 
 	protected virtual async Task AnimPressDown(CancellationTokenSource cancelToken)
 	{
-		float timer = 0f;
-		float startAngle = _icon.Rotation;
-		float targetAngle = startAngle + (float)Math.PI * 2f / 15f;
-		for (; timer < 0.25f; timer += (float)GetProcessDeltaTime())
+		if (_icon.IsValid())
 		{
-			if (cancelToken.IsCancellationRequested)
+			float num = 0f;
+			float startAngle = _icon.Rotation;
+			float targetAngle = startAngle + (float)Math.PI * 2f / 15f;
+			while (num < 0.25f)
 			{
-				return;
+				_icon.Rotation = Mathf.LerpAngle(startAngle, targetAngle, Ease.CubicOut(num / 0.25f));
+				_hsv?.SetShaderParameter(_v, Mathf.Lerp(1.1f, 0.4f, Ease.CubicOut(num / 0.25f)));
+				float num2 = num;
+				num = num2 + await this.AwaitProcessFrame(cancelToken.Token);
 			}
-			_icon.Rotation = Mathf.LerpAngle(startAngle, targetAngle, Ease.CubicOut(timer / 0.25f));
-			_hsv?.SetShaderParameter(_v, Mathf.Lerp(1.1f, 0.4f, Ease.CubicOut(timer / 0.25f)));
-			if (!this.IsValid() || !IsInsideTree())
-			{
-				return;
-			}
-			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			_icon.Rotation = targetAngle;
+			_hsv?.SetShaderParameter(_v, 0.4f);
 		}
-		_icon.Rotation = targetAngle;
-		_hsv?.SetShaderParameter(_v, 0.4f);
 	}
 
 	protected override void OnFocus()
@@ -128,22 +124,18 @@ public abstract partial class NTopBarButton : NButton
 
 	protected virtual async Task AnimHover(CancellationTokenSource cancelToken)
 	{
-		float timer = 0f;
-		float startAngle = _icon.Rotation;
-		for (; timer < 0.5f; timer += (float)GetProcessDeltaTime())
+		if (_icon.IsValid())
 		{
-			if (cancelToken.IsCancellationRequested)
+			float num = 0f;
+			float startAngle = _icon.Rotation;
+			while (num < 0.5f)
 			{
-				return;
+				_icon.Rotation = Mathf.LerpAngle(startAngle, -(float)Math.PI / 15f, Ease.BackOut(num / 0.5f));
+				float num2 = num;
+				num = num2 + await this.AwaitProcessFrame(cancelToken.Token);
 			}
-			_icon.Rotation = Mathf.LerpAngle(startAngle, -(float)Math.PI / 15f, Ease.BackOut(timer / 0.5f));
-			if (!this.IsValid() || !IsInsideTree())
-			{
-				return;
-			}
-			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			_icon.Rotation = -(float)Math.PI / 15f;
 		}
-		_icon.Rotation = -(float)Math.PI / 15f;
 	}
 
 	protected override void OnUnfocus()
@@ -166,26 +158,22 @@ public abstract partial class NTopBarButton : NButton
 
 	protected virtual async Task AnimUnhover(CancellationTokenSource cancelToken)
 	{
-		float timer = 0f;
-		float startAngle = _icon.Rotation;
-		for (; timer < 1f; timer += (float)GetProcessDeltaTime())
+		if (_icon.IsValid())
 		{
-			if (cancelToken.IsCancellationRequested)
+			float num = 0f;
+			float startAngle = _icon.Rotation;
+			while (num < 1f)
 			{
-				return;
+				_icon.Rotation = Mathf.LerpAngle(startAngle, 0f, Ease.ElasticOut(num / 1f));
+				_hsv?.SetShaderParameter(_v, Mathf.Lerp(1.1f, 1f, Ease.ExpoOut(num / 1f)));
+				_icon.Scale = _hoverScale.Lerp(Vector2.One, Ease.ExpoOut(num / 1f));
+				float num2 = num;
+				num = num2 + await this.AwaitProcessFrame(cancelToken.Token);
 			}
-			_icon.Rotation = Mathf.LerpAngle(startAngle, 0f, Ease.ElasticOut(timer / 1f));
-			_hsv?.SetShaderParameter(_v, Mathf.Lerp(1.1f, 1f, Ease.ExpoOut(timer / 1f)));
-			_icon.Scale = _hoverScale.Lerp(Vector2.One, Ease.ExpoOut(timer / 1f));
-			if (!this.IsValid() || !IsInsideTree())
-			{
-				return;
-			}
-			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			_hsv?.SetShaderParameter(_v, 1f);
+			_icon.Rotation = 0f;
+			_icon.Scale = Vector2.One;
 		}
-		_hsv?.SetShaderParameter(_v, 1f);
-		_icon.Rotation = 0f;
-		_icon.Scale = Vector2.One;
 	}
 
 	protected void UpdateScreenOpen()

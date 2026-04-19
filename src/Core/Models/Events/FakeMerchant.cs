@@ -94,7 +94,7 @@ public sealed class FakeMerchant : EventModel
 		return Array.Empty<EventOption>();
 	}
 
-	public override bool IsAllowed(RunState runState)
+	public override bool IsAllowed(IRunState runState)
 	{
 		if (runState.CurrentActIndex < 1)
 		{
@@ -107,7 +107,7 @@ public sealed class FakeMerchant : EventModel
 		return runState.Players.All((Player player) => player.Gold >= 100 || player.Potions.Any((PotionModel potion) => potion is FoulPotion));
 	}
 
-	protected override Task BeforeEventStarted()
+	protected override Task BeforeEventStarted(bool isPreFinished)
 	{
 		Inventory = new MerchantInventory(base.Owner);
 		List<RelicModel> list = _inventoryRelics.ToList().UnstableShuffle(base.Rng).Take(6)

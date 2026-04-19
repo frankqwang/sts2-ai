@@ -221,6 +221,10 @@ public partial class NMouseCardPlay : NCardPlay
 		_signalsConnected = true;
 		instance.StartTargeting(targetType, base.CardNode, targetMode, () => IsCardInCancelZone() || _cancellationTokenSource.IsCancellationRequested, null);
 		Node node = await instance.SelectionFinished();
+		if (_cancellationTokenSource.IsCancellationRequested)
+		{
+			return;
+		}
 		if (node != null)
 		{
 			Creature target;

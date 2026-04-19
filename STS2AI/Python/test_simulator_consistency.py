@@ -15,13 +15,14 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from constants import REPO_ROOT
 from env.full_run_env import ApiBackedFullRunClient, BinaryBackedFullRunClient, FullRunClientLike, PipeBackedFullRunClient
 from env.headless_sim_runner import DEFAULT_DLL_PATH, start_headless_sim, stop_process
 
 
 DEFAULT_PORT = 15527
-DEFAULT_REPO_ROOT = Path(r"D:/dev/ai-slay-sts2/sts2")
-DEFAULT_GODOT_EXE = Path(r"D:/dev/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe")
+DEFAULT_REPO_ROOT = REPO_ROOT
+DEFAULT_GODOT_EXE = Path(r"C:/dev/game/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe")
 DEFAULT_HEADLESS_DLL = DEFAULT_DLL_PATH
 TEST_SEEDS = ["CONSIST_A", "CONSIST_B", "CONSIST_C", "CONSIST_D", "CONSIST_E"]
 REWARD_PARITY_SEEDS = ["CARD_SCAN_24", "CARD_SCAN_169"]
@@ -61,7 +62,9 @@ VALID_TRANSITIONS = {
 	"elite": {"elite", "combat_pending", "combat_post_end_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
 	"boss": {"boss", "combat_pending", "combat_post_end_pending", "combat_rewards", "game_over", "hand_select", "card_select"},
 	"hand_select": COMBAT_TYPES | PENDING_STATE_TYPES | {"combat_rewards", "game_over"},
-	"card_select": COMBAT_TYPES | PENDING_STATE_TYPES | {"combat_rewards", "game_over", "card_select", "map"},
+	# Non-combat card selection can return to the originating screen after
+	# confirm/cancel, e.g. event rewards, rest-site smith, or shop purge flows.
+	"card_select": COMBAT_TYPES | PENDING_STATE_TYPES | {"combat_rewards", "game_over", "card_select", "map", "event", "rest_site", "shop"},
 	"combat_pending": {"combat_rewards", "map", "event", "game_over"} | COMBAT_TYPES,
 	"combat_start_pending": COMBAT_TYPES | {"game_over"},
 	"combat_post_end_pending": {"combat_rewards", "map", "event", "game_over"},
@@ -107,7 +110,8 @@ def create_client(backend: str, port: int) -> FullRunClientLike:
 	if backend == "godot-http":
 		return ApiBackedFullRunClient(base_url=f"http://127.0.0.1:{port}", request_timeout_s=30.0, ready_timeout_s=30.0)
 	if backend == "headless-binary":
-		return BinaryBackedFullRunClient(port=port, connect_timeout_s=15.0)
+		# BinaryBackedFullRunClient 默认协议已迁到 proto；legacy bin 验证必须显式锁死为 bin。
+		return BinaryBackedFullRunClient(port=port, connect_timeout_s=15.0, protocol="bin")
 	return PipeBackedFullRunClient(port=port, connect_timeout_s=15.0)
 
 

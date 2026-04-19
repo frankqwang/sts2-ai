@@ -32,7 +32,7 @@ public static class CardCmd
 {
 	public static async Task AutoPlay(PlayerChoiceContext choiceContext, CardModel card, Creature? target, AutoPlayType type = AutoPlayType.Default, bool skipXCapture = false, bool skipCardPileVisuals = false)
 	{
-		if (CombatManager.Instance.IsOverOrEnding)
+		if (CombatManager.Instance.IsOverOrEnding || card.Owner.Creature.IsDead)
 		{
 			return;
 		}
@@ -77,21 +77,18 @@ public static class CardCmd
 				return;
 			}
 		}
-		if (!card.IsDupe)
+		PlayerCombatState playerCombatState = card.Owner.PlayerCombatState;
+		if (card.EnergyCost.CostsX && !skipXCapture)
 		{
-			PlayerCombatState playerCombatState = card.Owner.PlayerCombatState;
-			if (card.EnergyCost.CostsX && !skipXCapture)
-			{
-				card.EnergyCost.CapturedXValue = playerCombatState.Energy;
-			}
-			if (card.HasStarCostX)
-			{
-				card.LastStarsSpent = playerCombatState.Stars;
-			}
-			else
-			{
-				card.LastStarsSpent = Math.Max(0, card.GetStarCostWithModifiers());
-			}
+			card.EnergyCost.CapturedXValue = playerCombatState.Energy;
+		}
+		if (card.HasStarCostX)
+		{
+			card.LastStarsSpent = playerCombatState.Stars;
+		}
+		else
+		{
+			card.LastStarsSpent = Math.Max(0, card.GetStarCostWithModifiers());
 		}
 		if (card.Pile == null)
 		{
@@ -432,7 +429,8 @@ public static class CardCmd
 			card.Enchantment.Amount += (int)amount;
 		}
 		card.FinalizeUpgradeInternal();
-		if (card.Pile != null)
+		CardPile pile = card.Pile;
+		if (pile != null && pile.Type == PileType.Deck)
 		{
 			card.Owner.RunState.CurrentMapPointHistoryEntry?.GetEntry(card.Owner.NetId).CardsEnchanted.Add(new CardEnchantmentHistoryEntry(card, enchantment.Id));
 		}

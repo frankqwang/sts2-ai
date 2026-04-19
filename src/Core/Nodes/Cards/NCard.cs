@@ -469,8 +469,8 @@ public partial class NCard : Control, IPoolable
 		{
 			_energyLabel.SetTextAutoSize("?");
 			_energyIcon.Visible = true;
-			_energyLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, StsColors.cream);
-			_energyLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, Model.Pool.EnergyOutlineColor);
+			_energyLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, StsColors.cream);
+			_energyLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, Model.Pool.EnergyOutlineColor);
 			return;
 		}
 		if (Model.EnergyCost.CostsX)
@@ -523,8 +523,8 @@ public partial class NCard : Control, IPoolable
 			color = GetCostTextColorInHand(energyCostColor, _pretendCardCanBePlayed, color);
 			color2 = GetCostOutlineColorInHand(energyCostColor, _pretendCardCanBePlayed, color2);
 		}
-		_energyLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, color);
-		_energyLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, color2);
+		_energyLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, color);
+		_energyLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, color2);
 	}
 
 	private void UpdateStarCostVisuals(PileType pileType)
@@ -533,8 +533,8 @@ public partial class NCard : Control, IPoolable
 		{
 			_starLabel.SetTextAutoSize(string.Empty);
 			_starIcon.Visible = false;
-			_starLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, StsColors.cream);
-			_starLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, Model.Pool.EnergyOutlineColor);
+			_starLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, StsColors.cream);
+			_starLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, Model.Pool.EnergyOutlineColor);
 			return;
 		}
 		if (Model.HasStarCostX)
@@ -591,8 +591,8 @@ public partial class NCard : Control, IPoolable
 			color = GetCostTextColorInHand(starCostColor, _pretendCardCanBePlayed, color);
 			color2 = GetCostOutlineColorInHand(starCostColor, _pretendCardCanBePlayed, color2);
 		}
-		_starLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, color);
-		_starLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, color2);
+		_starLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, color);
+		_starLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, color2);
 	}
 
 	private static Color GetCostTextColorInHand(CardCostColor costColor, bool pretendCardCanBePlayed, Color defaultColor)
@@ -780,8 +780,8 @@ public partial class NCard : Control, IPoolable
 			color2 = StsColors.cardTitleOutlineSpecial;
 		}
 		_titleLabel.SetTextAutoSize(textAutoSize);
-		_titleLabel.AddThemeColorOverride(ThemeConstants.Label.fontColor, color);
-		_titleLabel.AddThemeColorOverride(ThemeConstants.Label.fontOutlineColor, color2);
+		_titleLabel.AddThemeColorOverride(ThemeConstants.Label.FontColor, color);
+		_titleLabel.AddThemeColorOverride(ThemeConstants.Label.FontOutlineColor, color2);
 	}
 
 	private Color GetTitleLabelOutlineColor()

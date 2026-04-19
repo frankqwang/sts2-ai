@@ -45,7 +45,11 @@ public class CreatureAnimator
 			MegaTrackEntry current = animationState.GetCurrent(0);
 			current.SetTrackTime(Rng.Chaotic.NextFloat(current.GetAnimationEnd()));
 			animationState.Update(0f);
-			animationState.Apply(_spineController.GetSkeleton());
+			MegaSkeleton skeleton = _spineController.GetSkeleton();
+			if (skeleton != null)
+			{
+				animationState.Apply(skeleton);
+			}
 		}
 	}
 

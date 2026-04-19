@@ -35,7 +35,7 @@ public class RelicGrabBag
 	{
 		foreach (RelicRarity rarity in _rarities)
 		{
-			List<RelicModel> availableDeque = GetAvailableDeque(rarity, runState, null);
+			List<RelicModel> availableDeque = GetAvailableDeque(rarity, runState, (RelicModel _) => true);
 			if (availableDeque != null)
 			{
 				return true;
@@ -102,24 +102,31 @@ public class RelicGrabBag
 
 	public RelicModel? PullFromFront(RelicRarity rarity, IRunState runState)
 	{
-		List<RelicModel> availableDeque = GetAvailableDeque(rarity, runState, null);
+		return PullFromFront(rarity, (RelicModel _) => true, runState);
+	}
+
+	public RelicModel? PullFromFront(RelicRarity rarity, Func<RelicModel, bool> filter, IRunState runState)
+	{
+		List<RelicModel> availableDeque = GetAvailableDeque(rarity, runState, filter);
 		if (availableDeque == null || availableDeque.Count == 0)
 		{
 			return null;
 		}
-		RelicModel result = availableDeque[0];
-		availableDeque.RemoveAt(0);
-		return result;
+		for (int i = 0; i < availableDeque.Count; i++)
+		{
+			RelicModel relicModel = availableDeque[i];
+			if (filter(relicModel))
+			{
+				availableDeque.RemoveAt(i);
+				return relicModel;
+			}
+		}
+		return null;
 	}
 
-	public RelicModel? PullFromBack(RelicRarity rarity, IEnumerable<RelicModel> blacklist, IRunState runState)
+	public RelicModel? PullFromBack(RelicRarity rarity, Func<RelicModel, bool> filter, IRunState runState)
 	{
-		IEnumerable<RelicModel> enumerable = (blacklist as RelicModel[]) ?? blacklist.ToArray();
-		foreach (RelicModel item in enumerable)
-		{
-			item.AssertCanonical();
-		}
-		List<RelicModel> availableDeque = GetAvailableDeque(rarity, runState, enumerable);
+		List<RelicModel> availableDeque = GetAvailableDeque(rarity, runState, filter);
 		if (availableDeque == null || availableDeque.Count == 0)
 		{
 			return null;
@@ -127,7 +134,7 @@ public class RelicGrabBag
 		for (int num = availableDeque.Count - 1; num >= 0; num--)
 		{
 			RelicModel relicModel = availableDeque[num];
-			if (!enumerable.Contains(relicModel))
+			if (filter(relicModel))
 			{
 				availableDeque.RemoveAt(num);
 				return relicModel;
@@ -175,7 +182,7 @@ public class RelicGrabBag
 		}
 	}
 
-	private List<RelicModel>? GetAvailableDeque(RelicRarity rarity, IRunState runState, IEnumerable<RelicModel>? blacklist)
+	private List<RelicModel>? GetAvailableDeque(RelicRarity rarity, IRunState runState, Func<RelicModel, bool> filter)
 	{
 		RemoveDisallowedRelicsFromDeques(runState);
 		List<RelicModel> list = GetDeque(rarity);
@@ -184,7 +191,7 @@ public class RelicGrabBag
 			RefreshRarity(rarity);
 			RemoveDisallowedRelicsFromDeques(runState);
 		}
-		while (list != null && !DequeHasAnyRelics(list, blacklist))
+		while (list != null && !DequeHasAnyRelics(list, filter))
 		{
 			rarity = rarity switch
 			{
@@ -195,20 +202,16 @@ public class RelicGrabBag
 			};
 			list = ((rarity == RelicRarity.None) ? null : GetDeque(rarity));
 		}
-		if (list == null && DequeHasAnyRelics(_mpFallbackDequeue, blacklist))
+		if (list == null && DequeHasAnyRelics(_mpFallbackDequeue, filter))
 		{
 			list = _mpFallbackDequeue;
 		}
 		return list;
 	}
 
-	private bool DequeHasAnyRelics(List<RelicModel> deque, IEnumerable<RelicModel>? blacklist)
+	private bool DequeHasAnyRelics(List<RelicModel> deque, Func<RelicModel, bool> filter)
 	{
-		if (blacklist == null)
-		{
-			return deque.Count > 0;
-		}
-		return !deque.All(blacklist.Contains<RelicModel>);
+		return deque.Any(filter.Invoke);
 	}
 
 	private void RemoveDisallowedRelicsFromDeques(IRunState runState)

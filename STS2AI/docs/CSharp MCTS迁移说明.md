@@ -24,18 +24,18 @@ Python 侧保留：
 
 ### C# 宿主
 
-- `STS2AI/ENV/Sim/Runtime/HeadlessSim/CombatFeatureEncoder.cs`
+- `STS2AI/ENV/Sim/HeadlessSim/CombatFeatureEncoder.cs`
   - 负责 combat state / legal actions 到 ONNX 输入张量的编码。
-- `STS2AI/ENV/Sim/Runtime/HeadlessSim/OrtCombatEvaluator.cs`
+- `STS2AI/ENV/Sim/HeadlessSim/OrtCombatEvaluator.cs`
   - 负责 ONNX Runtime 的 `policy_logits + value` 单样本 / 批量评估。
   - 保留了 `OrtActorPolicy` 兼容包装，现有 `run_combat_local` 继续可复用。
-- `STS2AI/ENV/Sim/Runtime/HeadlessSim/CombatMcts.cs`
+- `STS2AI/ENV/Sim/HeadlessSim/CombatMcts.cs`
   - 负责 C# 侧 combat MCTS 搜索。
-- `STS2AI/ENV/Sim/Runtime/HeadlessSim/BinaryProtocol.cs`
+- `STS2AI/ENV/Sim/HeadlessSim/BinaryProtocol.cs`
   - 新增 `search_combat_mcts` 二进制协议。
-- `STS2AI/ENV/Sim/Runtime/HeadlessSim/Program.cs`
+- `STS2AI/ENV/Sim/HeadlessSim/Program.cs`
   - 新增 `SearchCombatMcts` 请求分发与 `load_ort_model` 元信息回传。
-- `STS2AI/ENV/Sim/Host/headless_sim_host_0991.csproj`
+- `STS2AI/ENV/Sim/HeadlessSim/HeadlessSim.csproj`
   - 宿主项目现在显式编入新的 MCTS / ORT 文件。
 
 ### Python 接线
@@ -160,7 +160,7 @@ python STS2AI/Python/diagnostics/mcts_decision_probe.py ^
 
 已完成：
 
-- C# 宿主编译通过：`headless_sim_host_0991.csproj`
+- C# 宿主编译通过：`HeadlessSim.csproj`
 - Python 入口脚本通过 `py_compile`
 - 新 CLI 参数已暴露到训练、评测、诊断脚本
 

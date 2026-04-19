@@ -29,7 +29,7 @@ public class GetLogsConsoleCmd : AbstractConsoleCmd
 
 	public override string CmdName => "getlogs";
 
-	public override string Args => "<name:string>";
+	public override string Args => "[test-feedback] <name:string>";
 
 	public override string Description => "Gathers logs, automatically zips them to a file containing 'name', and opens the directory containing the zip file.";
 
@@ -40,12 +40,28 @@ public class GetLogsConsoleCmd : AbstractConsoleCmd
 	public override CmdResult Process(Player? issuingPlayer, string[] args)
 	{
 		string extraName = "";
+		bool flag = false;
 		if (args.Length != 0)
 		{
-			extraName = "-" + args[0];
+			if (args[0] == "test-feedback")
+			{
+				flag = true;
+			}
+			else
+			{
+				extraName = "-" + args[0];
+			}
 		}
 		string bugReportPath = GetBugReportPath(extraName);
-		TaskHelper.RunSafely(GrabLogs(bugReportPath));
+		if (flag)
+		{
+			using FileAccessStream outputStream = new FileAccessStream(bugReportPath, Godot.FileAccess.ModeFlags.Write);
+			ZipFeedbackLogs(outputStream, SaveManager.Instance.CurrentProfileId);
+		}
+		else
+		{
+			TaskHelper.RunSafely(GrabLogs(bugReportPath));
+		}
 		return new CmdResult(success: true, "Zipping files to '" + bugReportPath + "'...");
 	}
 
@@ -238,6 +254,13 @@ public class GetLogsConsoleCmd : AbstractConsoleCmd
 			if (text6 != null)
 			{
 				list3.Add(Path.GetRelativePath(text, text6));
+			}
+		}
+		foreach (string allSaveFile in GetAllSaveFiles(text))
+		{
+			if (allSaveFile.EndsWith(".corrupt") && DateTimeOffset.Now - File.GetLastWriteTime(allSaveFile) < TimeSpan.FromDays(1))
+			{
+				list3.Add(Path.GetRelativePath(text, allSaveFile));
 			}
 		}
 		foreach (string item2 in list3)

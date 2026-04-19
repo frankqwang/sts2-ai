@@ -38,6 +38,8 @@ public class Player
 
 	private int _gold;
 
+	private bool _canRemovePotions = true;
+
 	public int MaxPotionCount => _potionSlots.Count;
 
 	public CharacterModel Character { get; }
@@ -108,7 +110,18 @@ public class Player
 
 	public bool HasOpenPotionSlots => _potionSlots.Any((PotionModel p) => p == null);
 
-	public bool CanRemovePotions { get; set; } = true;
+	public bool CanRemovePotions
+	{
+		get
+		{
+			return _canRemovePotions;
+		}
+		set
+		{
+			_canRemovePotions = value;
+			this.CanRemovePotionsChanged?.Invoke();
+		}
+	}
 
 	private bool IsInventoryPopulated
 	{
@@ -165,6 +178,8 @@ public class Player
 	public event Action? AddPotionFailed;
 
 	public event Action? GoldChanged;
+
+	public event Action? CanRemovePotionsChanged;
 
 	public bool HasEventPet()
 	{

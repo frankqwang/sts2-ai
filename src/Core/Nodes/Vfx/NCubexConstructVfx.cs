@@ -18,19 +18,22 @@ public partial class NCubexConstructVfx : Node
 	{
 		_parent = GetParent<Node2D>();
 		_animController = new MegaSprite(_parent);
-		_animController.ConnectAnimationEvent(Callable.From<GodotObject, GodotObject, GodotObject, GodotObject>(OnAnimationEvent));
 		_laser = _parent.GetNode<NLaserVfx>("LaserBone/Laser");
 		_rings = _parent.GetNode<Node2D>("LaserBone/Rings");
-		MegaSkin megaSkin = _animController.NewSkin("newSkin");
-		MegaSkeleton skeleton = _animController.GetSkeleton();
-		MegaSkin skin = skeleton.GetData().FindSkin("moss3");
-		megaSkin.AddSkin(skin);
-		skeleton.SetSkin(megaSkin);
-		_animController.GetAnimationState().SetAnimation("idle_loop");
 		_rings.Visible = false;
 		_laser.Scale = Vector2.One / _parent.Scale;
 		_laser.Visible = false;
 		_laser.ResetLaser();
+		MegaSkeleton skeleton = _animController.GetSkeleton();
+		if (skeleton != null)
+		{
+			_animController.ConnectAnimationEvent(Callable.From<GodotObject, GodotObject, GodotObject, GodotObject>(OnAnimationEvent));
+			MegaSkin megaSkin = _animController.NewSkin("newSkin");
+			MegaSkin skin = skeleton.GetData().FindSkin("moss3");
+			megaSkin.AddSkin(skin);
+			skeleton.SetSkin(megaSkin);
+			_animController.GetAnimationState().SetAnimation("idle_loop");
+		}
 	}
 
 	private void OnAnimationEvent(GodotObject _, GodotObject __, GodotObject ___, GodotObject spineEvent)

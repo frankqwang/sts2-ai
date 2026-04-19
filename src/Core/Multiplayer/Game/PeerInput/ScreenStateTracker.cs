@@ -18,10 +18,11 @@ public class ScreenStateTracker
 
 	private bool _isInSharedRelicPicking;
 
-	private NRewardsScreen? _connectedRewardsScreen;
+	private readonly Callable _onRewardsScreenCompleted;
 
 	public ScreenStateTracker(NMapScreen mapScreen, NCapstoneContainer capstoneContainer, NOverlayStack overlayStack)
 	{
+		_onRewardsScreenCompleted = Callable.From(SyncLocalScreen);
 		capstoneContainer.Connect(NCapstoneContainer.SignalName.Changed, Callable.From(OnCapstoneScreenChanged));
 		overlayStack.Connect(NOverlayStack.SignalName.Changed, Callable.From(OnOverlayStackChanged));
 		mapScreen.Connect(CanvasItem.SignalName.VisibilityChanged, Callable.From(OnMapScreenVisibilityChanged));
@@ -38,25 +39,16 @@ public class ScreenStateTracker
 
 	private void OnOverlayStackChanged()
 	{
-		if (RunManager.Instance.IsSinglePlayerOrFakeMultiplayer)
+		if (!RunManager.Instance.IsSinglePlayerOrFakeMultiplayer)
 		{
-			return;
-		}
-		IOverlayScreen overlayScreen = NOverlayStack.Instance.Peek();
-		if (overlayScreen is NRewardsScreen nRewardsScreen)
-		{
-			if (_connectedRewardsScreen != nRewardsScreen)
+			IOverlayScreen overlayScreen = NOverlayStack.Instance.Peek();
+			if (overlayScreen is NRewardsScreen nRewardsScreen && !nRewardsScreen.IsConnected(NRewardsScreen.SignalName.Completed, _onRewardsScreenCompleted))
 			{
-				_connectedRewardsScreen = nRewardsScreen;
-				nRewardsScreen.Connect(NRewardsScreen.SignalName.Completed, Callable.From(SyncLocalScreen));
+				nRewardsScreen.Connect(NRewardsScreen.SignalName.Completed, _onRewardsScreenCompleted);
 			}
+			_overlayScreen = overlayScreen?.ScreenType ?? NetScreenType.None;
+			SyncLocalScreen();
 		}
-		else
-		{
-			_connectedRewardsScreen = null;
-		}
-		_overlayScreen = overlayScreen?.ScreenType ?? NetScreenType.None;
-		SyncLocalScreen();
 	}
 
 	private void SyncLocalScreen()

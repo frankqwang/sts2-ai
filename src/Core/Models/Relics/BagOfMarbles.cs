@@ -12,7 +12,7 @@ namespace MegaCrit.Sts2.Core.Models.Relics;
 
 public sealed class BagOfMarbles : RelicModel
 {
-	public override RelicRarity Rarity => RelicRarity.Uncommon;
+	public override RelicRarity Rarity => RelicRarity.Common;
 
 	protected override IEnumerable<DynamicVar> CanonicalVars => new global::_003C_003Ez__ReadOnlySingleElementList<DynamicVar>(new PowerVar<VulnerablePower>(1m));
 

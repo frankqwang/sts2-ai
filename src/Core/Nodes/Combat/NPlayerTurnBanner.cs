@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Audio.Debug;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.TestSupport;
 
 namespace MegaCrit.Sts2.Core.Nodes.Combat;
@@ -65,11 +66,11 @@ public partial class NPlayerTurnBanner : Control
 		tween.TweenProperty(this, "modulate:a", 1f, 1.0).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
 		tween.TweenProperty(_label, "position", _label.Position + new Vector2(0f, -50f), 1.5).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
 		tween.TweenProperty(_turnLabel, "position", _turnLabel.Position + new Vector2(0f, 50f), 1.5).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Expo);
-		await ToSignal(tween, Tween.SignalName.Finished);
+		await tween.AwaitFinished(this);
 		tween = CreateTween();
 		tween.TweenInterval(0.4);
 		tween.TweenProperty(this, "modulate:a", 0f, 0.30000001192092896).SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Sine);
-		await ToSignal(tween, Tween.SignalName.Finished);
+		await tween.AwaitFinished(this);
 		this.QueueFreeSafely();
 	}
 }

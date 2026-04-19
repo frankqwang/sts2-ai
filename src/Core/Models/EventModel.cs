@@ -193,7 +193,7 @@ public abstract class EventModel : AbstractModel
 		Rng = new Rng((uint)(Owner.RunState.Rng.Seed + (IsShared ? 0 : Owner.NetId) + (ulong)StringHelper.GetDeterministicHashCode(base.Id.Entry)));
 		try
 		{
-			await BeforeEventStarted();
+			await BeforeEventStarted(isPreFinished);
 			CalculateVars();
 			if (player.Creature.IsDead)
 			{
@@ -258,7 +258,7 @@ public abstract class EventModel : AbstractModel
 		_currentOptions.Clear();
 	}
 
-	public virtual bool IsAllowed(RunState runState)
+	public virtual bool IsAllowed(IRunState runState)
 	{
 		return true;
 	}
@@ -326,6 +326,23 @@ public abstract class EventModel : AbstractModel
 			Creature creature = _combatStateForCombatLayout.CreateCreature(item, CombatSide.Enemy, item2);
 			_combatStateForCombatLayout.AddCreature(creature);
 		}
+	}
+
+	public void ResetInternalCombatState()
+	{
+		if (LayoutType != EventLayoutType.Combat)
+		{
+			throw new InvalidOperationException("Tried to reset internal encounter for non-combat event!");
+		}
+		if (_combatStateForCombatLayout == null)
+		{
+			return;
+		}
+		foreach (Creature item in _combatStateForCombatLayout.Creatures.ToList())
+		{
+			_combatStateForCombatLayout.RemoveCreature(item);
+		}
+		_combatStateForCombatLayout = null;
 	}
 
 	public EventModel ToMutable()
@@ -411,7 +428,7 @@ public abstract class EventModel : AbstractModel
 		EnsureCleanup();
 	}
 
-	protected virtual Task BeforeEventStarted()
+	protected virtual Task BeforeEventStarted(bool isPreFinished)
 	{
 		return Task.CompletedTask;
 	}
