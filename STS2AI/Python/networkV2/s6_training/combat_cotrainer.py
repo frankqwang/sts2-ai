@@ -358,6 +358,7 @@ def combat_rollout(
     greedy: bool = False,
     record_trajectory: bool = False,
     graph_runner_holder: dict | None = None,
+    defer_gae: bool = False,
 ) -> tuple[list[TrainingSample], dict[str, Any]]:
     """跑一场 combat，收 TrainingSample。
 
@@ -475,23 +476,30 @@ def combat_rollout(
             # Boss 败局 near-win ratio：让第一层 terminal reward 也有 near-win 渐变
             if combat_won is False and room_type == "boss" and enemy_max_hp_at_start > 0:
                 terminal_boss_damage_ratio = boss_damage_ratio(next_state, enemy_max_hp_at_start)
-        reward = combat_step_reward(
+        # 分 terminal + shaping:
+        #   terminal reward (胜 +1 / 败 -1,带 hp/boss-near-win scale) 保持 1.0 权
+        #   shaping reward (PBRS + tactical + dense + boss bonus + kill) 降到
+        #   SHAPING_SCALE (0.3) — 避免 v7 发现的 "70 步战斗 shaping 累积 +4 超过 terminal -1"
+        #   的 credit assignment bug(参见 handoff-2026-04-19-combat-v7-longrun.md 第 X 节)
+        SHAPING_SCALE = 0.3
+        terminal_r = combat_step_reward(
             prev_state, next_state,
             combat_won=combat_won,
             hp_at_combat_start=hp_at_start,
             boss_damage_ratio=terminal_boss_damage_ratio,
         )
-        reward += combat_local_tactical_reward(state, chosen, legal)
-        # Dense damage + block balanced shaping（解 zero-positive-adv trap）
+        shaping_r = 0.0
+        if not done:
+            # combat_step_reward 在非 terminal 时返回 PBRS 小量,也归到 shaping
+            # (让 done 那步的 terminal ±1 完全主导)
+            shaping_r += terminal_r
+            terminal_r = 0.0
+        shaping_r += combat_local_tactical_reward(state, chosen, legal)
         _player_max_hp = max(int((state.get("player") or {}).get("max_hp", 1) or 1), 1)
-        reward += dense_combat_shaping(state, next_state, _player_max_hp)
-        # Boss 战：每 step damage 按掉血百分比额外奖励（boss HP 高，damage 珍贵）
-        reward += co_trainer_boss_damage_bonus(state, next_state, room_type)
-        # Boss 战：Vuln/Weak 套 boss 身上额外 +0.02（放大 debuff setup 价值）
-        reward += co_trainer_boss_debuff_bonus(state, chosen, room_type)
-
-        # Gap 2:kill bonus(+0.05/enemy)+ overkill penalty(-0.02 大牌打残血)
-        reward += kill_overkill_reward(state, next_state, chosen)
+        shaping_r += dense_combat_shaping(state, next_state, _player_max_hp)
+        shaping_r += co_trainer_boss_damage_bonus(state, next_state, room_type)
+        shaping_r += co_trainer_boss_debuff_bonus(state, chosen, room_type)
+        shaping_r += kill_overkill_reward(state, next_state, chosen)
 
         chosen_action_name = str(chosen.get("action", "")).lower()
         if chosen_action_name in ("end_turn", "end"):
@@ -501,7 +509,9 @@ def combat_rollout(
             hand = battle.get("hand") or player.get("hand") or []
             playable = sum(1 for c in hand if isinstance(c, dict) and c.get("can_play", False))
             if prev_energy > 0 and playable > 0:
-                reward -= 0.10
+                shaping_r -= 0.10
+
+        reward = terminal_r + shaping_r * SHAPING_SCALE
 
         # head targets
         cm = tracker.combat_memory
@@ -605,8 +615,8 @@ def combat_rollout(
                 this_step_is_end_turn=True,
             )
             if ter != 0.0 and samples:
-                # 加到本 step 产出的最后一个 sample 的 reward 上
-                samples[-1].reward = float(samples[-1].reward) + ter
+                # turn_end_reward 也归入 shaping,同样降 scale
+                samples[-1].reward = float(samples[-1].reward) + ter * 0.3
 
             # 重置 turn 跟踪
             turn_start_sample_idx = len(samples)
@@ -643,8 +653,10 @@ def combat_rollout(
         samples[-1].reward += final_r
         samples[-1].fight_win_target = 1.0 if won else 0.0
 
-    # GAE
-    _compute_gae_combat(samples)
+    # GAE(chain 调用方若 defer_gae=True,会把整个 chain 的 samples 拼起来统一算
+    # GAE,这样 chain terminal reward 能真正回传到 early steps)
+    if not defer_gae:
+        _compute_gae_combat(samples)
 
     info = {
         "encounter_id": encounter_id,
@@ -793,6 +805,9 @@ def skada_chain_combat_rollout(
     sub_infos: list[dict[str, Any]] = []
 
     cur_hp: int | None = None
+    # 记录每场 combat 在 all_samples 里的 (start, end) 范围,用于 chain-level
+    # reward 分配 + 统一 GAE
+    combat_ranges: list[tuple[int, int]] = []
     for i, task in enumerate(task_chain):
         build = dict(task["build"])
         skada_hp = int(build.get("current_hp", build.get("max_hp", 80)))
@@ -805,12 +820,14 @@ def skada_chain_combat_rollout(
             build["current_hp"] = max(1, min(cur_hp, skada_hp))
 
         seed = f"{seed_prefix}-c{i}"
+        start_idx = len(all_samples)
         samples, info = combat_rollout(
             client, net, compiler,
             task["encounter_id"], task["room_type"], build,
             max_steps=max_steps_per_combat, seed=seed,
             record_trajectory=record_trajectory,
             graph_runner_holder=graph_runner_holder,
+            defer_gae=True,  # chain 结束后统一算 GAE
         )
         info["chain_index"] = i
         info["chain_total"] = len(task_chain)
@@ -819,6 +836,7 @@ def skada_chain_combat_rollout(
         info["run_id"] = task.get("run_id", -1)
         sub_infos.append(info)
         all_samples.extend(samples)
+        combat_ranges.append((start_idx, len(all_samples)))
 
         if info.get("outcome") != "victory":
             if abort_on_defeat:
@@ -827,6 +845,55 @@ def skada_chain_combat_rollout(
             cur_hp = skada_hp
         else:
             cur_hp = int(info.get("final_hp", cur_hp or skada_hp))
+
+    # ---- Chain-level terminal reward(credit assignment 跨 combat) ----
+    # 把"AI 在 chain 里打到多深 + 累计省了多少血"折算成 chain-level reward,
+    # 按 chain_index 递增权重分配给每场 combat 的最后一步,然后对整个 chain 的
+    # all_samples 统一算 GAE。这样:
+    #   - AI 在早期 combat 放血 → 后期 combat hp_enter 低 → chain 胜率低
+    #     → chain_terminal 扣分 → 回传到早期 step 的 value_target/advantage
+    #   - AI 打到越深 chain,越多场的 terminal reward bonus
+    if combat_ranges and all_samples:
+        chain_total = len(task_chain)
+        n_combats_played = len(sub_infos)
+        n_wins = sum(1 for info in sub_infos if info.get("outcome") == "victory")
+        deepest_floor = max(
+            (int(info.get("ref_floor", 0) or 0) for info in sub_infos if info.get("outcome") == "victory"),
+            default=0,
+        )
+        # 以 skada 真实玩家 run 的最深 floor 为 100% baseline
+        max_ref_floor = max(
+            (int(t.get("ref_floor", 0) or 0) for t in task_chain),
+            default=1,
+        )
+        # Floor bonus:打到越深越好,非线性放大深 floor 价值
+        floor_ratio = deepest_floor / max(max_ref_floor, 1)
+        floor_bonus = (floor_ratio ** 1.5) * 3.0  # chain 全通 ≈ +3.0
+        # Chain completion bonus:全胜整个 chain → 额外 +2.0(稀有奖励)
+        chain_complete_bonus = 2.0 if n_wins == chain_total else 0.0
+        # HP conservation penalty:累计掉血比 / skada 玩家累计掉血比。
+        # 如果 AI 累计比玩家掉血更多 → 扣分
+        total_hp_loss = sum(int(info.get("hp_loss", 0) or 0) for info in sub_infos)
+        ref_max_hp = int(sub_infos[0].get("max_hp", 75) or 75)
+        hp_loss_ratio = total_hp_loss / max(ref_max_hp, 1)
+        hp_penalty = -min(hp_loss_ratio, 2.0) * 1.5  # 损 2× max_hp → -3.0
+
+        chain_terminal = floor_bonus + chain_complete_bonus + hp_penalty
+
+        # 分配:按 chain_index 权重递增(后期 combat 拿更多),最后一场拿最多
+        # weight_i = (i+1)^2 / sum((k+1)^2)
+        weights_sum = sum((k + 1) ** 2 for k in range(len(combat_ranges)))
+        for i, (_, end_idx) in enumerate(combat_ranges):
+            if end_idx <= 0:
+                continue
+            w = ((i + 1) ** 2) / max(weights_sum, 1)
+            last_sample_idx = end_idx - 1
+            if 0 <= last_sample_idx < len(all_samples):
+                all_samples[last_sample_idx].reward += chain_terminal * w
+
+    # 统一 GAE:跨整个 chain 当作一个 trajectory,让 chain_terminal 回传到
+    # 早期 combat 的 step(真正的跨 combat credit assignment)
+    _compute_gae_combat(all_samples)
 
     return all_samples, sub_infos
 
@@ -1528,9 +1595,12 @@ def main():
     ap.add_argument("--compile-mode", type=str, default="reduce-overhead",
                     choices=["default", "reduce-overhead", "max-autotune"],
                     help="torch.compile mode; reduce-overhead 对 RL inference 最合适")
-    ap.add_argument("--use-cuda-graph", action="store_true",
+    ap.add_argument("--use-cuda-graph",
+                    action=argparse.BooleanOptionalAction, default=True,
                     help="rollout forward 用 CUDA graph (Windows-friendly,不需要 triton)。"
-                         " 首次 capture ~5s,之后预期 3-10x forward 加速。"
+                         " 默认启用;关掉用 --no-use-cuda-graph。"
+                         " 首次 capture ~1s/worker(进程全局锁串行),稳态 replay 预期"
+                         " 3-10x forward 加速,多 worker 并发 replay 不持锁。"
                          " 有硬检测:shape/periodic parity,drift 会抛异常。"
                          " capture 失败自动 fallback 到 eager (不阻塞训练)。")
     ap.add_argument("--graph-parity-every", type=int, default=500,
