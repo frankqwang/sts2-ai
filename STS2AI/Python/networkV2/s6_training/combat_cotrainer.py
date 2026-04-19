@@ -51,6 +51,15 @@ from networkV2.s6_training.head_targets import (
     compute_resource_health_target, compute_resource_retention_target,
 )
 from networkV2.s6_training.ppo import UnifiedPPOTrainer, PPOConfig
+from networkV2.s6_training.rollout_async_engine import (
+    add_rollout_engine_args,
+    build_rollout_engine_config,
+    runtime_stats_to_metrics,
+)
+from networkV2.s6_training.rollout_workers import (
+    create_cotrainer_runtime,
+    open_cotrainer_catalog_client,
+)
 from networkV2.s6_training.rewards import (
     combat_step_reward,
     turn_end_reward,
@@ -144,35 +153,64 @@ def _derive_curriculum_pools() -> dict[str, list[tuple[str, str]]]:
     TARGET_ACTS = frozenset({0})   # only STS2 Act 1 for now
     missing_act_idx: list[str] = []  # 收集 act_idx=-1 的 encounter 以便 warn
 
-    for enc in GAME_CATALOG.encounters():
-        eid = enc["encounter_id"].upper()
-        rt = enc["room_type"]
-        act_idx = enc.get("act_index", -1)
-        # 过滤 sim crash encounter
-        if eid in _SIM_BROKEN_ENCOUNTERS:
-            continue
-        # 过滤 event encounter（如 ARCHITECT_EVENT_ENCOUNTER 9999HP 假怪，永 timeout）
-        if "EVENT_ENCOUNTER" in eid:
-            continue
-        # 严格过滤非目标 act：act_idx 不在 TARGET_ACTS（含 -1/缺失情形）都 reject
-        # 历史 co11/co12 bug：条件写成 `act_idx >= 0 and act_idx not in TARGET_ACTS`，
-        # act_idx=-1 时第一分支 False 导致漏过滤 → 训了全 4 个 act 的 boss (77 pool)
-        if act_idx not in TARGET_ACTS:
-            if act_idx == -1:
-                missing_act_idx.append(eid)
-            continue
-        if rt == "boss":
-            pools["boss"].append((eid, "boss"))
-            continue
-        if rt == "elite":
-            pools["elite"].append((eid, "elite"))
-            continue
-        # monster - 只看 block 机制（scaling 可通过 dense shaping partial 学）
-        sig = GAME_CATALOG.encounter_difficulty_signals(enc["encounter_id"])
-        if sig.get("is_starter_blocker"):
-            pools["block_heavy"].append((eid, "monster"))
-        else:
-            pools["starter_friendly"].append((eid, "monster"))
+    encounters = list(GAME_CATALOG.encounters())
+    if not encounters:
+        sim_client = getattr(GAME_CATALOG, "_sim_client", None)
+        if sim_client is not None and hasattr(sim_client, "combat_catalog"):
+            try:
+                direct_cat = sim_client.combat_catalog()
+                encounters = list((direct_cat or {}).get("encounters") or [])
+                if encounters:
+                    logger.warning(
+                        "[curriculum] GAME_CATALOG.encounters() 为空，已退化到 direct combat_catalog。"
+                    )
+            except Exception as e:
+                logger.warning(f"[curriculum] direct combat_catalog fallback failed: {e}")
+
+    def _fill_pools(*, relax_missing_act: bool) -> tuple[dict[str, list[tuple[str, str]]], list[str]]:
+        out: dict[str, list[tuple[str, str]]] = {
+            "starter_friendly": [],
+            "block_heavy": [],
+            "elite": [],
+            "boss": [],
+        }
+        missing: list[str] = []
+        for enc in encounters:
+            eid = enc["encounter_id"].upper()
+            rt = enc["room_type"]
+            act_idx = enc.get("act_index", -1)
+            if eid in _SIM_BROKEN_ENCOUNTERS:
+                continue
+            if "EVENT_ENCOUNTER" in eid:
+                continue
+            # sqlite fallback 没有 act_index 时，全部 encounter 会是 -1。此时不要把 pool 清空；
+            # 退化成“放宽 act 过滤但保留 room_type/难度分级”。
+            if act_idx not in TARGET_ACTS:
+                if act_idx == -1:
+                    missing.append(eid)
+                    if relax_missing_act:
+                        act_idx = 0
+                if act_idx not in TARGET_ACTS:
+                    continue
+            if rt == "boss":
+                out["boss"].append((eid, "boss"))
+                continue
+            if rt == "elite":
+                out["elite"].append((eid, "elite"))
+                continue
+            sig = GAME_CATALOG.encounter_difficulty_signals(enc["encounter_id"])
+            if sig.get("is_starter_blocker"):
+                out["block_heavy"].append((eid, "monster"))
+            else:
+                out["starter_friendly"].append((eid, "monster"))
+        return out, missing
+
+    pools, missing_act_idx = _fill_pools(relax_missing_act=False)
+    if not any(pools.values()) and encounters:
+        pools, missing_act_idx = _fill_pools(relax_missing_act=True)
+        logger.warning(
+            "[curriculum] act_index 全缺失，已放宽 TARGET_ACTS 过滤并退化到 room_type/difficulty 分级。"
+        )
 
     if missing_act_idx and not _pool_log_state["warned"]:
         logger.warning(
@@ -348,7 +386,7 @@ def deck_for_encounter(encounter_id: str, rng: random.Random | None = None) -> d
 
 def combat_rollout(
     client: PipeBackedCombatTrainingClient,
-    net: UnifiedNet,
+    net: UnifiedNet | None,
     compiler: CombatFeatureCompiler,
     encounter_id: str,
     room_type: str,
@@ -359,6 +397,8 @@ def combat_rollout(
     record_trajectory: bool = False,
     graph_runner_holder: dict | None = None,
     defer_gae: bool = False,
+    inference_client: Any | None = None,
+    task_id: int = 0,
 ) -> tuple[list[TrainingSample], dict[str, Any]]:
     """跑一场 combat，收 TrainingSample。
 
@@ -399,13 +439,18 @@ def combat_rollout(
         for e in ((state.get("battle") or {}).get("enemies") or state.get("enemies") or [])
         if isinstance(e, dict)
     )
-    device = next(net.parameters()).device
     trajectory: list[dict[str, Any]] = [] if record_trajectory else []
     # Encounter conditioning：boss/encounter id → embedding index，每步 forward 传入
     from networkV2.s1_schema.encounter_vocab import encounter_to_index
-    enc_idx_tensor = torch.tensor(
-        [encounter_to_index(encounter_id)], dtype=torch.long, device=device,
-    )
+    enc_idx_value = int(encounter_to_index(encounter_id))
+    enc_idx_tensor = None
+    if inference_client is None:
+        if net is None:
+            raise ValueError("combat_rollout requires `net` when inference_client is absent")
+        device = next(net.parameters()).device
+        enc_idx_tensor = torch.tensor(
+            [enc_idx_value], dtype=torch.long, device=device,
+        )
 
     for _ in range(max_steps):
         legal = state.get("legal_actions", [])
@@ -424,29 +469,45 @@ def combat_rollout(
         _t1 = time.perf_counter()
         # Lazy init per-worker CUDA graph runner:第一次 step 拿到 banks 样本后 capture
         forward_fn = net
-        if graph_runner_holder is not None and graph_runner_holder.get("runner") is None \
-           and not graph_runner_holder.get("init_attempted", False):
+        if (
+            inference_client is None
+            and graph_runner_holder is not None
+            and graph_runner_holder.get("runner") is None
+            and not graph_runner_holder.get("init_attempted", False)
+        ):
             graph_runner_holder["init_attempted"] = True
             graph_runner_holder["runner"] = _try_init_worker_graph_runner(
                 net, banks, enc_idx_tensor,
                 graph_runner_holder.get("worker_id", 0),
             )
-        if graph_runner_holder is not None:
+        if inference_client is None and graph_runner_holder is not None:
             rr = graph_runner_holder.get("runner")
             if rr is not None and rr.enabled:
                 forward_fn = rr
-        with torch.inference_mode():
-            out = forward_fn(banks=banks, encounter_idx=enc_idx_tensor)
-            logits = out.logits[0, :len(legal)]
-            mask = out.action_mask[0, :len(legal)]
-            logits = torch.nan_to_num(logits.masked_fill(~mask, float("-inf")), nan=0.0)
-            dist = Categorical(logits=logits)
-            idx_t = logits.argmax() if greedy else dist.sample()
-            lp_t = dist.log_prob(idx_t)
-            value_t = out.values.fight_win.squeeze() if out.values is not None else torch.tensor(0.5, device=logits.device)
-            # 单次 GPU→CPU sync 取 3 个 scalar,替代原来 3 次 .item() 单独 sync
-            idx, lp, value = torch.stack([idx_t.float(), lp_t, value_t]).tolist()
-            idx = int(idx)
+        if inference_client is not None:
+            reply = inference_client.infer(
+                banks,
+                encounter_idx=enc_idx_value,
+                legal_len=len(legal),
+                greedy=greedy,
+                task_id=task_id,
+            )
+            idx = int(reply.chosen_action_index)
+            lp = float(reply.old_log_prob)
+            value = float(reply.value_estimate)
+        else:
+            with torch.inference_mode():
+                out = forward_fn(banks=banks, encounter_idx=enc_idx_tensor)
+                logits = out.logits[0, :len(legal)]
+                mask = out.action_mask[0, :len(legal)]
+                logits = torch.nan_to_num(logits.masked_fill(~mask, float("-inf")), nan=0.0)
+                dist = Categorical(logits=logits)
+                idx_t = logits.argmax() if greedy else dist.sample()
+                lp_t = dist.log_prob(idx_t)
+                value_t = out.values.fight_win.squeeze() if out.values is not None else torch.tensor(0.5, device=logits.device)
+                # 单次 GPU→CPU sync 取 3 个 scalar,替代原来 3 次 .item() 单独 sync
+                idx, lp, value = torch.stack([idx_t.float(), lp_t, value_t]).tolist()
+                idx = int(idx)
         chosen = legal[idx]
         _t2 = time.perf_counter()
 
@@ -725,6 +786,8 @@ def chained_combat_rollout(
     start_full_hp: bool = CHAIN_START_FULL_HP,
     abort_on_defeat: bool = CHAIN_ABORT_ON_DEFEAT,
     graph_runner_holder: dict | None = None,
+    inference_client: Any | None = None,
+    task_id: int = 0,
 ) -> tuple[list[TrainingSample], list[dict[str, Any]]]:
     """顺序跑 N 场战斗，HP 跨场保留，场间按 heal_after_combat 回血。
 
@@ -749,6 +812,8 @@ def chained_combat_rollout(
             seed=f"{seed_prefix}-c{i}",
             record_trajectory=record_trajectory,
             graph_runner_holder=graph_runner_holder,
+            inference_client=inference_client,
+            task_id=task_id,
         )
         # 给 sub_info 加 chain 上下文
         info["chain_index"] = i
@@ -785,6 +850,8 @@ def skada_chain_combat_rollout(
     abort_on_defeat: bool = False,
     use_skada_hp_each_combat: bool = False,
     graph_runner_holder: dict | None = None,
+    inference_client: Any | None = None,
+    task_id: int = 0,
 ) -> tuple[list[TrainingSample], list[dict[str, Any]]]:
     """按 skada run 的真实 combat 序列顺序跑,每场还原当时的 deck/relics。
 
@@ -828,6 +895,8 @@ def skada_chain_combat_rollout(
             record_trajectory=record_trajectory,
             graph_runner_holder=graph_runner_holder,
             defer_gae=True,  # chain 结束后统一算 GAE
+            inference_client=inference_client,
+            task_id=task_id,
         )
         info["chain_index"] = i
         info["chain_total"] = len(task_chain)
@@ -1023,7 +1092,7 @@ def _try_init_worker_graph_runner(net, banks_sample, enc_idx_sample, worker_id: 
             atol=float(cfg.get("atol", 1e-3)),
             rtol=float(cfg.get("rtol", 1e-3)),
             startup_parity_n=int(cfg.get("startup_parity_n", 10)),
-            startup_parity_noise=float(cfg.get("startup_parity_noise", 0.05)),
+            startup_parity_noise=float(cfg.get("startup_parity_noise", 0.0)),
             strict=strict,
         )
     except GraphBankUndeclaredError:
@@ -1244,6 +1313,16 @@ def run_cotrainer(args: argparse.Namespace) -> None:
             f"atol={args.graph_atol}). 首次 rollout 时 capture,~5s warmup。"
         )
 
+    # 新异步 rollout 引擎默认启用；旧线程模型只保留隐藏 fallback 开关。
+    args.rollout_graph_enabled = bool(
+        getattr(args, "rollout_graph_enabled", True) and getattr(args, "use_cuda_graph", True)
+    )
+    rollout_cfg = build_rollout_engine_config(
+        args,
+        max_numeric_dim=int(getattr(net.tokenizer, "max_numeric_dim", 58)),
+    )
+    n_collectors = int(rollout_cfg.rollout_num_actors)
+
     trainer = UnifiedPPOTrainer(net, PPOConfig(
         lr=args.lr, ppo_epochs=args.ppo_epochs,
         mini_batch_size=args.mini_batch_size,
@@ -1251,15 +1330,34 @@ def run_cotrainer(args: argparse.Namespace) -> None:
         target_kl=args.target_kl,
     ))
 
-    pool = CombatClientPool(args.base_port, args.num_workers)
-    # 把第一个 client 挂到 GAME_CATALOG，让所有后续特征查询走 sim API
-    # （game_catalog 预取一次 cache，不干扰 worker rollouts）
-    try:
-        from networkV2.s1_schema.sim_catalog import GAME_CATALOG
-        GAME_CATALOG.attach_sim(pool.clients[0])
-        logger.info("Attached sim API to GAME_CATALOG (data-driven schema active)")
-    except Exception as e:
-        logger.warning(f"Failed to attach sim API, fallback to sqlite: {e}")
+    pool: CombatClientPool | None = None
+    runtime = None
+    catalog_client = None
+    if rollout_cfg.use_legacy_thread_rollout:
+        pool = CombatClientPool(args.base_port, n_collectors)
+        try:
+            from networkV2.s1_schema.sim_catalog import GAME_CATALOG
+            GAME_CATALOG.attach_sim(pool.clients[0])
+            logger.info("Attached sim API to GAME_CATALOG (legacy thread rollout)")
+        except Exception as e:
+            logger.warning(f"Failed to attach sim API, fallback to sqlite: {e}")
+    else:
+        runtime = create_cotrainer_runtime(
+            args=args,
+            net=compiled_net,
+            rollout_cfg=rollout_cfg,
+        )
+        helper_port = int(args.base_port) + n_collectors + 100
+        try:
+            catalog_client = open_cotrainer_catalog_client(helper_port)
+            from networkV2.s1_schema.sim_catalog import GAME_CATALOG
+            GAME_CATALOG.attach_sim(catalog_client)
+            logger.info(
+                "Attached sim API to GAME_CATALOG (async rollout, helper_port=%s)",
+                helper_port,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to attach sim API, fallback to sqlite: {e}")
 
     rng = random.Random(args.seed)
     # 每个 encounter 用对应难度的 deck：starter-friendly 用 starter，
@@ -1275,6 +1373,8 @@ def run_cotrainer(args: argparse.Namespace) -> None:
             "preset": args.preset,
             "checkpoint": args.checkpoint,
             "num_workers": args.num_workers,
+            "rollout_num_actors": n_collectors,
+            "rollout_async_default": float(not rollout_cfg.use_legacy_thread_rollout),
             "base_port": args.base_port,
         })
 
@@ -1285,7 +1385,10 @@ def run_cotrainer(args: argparse.Namespace) -> None:
     chain_len = sum(c for _, c in CHAIN_STRUCTURE)
 
     print()
-    print(f"Config: preset={args.preset} lr={args.lr} eps/iter={args.episodes_per_iter} workers={args.num_workers}")
+    print(
+        f"Config: preset={args.preset} lr={args.lr} eps/iter={args.episodes_per_iter} "
+        f"actors={n_collectors} async={not rollout_cfg.use_legacy_thread_rollout}"
+    )
     if use_skada_replay:
         print(f"Skada chain replay ENABLED: 1 ep = 1 victory run 的全部 combat 按 floor 顺序")
         print(f"  每场 reset 还原当时 deck/relics,HP 跨场继承(败则用 skada 当时 hp 重置续跑)")
@@ -1315,14 +1418,14 @@ def run_cotrainer(args: argparse.Namespace) -> None:
         t0 = time.time()
         eps_total = args.episodes_per_iter
 
-        # 分配 tasks 给 workers
+        # 分配 rollout tasks
         # record_trajectory 逻辑（优先级从高到低）：
         #   1. --record-trajectory → 全量记录每 ep（~1-3 MB/iter）
         #   2. --record-trajectory-every N → 采样 N 条（优先 boss/elite）
         #   3. 默认都不记
         record_all = bool(getattr(args, "record_trajectory", False))
         n_record = max(0, int(getattr(args, "record_trajectory_every", 0) or 0))
-        tasks_per_worker: list[list] = [[] for _ in range(args.num_workers)]
+        iter_tasks: list[Any] = []
 
         if getattr(args, "skada_replay_index_db", None):
             # Skada chain replay 模式:抽 skada victory run,每 ep = 1 run 的全部战斗
@@ -1337,7 +1440,12 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                 # 过滤 skada 里(多人模式卡 MP_*/老版本 encounter TOADPOLES_NORMAL/
                 # mod relic EXTRARELICS-*/错分类 event encounter) 等不兼容数据。
                 # 数据源不改,清洗在 cache load 阶段做,训练期永不 hit unsupported。
-                _supported = load_sim_supported_lists(pool.clients[0])
+                if pool is not None:
+                    _supported = load_sim_supported_lists(pool.clients[0])
+                elif catalog_client is not None:
+                    _supported = load_sim_supported_lists(catalog_client)
+                else:
+                    raise RuntimeError("no sim client available for skada support discovery")
                 _sf = SkadaIndexFetcher(
                     index_db=Path(args.skada_replay_index_db),
                 )
@@ -1355,8 +1463,7 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                 if _skada_chains_pool else []
             for i, chain in enumerate(ep_chains):
                 seed_prefix = f"co-{iteration}-{i}-{rng.getrandbits(32):08x}"
-                tasks_per_worker[i % args.num_workers].append(
-                    ("skada_chain", chain, seed_prefix, record_all))
+                iter_tasks.append(("skada_chain", chain, seed_prefix, record_all))
         elif use_chained:
             # Chained 模式：每 ep 一个 chain（3m+1e+1b），整个 chain 用同一 deck
             for i in range(eps_total):
@@ -1365,8 +1472,7 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                 seed_prefix = f"co-{iteration}-{i}-{rng.getrandbits(32):08x}"
                 # 全量记录 → chain 内所有 sub_combat 都记；否则都不记（采样模式对 chain 不适用）
                 record_traj = record_all
-                tasks_per_worker[i % args.num_workers].append(
-                    ("chain", seq, chain_deck, seed_prefix, record_traj))
+                iter_tasks.append(("chain", seq, chain_deck, seed_prefix, record_traj))
         else:
             # 老模式：单 ep = 单 combat，由 curriculum_at_iter 控制难度池
             pool_encs = curriculum_at_iter(iteration)
@@ -1383,37 +1489,49 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                     record_traj = True; n_recorded += 1
                 else:
                     record_traj = False
-                tasks_per_worker[i % args.num_workers].append((enc_id, rt, ep_deck, seed, record_traj))
+                iter_tasks.append((enc_id, rt, ep_deck, seed, record_traj))
 
         # 并发收集
         net.eval()
-        result_q: queue.Queue = queue.Queue()
-        threads = []
-        for w_idx in range(args.num_workers):
-            if not tasks_per_worker[w_idx]:
-                continue
-            if w_idx not in _worker_graph_holders:
-                _worker_graph_holders[w_idx] = {
-                    "worker_id": w_idx, "runner": None, "init_attempted": False,
-                }
-            t = threading.Thread(
-                target=_worker_collect,
-                args=(w_idx, pool, compiled_net, tasks_per_worker[w_idx],
-                      args.max_steps, result_q,
-                      _worker_graph_holders[w_idx]),
-            )
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join(timeout=300)
-
-        # 汇总
         iter_samples: list[TrainingSample] = []
         iter_infos: list[dict] = []
-        while not result_q.empty():
-            r = result_q.get()
-            iter_samples.extend(r["samples"])
-            iter_infos.extend(r["infos"])
+        rollout_stats: dict[str, Any] = {}
+        if rollout_cfg.use_legacy_thread_rollout:
+            result_q: queue.Queue = queue.Queue()
+            threads = []
+            tasks_per_worker: list[list[Any]] = [[] for _ in range(n_collectors)]
+            for idx, task in enumerate(iter_tasks):
+                tasks_per_worker[idx % n_collectors].append(task)
+            for w_idx in range(n_collectors):
+                if not tasks_per_worker[w_idx]:
+                    continue
+                if w_idx not in _worker_graph_holders:
+                    _worker_graph_holders[w_idx] = {
+                        "worker_id": w_idx, "runner": None, "init_attempted": False,
+                    }
+                t = threading.Thread(
+                    target=_worker_collect,
+                    args=(w_idx, pool, compiled_net, tasks_per_worker[w_idx],
+                          args.max_steps, result_q,
+                          _worker_graph_holders[w_idx]),
+                )
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join(timeout=300)
+            while not result_q.empty():
+                r = result_q.get()
+                iter_samples.extend(r["samples"])
+                iter_infos.extend(r["infos"])
+        else:
+            if runtime is None:
+                raise RuntimeError("async rollout runtime was not initialized")
+            task_ids = runtime.submit_tasks(iter_tasks)
+            envelopes = runtime.gather_results(len(task_ids))
+            for env in envelopes:
+                iter_samples.extend(env.samples)
+                iter_infos.extend(env.infos)
+            rollout_stats = runtime.stats()
 
         # 按难度分类胜率 + sim error 计数
         wins_by_rt = {"monster": 0, "elite": 0, "boss": 0}
@@ -1463,14 +1581,35 @@ def run_cotrainer(args: argparse.Namespace) -> None:
                     f"[sim-health] {consecutive_empty_iters} consecutive empty iters, "
                     f"restarting sim pool (attempt {total_empty_aborts}/{MAX_TOTAL_EMPTY_ABORTS})"
                 )
-                pool.close_all()
-                time.sleep(3)
-                pool = CombatClientPool(args.base_port, args.num_workers)
-                try:
-                    from networkV2.s1_schema.sim_catalog import GAME_CATALOG
-                    GAME_CATALOG.attach_sim(pool.clients[0])
-                except Exception as _e:
-                    logger.warning(f"re-attach GAME_CATALOG failed: {_e}")
+                if runtime is not None:
+                    runtime.shutdown()
+                    time.sleep(2)
+                    runtime = create_cotrainer_runtime(
+                        args=args,
+                        net=compiled_net,
+                        rollout_cfg=rollout_cfg,
+                    )
+                if pool is not None:
+                    pool.close_all()
+                    time.sleep(3)
+                    pool = CombatClientPool(args.base_port, n_collectors)
+                    try:
+                        from networkV2.s1_schema.sim_catalog import GAME_CATALOG
+                        GAME_CATALOG.attach_sim(pool.clients[0])
+                    except Exception as _e:
+                        logger.warning(f"re-attach GAME_CATALOG failed: {_e}")
+                if catalog_client is not None:
+                    try:
+                        catalog_client.close()
+                    except Exception:
+                        pass
+                    helper_port = int(args.base_port) + n_collectors + 100
+                    try:
+                        catalog_client = open_cotrainer_catalog_client(helper_port)
+                        from networkV2.s1_schema.sim_catalog import GAME_CATALOG
+                        GAME_CATALOG.attach_sim(catalog_client)
+                    except Exception as _e:
+                        logger.warning(f"re-attach helper catalog client failed: {_e}")
                 consecutive_empty_iters = 0
                 # 跳过本 iter 训练
                 metrics = {"policy_loss": 0.0, "value_loss": 0.0}
@@ -1489,6 +1628,8 @@ def run_cotrainer(args: argparse.Namespace) -> None:
         # 把 sim 错误信息进 metrics
         metrics["sim_error_count"] = float(sim_error_count)
         metrics["sim_error_rate"] = float(sim_error_count) / max(len(iter_infos), 1)
+        if rollout_stats:
+            metrics.update(runtime_stats_to_metrics("rollout", rollout_stats))
         # 把性能 profile 进 metrics(步数加权平均每 step 各 phase 的 ms)
         if _prof_total_steps > 0:
             for k, v in _prof_agg.items():
@@ -1513,6 +1654,19 @@ def run_cotrainer(args: argparse.Namespace) -> None:
             top = sorted(sim_error_types.items(), key=lambda x: -x[1])[:3]
             top_str = "; ".join(f"[{cnt}x] {msg}" for msg, cnt in top)
             logger.warning(f"[sim-errors] iter {iteration}: {top_str}")
+        if rollout_stats:
+            logger.info(
+                "[rollout_async] iter=%s req=%s batches=%s graph_hits=%s eager=%s "
+                "queue_wait=%.3fms infer=%.3fms batch_hist=%s",
+                iteration,
+                int(rollout_stats.get("requests", 0)),
+                int(rollout_stats.get("batches", 0)),
+                int(rollout_stats.get("graph_hits", 0)),
+                int(rollout_stats.get("eager_fallbacks", 0)),
+                float(rollout_stats.get("queue_wait_ms_avg", 0.0)),
+                float(rollout_stats.get("infer_ms_avg", 0.0)),
+                rollout_stats.get("batch_hist", {}),
+            )
 
         if dumper:
             dumper.dump_iteration(
@@ -1539,7 +1693,15 @@ def run_cotrainer(args: argparse.Namespace) -> None:
         if iteration % args.save_every == 0:
             torch.save(net.state_dict(), out_dir / f"cotrainer_iter{iteration}.pt")
 
-    pool.close_all()
+    if runtime is not None:
+        runtime.shutdown()
+    if pool is not None:
+        pool.close_all()
+    if catalog_client is not None:
+        try:
+            catalog_client.close()
+        except Exception:
+            pass
     torch.save(net.state_dict(), out_dir / "cotrainer_final.pt")
     print(f"Done. Saved {out_dir/'cotrainer_final.pt'}")
 
@@ -1548,7 +1710,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preset", type=str, default="slim")
     ap.add_argument("--checkpoint", type=str, default="")
-    ap.add_argument("--num-workers", type=int, default=8)
+    ap.add_argument("--num-workers", type=int, default=8,
+                    help="兼容旧参数；默认映射到 --rollout-num-actors。")
     ap.add_argument("--base-port", type=int, default=15700)
     ap.add_argument("--max-iterations", type=int, default=200)
     ap.add_argument("--episodes-per-iter", type=int, default=80)
@@ -1607,6 +1770,7 @@ def main():
                     help="CUDA graph 周期性 parity check 间隔(0=禁用)")
     ap.add_argument("--graph-atol", type=float, default=1e-3,
                     help="CUDA graph vs eager logits 允许的绝对误差")
+    add_rollout_engine_args(ap)
     args = ap.parse_args()
 
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(message)s")

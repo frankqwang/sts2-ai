@@ -31,6 +31,15 @@ from networkV2.s4_compiler.feature_compiler import CombatFeatureCompiler
 from networkV2.s5_net.combat_net import CombatNetV2, CombatNetOutput
 from networkV2.s6_training.batch import TrainingSample
 from networkV2.s6_training.ppo import CombatPPOTrainerV2, PPOConfig
+from networkV2.s6_training.rollout_async_engine import (
+    add_rollout_engine_args,
+    build_rollout_engine_config,
+    runtime_stats_to_metrics,
+)
+from networkV2.s6_training.rollout_workers import (
+    create_combat_v2_runtime,
+    open_combat_v2_catalog_client,
+)
 
 from core.rl_reward_shaping import combat_step_reward, combat_local_tactical_reward
 from env.combat_training_env import (
@@ -111,18 +120,39 @@ def compute_step_targets(
 # ---------------------------------------------------------------------------
 
 def sample_action_v2(
-    net: CombatNetV2,
+    net: CombatNetV2 | None,
     banks,
     num_actions: int,
     *,
     greedy: bool = False,
     encounter_id: str = "",
+    inference_client: Any | None = None,
+    task_id: int = 0,
 ) -> tuple[int, float, float]:
+    from networkV2.s1_schema.encounter_vocab import encounter_to_index
+
+    enc_idx_value = int(encounter_to_index(encounter_id))
+    if inference_client is not None:
+        reply = inference_client.infer(
+            banks,
+            encounter_idx=enc_idx_value,
+            legal_len=num_actions,
+            greedy=greedy,
+            task_id=task_id,
+        )
+        return (
+            int(reply.chosen_action_index),
+            float(reply.old_log_prob),
+            float(reply.value_estimate),
+        )
+
+    if net is None:
+        raise ValueError("sample_action_v2 requires `net` when inference_client is absent")
+
     # rollout 必须传 encounter_idx，否则 conditioning 下 rollout/train 策略不一致
     # （PPO 训练时 collate_training_samples 会给每个 sample 注入 encounter_idx）
     enc_idx = None
     if getattr(net, "enable_encounter_conditioning", False):
-        from networkV2.s1_schema.encounter_vocab import encounter_to_index
         device = next(net.parameters()).device
         enc_idx = torch.tensor(
             [encounter_to_index(encounter_id)], dtype=torch.long, device=device,
@@ -148,7 +178,7 @@ def sample_action_v2(
 
 def collect_combat_rollout(
     client: PipeBackedCombatTrainingClient,
-    net: CombatNetV2,
+    net: CombatNetV2 | None,
     compiler: CombatFeatureCompiler,
     tracker: CombatStateTracker,
     *,
@@ -157,6 +187,8 @@ def collect_combat_rollout(
     build_spec: dict[str, Any] | None = None,
     max_steps: int = 200,
     greedy: bool = False,
+    inference_client: Any | None = None,
+    task_id: int = 0,
 ) -> tuple[list[TrainingSample], dict[str, Any]]:
     state = client.reset(encounter_id=encounter_id, build=build_spec)
     legal_actions = build_combat_legal_actions(state)
@@ -184,6 +216,8 @@ def collect_combat_rollout(
         action_idx, log_prob, value = sample_action_v2(
             net, banks, len(legal_actions), greedy=greedy,
             encounter_id=encounter_id,
+            inference_client=inference_client,
+            task_id=task_id,
         )
         chosen = legal_actions[action_idx]
 
@@ -309,6 +343,10 @@ def train_v2(args: argparse.Namespace) -> None:
         max_numeric_dim=args.max_numeric_dim,
     ))
     compiler = CombatFeatureCompiler()
+    rollout_cfg = build_rollout_engine_config(
+        args,
+        max_numeric_dim=int(getattr(net.tokenizer, "max_numeric_dim", args.max_numeric_dim)),
+    )
 
     # Builds
     builds = []
@@ -318,8 +356,21 @@ def train_v2(args: argparse.Namespace) -> None:
         logger.info(f"Loaded {len(builds)} builds")
 
     # Client + encounter catalog
-    client = PipeBackedCombatTrainingClient(auto_launch=True, connect_timeout_s=30)
-    catalog = client.combat_catalog()
+    client: PipeBackedCombatTrainingClient | None = None
+    runtime = None
+    catalog_client = open_combat_v2_catalog_client(
+        int(args.port) + int(rollout_cfg.rollout_num_actors) + 100,
+    )
+    if rollout_cfg.use_legacy_thread_rollout:
+        client = PipeBackedCombatTrainingClient(
+            port=int(args.port),
+            auto_launch=True,
+            connect_timeout_s=30,
+        )
+        catalog = client.combat_catalog()
+    else:
+        runtime = create_combat_v2_runtime(args=args, net=net, rollout_cfg=rollout_cfg)
+        catalog = catalog_client.combat_catalog()
     encounter_pools: dict[str, list[str]] = {}
     for e in catalog.get("encounters", []):
         rt = str(e.get("room_type", "monster")).lower()
@@ -345,37 +396,63 @@ def train_v2(args: argparse.Namespace) -> None:
         t0 = time.time()
         iter_samples: list[TrainingSample] = []
         w, l, err = 0, 0, 0
+        rollout_stats: dict[str, Any] = {}
+        episode_tasks: list[dict[str, Any]] = []
 
         for _ in range(args.episodes_per_iter):
             build = rng.choice(builds) if builds else {"build": {}, "source": {"character": "IRONCLAD"}}
             room_type = rng.choices(room_types, weights=room_w, k=1)[0]
             encounter_id = rng.choice(encounter_pools[room_type])
-            character = str((build.get("source") or {}).get("character", "IRONCLAD")).upper()
+            episode_tasks.append({
+                "encounter_id": encounter_id,
+                "room_type": room_type,
+                "build_spec": build.get("build"),
+                "max_steps": args.max_episode_steps,
+                "greedy": False,
+            })
 
-            tracker = CombatStateTracker()
-            try:
-                samples, info = collect_combat_rollout(
-                    client, net, compiler, tracker,
-                    encounter_id=encounter_id,
-                    room_type=room_type,
-                    build_spec=build.get("build"),
-                    max_steps=args.max_episode_steps,
-                )
-            except Exception as e:
-                logger.warning(f"Episode failed ({encounter_id}): {e}")
-                err += 1
-                continue
-
-            iter_samples.extend(samples)
-            if info.get("combat_won") is True:
-                w += 1
-            elif info.get("combat_won") is False:
-                l += 1
+        if rollout_cfg.use_legacy_thread_rollout:
+            for task in episode_tasks:
+                tracker = CombatStateTracker()
+                try:
+                    samples, info = collect_combat_rollout(
+                        client, net, compiler, tracker,
+                        encounter_id=task["encounter_id"],
+                        room_type=task["room_type"],
+                        build_spec=task.get("build_spec"),
+                        max_steps=int(task["max_steps"]),
+                    )
+                except Exception as e:
+                    logger.warning(f"Episode failed ({task['encounter_id']}): {e}")
+                    err += 1
+                    continue
+                iter_samples.extend(samples)
+                if info.get("combat_won") is True:
+                    w += 1
+                elif info.get("combat_won") is False:
+                    l += 1
+        else:
+            if runtime is None:
+                raise RuntimeError("async rollout runtime was not initialized")
+            task_ids = runtime.submit_tasks(episode_tasks)
+            for env in runtime.gather_results(len(task_ids)):
+                iter_samples.extend(env.samples)
+                for info in env.infos:
+                    if info.get("error"):
+                        logger.warning(f"Episode failed ({info.get('encounter_id','')}): {info['error']}")
+                        err += 1
+                    elif info.get("combat_won") is True:
+                        w += 1
+                    elif info.get("combat_won") is False:
+                        l += 1
+            rollout_stats = runtime.stats()
 
         total_w += w
         total_l += l
 
         metrics = trainer.train_step(iter_samples) if len(iter_samples) >= args.min_update_samples else {}
+        if rollout_stats:
+            metrics.update(runtime_stats_to_metrics("rollout", rollout_stats))
         elapsed = time.time() - t0
         wr = w / max(w + l, 1) * 100
         cum = total_w / max(total_w + total_l, 1) * 100
@@ -387,13 +464,27 @@ def train_v2(args: argparse.Namespace) -> None:
             f"hp={metrics.get('vl_hp_loss',0):.4f} surv={metrics.get('vl_survival',0):.4f} "
             f"ent={metrics.get('entropy',0):.4f} | {elapsed:.1f}s"
         )
+        if rollout_stats:
+            logger.info(
+                "[rollout_async] req=%s batches=%s queue_wait=%.3fms infer=%.3fms graph=%s eager=%s",
+                int(rollout_stats.get("requests", 0)),
+                int(rollout_stats.get("batches", 0)),
+                float(rollout_stats.get("queue_wait_ms_avg", 0.0)),
+                float(rollout_stats.get("infer_ms_avg", 0.0)),
+                int(rollout_stats.get("graph_hits", 0)),
+                int(rollout_stats.get("eager_fallbacks", 0)),
+            )
 
         if iteration % args.save_every == 0:
             p = Path(args.output_dir) / f"combat_v2_iter{iteration}.pt"
             p.parent.mkdir(parents=True, exist_ok=True)
             torch.save(net.state_dict(), p)
 
-    client.close()
+    if runtime is not None:
+        runtime.shutdown()
+    if client is not None:
+        client.close()
+    catalog_client.close()
     p = Path(args.output_dir) / "combat_v2_final.pt"
     p.parent.mkdir(parents=True, exist_ok=True)
     torch.save(net.state_dict(), p)
@@ -423,12 +514,14 @@ def main():
     p.add_argument("--elite-weight", type=float, default=3.0)
     p.add_argument("--boss-weight", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--port", type=int, default=15527)
     p.add_argument("--builds", type=str, default="")
     p.add_argument("--checkpoint", type=str, default="")
     p.add_argument("--output-dir", type=str, default="checkpoints/combat_v2")
     p.add_argument("--save-every", type=int, default=50)
     p.add_argument("--cpu", action="store_true")
     p.add_argument("--log-level", type=str, default="INFO")
+    add_rollout_engine_args(p)
     args = p.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level),
                         format="%(asctime)s %(levelname)s %(message)s")

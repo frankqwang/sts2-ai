@@ -16,6 +16,20 @@ from networkV2.s1_schema.token_banks import (
 )
 
 
+def _valid_token_prefix(tokens: list[Token]) -> list[Token]:
+    """返回连续前缀里的有效 token。
+
+    约定：GraphRunner 的 padding 只会把 `token_type='pad'` 追加在尾部。
+    这里取 leading valid prefix，避免每步为整段 padded tail 做无意义拷贝。
+    """
+    valid_len = 0
+    for tok in tokens:
+        if tok.token_type == "pad":
+            break
+        valid_len += 1
+    return tokens[:valid_len]
+
+
 class BankTensor:
     """一个 bank 张量化后的结果。"""
     __slots__ = ("features", "mask", "bank_name")
@@ -69,6 +83,8 @@ class BankTokenizer(nn.Module):
 
         tokens = bank.tokens
         seq_len = max(len(tokens), 1)  # 至少 1（避免空 bank）
+        valid_tokens = _valid_token_prefix(tokens)
+        n_valid = len(valid_tokens)
 
         # 构建 numeric tensor: (1, L, max_numeric_dim)
         numeric = torch.zeros(1, seq_len, self.max_numeric_dim, device=device)
@@ -76,12 +92,30 @@ class BankTokenizer(nn.Module):
         ts_ids = torch.zeros(1, seq_len, dtype=torch.long, device=device)
         mask = torch.zeros(1, seq_len, dtype=torch.bool, device=device)
 
-        for i, tok in enumerate(tokens):
-            n = min(len(tok.numeric), self.max_numeric_dim)
-            numeric[0, i, :n] = torch.tensor(tok.numeric[:n], dtype=torch.float32)
-            type_ids[0, i] = tok.type_idx
-            ts_ids[0, i] = tok.time_scale_idx
-            mask[0, i] = True
+        if n_valid > 0:
+            numeric_width = min(
+                max((len(tok.numeric) for tok in valid_tokens), default=0),
+                self.max_numeric_dim,
+            )
+            if numeric_width > 0:
+                numeric_rows: list[list[float]] = []
+                for tok in valid_tokens:
+                    row = list(tok.numeric[:numeric_width])
+                    if len(row) < numeric_width:
+                        row.extend([0.0] * (numeric_width - len(row)))
+                    numeric_rows.append(row)
+                numeric[0, :n_valid, :numeric_width] = torch.tensor(
+                    numeric_rows, dtype=torch.float32, device=device,
+                )
+            type_ids[0, :n_valid] = torch.tensor(
+                [tok.type_idx for tok in valid_tokens],
+                dtype=torch.long, device=device,
+            )
+            ts_ids[0, :n_valid] = torch.tensor(
+                [tok.time_scale_idx for tok in valid_tokens],
+                dtype=torch.long, device=device,
+            )
+            mask[0, :n_valid] = True
 
         # 投影: numeric → d_model, 加上 type + time_scale embedding
         h = self.numeric_proj(numeric)                    # (1, L, d_model)
@@ -180,15 +214,30 @@ class BankTokenizer(nn.Module):
             h["type_ids"].zero_()
             h["ts_ids"].zero_()
             h["mask"].zero_()
-
-            for i, tok in enumerate(bank.tokens):
-                n = min(len(tok.numeric), self.max_numeric_dim)
-                h["numeric"][0, i, :n] = torch.tensor(
-                    tok.numeric[:n], dtype=torch.float32,
+            valid_tokens = _valid_token_prefix(bank.tokens)
+            n_tokens = len(valid_tokens)
+            if n_tokens > 0:
+                numeric_width = min(
+                    max((len(tok.numeric) for tok in valid_tokens), default=0),
+                    self.max_numeric_dim,
                 )
-                h["type_ids"][0, i] = tok.type_idx
-                h["ts_ids"][0, i] = tok.time_scale_idx
-                h["mask"][0, i] = True
+                if numeric_width > 0:
+                    numeric_rows: list[list[float]] = []
+                    for tok in valid_tokens:
+                        row = list(tok.numeric[:numeric_width])
+                        if len(row) < numeric_width:
+                            row.extend([0.0] * (numeric_width - len(row)))
+                        numeric_rows.append(row)
+                    h["numeric"][0, :n_tokens, :numeric_width].copy_(
+                        torch.tensor(numeric_rows, dtype=torch.float32),
+                    )
+                h["type_ids"][0, :n_tokens].copy_(
+                    torch.tensor([tok.type_idx for tok in valid_tokens], dtype=torch.long),
+                )
+                h["ts_ids"][0, :n_tokens].copy_(
+                    torch.tensor([tok.time_scale_idx for tok in valid_tokens], dtype=torch.long),
+                )
+                h["mask"][0, :n_tokens] = True
 
             # Async DMA to GPU static buffers(不阻塞 CPU,graph replay 前 sync)
             for key in ("numeric", "type_ids", "ts_ids", "mask"):
@@ -223,6 +272,61 @@ class BankTokenizer(nn.Module):
             h = self.norm(h)
             result[name] = BankTensor(h, bufs["mask"], name)
         return result
+
+    def fill_static_padded_buffers(
+        self,
+        batched_banks: dict[str, "PaddedBank"],
+        host_buffers: dict[str, dict[str, torch.Tensor]],
+        gpu_buffers: dict[str, dict[str, torch.Tensor]],
+        *,
+        batch_size: int | None = None,
+    ) -> None:
+        """把 batched PaddedBank 写进 pre-allocated static buffers。
+
+        用于 rollout 集中 batch inference 的 CUDA graph bucket。
+        host/gpu buffer 的 batch 维固定为 bucket 大小；若实际 batch 更小，尾部会被清零。
+        """
+        from networkV2.s5_net.bank_max_spec import BankOverflowError
+
+        for name, h in host_buffers.items():
+            g = gpu_buffers[name]
+            h["numeric"].zero_()
+            h["type_ids"].zero_()
+            h["ts_ids"].zero_()
+            h["mask"].zero_()
+
+            pb = batched_banks.get(name)
+            if pb is not None:
+                src_batch = int(pb.numeric.shape[0])
+                dst_batch = int(h["numeric"].shape[0])
+                if batch_size is not None:
+                    src_batch = min(src_batch, int(batch_size))
+                if src_batch > dst_batch:
+                    raise BankOverflowError(
+                        f"bank '{name}' batch {src_batch} > static batch {dst_batch}. "
+                        f"调大 graph bucket 或回退 eager。"
+                    )
+                if pb.numeric.shape[1] > h["numeric"].shape[1]:
+                    raise BankOverflowError(
+                        f"bank '{name}' len {pb.numeric.shape[1]} > static len {h['numeric'].shape[1]}."
+                    )
+                ndim = min(int(pb.numeric.shape[2]), int(h["numeric"].shape[2]))
+                if src_batch > 0:
+                    h["numeric"][:src_batch, : pb.numeric.shape[1], :ndim].copy_(
+                        pb.numeric[:src_batch, :, :ndim],
+                    )
+                    h["type_ids"][:src_batch, : pb.type_ids.shape[1]].copy_(
+                        pb.type_ids[:src_batch],
+                    )
+                    h["ts_ids"][:src_batch, : pb.ts_ids.shape[1]].copy_(
+                        pb.ts_ids[:src_batch],
+                    )
+                    h["mask"][:src_batch, : pb.mask.shape[1]].copy_(
+                        pb.mask[:src_batch],
+                    )
+
+            for key in ("numeric", "type_ids", "ts_ids", "mask"):
+                g[key].copy_(h[key], non_blocking=True)
 
 
 def alloc_static_bank_buffers(

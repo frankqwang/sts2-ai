@@ -37,6 +37,7 @@ Windows 友好(不依赖 triton,纯 CUDA)。
 from __future__ import annotations
 
 import logging
+import threading
 import torch
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -46,6 +47,11 @@ from networkV2.s5_net.bank_max_spec import (
     BankMaxSpec, BankOverflowError, DEFAULT_MAX_SPEC,
 )
 from networkV2.s5_net.tokenizer import alloc_static_bank_buffers
+
+
+# CUDA graph capture 不能在同一进程里并发进行；多 worker 首次 lazy init 时需要
+# 串行化 capture。replay 不需要这把锁。
+_CAPTURE_LOCK = threading.Lock()
 
 
 def patch_dropout_for_graph_safety() -> None:
@@ -77,8 +83,13 @@ def patch_dropout_for_graph_safety() -> None:
 
 
 def _empty_token(numeric_dim: int) -> Token:
-    """MAX padding 用的 zero token。token_type='pad' → type_idx=0。"""
-    return Token(numeric=[0.0] * numeric_dim, token_type="pad")
+    """MAX padding 用的 masked token。
+
+    tokenizer/fill_static_buffers 会把 `token_type='pad'` 视为无效位，
+    所以这里不需要携带 58 维 zero numeric，留空即可。
+    """
+    _ = numeric_dim
+    return Token(numeric=[], token_type="pad")
 
 
 def pad_banks_to_max(
@@ -93,6 +104,7 @@ def pad_banks_to_max(
     """
     import copy
     padded = copy.copy(banks)
+    pad_token = _empty_token(numeric_dim)
     # shared
     from networkV2.s1_schema.token_banks import SharedWorldBanks, CombatBanks
     padded.shared = copy.copy(banks.shared)
@@ -105,8 +117,7 @@ def pad_banks_to_max(
         if len(src.tokens) >= max_len:
             continue
         new_bank = TokenBank(bank_name=src.bank_name, tokens=list(src.tokens))
-        while len(new_bank.tokens) < max_len:
-            new_bank.tokens.append(_empty_token(numeric_dim))
+        new_bank.tokens.extend([pad_token] * (max_len - len(new_bank.tokens)))
         setattr(padded.shared, attr, new_bank)
     # combat
     if banks.combat is not None:
@@ -120,14 +131,12 @@ def pad_banks_to_max(
             if len(src.tokens) >= max_len:
                 continue
             new_bank = TokenBank(bank_name=src.bank_name, tokens=list(src.tokens))
-            while len(new_bank.tokens) < max_len:
-                new_bank.tokens.append(_empty_token(numeric_dim))
+            new_bank.tokens.extend([pad_token] * (max_len - len(new_bank.tokens)))
             setattr(padded.combat, attr, new_bank)
     # action
     if hasattr(max_spec, "action") and len(banks.action_bank.tokens) < max_spec.action:
         new_action = TokenBank(bank_name="action", tokens=list(banks.action_bank.tokens))
-        while len(new_action.tokens) < max_spec.action:
-            new_action.tokens.append(_empty_token(numeric_dim))
+        new_action.tokens.extend([pad_token] * (max_spec.action - len(new_action.tokens)))
         padded.action_bank = new_action
     return padded
 
@@ -175,8 +184,8 @@ class BankShapeSignature:
 
     不存 tensor 内容,只存"形状结构",快速比较。
     """
-    # sorted tuple of (bank_name, seq_len, numeric_dim)
-    bank_shapes: tuple[tuple[str, int, int], ...]
+    # sorted tuple of (bank_name, seq_len)
+    bank_shapes: tuple[tuple[str, int], ...]
 
     @classmethod
     def from_banks(cls, banks) -> "BankShapeSignature":
@@ -185,12 +194,7 @@ class BankShapeSignature:
         for bank in banks.all_banks():
             if bank.is_empty:
                 continue
-            seq_len = len(bank.tokens)
-            num_dim = max(
-                (len(tok.numeric) for tok in bank.tokens),
-                default=0,
-            )
-            shapes.append((bank.bank_name, seq_len, num_dim))
+            shapes.append((bank.bank_name, len(bank.tokens)))
         return cls(bank_shapes=tuple(sorted(shapes)))
 
 
@@ -219,7 +223,7 @@ class GraphRunner:
         rtol: float = 1e-3,
         parity_check_every: int = 500,
         startup_parity_n: int = 20,
-        startup_parity_noise: float = 0.05,
+        startup_parity_noise: float = 0.0,
         max_spec: BankMaxSpec | None = None,
         enabled: bool = True,
         strict: bool = True,
@@ -247,13 +251,17 @@ class GraphRunner:
         self.strict = bool(strict)
         self.startup_parity_noise = float(startup_parity_noise)
         self.max_spec = max_spec or DEFAULT_MAX_SPEC
+        self._numeric_dim = int(getattr(net.tokenizer, "max_numeric_dim", 58))
         self._step = 0
         self._last_parity_err = 0.0
 
+        sample_banks_padded = pad_banks_to_max(
+            sample_banks, self.max_spec, numeric_dim=self._numeric_dim,
+        )
         # 记录 capture 时的 shape signature
-        self._capture_sig = BankShapeSignature.from_banks(sample_banks)
-        self._sample_banks = sample_banks
-        self._sample_enc_idx = encounter_idx.clone()
+        self._capture_sig = BankShapeSignature.from_banks(sample_banks_padded)
+        self._sample_banks = sample_banks_padded
+        self._sample_enc_idx: torch.Tensor | None = None
 
         self._graph: torch.cuda.CUDAGraph | None = None
         self._static_output = None
@@ -261,6 +269,7 @@ class GraphRunner:
         self._host_buffers: dict[str, dict[str, torch.Tensor]] = {}
         self._gpu_buffers: dict[str, dict[str, torch.Tensor]] = {}
         self._static_enc_idx: torch.Tensor | None = None
+        self._stream: torch.cuda.Stream | None = None
 
         if not self.enabled:
             logger.info("[graph_runner] disabled (fallback to eager forward)")
@@ -273,9 +282,11 @@ class GraphRunner:
             self.enabled = False
             return
 
+        self._stream = torch.cuda.Stream(device=self.device)
         try:
-            self._alloc_static_buffers(sample_banks)
-            self._capture(sample_banks, encounter_idx)
+            self._sample_enc_idx = encounter_idx.detach().clone()
+            self._alloc_static_buffers(sample_banks_padded)
+            self._capture(sample_banks_padded, encounter_idx)
             logger.info(
                 f"[graph_runner] capture OK. banks={list(self._gpu_buffers.keys())}"
             )
@@ -288,15 +299,13 @@ class GraphRunner:
             # 声明漏配永远 fatal,不允许 fallback(因为 fallback 后 graph 仍在
             # 静默漏某 bank)
             raise
+        except BankOverflowError:
+            self._cleanup_cuda_state()
+            raise
         except Exception as e:
             self.enabled = False
             self._graph = None
-            # 清理 CUDA state(capture 异常后的 stream 残留)
-            try:
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-            except Exception:
-                pass
+            self._cleanup_cuda_state()
             if self.strict:
                 raise GraphCaptureFailedError(
                     f"CUDA graph capture/parity 失败: {type(e).__name__}: "
@@ -312,6 +321,24 @@ class GraphRunner:
     # ------------------------------------------------------------------
     # Static buffer allocation
     # ------------------------------------------------------------------
+
+    def _cleanup_cuda_state(self) -> None:
+        """best-effort 清理 capture 失败后的 CUDA 状态。"""
+        if self.device.type != "cuda" or not torch.cuda.is_available():
+            return
+        try:
+            if self._stream is not None:
+                torch.cuda.current_stream(device=self.device).wait_stream(self._stream)
+        except Exception:
+            pass
+        try:
+            torch.cuda.synchronize(device=self.device)
+        except Exception:
+            pass
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     def _alloc_static_buffers(self, sample_banks) -> None:
         """按 sample_banks 里出现的 bank name 预分配 host pinned + GPU buffer。
@@ -350,6 +377,11 @@ class GraphRunner:
         # encounter_idx static — graph 每次 replay 从这个固定地址读取
         self._static_enc_idx = torch.zeros(1, dtype=torch.long, device=self.device)
 
+    def _pad_runtime_banks(self, banks: UnifiedTokenBanks) -> UnifiedTokenBanks:
+        return pad_banks_to_max(
+            banks, self.max_spec, numeric_dim=self._numeric_dim,
+        )
+
     # ------------------------------------------------------------------
     # Capture
     # ------------------------------------------------------------------
@@ -376,35 +408,40 @@ class GraphRunner:
             if isinstance(m, nn.Dropout):
                 m.p = 0.0
         tokenizer = self.net.tokenizer
+        assert self._stream is not None, "CUDA stream 必须在 capture 前初始化"
 
-        # Capture 前:fill buffers + copy encounter_idx
-        tokenizer.fill_static_buffers(
-            sample_banks, self._host_buffers, self._gpu_buffers,
-        )
-        self._static_enc_idx.copy_(encounter_idx, non_blocking=True)
-        torch.cuda.synchronize()
+        with _CAPTURE_LOCK:
+            # Capture 前:fill buffers + copy encounter_idx
+            tokenizer.fill_static_buffers(
+                sample_banks, self._host_buffers, self._gpu_buffers,
+            )
+            self._static_enc_idx.copy_(encounter_idx, non_blocking=True)
+            torch.cuda.synchronize(device=self.device)
 
-        # warmup stream(对 CUDA graph capture 是必须的:确保 kernel 编译/分配都做完)
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
-            with torch.no_grad():
-                for _ in range(3):
-                    _ = self.net.forward_from_static(
+            # warmup stream(对 CUDA graph capture 是必须的:确保 kernel 编译/分配都做完)
+            self._stream.wait_stream(torch.cuda.current_stream(device=self.device))
+            with torch.cuda.stream(self._stream):
+                with torch.no_grad():
+                    for _ in range(3):
+                        _ = self.net.forward_from_static(
+                            self._gpu_buffers, self._static_enc_idx,
+                            decision_domain=sample_banks.decision_domain,
+                        )
+            torch.cuda.current_stream(device=self.device).wait_stream(self._stream)
+            torch.cuda.synchronize(device=self.device)
+
+            # 真正 capture
+            self._graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                self._graph,
+                stream=self._stream,
+                capture_error_mode="thread_local",
+            ):
+                with torch.no_grad():
+                    self._static_output = self.net.forward_from_static(
                         self._gpu_buffers, self._static_enc_idx,
                         decision_domain=sample_banks.decision_domain,
                     )
-        torch.cuda.current_stream().wait_stream(s)
-        torch.cuda.synchronize()
-
-        # 真正 capture
-        self._graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self._graph):
-            with torch.no_grad():
-                self._static_output = self.net.forward_from_static(
-                    self._gpu_buffers, self._static_enc_idx,
-                    decision_domain=sample_banks.decision_domain,
-                )
 
     # ------------------------------------------------------------------
     # Parity checks
@@ -481,14 +518,17 @@ class GraphRunner:
         real_action_len = len(sample_banks.action_bank.tokens)
         for i in range(n):
             variant = self._random_variant(sample_banks, self.startup_parity_noise)
+            variant_padded = self._pad_runtime_banks(variant)
             eager_nonpad = self._eager_forward(variant, encounter_idx)
             # Fill static buffers + replay (用同样的 variant 数据)
             tokenizer.fill_static_buffers(
-                variant, self._host_buffers, self._gpu_buffers,
+                variant_padded, self._host_buffers, self._gpu_buffers,
             )
             self._static_enc_idx.copy_(encounter_idx, non_blocking=True)
-            self._graph.replay()
-            torch.cuda.synchronize()
+            assert self._stream is not None
+            with torch.cuda.stream(self._stream):
+                self._graph.replay()
+            self._stream.synchronize()
             # 只对 real action positions 做 parity(rollout 时 `logits[:len(legal)]`)
             eager_real = eager_nonpad.logits[..., :real_action_len]
             graph_real = self._static_output.logits[..., :real_action_len]
@@ -506,8 +546,9 @@ class GraphRunner:
     def _periodic_parity(self, banks, encounter_idx: torch.Tensor) -> None:
         """运行期抽样 parity。"""
         eager_out = self._eager_forward(banks, encounter_idx)
-        eager_logits = eager_out.logits
-        graph_logits = self._static_output.logits
+        real_action_len = len(banks.action_bank.tokens)
+        eager_logits = eager_out.logits[..., :real_action_len]
+        graph_logits = self._static_output.logits[..., :real_action_len]
         err = (eager_logits - graph_logits).abs().max().item()
         self._last_parity_err = err
         if err > self.atol + self.rtol * eager_logits.abs().max().item():
@@ -550,21 +591,31 @@ class GraphRunner:
                 f"decision_domain changed: capture={self._sample_banks.decision_domain}, "
                 f"runtime={banks.decision_domain}. combat/non-combat 要分别 capture。"
             )
+        banks_padded = self._pad_runtime_banks(banks)
+        cur_sig = BankShapeSignature.from_banks(banks_padded)
+        if cur_sig != self._capture_sig:
+            raise GraphShapeMismatchError(
+                "banks shape changed after capture. "
+                f"capture={self._capture_sig.bank_shapes} runtime={cur_sig.bank_shapes}"
+            )
 
         # Fill static buffers(含 shape overflow 检测,超 MAX 会 raise BankOverflowError)
         # 这是 capture 之外的 DMA,允许 CPU→GPU。
         self.net.tokenizer.fill_static_buffers(
-            banks, self._host_buffers, self._gpu_buffers,
+            banks_padded, self._host_buffers, self._gpu_buffers,
         )
         self._static_enc_idx.copy_(encounter_idx, non_blocking=True)
 
         # Graph replay — 用最新 static buffer 数据
-        self._graph.replay()
+        assert self._stream is not None
+        with torch.cuda.stream(self._stream):
+            self._graph.replay()
+        torch.cuda.current_stream(device=self.device).wait_stream(self._stream)
         self._step += 1
 
         # Hard check 3: periodic parity(加 cuda.synchronize 让 replay 完成)
         if self.parity_check_every > 0 and self._step % self.parity_check_every == 0:
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device=self.device)
             self._periodic_parity(banks, encounter_idx)
 
         return self._static_output
@@ -580,3 +631,211 @@ class GraphRunner:
             "last_parity_err": self._last_parity_err,
             "capture_shape_sig": self._capture_sig.bank_shapes,
         }
+
+
+def _declared_bank_names(max_spec: BankMaxSpec) -> list[str]:
+    names: list[str] = []
+    for name in getattr(max_spec, "__annotations__", {}):
+        if name == "numeric_dim":
+            continue
+        value = getattr(max_spec, name, None)
+        if isinstance(value, int):
+            names.append(name)
+    return names
+
+
+class _GraphBatchBucketRunner:
+    """固定 batch size + 固定 BankMaxSpec 的 CUDA graph bucket。"""
+
+    def __init__(
+        self,
+        net: torch.nn.Module,
+        *,
+        decision_domain: str,
+        batch_size: int,
+        max_spec: BankMaxSpec | None = None,
+        device: str | torch.device = "cuda",
+        enabled: bool = True,
+    ):
+        patch_dropout_for_graph_safety()
+        self.net = net
+        self.device = torch.device(device)
+        self.decision_domain = str(decision_domain or "combat")
+        self.batch_size = int(batch_size)
+        self.max_spec = max_spec or DEFAULT_MAX_SPEC
+        self.enabled = bool(enabled)
+        self._numeric_dim = int(getattr(net.tokenizer, "max_numeric_dim", 58))
+        self._graph: torch.cuda.CUDAGraph | None = None
+        self._static_output = None
+        self._host_buffers: dict[str, dict[str, torch.Tensor]] = {}
+        self._gpu_buffers: dict[str, dict[str, torch.Tensor]] = {}
+        self._static_enc_idx: torch.Tensor | None = None
+        self._stream: torch.cuda.Stream | None = None
+
+        if not self.enabled:
+            return
+        if self.device.type != "cuda":
+            self.enabled = False
+            return
+        if not hasattr(net, "forward_from_static"):
+            self.enabled = False
+            return
+
+        self._stream = torch.cuda.Stream(device=self.device)
+        bank_names = _declared_bank_names(self.max_spec)
+        self._host_buffers, self._gpu_buffers = alloc_static_bank_buffers(
+            bank_names=bank_names,
+            max_spec=self.max_spec,
+            device=self.device,
+            max_numeric_dim=self._numeric_dim,
+            batch=self.batch_size,
+        )
+        self._static_enc_idx = torch.zeros(
+            self.batch_size, dtype=torch.long, device=self.device,
+        )
+        self._capture()
+
+    def _capture(self) -> None:
+        import torch.nn as nn
+
+        if self._stream is None:
+            return
+        self.net.eval()
+        for m in self.net.modules():
+            if isinstance(m, nn.MultiheadAttention):
+                m.dropout = 0.0
+            if isinstance(m, nn.Dropout):
+                m.p = 0.0
+
+        with _CAPTURE_LOCK:
+            for h in self._host_buffers.values():
+                h["numeric"].zero_()
+                h["type_ids"].zero_()
+                h["ts_ids"].zero_()
+                h["mask"].zero_()
+            for name in self._host_buffers:
+                for key in ("numeric", "type_ids", "ts_ids", "mask"):
+                    self._gpu_buffers[name][key].copy_(self._host_buffers[name][key])
+            self._static_enc_idx.zero_()
+            torch.cuda.synchronize(device=self.device)
+
+            self._stream.wait_stream(torch.cuda.current_stream(device=self.device))
+            with torch.cuda.stream(self._stream):
+                with torch.no_grad():
+                    for _ in range(3):
+                        _ = self.net.forward_from_static(
+                            self._gpu_buffers,
+                            self._static_enc_idx,
+                            decision_domain=self.decision_domain,
+                        )
+            torch.cuda.current_stream(device=self.device).wait_stream(self._stream)
+            torch.cuda.synchronize(device=self.device)
+
+            self._graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(
+                self._graph,
+                stream=self._stream,
+                capture_error_mode="thread_local",
+            ):
+                with torch.no_grad():
+                    self._static_output = self.net.forward_from_static(
+                        self._gpu_buffers,
+                        self._static_enc_idx,
+                        decision_domain=self.decision_domain,
+                    )
+
+    def replay(self, batched_banks: dict[str, Any], encounter_idx: torch.Tensor):
+        if not self.enabled or self._graph is None or self._stream is None:
+            raise GraphCaptureFailedError("graph bucket 未启用")
+        if int(encounter_idx.shape[0]) > self.batch_size:
+            raise BankOverflowError(
+                f"batch {int(encounter_idx.shape[0])} > graph bucket {self.batch_size}",
+            )
+        self.net.tokenizer.fill_static_padded_buffers(
+            batched_banks,
+            self._host_buffers,
+            self._gpu_buffers,
+            batch_size=int(encounter_idx.shape[0]),
+        )
+        self._static_enc_idx.zero_()
+        self._static_enc_idx[: int(encounter_idx.shape[0])].copy_(
+            encounter_idx.to(device=self.device, dtype=torch.long),
+            non_blocking=True,
+        )
+        with torch.cuda.stream(self._stream):
+            self._graph.replay()
+        torch.cuda.current_stream(device=self.device).wait_stream(self._stream)
+        return self._static_output
+
+
+class GraphBatchBucketCache:
+    """batched rollout inference 的 CUDA graph bucket cache。
+
+    运行时按 `min(bucket >= batch_size)` 选择 bucket；命不中则回退 eager。
+    """
+
+    def __init__(
+        self,
+        net: torch.nn.Module,
+        *,
+        decision_domain: str,
+        buckets: tuple[int, ...] = (1, 2, 4, 8, 16),
+        max_spec: BankMaxSpec | None = None,
+        device: str | torch.device = "cuda",
+        enabled: bool = True,
+    ):
+        self.net = net
+        self.device = torch.device(device)
+        self.decision_domain = str(decision_domain or "combat")
+        self.max_spec = max_spec or DEFAULT_MAX_SPEC
+        self.enabled = bool(enabled)
+        self.buckets = tuple(sorted({int(b) for b in buckets if int(b) > 0}))
+        self._runners: dict[int, _GraphBatchBucketRunner] = {}
+        if not self.enabled:
+            return
+        for bucket in self.buckets:
+            try:
+                runner = _GraphBatchBucketRunner(
+                    net,
+                    decision_domain=self.decision_domain,
+                    batch_size=bucket,
+                    max_spec=self.max_spec,
+                    device=self.device,
+                    enabled=self.enabled,
+                )
+                if runner.enabled:
+                    self._runners[bucket] = runner
+            except Exception as e:
+                logger.warning(
+                    f"[graph_runner] bucket capture failed "
+                    f"(domain={self.decision_domain}, batch={bucket}): {e}"
+                )
+
+    def pick_bucket(self, batch_size: int) -> int | None:
+        for bucket in self.buckets:
+            if bucket >= int(batch_size) and bucket in self._runners:
+                return bucket
+        return None
+
+    def run(
+        self,
+        batched_banks: dict[str, Any],
+        encounter_idx: torch.Tensor,
+    ) -> tuple[Any, int | None]:
+        batch_size = int(encounter_idx.shape[0])
+        bucket = self.pick_bucket(batch_size)
+        if bucket is None:
+            with torch.no_grad():
+                return (
+                    self.net(
+                        batched_banks=batched_banks,
+                        decision_domain=self.decision_domain,
+                        encounter_idx=encounter_idx.to(device=self.device, dtype=torch.long),
+                    ),
+                    None,
+                )
+        out = self._runners[bucket].replay(
+            batched_banks,
+            encounter_idx.to(device=self.device, dtype=torch.long),
+        )
+        return out, bucket
