@@ -99,6 +99,12 @@ def _enemies_total_hp(state: dict) -> int:
     return sum(int(e.get("hp", 0) or 0) for e in enemies if e.get("is_alive", True))
 
 
+def _player_block_total(state: dict) -> int:
+    battle = state.get("battle") or {}
+    player = battle.get("player") or state.get("player") or {}
+    return int(player.get("block", 0) or 0)
+
+
 def _backfill_turn_damage(
     samples: list[TrainingSample],
     turn_start_idx: int,
@@ -117,6 +123,34 @@ def _backfill_turn_damage(
         sample_idx = turn_start_idx + k
         if 0 <= sample_idx < len(samples):
             samples[sample_idx].turn_damage_target = suffix
+
+
+def _backfill_turn_block(
+    samples: list[TrainingSample],
+    turn_start_idx: int,
+    turn_step_blocks: list[float],
+) -> None:
+    n = len(turn_step_blocks)
+    if n == 0:
+        return
+    suffix = 0.0
+    for k in range(n - 1, -1, -1):
+        suffix += turn_step_blocks[k]
+        sample_idx = turn_start_idx + k
+        if 0 <= sample_idx < len(samples):
+            samples[sample_idx].turn_block_target = suffix
+
+
+def _backfill_combat_outcome(
+    samples: list[TrainingSample],
+    start_idx: int,
+    won: bool,
+    end_idx: int | None = None,
+) -> None:
+    end = len(samples) if end_idx is None else min(end_idx, len(samples))
+    value = 1.0 if won else 0.0
+    for sample_idx in range(max(start_idx, 0), max(end, 0)):
+        samples[sample_idx].fight_win_target = value
 
 
 def _backfill_combat_future_targets(
@@ -220,6 +254,7 @@ def run_full_episode(
     # end_turn / 战斗结束时回填 turn_damage_target 给本回合所有 combat samples。
     turn_start_sample_idx = 0
     turn_step_damages: list[float] = []  # 与当前回合 samples 一一对应
+    turn_step_blocks: list[float] = []   # 与 turn_step_damages 对齐，记录本步净挡伤
     # R1.1 / R1.2: 战斗全程 trace，记录每个 combat sample 的 (sample_idx, hp_after_step)。
     # 战斗结束时回填 hp_loss_target (未来累计掉血) + survival_target (战斗末 hp_ratio)，
     # 把原先的"过去累计"proxy 替换成真正 future-looking target。
@@ -242,15 +277,20 @@ def run_full_episode(
             # combat_won 用整 run 的 won：死在战斗里 → 必败；如果是战斗后期死（一般不可能）
             # 也按整 run 结果给。未来可改更细粒度的 per-combat win detection。
             if in_combat and combat_sample_trace:
+                _backfill_turn_damage(samples, turn_start_sample_idx, turn_step_damages)
+                _backfill_turn_block(samples, turn_start_sample_idx, turn_step_blocks)
+                _backfill_combat_outcome(samples, combat_samples_start, won)
                 _final_hp = int((state.get("player") or {}).get("hp", 0) or 0)
                 _final_max_hp = int(
                     (state.get("player") or {}).get("max_hp", 0) or 0) or hp_max_at_combat
                 _backfill_combat_future_targets(
                     samples, combat_sample_trace,
                     final_hp=_final_hp, max_hp=_final_max_hp,
-                    combat_won=False,  # 死在战斗里 = 战斗败
+                    combat_won=won,
                 )
                 combat_sample_trace = []
+                turn_step_damages = []
+                turn_step_blocks = []
             # 给最后一个 sample 加终局 reward + 显式硬标签
             if samples:
                 # Tier1 P3: 加 terminal reward 前先 cap shaping 累积量级
@@ -260,7 +300,7 @@ def run_full_episode(
                     for s in samples:
                         s.reward *= scale
                 samples[-1].reward += final_reward
-                samples[-1].fight_win_target = 1.0 if won else 0.0  # >= 0 → 显式监督
+                samples[-1].run_win_target = 1.0 if won else 0.0
             if in_combat:
                 tracker.on_combat_end(state)
             break
@@ -312,6 +352,9 @@ def run_full_episode(
             # 从战斗切出（战斗结束 → 奖励/选牌等 → 胜利）
             # R1.1 / R1.2: 在 on_combat_end 之前 backfill hp_loss / survival
             # 用当前 state 的 hp（即战斗末 hp）
+            _backfill_turn_damage(samples, turn_start_sample_idx, turn_step_damages)
+            _backfill_turn_block(samples, turn_start_sample_idx, turn_step_blocks)
+            _backfill_combat_outcome(samples, combat_samples_start, True)
             _final_hp = int((state.get("player") or {}).get("hp", 0) or 0)
             _final_max_hp = int((state.get("player") or {}).get("max_hp", 0) or 0) or hp_max_at_combat
             _backfill_combat_future_targets(
@@ -320,6 +363,8 @@ def run_full_episode(
                 combat_won=True,  # 切出战斗通常 = 胜利
             )
             combat_sample_trace = []
+            turn_step_damages = []
+            turn_step_blocks = []
             tracker.on_combat_end(state)
             in_combat = False
 
@@ -379,7 +424,7 @@ def run_full_episode(
 
             # Value 估计
             if is_combat and out.values is not None:
-                value = out.values.fight_win.item()
+                value = out.values.run_value.item()
             elif out.run_eval is not None:
                 value = out.run_eval.run_win_prob.item()
             else:
@@ -420,8 +465,10 @@ def run_full_episode(
         # ---- 1-turn lookahead damage 跟踪 ----
         if is_combat:
             step_damage = max(0, _enemies_total_hp(state) - _enemies_total_hp(next_state))
+            step_block = max(0, _player_block_total(next_state) - _player_block_total(state))
         else:
             step_damage = 0
+            step_block = 0
 
         # ---- tracker.on_step：必须在 act 之后调用，才能做 prev/next 差分算效果量 ----
         if is_combat:
@@ -503,6 +550,7 @@ def run_full_episode(
             value_target=0.0,
             value_estimate=value,          # GAE bootstrap，非监督
             fight_win_target=-1.0,          # 哨值：loss 用 returns；终局会被 0/1 覆盖
+            run_win_target=-1.0,
             # R1.1 proxy 初始值：若战斗正常结束，_backfill_combat_future_targets 会覆盖成
             # "未来累计掉血"；若 rollout 截断（max_steps / 异常）保留 proxy 作 fallback。
             hp_loss_target=float(max(hp_at_combat_start - cur_hp, 0)) if is_combat else 0.0,
@@ -516,6 +564,7 @@ def run_full_episode(
             resource_health_target=resource_health_t,
             deck_quality_target=deck_quality_t,
             turn_damage_target=-1.0,  # 待 backfill；非战斗保持 -1（loss 跳过）
+            turn_block_target=-1.0,   # 待 backfill；非战斗保持 -1（loss 跳过）
             sample_weight=sw,
             encounter_id=tracker.encounter_id if is_combat else "",
             room_type=tracker.room_type if is_combat else st,
@@ -531,6 +580,7 @@ def run_full_episode(
         # 战斗中：append step_damage；end_turn 或战斗切出时 backfill 整个回合
         if is_combat:
             turn_step_damages.append(float(step_damage))
+            turn_step_blocks.append(float(step_block))
             chosen_action = str(chosen.get("action", "")).lower()
             next_st = str(next_state.get("state_type", "")).lower()
             turn_ended = (
@@ -540,12 +590,15 @@ def run_full_episode(
             )
             if turn_ended:
                 _backfill_turn_damage(samples, turn_start_sample_idx, turn_step_damages)
+                _backfill_turn_block(samples, turn_start_sample_idx, turn_step_blocks)
                 turn_start_sample_idx = len(samples)  # 下一回合从此开始
                 turn_step_damages = []
+                turn_step_blocks = []
         else:
             # 非战斗 sample：reset turn tracking（防止跨房间状态泄漏）
             turn_start_sample_idx = len(samples)
             turn_step_damages = []
+            turn_step_blocks = []
 
         # Trajectory record（轻量 per-step 快照，仅 record_trajectory=True 时启用）
         if record_trajectory:
@@ -591,7 +644,7 @@ def _compute_gae(
     samples: list[TrainingSample], gamma: float = 0.99, lam: float = 0.95,
     leaf_horizon: int = 3,
 ) -> None:
-    """GAE。Bootstrap 用 rollout 时网络 value_estimate；终局硬标签（fight_win_target>=0）优先。
+    """GAE。Bootstrap 用 rollout 时网络 value_estimate；终局硬标签（run_win_target>=0）优先。
 
     R1.3: leaf_target 从"2*value_target - 1"（和 fight_win 同源线性重复）改为
     n-step return（horizon=leaf_horizon，默认 3 步）的 tanh 压缩。这样 leaf_score 的
@@ -603,8 +656,8 @@ def _compute_gae(
         return
 
     def _bootstrap(sample: TrainingSample) -> float:
-        if sample.fight_win_target >= 0.0:
-            return float(sample.fight_win_target)
+        if sample.run_win_target >= 0.0:
+            return float(sample.run_win_target)
         return float(sample.value_estimate)
 
     adv = [0.0] * n
@@ -976,7 +1029,7 @@ def train_full_run(args: argparse.Namespace) -> None:
     trainer = UnifiedPPOTrainer(net, PPOConfig(
         lr=args.lr, ppo_epochs=args.ppo_epochs,
         mini_batch_size=args.mini_batch_size,
-        max_numeric_dim=args.max_numeric_dim,
+        max_numeric_dim=getattr(net.config, "max_numeric_dim", args.max_numeric_dim or 58),
         value_warmup_iters=args.value_warmup_iters,
         target_kl=args.target_kl,
     ))
@@ -1234,7 +1287,7 @@ def main():
                    help="覆盖 preset 的 n_heads；不传 = 用 preset 默认 (tiny=4, slim/full=8)")
     p.add_argument("--n-build-slots", type=int, default=None,
                    help="覆盖 preset 的 n_build_slots；不传 = 用 preset 默认")
-    p.add_argument("--max-numeric-dim", type=int, default=48)
+    p.add_argument("--max-numeric-dim", type=int, default=None)
     p.add_argument("--dropout", type=float, default=None,
                    help="覆盖 preset 的 dropout；不传 = 用 preset 默认 0.1")
     # Training

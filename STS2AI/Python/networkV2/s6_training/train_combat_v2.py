@@ -496,7 +496,7 @@ def main():
     p.add_argument("--d-model", type=int, default=384)
     p.add_argument("--n-heads", type=int, default=8)
     p.add_argument("--n-build-slots", type=int, default=8)
-    p.add_argument("--max-numeric-dim", type=int, default=48)
+    p.add_argument("--max-numeric-dim", type=int, default=58)
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--contextualizer-mode", type=str, default="full",
                    choices=["full", "merged", "minimal"],

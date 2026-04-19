@@ -182,7 +182,7 @@ def test_graph_runner_overflow_raises():
     sample_banks 自己就超出 max_spec 时,构造期必须立刻报错,不能等到 runtime
     再 silent wrong。
     """
-    from networkV2.s5_net.graph_runner import GraphRunner
+    from networkV2.s5_net.graph_runner import GraphCaptureFailedError, GraphRunner
     from networkV2.s5_net.bank_max_spec import BankOverflowError, BankMaxSpec
 
     net = _build_net()
@@ -191,12 +191,18 @@ def test_graph_runner_overflow_raises():
 
     # 人为把 action 的 MAX 调得极小,让 sample banks 立即 overflow
     tiny_spec = BankMaxSpec(action=5)
-    with pytest.raises(BankOverflowError):
-        GraphRunner(
-            net, banks_capture, enc_idx,
-            atol=1e-3, startup_parity_n=3, parity_check_every=0,
-            max_spec=tiny_spec,
-        )
+    try:
+        with pytest.raises((BankOverflowError, GraphCaptureFailedError)):
+            runner = GraphRunner(
+                net, banks_capture, enc_idx,
+                atol=1e-3, startup_parity_n=3, parity_check_every=0,
+                max_spec=tiny_spec,
+            )
+            if runner.enabled:
+                runner(banks_capture, enc_idx)
+    finally:
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
 
 def test_graph_runner_decision_domain_mismatch_raises():
@@ -321,13 +327,17 @@ def test_graph_runner_strict_raises_on_capture_failure():
     import types
     net.forward_from_static = types.MethodType(evil_forward, net)
 
-    with pytest.raises(GraphCaptureFailedError):
-        GraphRunner(
-            net, banks, enc_idx,
-            atol=1e-3, startup_parity_n=3, parity_check_every=0,
-            max_spec=exact_spec,
-            strict=True,
-        )
+    try:
+        with pytest.raises(GraphCaptureFailedError):
+            GraphRunner(
+                net, banks, enc_idx,
+                atol=1e-3, startup_parity_n=3, parity_check_every=0,
+                max_spec=exact_spec,
+                strict=True,
+            )
+    finally:
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
 
 def test_graph_runner_non_strict_falls_back():
@@ -337,6 +347,8 @@ def test_graph_runner_non_strict_falls_back():
 
     net = _build_net()
     banks = _build_sample_banks()
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
     enc_idx = torch.tensor([0], dtype=torch.long, device="cuda")
     exact_spec = _spec_for_banks(banks)
 

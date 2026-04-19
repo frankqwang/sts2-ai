@@ -22,7 +22,7 @@ class BankMaxSpec:
     objective: int = 20       # boss + story goals
     forecast: int = 20        # lookahead encounters
     # Combat banks
-    board: int = 20           # player + up to ~4 enemies
+    board: int = 32           # player + 手牌/敌人/牌堆 + draw distribution tokens
     mechanism: int = 20       # boss mechanics
     modifier: int = 30        # power modifiers
     power: int = 50           # all active powers (enemies * their powers)

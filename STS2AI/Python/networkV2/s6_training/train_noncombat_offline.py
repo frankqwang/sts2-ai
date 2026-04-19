@@ -92,8 +92,8 @@ def _move_batched_to_device(batched, device):
         bank.mask = bank.mask.to(device)
     for attr in (
         "action_indices", "old_log_probs", "advantages", "returns",
-        "fight_win_targets", "hp_loss_targets", "survival_targets",
-        "turn_damage_targets", "leaf_targets", "transition_risk_targets",
+        "fight_win_targets", "run_win_targets", "hp_loss_targets", "survival_targets",
+        "turn_damage_targets", "turn_block_targets", "leaf_targets", "transition_risk_targets",
         "resource_retention_targets", "boss_readiness_targets",
         "resource_health_targets", "deck_quality_targets",
         "future_dq_targets", "sample_weights",
@@ -200,7 +200,7 @@ def train_offline(
             total, metrics = loss_fn(
                 output,
                 action_indices=batched.action_indices,
-                run_win_targets=batched.fight_win_targets,
+                run_win_targets=batched.run_win_targets,
                 boss_readiness_targets=batched.boss_readiness_targets,
                 resource_health_targets=batched.resource_health_targets,
                 deck_quality_targets=batched.deck_quality_targets,

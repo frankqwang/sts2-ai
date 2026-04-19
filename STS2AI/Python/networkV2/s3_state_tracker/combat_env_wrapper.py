@@ -22,32 +22,7 @@ from networkV2.s1_schema.memory import (
     RunBuildMemory,
     PlayedAction,
 )
-from core.card_base_stats import is_aoe as _is_aoe
-
-
-# 数据驱动规范（CLAUDE.md）：heal / draw 判定走 core.card_tags 的 functional tags，
-# 覆盖全职业所有卡 + 升级版自动继承。
-#
-# U6 修复：原先有 `_FALLBACK_HEAL_CARDS = {"reaper", "bite", "self_repair"}` 兜底集，
-# 是 STS1 卡名残留——STS2 里根本没有这些卡（对应 STS2 是 reaper_form / snakebite 等
-# 且不一定是 heal 卡）。重跑 card_tags 提取后确认：STS2 只有 spur 这一张带 heal tag
-# 的卡，兜底永远不命中。直接删除，完全数据驱动。
-
-
-def _card_tags_db():
-    """Lazy load card_tags.json（由 core/card_tags.py 从 C# 源码提取）。返回
-    dict[card_id_lower, list[tag_name]]。"""
-    global _CARD_TAGS_CACHE
-    if _CARD_TAGS_CACHE is None:
-        try:
-            from core.card_tags import load_card_tags
-            _CARD_TAGS_CACHE = load_card_tags()
-        except Exception:
-            _CARD_TAGS_CACHE = {}
-    return _CARD_TAGS_CACHE
-
-
-_CARD_TAGS_CACHE: dict[str, list[str]] | None = None
+from networkV2.s1_schema.card_semantic_catalog import CARD_SEMANTICS
 
 
 def _strip_upgrade_suffix(cid: str) -> str:
@@ -58,14 +33,17 @@ def _strip_upgrade_suffix(cid: str) -> str:
 
 
 def _card_has_tag(card_id: str, tag: str) -> bool:
-    """查 card 是否有某功能 tag。升级版 "_UPGRADED" 后缀会被剥离后查 base 版。"""
+    """查 card 是否有某功能 tag。升级版后缀会被剥离后查 base 版。"""
     cid = str(card_id or "").lower().strip()
     if not cid:
         return False
-    tags = _card_tags_db().get(cid)
-    if tags is None:
-        tags = _card_tags_db().get(_strip_upgrade_suffix(cid))
-    return tags is not None and tag in tags
+    snap = CARD_SEMANTICS.get(cid)
+    if snap.card_id:
+        return snap.has_functional_tag(tag)
+    base = _strip_upgrade_suffix(cid)
+    if base != cid:
+        return CARD_SEMANTICS.get(base).has_functional_tag(tag)
+    return False
 
 
 def _is_heal_card(card_id: str) -> bool:
@@ -78,6 +56,7 @@ def _is_draw_card(card_id: str) -> bool:
 
 def _is_x_cost_card(card: dict[str, Any]) -> bool:
     """X-cost 检测：cost == -1（游戏惯例）或 has_energy_cost_x 字段。"""
+    card_id = str(card.get("id", card.get("card_id", "")) or "").lower()
     cost = card.get("cost", card.get("energy_cost"))
     if cost is not None:
         try:
@@ -88,7 +67,7 @@ def _is_x_cost_card(card: dict[str, Any]) -> bool:
     for key in ("is_x_cost", "has_energy_cost_x", "IsXCost", "HasEnergyCostX"):
         if bool(card.get(key, False)):
             return True
-    return False
+    return CARD_SEMANTICS.get(card_id).is_x_cost
 
 
 def _extract_hp(obs: dict[str, Any]) -> int:
@@ -605,7 +584,7 @@ class CombatStateTracker:
                     high_cost += 1
                 if _is_x_cost_card(card):
                     x_cost += 1
-                if _is_aoe(cid):
+                if _card_has_tag(cid, "aoe"):
                     aoe_count += 1
                 if _is_heal_card(cid):
                     heal_count += 1

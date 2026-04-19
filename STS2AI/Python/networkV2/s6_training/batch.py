@@ -36,9 +36,11 @@ class BatchedBanks:
     returns: torch.Tensor | None = None              # (B,)
     # Multi-head value targets
     fight_win_targets: torch.Tensor | None = None    # (B,)
+    run_win_targets: torch.Tensor | None = None      # (B,)
     hp_loss_targets: torch.Tensor | None = None      # (B,)
     survival_targets: torch.Tensor | None = None     # (B,)
     turn_damage_targets: torch.Tensor | None = None  # (B,) <0 = invalid (skip in loss)
+    turn_block_targets: torch.Tensor | None = None   # (B,) <0 = invalid (skip in loss)
     # Leaf targets
     leaf_targets: torch.Tensor | None = None         # (B,)
     transition_risk_targets: torch.Tensor | None = None    # (B,)
@@ -50,6 +52,7 @@ class BatchedBanks:
     future_dq_targets: torch.Tensor | None = None           # (B,) ∈ [-1,1] 或 -2 = 无效
     # Sample weights
     sample_weights: torch.Tensor | None = None       # (B,)
+    encounter_indices: torch.Tensor | None = None    # (B,)
 
 
 def _pad_bank(samples: list[TokenBank], max_numeric_dim: int = 58) -> PaddedBank:
@@ -124,11 +127,13 @@ class TrainingSample:
     # fight_win_target: ≥0 时视为显式监督（如终局 0/1 硬标签）；<0（如 -1）视为"无显式监督"，
     # loss 会改用 returns (value_target) 作为目标 —— 避免 value head 自蒸馏
     fight_win_target: float = -1.0
+    run_win_target: float = -1.0
     hp_loss_target: float = 0.0     # [0,+inf) 期望掉血
     survival_target: float = 1.0    # [0,1] 近期生存概率
     # 1-turn lookahead：从本步起到回合结束累计的实际造成伤害（含本步动作伤害）。
     # combo / 牌序学习的关键监督信号。<0 = 无效（非战斗或回合未关闭），loss 跳过。
     turn_damage_target: float = -1.0
+    turn_block_target: float = -1.0
     # Leaf head targets（leaf_evaluator 4 个 head 全监督）
     leaf_target: float = 0.0                  # leaf_score ∈ [-1,1]（= 2*value_target - 1）
     transition_risk_target: float = 0.0       # ∈ [0,1] 敌方行为切换频率
@@ -158,9 +163,11 @@ def collate_training_samples(
     batched.advantages = torch.tensor([s.advantage for s in samples], dtype=torch.float32)
     batched.returns = torch.tensor([s.value_target for s in samples], dtype=torch.float32)
     batched.fight_win_targets = torch.tensor([s.fight_win_target for s in samples], dtype=torch.float32)
+    batched.run_win_targets = torch.tensor([s.run_win_target for s in samples], dtype=torch.float32)
     batched.hp_loss_targets = torch.tensor([s.hp_loss_target for s in samples], dtype=torch.float32)
     batched.survival_targets = torch.tensor([s.survival_target for s in samples], dtype=torch.float32)
     batched.turn_damage_targets = torch.tensor([s.turn_damage_target for s in samples], dtype=torch.float32)
+    batched.turn_block_targets = torch.tensor([s.turn_block_target for s in samples], dtype=torch.float32)
     batched.leaf_targets = torch.tensor([s.leaf_target for s in samples], dtype=torch.float32)
     batched.transition_risk_targets = torch.tensor([s.transition_risk_target for s in samples], dtype=torch.float32)
     batched.resource_retention_targets = torch.tensor([s.resource_retention_target for s in samples], dtype=torch.float32)
