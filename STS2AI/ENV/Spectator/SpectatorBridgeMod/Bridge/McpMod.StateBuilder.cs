@@ -173,6 +173,16 @@ public static partial class McpMod
                     result["state_type"] = "map";
                     result["map"] = BuildMapState(runState);
                 }
+                else if (topOverlay is NCardRewardSelectionScreen cardScreen)
+                {
+                    result["state_type"] = "card_reward";
+                    result["card_reward"] = BuildCardRewardState(cardScreen, runState);
+                }
+                else if (topOverlay is NRewardsScreen rewardsScreen)
+                {
+                    result["state_type"] = "combat_rewards";
+                    result["rewards"] = BuildRewardsState(rewardsScreen, runState);
+                }
                 else
                 {
                     result["state_type"] = "event";
@@ -692,46 +702,59 @@ public static partial class McpMod
         state["is_ancient"] = isAncient;
         state["is_finished"] = localEvent.IsFinished;
 
-        // Check dialogue state for ancients
-        bool inDialogue = false;
         var uiRoom = NEventRoom.Instance;
-        if (isAncient && uiRoom != null)
-        {
-            var ancientLayout = FindFirst<NAncientEventLayout>(uiRoom);
-            if (ancientLayout != null)
-            {
-                var hitbox = ancientLayout.GetNodeOrNull<NClickableControl>("%DialogueHitbox");
-                inDialogue = hitbox != null && hitbox.Visible && hitbox.IsEnabled;
-            }
-        }
-        state["in_dialogue"] = inDialogue;
 
         // Event body text
         state["body"] = SafeGetText(() => eventModel.Description);
 
-        // Options: prefer game model (matches Sim) with fallback to UI buttons
+        // Visible spectator semantics must match the actionable UI, so prefer
+        // currently rendered buttons. The model can transiently retain stale
+        // CurrentOptions after the room clears buttons in OptionButtonClicked().
         var options = new List<Dictionary<string, object?>>();
+        bool anyChosenInModel = false;
         try
         {
-            // Snapshot the options list to avoid mutation during iteration
             var currentOptions = localEvent.CurrentOptions.ToList();
-            for (int i = 0; i < currentOptions.Count; i++)
+            anyChosenInModel = currentOptions.Any(static opt => opt.WasChosen);
+
+            if (uiRoom != null)
             {
-                var opt = currentOptions[i];
-                options.Add(new Dictionary<string, object?>
+                var buttons = FindAll<NEventOptionButton>(uiRoom);
+                int bi = 0;
+                foreach (var button in buttons)
                 {
-                    ["index"] = i,
-                    ["text"] = SafeGetText(() => opt.Title?.GetRawText()),
-                    ["title"] = SafeGetText(() => opt.Title),
-                    ["is_locked"] = opt.IsLocked,
-                    ["is_chosen"] = opt.WasChosen,
-                    ["is_proceed"] = opt.IsProceed
-                });
+                    var opt = button.Option;
+                    options.Add(new Dictionary<string, object?>
+                    {
+                        ["index"] = bi++,
+                        ["text"] = SafeGetText(() => opt.Title?.GetRawText()),
+                        ["title"] = SafeGetText(() => opt.Title),
+                        ["is_locked"] = opt.IsLocked,
+                        ["is_chosen"] = opt.WasChosen,
+                        ["is_proceed"] = opt.IsProceed
+                    });
+                }
+            }
+
+            if (uiRoom == null && options.Count == 0)
+            {
+                for (int i = 0; i < currentOptions.Count; i++)
+                {
+                    var opt = currentOptions[i];
+                    options.Add(new Dictionary<string, object?>
+                    {
+                        ["index"] = i,
+                        ["text"] = SafeGetText(() => opt.Title?.GetRawText()),
+                        ["title"] = SafeGetText(() => opt.Title),
+                        ["is_locked"] = opt.IsLocked,
+                        ["is_chosen"] = opt.WasChosen,
+                        ["is_proceed"] = opt.IsProceed
+                    });
+                }
             }
         }
         catch
         {
-            // Fallback to UI buttons if game model is mid-mutation
             options.Clear();
             if (uiRoom != null)
             {
@@ -753,9 +776,11 @@ public static partial class McpMod
             }
         }
         state["options"] = options;
-        // Match Sim logic: no options + not finished = in dialogue
-        if (!localEvent.IsFinished && options.Count == 0)
-            state["in_dialogue"] = true;
+        // Match Sim/full-run API semantics: only expose dialogue when there are
+        // no actionable options yet. Some visible Ancient UI nodes keep the
+        // dialogue hitbox alive briefly even after options materialize, which
+        // otherwise leaves the state internally inconsistent.
+        state["in_dialogue"] = !localEvent.IsFinished && options.Count == 0 && !anyChosenInModel;
 
         return state;
     }
@@ -1575,10 +1600,10 @@ public static partial class McpMod
         // Screen type
         state["screen_type"] = screen switch
         {
-            NDeckTransformSelectScreen => "transform",
-            NDeckUpgradeSelectScreen => "upgrade",
-            NDeckCardSelectScreen => "select",
-            NSimpleCardSelectScreen => "simple_select",
+            NDeckTransformSelectScreen => "Transform",
+            NDeckUpgradeSelectScreen => "UpgradeSelect",
+            NDeckCardSelectScreen => "DeckGeneric",
+            NSimpleCardSelectScreen => "SimpleSelect",
             _ => screen.GetType().Name
         };
 
@@ -1702,7 +1727,7 @@ public static partial class McpMod
     private static Dictionary<string, object?> BuildChooseCardState(NChooseACardSelectionScreen screen, RunState runState)
     {
         var state = new Dictionary<string, object?>();
-        state["screen_type"] = "choose";
+        state["screen_type"] = "SimpleSelect";
 
         var player = LocalContext.GetMe(runState);
         if (player != null)

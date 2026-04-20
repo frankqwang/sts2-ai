@@ -205,6 +205,7 @@ internal static class ProtoStateBuilder
 
 	private static byte[] BuildCombatGameStatePayload(CombatTrainingStateSnapshot snapshot)
 	{
+		Player? runtimePlayer = TryResolveActiveCombatPlayer();
 		GameState gs = new GameState
 		{
 			StateType = DetectCombatStateType(snapshot),
@@ -216,34 +217,72 @@ internal static class ProtoStateBuilder
 			Run = new RunInfo(),
 		};
 
-		if (snapshot.Player != null)
+		if (snapshot.Player != null || runtimePlayer != null)
 		{
-			gs.Player = new PlayerState
+			// combat-only proto 也要暴露完整 player build。否则上游会把
+			// “deck/relics 为空”误判成 build 没有真正应用到 sim。
+			gs.Player = BuildCombatPlayerState(runtimePlayer, snapshot);
+		}
+
+		gs.Battle = BuildBattleState(snapshot, runtimePlayer);
+		PopulateCombatLegalActions(gs, snapshot);
+		return gs.ToByteArray();
+	}
+
+	private static Player? TryResolveActiveCombatPlayer()
+	{
+		CombatState? combatState = CombatManager.Instance.DebugOnlyGetState();
+		if (combatState != null)
+		{
+			try
 			{
-				Hp = snapshot.Player.CurrentHp,
-				MaxHp = snapshot.Player.MaxHp,
-				Block = snapshot.Player.Block,
-				Energy = snapshot.Player.Energy,
-				MaxEnergy = snapshot.Player.MaxEnergy,
-				DrawPileCount = snapshot.Piles?.Draw ?? 0,
-				DiscardPileCount = snapshot.Piles?.Discard ?? 0,
-				ExhaustPileCount = snapshot.Piles?.Exhaust ?? 0,
-				PlayPileCount = snapshot.Piles?.Play ?? 0,
-				Stars = snapshot.Player.Stars,
-			};
-			if (snapshot.Player.Powers != null)
+				return LocalContext.GetMe(combatState);
+			}
+			catch
 			{
-				foreach (CombatTrainingPowerSnapshot power in snapshot.Player.Powers
-					.Where(static p => p?.Id != null && p.Amount != 0))
-				{
-					gs.Player.Powers.Add(new Power { Id = power.Id ?? "", Amount = power.Amount });
-				}
 			}
 		}
 
-		gs.Battle = BuildBattleState(snapshot);
-		PopulateCombatLegalActions(gs, snapshot);
-		return gs.ToByteArray();
+		return TryResolveLocalPlayer(RunManager.Instance.DebugOnlyGetState());
+	}
+
+	private static PlayerState BuildCombatPlayerState(Player? player, CombatTrainingStateSnapshot snapshot)
+	{
+		CombatTrainingPlayerSnapshot? combatPlayer = snapshot.Player;
+		PlayerState state = new PlayerState
+		{
+			Hp = combatPlayer?.CurrentHp ?? player?.Creature?.CurrentHp ?? 0,
+			MaxHp = combatPlayer?.MaxHp ?? player?.Creature?.MaxHp ?? 0,
+			Block = combatPlayer?.Block ?? player?.Creature?.Block ?? 0,
+			Gold = player?.Gold ?? 0,
+			Energy = combatPlayer?.Energy ?? 0,
+			MaxEnergy = combatPlayer?.MaxEnergy ?? player?.MaxEnergy ?? 0,
+			DrawPileCount = snapshot.Piles?.Draw ?? 0,
+			DiscardPileCount = snapshot.Piles?.Discard ?? 0,
+			ExhaustPileCount = snapshot.Piles?.Exhaust ?? 0,
+			PlayPileCount = snapshot.Piles?.Play ?? 0,
+			OpenPotionSlots = player?.PotionSlots.Count(static potion => potion == null) ?? 0,
+			MaxPotions = player?.MaxPotionCount ?? 0,
+			Stars = combatPlayer?.Stars ?? 0,
+		};
+
+		if (player != null)
+		{
+			AppendPlayerDeck(state, player.Deck?.Cards);
+			AppendPlayerRelics(state, player.Relics);
+			AppendPlayerPotions(state, player.PotionSlots.Where(static potion => potion != null).OfType<PotionModel>());
+		}
+
+		if (combatPlayer?.Powers != null)
+		{
+			foreach (CombatTrainingPowerSnapshot power in combatPlayer.Powers
+				.Where(static p => p?.Id != null && p.Amount != 0))
+			{
+				state.Powers.Add(new Power { Id = power.Id ?? "", Amount = power.Amount });
+			}
+		}
+
+		return state;
 	}
 
 	private static string DetectCombatStateType(CombatTrainingStateSnapshot snapshot)
@@ -467,10 +506,26 @@ internal static class ProtoStateBuilder
 		};
 
 		// Deck
-		int deckIndex = 0;
-		foreach (CardModel card in player.Deck.Cards)
+		AppendPlayerDeck(ps, player.Deck.Cards);
+
+		AppendPlayerRelics(ps, player.Relics);
+
+		AppendPlayerPotions(ps, player.PotionSlots.Where(static p => p != null).OfType<PotionModel>());
+
+		return ps;
+	}
+
+	private static void AppendPlayerDeck(PlayerState state, IEnumerable<CardModel>? cards)
+	{
+		if (cards == null)
 		{
-			ps.Deck.Add(new CardInfo
+			return;
+		}
+
+		int deckIndex = 0;
+		foreach (CardModel card in cards)
+		{
+			state.Deck.Add(new CardInfo
 			{
 				Index = deckIndex++,
 				Id = card.Id.Entry ?? "",
@@ -482,32 +537,44 @@ internal static class ProtoStateBuilder
 				Upgrades = card.IsUpgraded ? 1 : 0
 			});
 		}
+	}
 
-		// Relics
-		int relicIndex = 0;
-		foreach (RelicModel relic in player.Relics)
+	private static void AppendPlayerRelics(PlayerState state, IEnumerable<RelicModel>? relics)
+	{
+		if (relics == null)
 		{
-			ps.Relics.Add(new RelicInfo
+			return;
+		}
+
+		int relicIndex = 0;
+		foreach (RelicModel relic in relics)
+		{
+			state.Relics.Add(new RelicInfo
 			{
 				Index = relicIndex++,
 				Id = relic.Id.Entry ?? "",
 				Name = relic.Id.Entry ?? ""
 			});
 		}
+	}
 
-		// Potions
-		int potionIndex = 0;
-		foreach (PotionModel potion in player.PotionSlots.Where(static p => p != null).OfType<PotionModel>())
+	private static void AppendPlayerPotions(PlayerState state, IEnumerable<PotionModel>? potions)
+	{
+		if (potions == null)
 		{
-			ps.Potions.Add(new PotionInfo
+			return;
+		}
+
+		int potionIndex = 0;
+		foreach (PotionModel potion in potions)
+		{
+			state.Potions.Add(new PotionInfo
 			{
 				Index = potionIndex++,
 				Id = potion.Id.Entry ?? "",
 				Name = potion.Id.Entry ?? ""
 			});
 		}
-
-		return ps;
 	}
 
 	// ================================================================
@@ -534,7 +601,7 @@ internal static class ProtoStateBuilder
 	// Battle (combat)
 	// ================================================================
 
-	private static BattleState BuildBattleState(CombatTrainingStateSnapshot? combat)
+	private static BattleState BuildBattleState(CombatTrainingStateSnapshot? combat, Player? runtimePlayer = null)
 	{
 		combat ??= CombatTrainingEnvService.BuildStateSnapshot() ?? new CombatTrainingStateSnapshot();
 		BattleState bs = new BattleState
@@ -548,27 +615,11 @@ internal static class ProtoStateBuilder
 		};
 
 		// Battle player
-		if (combat.Player != null)
+		if (combat.Player != null || runtimePlayer != null)
 		{
-			CombatTrainingPlayerSnapshot cp = combat.Player;
-			PlayerState battlePlayer = new PlayerState
-			{
-				Hp = cp.CurrentHp,
-				MaxHp = cp.MaxHp,
-				Block = cp.Block,
-				Energy = cp.Energy,
-				MaxEnergy = cp.MaxEnergy,
-				Stars = cp.Stars
-			};
-			// Player powers
-			if (cp.Powers != null)
-			{
-				foreach (CombatTrainingPowerSnapshot power in cp.Powers.Where(static p => p?.Id != null && p.Amount != 0))
-				{
-					battlePlayer.Powers.Add(new Power { Id = power.Id ?? "", Amount = power.Amount });
-				}
-			}
-			bs.Player = battlePlayer;
+			// battle.player 与顶层 player 共享同一份完整 build 视图，避免
+			// combat-only API 在不同 payload 分支里出现字段缺口。
+			bs.Player = BuildCombatPlayerState(runtimePlayer, combat);
 		}
 
 		// Hand
@@ -731,6 +782,19 @@ internal static class ProtoStateBuilder
 			});
 		}
 
+		if (es.IsFinished && es.Options.Count == 0)
+		{
+			es.Options.Add(new STS2AI.Bridge.EventOption
+			{
+				Index = 0,
+				Text = "proceed",
+				Label = "proceed",
+				IsLocked = false,
+				IsChosen = false,
+				IsProceed = true
+			});
+		}
+
 		return es;
 	}
 
@@ -740,8 +804,8 @@ internal static class ProtoStateBuilder
 
 	private static RestSiteState BuildRestSiteState()
 	{
-		RestSiteState rs = new RestSiteState { CanProceed = true };
 		IReadOnlyList<RestSiteOption> options = RunManager.Instance.RestSiteSynchronizer.GetLocalOptions();
+		RestSiteState rs = new RestSiteState { CanProceed = options.Count == 0 };
 		int i = 0;
 		foreach (RestSiteOption opt in options)
 		{
@@ -867,18 +931,31 @@ internal static class ProtoStateBuilder
 		CombatTrainingCardSelectionSnapshot? selection = bridge.BuildCardSelectionSnapshot(null);
 		List<CombatTrainingSelectableCardSnapshot> selectableCards = selection?.SelectableCards ?? new();
 		List<CombatTrainingSelectableCardSnapshot> selectedCards = selection?.SelectedCards ?? new();
+		int maxSelect = selection?.MaxSelect ?? 0;
+		int selectedCount = selectedCards.Count;
+		bool canConfirm = selection?.CanConfirm ?? false;
+		bool selectionQuotaReached = maxSelect > 0 && selectedCount >= maxSelect;
+		bool previewShowing = selectionQuotaReached && canConfirm;
+		bool canCancel = selection?.Cancelable ?? false;
+		if (!canCancel && previewShowing && selectedCount > 0)
+		{
+			canCancel = true;
+		}
+		List<CombatTrainingSelectableCardSnapshot> visibleCards = previewShowing
+			? selectableCards.Concat(selectedCards).OrderBy(static card => card.ChoiceIndex).ToList()
+			: selectableCards;
 		CardSelectState cs = new CardSelectState
 		{
-			ScreenType = selection?.Mode ?? "card_select",
-			SelectedCount = selectedCards.Count,
-			CanConfirm = selection?.CanConfirm ?? false,
-			CanCancel = selection?.Cancelable ?? false
+			ScreenType = NormalizeCardSelectScreenType(selection?.Mode),
+			SelectedCount = selectedCount,
+			CanConfirm = canConfirm,
+			CanCancel = canCancel
 		};
-		foreach (CombatTrainingSelectableCardSnapshot card in selectableCards)
+		foreach (CombatTrainingSelectableCardSnapshot card in visibleCards)
 		{
 			cs.Cards.Add(new HandCard
 			{
-				Index = cs.Cards.Count,
+				Index = card.ChoiceIndex,
 				Id = card.Id ?? "",
 				Name = card.Id ?? "",
 				Cost = card.EnergyCost,
@@ -891,7 +968,7 @@ internal static class ProtoStateBuilder
 		{
 			cs.SelectedCards.Add(new HandCard
 			{
-				Index = cs.SelectedCards.Count,
+				Index = card.ChoiceIndex,
 				Id = card.Id ?? "",
 				Name = card.Id ?? "",
 				Cost = card.EnergyCost,
@@ -901,6 +978,21 @@ internal static class ProtoStateBuilder
 			});
 		}
 		return cs;
+	}
+
+	private static string NormalizeCardSelectScreenType(string? mode)
+	{
+		return mode switch
+		{
+			"DeckUpgrade" => "UpgradeSelect",
+			"DeckTransform" => "Transform",
+			"DeckGeneric" => "DeckGeneric",
+			"SimpleGrid" => "SimpleSelect",
+			"RewardSimpleGrid" => "SimpleSelect",
+			"ChooseCard" => "SimpleSelect",
+			null or "" => "card_select",
+			_ => mode
+		};
 	}
 
 	// ================================================================

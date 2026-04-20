@@ -142,6 +142,14 @@ class TestPlayer:
         assert len(d["player"]["potions"]) == 1
         assert d["player"]["max_potions"] == 3
 
+    def test_player_powers(self):
+        p = _make_player(
+            powers=[{"id": "STRENGTH_POWER", "amount": 2}],
+        )
+        gs = _make_game_state("map", player=p)
+        d = game_state_to_dict(gs)
+        assert d["player"]["powers"] == [{"id": "STRENGTH_POWER", "amount": 2}]
+
 
 # ======================================================================
 # Tests — Battle (combat)
@@ -227,6 +235,24 @@ class TestBattle:
         assert len(bp["powers"]) == 1
         assert bp["powers"][0]["id"] == "STRENGTH_POWER"
         assert bp["powers"][0]["amount"] == 2
+
+    def test_combat_top_level_player_uses_merged_battle_player(self):
+        gs = self._make_combat_state()
+        gs.player.CopyFrom(
+            _make_player(
+                deck=[{"index": 0, "id": "Strike", "name": "Strike", "cost": 1,
+                       "card_type": "ATTACK", "rarity": "basic", "is_upgraded": False, "upgrades": 0}],
+                relics=[{"index": 0, "id": "BurningBlood", "name": "BurningBlood"}],
+                potions=[{"index": 0, "id": "FirePotion", "name": "FirePotion"}],
+            )
+        )
+        d = game_state_to_dict(gs)
+        player = d["player"]
+        assert player["deck"][0]["id"] == "Strike"
+        assert player["relics"][0]["id"] == "BurningBlood"
+        assert player["potions"][0]["id"] == "FirePotion"
+        assert player["powers"] == [{"id": "STRENGTH_POWER", "amount": 2}]
+        assert player is d["battle"]["player"]
 
     def test_hand_cards(self):
         gs = self._make_combat_state()

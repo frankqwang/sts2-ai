@@ -25,14 +25,17 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 
 		public bool IsHandSelection { get; }
 
+		public bool AutoCompleteOnSelect { get; }
+
 		public TaskCompletionSource<IEnumerable<CardModel>> CompletionSource { get; } = new TaskCompletionSource<IEnumerable<CardModel>>();
 
-		public PendingCardSelection(IReadOnlyList<CardModel> options, CardSelectorPrefs prefs, string mode, bool isHandSelection)
+		public PendingCardSelection(IReadOnlyList<CardModel> options, CardSelectorPrefs prefs, string mode, bool isHandSelection, bool autoCompleteOnSelect = false)
 		{
 			Options = options;
 			Prefs = prefs;
 			Mode = mode;
 			IsHandSelection = isHandSelection;
+			AutoCompleteOnSelect = autoCompleteOnSelect;
 		}
 
 		public IReadOnlyList<CardModel> SelectedCards => _selectedCards;
@@ -41,7 +44,12 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 
 		public IEnumerable<(int ChoiceIndex, CardModel Card)> SelectableChoices => Options.Select((CardModel card, int index) => (ChoiceIndex: index, Card: card)).Where((valueTuple) => !_selectedCards.Contains(valueTuple.Card));
 
-		public bool CanConfirm => _selectedCards.Count >= Prefs.MinSelect && _selectedCards.Count <= Prefs.MaxSelect;
+		// Keep simulator-backed combat selection aligned with the visible-game
+		// confirm button: choose-one prompts should not expose confirm until a
+		// card has actually been selected.
+		public bool CanConfirm => _selectedCards.Count >= Math.Max(1, Prefs.MinSelect) && _selectedCards.Count <= Prefs.MaxSelect;
+
+		public bool ShouldAutoComplete => AutoCompleteOnSelect || (!IsHandSelection && !Prefs.RequireManualConfirmation && _selectedCards.Count >= Prefs.MaxSelect);
 
 		public void Select(CardModel card)
 		{
@@ -88,7 +96,12 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 
 	public void RegisterCardSelection(IEnumerable<CardModel> options, CardSelectorPrefs prefs, string mode)
 	{
-		_pendingSelection = new PendingCardSelection(options.ToList(), prefs, mode, isHandSelection: false);
+		_pendingSelection = new PendingCardSelection(
+			options.ToList(),
+			prefs,
+			mode,
+			isHandSelection: false,
+			autoCompleteOnSelect: ShouldAutoCompleteOnSelect(mode, prefs));
 	}
 
 	public CombatTrainingHandSelectionSnapshot? BuildHandSelectionSnapshot(CombatState? combatState)
@@ -109,8 +122,8 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 			MaxSelect = selection.Prefs.MaxSelect,
 			CanConfirm = selection.CanConfirm,
 			Cancelable = selection.Prefs.Cancelable,
-			SelectableCards = selection.SelectableCards.Select((CardModel card) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState)).ToList(),
-			SelectedCards = selection.SelectedCards.Select((CardModel card) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState)).ToList()
+			SelectableCards = selection.SelectableCards.Select((CardModel card, int index) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState, explicitHandIndex: index)).ToList(),
+			SelectedCards = selection.SelectedCards.Select((CardModel card, int index) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState, explicitHandIndex: index)).ToList()
 		};
 	}
 
@@ -145,7 +158,7 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 			error = "Hand card selection is not active.";
 			return false;
 		}
-		CardModel? card = selection.SelectableCards.FirstOrDefault((CardModel candidate) => CombatTrainingChoiceSnapshotBuilder.GetHandIndex(candidate) == handIndex);
+		CardModel? card = handIndex >= 0 ? selection.SelectableCards.Skip(handIndex).FirstOrDefault() : null;
 		if (card == null)
 		{
 			error = $"Hand index {handIndex} is not selectable in the current hand selection prompt.";
@@ -171,6 +184,7 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 			return false;
 		}
 		selection.Select(choice.Card);
+		CompleteSelectionIfReady(selection);
 		return true;
 	}
 
@@ -191,6 +205,19 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 		selection.CompletionSource.TrySetResult(selection.SelectedCards.ToList());
 		_pendingSelection = null;
 		return true;
+	}
+
+	private void CompleteSelectionIfReady(PendingCardSelection selection)
+	{
+		if (!selection.ShouldAutoComplete)
+		{
+			return;
+		}
+		selection.CompletionSource.TrySetResult(selection.SelectedCards.ToList());
+		if (ReferenceEquals(_pendingSelection, selection))
+		{
+			_pendingSelection = null;
+		}
 	}
 
 	public bool TryCancelSelection(out string error)
@@ -214,7 +241,12 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 
 	public async Task<IEnumerable<CardModel>> GetSelectedCards(IEnumerable<CardModel> options, int minSelect, int maxSelect)
 	{
-		PendingCardSelection selection = _pendingSelection ?? new PendingCardSelection(options.ToList(), new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, minSelect, maxSelect), "SimpleSelect", isHandSelection: false);
+		PendingCardSelection selection = _pendingSelection ?? new PendingCardSelection(
+			options.ToList(),
+			new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, minSelect, maxSelect),
+			"ChooseCard",
+			isHandSelection: false,
+			autoCompleteOnSelect: true);
 		_pendingSelection ??= selection;
 		try
 		{
@@ -232,5 +264,10 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 	public CardModel? GetSelectedCardReward(IReadOnlyList<CardCreationResult> options, IReadOnlyList<CardRewardAlternative> alternatives)
 	{
 		return options.FirstOrDefault()?.Card;
+	}
+
+	private static bool ShouldAutoCompleteOnSelect(string? mode, CardSelectorPrefs prefs)
+	{
+		return string.Equals(mode, "ChooseCard", StringComparison.Ordinal) && prefs.MaxSelect == 1;
 	}
 }

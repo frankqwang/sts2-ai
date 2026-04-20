@@ -12,6 +12,7 @@ from game_bridge.sim.launcher import (
     start_headless_sim,
     stop_process,
 )
+from game_bridge.sim.consistency import build_consistency_report, inspect_state_consistency, static_consistency_report
 from game_bridge.sim.process import SimProcessHandle
 
 
@@ -44,6 +45,9 @@ __all__ = [
     "DEFAULT_HOST_PATH",
     "DEFAULT_REPO_ROOT",
     "SimProcessHandle",
+    "build_consistency_report",
+    "inspect_state_consistency",
+    "static_consistency_report",
     "ensure_host_binary_is_fresh",
     "launch_headless_sim",
     "start_headless_sim",

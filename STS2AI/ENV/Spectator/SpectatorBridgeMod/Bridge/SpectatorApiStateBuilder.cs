@@ -32,6 +32,7 @@ public static class SpectatorApiStateBuilder
 			coverage_tier = "visible",
 			is_pure_simulator = false,
 			run = ConvertRun(dict),
+			player = stateType == "game_over" ? null : ConvertPlayerState(GetDict(dict, "player")),
 			legal_actions = dictLegalActions.Select(ConvertAction).ToList()
 		};
 

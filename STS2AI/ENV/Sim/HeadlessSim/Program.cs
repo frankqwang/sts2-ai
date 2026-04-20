@@ -27,7 +27,7 @@ using MegaCrit.Sts2.Core.Training;
 
 namespace HeadlessSim;
 
-internal static class Program
+internal static partial class Program
 {
 	private sealed class RequestStateCache
 	{
@@ -555,43 +555,8 @@ internal static class Program
 		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
 	{
 		FullRunSimulationActionRequest action = BinaryProtocol.ParseActionRequest(requestBytes);
-		FullRunSimulationStepResult result;
-		using (FullRunSimulationDiagnostics.Measure("request.step.runtime_ms"))
-		{
-			result = await service.StepAsync(action);
-		}
-		FullRunSimulationStateSnapshot snapshot = result.State ?? GetSnapshot(service, cache);
-		// Auto-advance through non-decision states (same logic as binary)
-		int autoAdvanceCount = 0;
-		const int maxAutoAdvance = 50;
-		while (!IsDecisionState(snapshot) && autoAdvanceCount < maxAutoAdvance)
-		{
-			autoAdvanceCount++;
-			FullRunSimulationDiagnostics.Increment("step.auto_advance");
-			if (snapshot.LegalActions.Count == 0)
-			{
-				var waitResult = await service.StepAsync(new FullRunSimulationActionRequest { Action = "wait" });
-				snapshot = waitResult.State ?? GetSnapshot(service, cache);
-			}
-			else
-			{
-				var la = snapshot.LegalActions[0];
-				var autoAction = new FullRunSimulationActionRequest
-				{
-					Action = la.Action ?? "",
-					Index = la.Index,
-					Col = la.Col,
-					Row = la.Row,
-					Slot = la.Slot,
-					TargetId = la.TargetId,
-					Target = la.Target,
-					CardIndex = la.CardIndex,
-					Value = la.Label,
-				};
-				var autoResult = await service.StepAsync(autoAction);
-				snapshot = autoResult.State ?? GetSnapshot(service, cache);
-			}
-		}
+		(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot) =
+			await ExecuteFullRunStepAsync(service, cache, action, autoAdvanceToDecisionState: true);
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
 			return ProtoStateBuilder.BuildStepResponse(result, snapshot);
@@ -616,27 +581,35 @@ internal static class Program
 
 	private static byte[] ProcessProtoExportState(FullRunTrainingEnvService service, byte[] requestBytes)
 	{
-		// TODO: ExportState not yet implemented on FullRunTrainingEnvService
-		throw new NotImplementedException("ExportState not yet available in proto mode");
+		(string path, string? stateId) = BinaryProtocol.ParseExportStateRequest(requestBytes);
+		string writtenPath = service.ExportStateToFile(path, stateId);
+		return ProtoStateBuilder.BuildExportStateResponse(writtenPath, service.StateCacheCount);
 	}
 
 	private static async Task<byte[]> ProcessProtoLoadStateAsync(
 		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
 	{
 		string stateId = BinaryProtocol.ParseStateIdRequest(BinaryOpcode.LoadState, requestBytes);
+		FullRunSimulationStateSnapshot snapshot;
 		using (FullRunSimulationDiagnostics.Measure("request.load_state.runtime_ms"))
 		{
-			service.LoadState(stateId);
+			snapshot = await service.LoadState(stateId);
 		}
-		FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
+		cache.Snapshot = snapshot;
 		return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.LoadState, snapshot);
 	}
 
 	private static async Task<byte[]> ProcessProtoImportStateAsync(
 		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
 	{
-		// TODO: ImportState not yet implemented on FullRunTrainingEnvService
-		throw new NotImplementedException("ImportState not yet available in proto mode");
+		string path = BinaryProtocol.ParsePathRequest(BinaryOpcode.ImportState, requestBytes);
+		FullRunSimulationStateSnapshot snapshot;
+		using (FullRunSimulationDiagnostics.Measure("request.import_state.runtime_ms"))
+		{
+			snapshot = await service.LoadStateFromFile(path);
+		}
+		cache.Snapshot = snapshot;
+		return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.ImportState, snapshot);
 	}
 
 	private static byte[] ProcessProtoDeleteState(FullRunTrainingEnvService service, byte[] requestBytes)
@@ -801,17 +774,7 @@ internal static class Program
 			throw new InvalidOperationException("CombatStepRequest.action is missing.");
 		}
 		string raw = (action.Action ?? string.Empty).Trim().ToLowerInvariant();
-		CombatTrainingActionType type = raw switch
-		{
-			"play_card" => CombatTrainingActionType.PlayCard,
-			"end_turn" => CombatTrainingActionType.EndTurn,
-			"select_hand_card" => CombatTrainingActionType.SelectHandCard,
-			"select_card_option" => CombatTrainingActionType.SelectCardChoice,
-			"confirm_selection" => CombatTrainingActionType.ConfirmSelection,
-			"cancel_selection" => CombatTrainingActionType.CancelSelection,
-			"use_potion" => CombatTrainingActionType.UsePotion,
-			_ => throw new InvalidOperationException($"Unsupported combat action type: {raw}")
-		};
+		CombatTrainingActionType type = ParseCombatActionType(raw);
 		CombatTrainingActionRequest req = new CombatTrainingActionRequest { Type = type };
 		int chosenIdx = action.CardIndex >= 0 ? action.CardIndex : action.Index;
 		if (chosenIdx >= 0)
@@ -920,24 +883,6 @@ internal static class Program
 		}
 	}
 
-	// State types that require agent decision (return to Python)
-	private static readonly HashSet<string> DecisionStateTypes = new(StringComparer.OrdinalIgnoreCase)
-	{
-		"map", "combat_rewards", "card_reward", "card_select", "relic_select",
-		"shop", "rest_site", "campfire", "event", "treasure",
-		"monster", "elite", "boss", "combat", "hand_select",
-		"game_over", "menu",
-	};
-
-	private static bool IsDecisionState(FullRunSimulationStateSnapshot snapshot)
-	{
-		if (snapshot.IsTerminal || snapshot.StateType == "game_over")
-			return true;
-		if (snapshot.LegalActions.Count == 0)
-			return false; // pending/wait state — not a decision
-		return DecisionStateTypes.Contains(snapshot.StateType);
-	}
-
 	private static async Task<byte[]> ProcessBinaryStepAsync(
 		FullRunTrainingEnvService service,
 		BinarySessionState session,
@@ -945,49 +890,8 @@ internal static class Program
 		RequestStateCache cache)
 	{
 		FullRunSimulationActionRequest action = BinaryProtocol.ParseActionRequest(requestBytes);
-		FullRunSimulationStepResult result;
-		using (FullRunSimulationDiagnostics.Measure("request.step.runtime_ms"))
-		{
-			result = await service.StepAsync(action);
-		}
-
-		FullRunSimulationStateSnapshot snapshot = result.State ?? GetSnapshot(service, cache);
-
-		// Auto-advance through non-decision states (combat_rewards, card_select, etc.)
-		// This reduces Python↔C# round-trips by ~96% (only return on real decisions).
-		int autoAdvanceCount = 0;
-		const int maxAutoAdvance = 50; // safety cap
-		while (!IsDecisionState(snapshot) && autoAdvanceCount < maxAutoAdvance)
-		{
-			autoAdvanceCount++;
-			FullRunSimulationDiagnostics.Increment("step.auto_advance");
-
-			if (snapshot.LegalActions.Count == 0)
-			{
-				// No legal actions — send wait
-				var waitResult = await service.StepAsync(new FullRunSimulationActionRequest { Action = "wait" });
-				snapshot = waitResult.State ?? GetSnapshot(service, cache);
-			}
-			else
-			{
-				// Auto-pick first legal action (convert LegalAction → ActionRequest)
-				var la = snapshot.LegalActions[0];
-				var autoAction = new FullRunSimulationActionRequest
-				{
-					Action = la.Action ?? "",
-					Index = la.Index,
-					Col = la.Col,
-					Row = la.Row,
-					Slot = la.Slot,
-					TargetId = la.TargetId,
-					Target = la.Target,
-					CardIndex = la.CardIndex,
-					Value = la.Label,
-				};
-				var autoResult = await service.StepAsync(autoAction);
-				snapshot = autoResult.State ?? GetSnapshot(service, cache);
-			}
-		}
+		(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot) =
+			await ExecuteFullRunStepAsync(service, cache, action, autoAdvanceToDecisionState: true);
 
 		using (FullRunSimulationDiagnostics.Measure("request.binary_encode_ms"))
 		{
@@ -1490,37 +1394,9 @@ internal static class Program
 			var (actionIdx, logits) = _ortPolicy.SelectAction(snapshot, session, _ortRng);
 
 			// Execute the selected action
-			var action = snapshot.LegalActions[actionIdx];
-			var stepRequest = new FullRunSimulationActionRequest
-			{
-				Action = action.Action,
-				Index = action.Index,
-				CardIndex = action.CardIndex,
-				Slot = action.Slot,
-				Col = action.Col,
-				Row = action.Row,
-			};
-			if (action.TargetId.HasValue)
-				stepRequest.TargetId = action.TargetId;
-
-			FullRunSimulationStepResult result;
-			using (FullRunSimulationDiagnostics.Measure("request.step_local_policy.runtime_ms"))
-			{
-				result = await service.StepAsync(stepRequest);
-			}
-
-			// Auto-advance non-decision states
-			const int maxAutoAdvance = 30;
-			for (int i = 0; i < maxAutoAdvance && result.Accepted && result.State != null; i++)
-			{
-				if (result.State.IsTerminal || result.State.StateType == "game_over")
-					break;
-				if (result.State.LegalActions.Count > 0)
-					break;
-				result = await service.StepAsync(new FullRunSimulationActionRequest { Action = "wait" });
-			}
-
-			var nextSnapshot = result.State ?? GetSnapshot(service, cache);
+			FullRunSimulationActionRequest stepRequest = BuildFullRunActionRequest(snapshot.LegalActions[actionIdx]);
+			(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot nextSnapshot) =
+				await ExecuteFullRunStepAsync(service, cache, stepRequest, autoAdvanceToDecisionState: false);
 			FullRunSimulationDiagnostics.Increment("request.step_local_policy.calls");
 
 			// Return as standard step response (Python decodes normally)
@@ -1925,7 +1801,12 @@ internal static class Program
 			}
 		}
 
-		return (raw ?? string.Empty).Trim().ToLowerInvariant() switch
+		return ParseCombatActionType((raw ?? string.Empty).Trim().ToLowerInvariant());
+	}
+
+	private static CombatTrainingActionType ParseCombatActionType(string raw)
+	{
+		return raw switch
 		{
 			"play_card" => CombatTrainingActionType.PlayCard,
 			"end_turn" => CombatTrainingActionType.EndTurn,

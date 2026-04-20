@@ -147,6 +147,7 @@
     <Protobuf Include="..\..\proto\game_state.proto" GrpcServices="None" />
     <Compile Include="ProtoStateBuilder.cs" Link="HeadlessSim\ProtoStateBuilder.cs" />
     <Compile Include="Program.cs" Link="HeadlessSim\Program.cs" />
+    <Compile Include="ProgramStepSupport.cs" Link="HeadlessSim\ProgramStepSupport.cs" />
     <Compile Include="..\GodotSharpStub\src\**\*.cs" Link="GodotSharpStub\%(RecursiveDir)%(Filename)%(Extension)" />
 
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />

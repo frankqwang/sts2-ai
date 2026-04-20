@@ -33,82 +33,20 @@ Python 侧不再自己推断,彻底消除 schema drift。
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from game_bridge.generated import game_state_pb2 as pb
+from game_bridge.session.build_spec import BuildSpecPy, CardSpecPy, RelicSpecPy
 from game_bridge.transport import (
     PipeConnection,
     PipeConnectionConfig,
     ProtoCodec,
     SimulatorApiError,
 )
+from game_bridge.session.state_semantics import is_failure_outcome, is_victory_outcome, normalize_run_outcome
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Build spec - proto typed dataclass 替代散的 dict
-# ---------------------------------------------------------------------------
-
-@dataclass
-class CardSpecPy:
-    id: str
-    upgrade_level: int = 0
-
-
-@dataclass
-class RelicSpecPy:
-    id: str
-
-
-@dataclass
-class BuildSpecPy:
-    deck: list[CardSpecPy] = field(default_factory=list)
-    relics: list[RelicSpecPy] = field(default_factory=list)
-    current_hp: int = 0
-    max_hp: int = 0
-    max_energy: int = 3
-    gold: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "BuildSpecPy":
-        """从旧 dict 格式 (combat_cotrainer 传入的 build dict) 转 proto-typed。"""
-        deck = []
-        for c in d.get("deck", []) or []:
-            if isinstance(c, dict):
-                deck.append(CardSpecPy(
-                    id=str(c.get("id", "") or "").upper(),
-                    upgrade_level=int(c.get("upgrade_level", 0) or 0),
-                ))
-            elif isinstance(c, str):
-                deck.append(CardSpecPy(id=c.upper()))
-        relics = []
-        for r in d.get("relics", []) or []:
-            if isinstance(r, dict):
-                relics.append(RelicSpecPy(id=str(r.get("id", "") or "").upper()))
-            elif isinstance(r, str):
-                relics.append(RelicSpecPy(id=r.upper()))
-        return cls(
-            deck=deck,
-            relics=relics,
-            current_hp=int(d.get("current_hp", d.get("max_hp", 0)) or 0),
-            max_hp=int(d.get("max_hp", 0) or 0),
-            max_energy=int(d.get("max_energy", 3) or 3),
-            gold=int(d.get("gold", 0) or 0),
-        )
-
-    def to_sim_dict(self) -> dict[str, Any]:
-        """转成 ProtoCodec `combat_reset` 要的 dict 格式。"""
-        return {
-            "deck": [{"id": c.id, "upgrade_level": c.upgrade_level} for c in self.deck],
-            "relics": [{"id": r.id} for r in self.relics],
-            "current_hp": self.current_hp,
-            "max_hp": self.max_hp,
-            "max_energy": self.max_energy,
-            "gold": self.gold,
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -289,9 +227,12 @@ class CombatSession:
         state = self.current_state
         done = bool(state.get("terminal"))
         reward = 0.0
-        outcome = str(state.get("run_outcome") or "").strip().lower()
+        outcome = normalize_run_outcome(state.get("run_outcome"))
         if done:
-            reward = 1.0 if outcome in {"victory", "win"} else -1.0
+            if is_victory_outcome(outcome):
+                reward = 1.0
+            elif is_failure_outcome(outcome):
+                reward = -1.0
         info = {
             "accepted": True,
             "state_type": state.get("state_type"),
@@ -347,7 +288,7 @@ class CombatSession:
 
     @property
     def run_outcome(self) -> str:
-        return str(self._current_raw.get("run_outcome") or "")
+        return str(normalize_run_outcome(self._current_raw.get("run_outcome")) or "")
 
     @property
     def legal_actions(self) -> list[dict[str, Any]]:

@@ -51,6 +51,7 @@ from game_bridge.sim.constants import (
     STATUS_PROTOCOL_ERROR,
     STATUS_SIMULATOR_ERROR,
 )
+from game_bridge.session.state_semantics import is_failure_outcome, is_victory_outcome
 
 
 # ---------------------------------------------------------------------------
@@ -119,10 +120,10 @@ def _parse_proto_state(data: bytes) -> dict[str, Any]:
 def _terminal_reward(state: dict[str, Any]) -> float:
     if not bool(state.get("terminal")):
         return 0.0
-    outcome = str(state.get("run_outcome") or "").strip().lower()
-    if outcome in {"victory", "win"}:
+    outcome = state.get("run_outcome")
+    if is_victory_outcome(outcome):
         return 1.0
-    if outcome in {"defeat", "loss", "death"}:
+    if is_failure_outcome(outcome):
         return -1.0
     return 0.0
 

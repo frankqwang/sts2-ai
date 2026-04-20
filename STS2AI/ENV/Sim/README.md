@@ -1,6 +1,8 @@
-# HeadlessSim 边界
+# HeadlessSim 运行、状态对齐与等待语义说明
 
-`STS2AI/ENV/Sim` 是 AI 训练使用的独立 full-run simulator 工作区。
+`STS2AI/ENV/Sim` 是 AI 训练使用的独立 full-run simulator 工作区。这里的重点不是 UI，而是把“可推进的游戏逻辑”“可序列化的 GameState”“可稳定等待的 step 语义”收在一条确定链路里。
+
+## 目录边界
 
 当前目录：
 - `HeadlessSim/`：主 simulator 项目、运行入口、simulation/training/test support 代码
@@ -31,3 +33,391 @@ stub 约束：
 - stub 可以提供类型壳、静态工厂、平凡属性
 - stub 不能承载真实选择、UI 或 gameplay 语义
 - 新依赖优先通过收紧编译输入和新增 `SrcCompat` 处理，不优先扩张 stub
+
+## 请求执行链路
+
+当前 sim 的主链路是：
+
+1. `Program.Main`
+   - 负责 standalone bootstrap、stdio/pipe server 启动。
+   - 启动时会把线程池最小线程数提升到 `STS2_MIN_THREADS`，默认 `32`，目的是减少多进程并发时 `Task.Yield()` continuation 被饿死的延迟。
+2. `FullRunTrainingEnvService`
+   - 对外暴露 `ResetAsync / GetState / StepAsync / BatchStepAsync / SaveState / LoadState`。
+   - 通过单个 `SemaphoreSlim` 把所有操作串行化，保证共享 runtime 仍表现成“单实例、确定性 simulator”。
+3. `FullRunSimulatorRuntimeFacade`
+   - 真正执行 reset、step、save/load、wait/settle。
+   - 这里定义了“什么时候一个 action 已经推进到可交给上游”的判定。
+4. `FullRunSimulationStateBuilder`
+   - 从 `RunState + bridge snapshot + cached combat state` 组装 full-run 快照。
+   - full-run `state_type`、`legal_actions`、`map_options`、`run_outcome` 等，都是这里决定。
+5. `ProtoStateBuilder` / `FullRunApiStateBuilder`
+   - 把快照转成 protobuf `GameState` 或 HTTP/API state。
+   - 这一步只应该做“序列化”和“轻量格式映射”，不应该重新发明游戏语义。
+
+可以把它理解成：
+
+`RunState/CombatState -> FullRunSimulatorRuntimeFacade -> FullRunSimulationStateBuilder -> snapshot -> ProtoStateBuilder/API builder -> Python`
+
+## action mask / legal_actions 在哪边做
+
+结论先说：
+
+- 权威 legal actions 在 sim 的 C# 侧生成，不在 Python 侧生成。
+- Python 当前只是消费 `legal_actions` 列表，没有再做一层“兜底动作合法性推导”。
+
+分两类看：
+
+### 1. full-run 模式
+
+`FullRunSimulationStateBuilder.Build(...)` 会调用 `BuildLegalActions(...)`，按 screen 类型分发：
+
+- `map`：生成 `choose_map_node`
+- `event`：生成 `choose_event_option` / `proceed`
+- `combat_rewards`：生成 `claim_reward` / `proceed`
+- `card_reward`：生成 `select_card_reward` / `skip_card_reward`
+- `card_select`：生成 `select_card` / `confirm_selection` / `cancel_selection`
+- `relic_select`：生成 `select_relic` / `skip_relic_selection`
+- `rest_site`：生成 `choose_rest_option`
+- `shop`：生成 `shop_purchase` / `proceed`
+- `treasure`：生成 `claim_treasure_relic` / `proceed`
+- `monster/elite/boss/hand_select`：进入 `BuildCombatLegalActions(...)`
+
+也就是说，full-run `snapshot.LegalActions` 本身就是 sim 权威动作集，后面的 proto/api 只是转发。
+
+### 2. combat-only proto 模式
+
+`ProtoStateBuilder.PopulateCombatLegalActions(...)` 直接从 `CombatTrainingStateSnapshot` 生成 protobuf `GameState.legal_actions`：
+
+- 先处理 `hand_select`
+- 再处理 `card_select`
+- 最后处理 play phase 的 `play_card` / `end_turn`
+
+这里使用的权威字段都是 sim snapshot 已经计算好的：
+
+- `RequiresTarget`
+- `ValidTargetIds`
+- `CanPlay`
+- `CanConfirm`
+- `Cancelable`
+- `CanEndTurn`
+
+### 3. Python 侧当前职责
+
+Python bridge 当前只把 C# 产出的 `legal_actions` 反序列化成 dict，并在 parity / smoke 中消费它们。当前没有发现 Python 侧再生成 action mask 的实现，所以如果 legal actions 不对，优先修 sim builder，而不是在 Python 里追加兼容逻辑。
+
+## GameState 字段覆盖情况
+
+### 已覆盖的主干字段
+
+full-run proto `GameState` 当前已经覆盖这些主干能力：
+
+- 顶层：
+  - `state_type`
+  - `terminal`
+  - `run_outcome`
+  - `run.act`
+  - `run.floor`
+- player：
+  - `hp/max_hp/block/gold`
+  - combat 中的 `energy/max_energy`
+  - `draw/discard/exhaust/play pile count`
+  - `open_potion_slots/max_potions`
+  - `deck/relics/potions`
+  - combat-only proto 的顶层 `player` 与 `battle.player` 现在都会带完整
+    `deck/relics/potions/powers`，不会再出现“build 已应用但 API 看起来为空”的假象
+- map：
+  - `next_options`
+  - `nodes`
+  - `boss`
+- event：
+  - `event_id`
+  - `in_dialogue`
+  - `is_finished`
+  - `options`
+- rest site：
+  - `options`
+  - `can_proceed`
+- shop：
+  - `items`
+  - `cost/can_afford/is_stocked/on_sale`
+  - `can_proceed`
+- rewards / card reward / card select / relic select / treasure：
+  - 均有对应 screen payload
+- battle：
+  - `round_number`
+  - `turn_side`
+  - `is_play_phase`
+  - `can_end_turn`
+  - `player`
+  - `hand`
+  - `enemies`
+  - `intents`
+  - `powers`
+  - `draw/discard/exhaust pile card ids`
+
+### 已确认的不一致/缺口
+
+下面这些是当前已经确认、需要注意的点：
+
+1. `rest_site.can_proceed`
+   - 之前 proto builder 写死成 `true`，会和 API builder、真实语义不一致。
+   - 现在已修正成 `options.Count == 0`。
+
+2. `encounter_id`
+   - full-run proto 当前固定写空字符串。
+   - 这意味着如果上游拿 `encounter_id` 做 screen 识别或 catalog 键，会丢信息。
+
+3. combat-only proto 的 `state_type`
+   - `DetectCombatStateType(...)` 当前只能区分 `hand_select / card_select / monster`。
+   - 对 combat-only 接口来说，`elite` 和 `boss` 没有单独编码出来。
+
+4. combat-only proto 历史上曾漏掉 `player.deck/relics`
+   - 2026-04-21 之前，combat-only `GameState.player` / `battle.player`
+     只带了战斗动态字段，没有把 build 中的 `deck/relics/potions`
+     一起暴露给上游。
+   - 这会让上游误判成“sim 丢 build”，典型表现就是：
+     - `player.relics = []`
+     - `player.deck = []`
+     - 但同一状态下 `hand + draw_pile_cards` 数量又是对的
+   - 现已修正到：
+     - `ProtoStateBuilder.BuildCombatGameStatePayload(...)`
+     - `proto_state_converter.game_state_to_dict(...)`
+   - 当前 bridge 读取 combat state 时，顶层 `player` 已同步成 battle 合并后的权威 player 视图。
+
+4. 一部分 `name` 字段仍是模型 id，不是本地化标题
+   - deck/relic/potion/shop/card reward/treasure/relic select 等多个 proto payload 里，`Name` 仍然直接取 `Id.Entry`。
+   - 这对训练可能够用，但对“和真实游戏 UI GameState 一致”来说是有损的。
+
+5. combat hand 的 `rarity`
+   - 当前直接写空字符串。
+
+6. pile card ids 被截断
+   - `ProtoStateBuilder` 里 `MaxPileCards = 50`，draw/discard/exhaust 只保留前 50 张 id。
+   - 这对大多数训练足够，但不是完整状态镜像。
+
+7. proto 和 API builder 的信息密度不一致
+   - `FullRunApiStateBuilder` 明显更偏“UI/调试态”，文本、描述、部分字段更丰富。
+   - `ProtoStateBuilder` 更偏训练/紧凑态，字段更少、更结构化。
+   - 如果对比“原游戏 gamestate”追求屏幕级一致性，应优先和 API state 或真实 singleplayer state 对拍，而不是只看 proto。
+
+## 当前 wait / settle 语义
+
+### 上游真正 wait 的边界
+
+上游不是简单地“step 完就返回”，而是要等到 sim 进入“可继续决策”的状态。这个判定主要在 `FullRunSimulatorRuntimeFacade`。
+
+`FullRunTrainingEnvService` 只是最外层串行化边界：
+
+- 所有请求先抢 `_operationGate`
+- 默认超时 `30s`
+- 超时意味着上一个请求可能卡死，不代表游戏逻辑本身一定错
+
+真正的 settle 逻辑在 3 个 wait 函数里：
+
+### 1. `WaitForStateChangeAsync(previousState)`
+
+适用场景：
+
+- reset
+- map/event/rest/shop/treasure 等非战斗 step
+- proceed 后等待 screen 切换
+
+“wait 到什么时候算 OK”：
+
+- 新 state 相比旧 signature 已变化
+- 并且 `IsReadySnapshot(...)` 返回 true
+
+`IsReadySnapshot(...)` 当前规则：
+
+- `menu`、`run_bootstrap`、`!IsRunActive` 不算 ready
+- `combat_start_pending` 不算 ready
+- `map` 必须 `MapOptions.Count > 0`
+- `event` 必须有 `LegalActions`，或者 event 已 finished
+- 其他状态默认 ready
+
+这意味着：
+
+- 不是“状态对象存在就返回”
+- 而是“状态已经变成一个可消费 screen”
+
+### 2. `WaitForCombatFollowupAsync(previousState)`
+
+适用场景：
+
+- 打出一张牌
+- 用 potion
+- end turn
+- 战斗中各种会触发后续 action queue 的动作
+
+“wait 到什么时候算 OK”：
+
+- 新 state 相比旧 signature 已变化
+- 并且满足下列之一：
+  - 已经离开 combat
+  - combat state 已经 actionable
+
+`IsActionableCombatSnapshot(...)` 当前规则：
+
+- 不是 combat state，则直接算 actionable
+- `snapshot.LegalActions.Count > 0`，算 actionable
+- 否则看 cached combat state：
+  - `IsHandSelectionActive` 或 `IsCardSelectionActive`，算 actionable
+  - 或者 `IsPlayPhase && !PlayerActionsDisabled && !IsActionQueueRunning`
+
+这套规则的核心目的是：
+
+- 敌方行动中、action queue 还在跑时继续等待
+- 一旦出现可选牌、可选目标、可结束回合，就尽快返回给上游
+
+### 3. `WaitExplicitlyAsync(previousState)`
+
+适用场景：
+
+- 一些“明确知道需要等一个后续流转”的动作
+- 常见于 post-combat reward、terminal reward、部分显式 proceed 流程
+
+“wait 到什么时候算 OK”：
+
+- terminal
+- 或 signature 变化后进入：
+  - `map`
+  - `combat_post_end_pending`
+  - 有 legal actions 的 screen
+- 或 signature 没变，但当前已经有 legal actions，且不在 post-combat pending
+
+也就是说它比 `WaitForStateChangeAsync` 更偏“显式等到可以继续操作”，而不是纯 screen 切换。
+
+## 异步处理现在怎么做
+
+当前异步处理不是“后台随便跑，前台随便读”，而是明确分层：
+
+### 1. service 层串行化
+
+`FullRunTrainingEnvService` 用单 gate 串行所有调用，避免共享 runtime 被并发写坏。
+
+### 2. runtime 层区分同步推进和需要 frame/scheduler 的推进
+
+`WaitForStateChangeAsync / WaitForCombatFollowupAsync / WaitExplicitlyAsync` 都分两段：
+
+- Phase 1：
+  - 先 `Clock.YieldAsync()`
+  - 再看 `ActionExecutor.FinishedExecutingActions()`
+  - 在 pure simulator 模式下，尽量不付出 1 frame 额外开销
+- Phase 2：
+  - 只在有真实 frame deadline、且不是 pure sim 时才做循环等待
+  - 否则直接跳过，避免空转
+
+### 3. pure sim 的死锁规避
+
+pure sim 下如果 `ActionExecutor` 正在等一个“本该由 UI 触发的选择”：
+
+- 直接 `await FinishedExecutingActions()` 可能永远等不到
+- 当前实现会优先观察当前 state
+- 如果已经出现 `card_select / hand_select / actionable combat state`，就提前返回，让上游做选择
+
+### 4. 特殊过渡的额外推进
+
+当前 runtime 还额外处理这些边缘态：
+
+- `combat_start_pending`
+- `combat_post_end_pending`
+- pure combat continuation
+- blocked executor
+- terminal rewards transition
+- force map view
+
+这也是为什么 sim 现在比“简单 while 轮询 state”稳定得多。
+
+## 性能现状与优化空间
+
+### 已经做掉的优化
+
+当前代码里已经有几处实用优化：
+
+- ThreadPool 最小线程数提升，减少 `Task.Yield()` continuation 抖动
+- `FullRunTrainingEnvService` 单 gate 串行，减少重入带来的不可控成本
+- `BuildCombatLegalActions(...)` 在敌方回合、action queue 运行且没有 selector 时直接 fast return，不强行构建完整 combat snapshot
+- `FullRunApiStateBuilder.Signature(...)` 走轻量签名，不再每次 wait 都构建完整 HTTP state
+- `BatchStepAsync(...)` 支持一批动作顺序执行，减少跨进程/跨协议往返
+- Phase 2 wait 在 pure sim/no engine 下直接跳过，避免无意义空转
+
+### 还存在的热点
+
+当前比较明显的热点主要有：
+
+1. 每次 state/step 响应都完整重建 protobuf `GameState`
+   - `BuildProtoStatePayload(...)` 每次都重新组 deck/relic/potion/map/battle payload
+
+2. 文本和静态元数据重复组装
+   - shop/reward/card/relic 等大量字段本质上是静态模型信息，但每次 state poll 都重建
+
+3. map 全量节点重复序列化
+   - `BuildFullMapNodes(...)` 每次 map state 都会重扫整张图
+
+4. legal actions 和 payload 重复计算
+   - 上游高频 `get_state` 时，很多字段其实没变
+
+5. pile card ids 传输体积偏大
+   - 即使已经截断到 50，combat 高频轮询时依旧有明显 payload 成本
+
+### 建议的下一步优化顺序
+
+建议优先级如下：
+
+1. 先做 parity，再做缓存
+   - 在和真实游戏逐步骤对拍没冻结之前，不建议过早引入 aggressive cache，容易把状态不一致藏起来。
+
+2. 引入“按 signature/version 的响应缓存”
+   - 当 `state signature` 不变时，复用最近一次 `ProtoStateBuilder` 结果。
+
+3. 把静态模型文本从动态 state 里剥离
+   - 例如 card/relic/potion 名称、描述、稀有度，可走 catalog 或独立缓存。
+
+4. map payload 做增量或按 screen 缓存
+   - map nodes/boss 坐标在一场 run 里变化极少，没有必要每次 poll 全量重建。
+
+5. 区分训练态和调试态 payload
+   - 训练默认用紧凑字段，debug/inspection 再请求 rich payload。
+
+## 一致性现状
+
+截至 2026-04-20，当前结论是：
+
+- sim 的基础连接、reset、state 读取、step/wait 主链是通的
+- 但“sim 和真实观战/单机逻辑逐步骤完全一致”还没有在这台机器上跑出最终结论
+- 原因不是发现了大面积行为分叉，而是本机缺少可连的真实 singleplayer/spectate 端，无法完成 live parity
+
+因此当前对“一致性”的准确说法应该是：
+
+- 静态结构与本地 smoke 已经过
+- 已经补了 step-by-step parity harness
+- 但 live parity 仍需要真实端在线后继续对拍
+
+建议对拍顺序：
+
+1. 同 seed reset
+2. 比 `state_type`
+3. 比 `legal_actions`
+4. 比各 screen payload
+5. 最后比 `run_outcome`
+
+优先 screen：
+
+- `map`
+- `event`
+- `rest_site`
+- `shop`
+- `combat_rewards`
+- `card_reward`
+- `card_select`
+- `combat`
+
+## 维护原则
+
+后续继续整理这块代码时，建议遵守下面几条：
+
+- legal actions 的权威口径只保留在 sim builder，不要在 Python 再补一套
+- wait/settle 的 ready 判定集中在 facade，不要散落到调用方
+- proto 和 API builder 都只做“序列化映射”，不要偷偷追加业务状态机
+- parity 没冻结前，优化优先做可观测性和 diagnostics，不优先做复杂缓存
+- 凡是发现“字段有值但语义不对”的问题，优先修 builder，而不是在下游做容错

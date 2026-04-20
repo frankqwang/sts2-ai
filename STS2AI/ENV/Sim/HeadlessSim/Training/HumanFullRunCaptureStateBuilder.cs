@@ -213,6 +213,19 @@ internal static class HumanFullRunCaptureStateBuilder
 			["is_chosen"] = option.WasChosen,
 			["is_proceed"] = option.IsProceed
 		}).ToList();
+		if (eventModel.IsFinished && options.Count == 0)
+		{
+			options.Add(new Dictionary<string, object?>
+			{
+				["index"] = 0,
+				["id"] = "proceed",
+				["title"] = "proceed",
+				["description"] = "",
+				["is_locked"] = false,
+				["is_chosen"] = false,
+				["is_proceed"] = true
+			});
+		}
 
 		return new Dictionary<string, object?>
 		{

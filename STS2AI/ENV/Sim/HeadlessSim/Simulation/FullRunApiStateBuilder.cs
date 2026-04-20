@@ -56,6 +56,7 @@ public static class FullRunApiStateBuilder
 				room_type = snapshot.RoomType,
 				room_model_id = snapshot.RoomModelId
 			},
+			player = snapshot.StateType == "game_over" || player == null ? null : GetPlayerState(),
 			legal_actions = snapshot.LegalActions.Select(ToApiAction).ToList()
 		};
 
@@ -283,6 +284,17 @@ public static class FullRunApiStateBuilder
 			is_chosen = option.WasChosen,
 			is_proceed = option.IsProceed
 		}).ToList();
+		if (state.is_finished && state.options.Count == 0)
+		{
+			state.options.Add(new FullRunApiEventOption
+			{
+				index = 0,
+				text = "proceed",
+				is_locked = false,
+				is_chosen = false,
+				is_proceed = true
+			});
+		}
 		state.in_dialogue = !state.is_finished && state.options.Count == 0;
 		return state;
 	}
@@ -428,21 +440,57 @@ public static class FullRunApiStateBuilder
 
 	private static FullRunApiCardSelectState BuildCardSelectState(CombatTrainingCardSelectionSnapshot? selection, FullRunApiPlayerState playerState)
 	{
+		int minSelect = selection?.MinSelect ?? 0;
+		int maxSelect = selection?.MaxSelect ?? 0;
+		int selectedCount = selection?.SelectedCards.Count ?? 0;
+		bool canConfirm = selection?.CanConfirm ?? false;
+		bool selectionQuotaReached = maxSelect > 0 && selectedCount >= maxSelect;
+		bool previewShowing = selectionQuotaReached && canConfirm;
+		bool canCancel = selection?.Cancelable ?? false;
+		if (!canCancel && previewShowing && selectedCount > 0)
+		{
+			canCancel = true;
+		}
+
+		List<FullRunApiCardOption> selectedCards = selection?.SelectedCards.Select(ToApiSelectableCardOption).ToList()
+			?? new List<FullRunApiCardOption>();
+		List<FullRunApiCardOption> cards = selection == null
+			? new List<FullRunApiCardOption>()
+			: selection.SelectableCards
+				.Select(ToApiSelectableCardOption)
+				.Concat(selectedCards)
+				.OrderBy(static card => card.index)
+				.ToList();
+
 		return new FullRunApiCardSelectState
 		{
 			player = playerState,
-			screen_type = selection?.Mode,
+			screen_type = NormalizeCardSelectScreenType(selection?.Mode),
 			prompt = selection?.PromptText,
-			min_select = selection?.MinSelect ?? 0,
-			max_select = selection?.MaxSelect ?? 0,
-			selected_count = selection?.SelectedCards.Count ?? 0,
-			remaining_picks = Math.Max(0, (selection?.MaxSelect ?? 0) - (selection?.SelectedCards.Count ?? 0)),
-			can_confirm = selection?.CanConfirm ?? false,
-			can_cancel = selection?.Cancelable ?? false,
-			preview_showing = false,
+			min_select = minSelect,
+			max_select = maxSelect,
+			selected_count = selectedCount,
+			remaining_picks = Math.Max(0, maxSelect - selectedCount),
+			can_confirm = canConfirm,
+			can_cancel = canCancel,
+			preview_showing = previewShowing,
 			requires_manual_confirmation = true,
-			cards = selection?.SelectableCards.Select(ToApiSelectableCardOption).ToList() ?? new List<FullRunApiCardOption>(),
-			selected_cards = selection?.SelectedCards.Select(ToApiSelectableCardOption).ToList() ?? new List<FullRunApiCardOption>()
+			cards = cards,
+			selected_cards = selectedCards
+		};
+	}
+
+	private static string? NormalizeCardSelectScreenType(string? mode)
+	{
+		return mode switch
+		{
+			"DeckUpgrade" => "UpgradeSelect",
+			"DeckTransform" => "Transform",
+			"DeckGeneric" => "DeckGeneric",
+			"SimpleGrid" => "SimpleSelect",
+			"RewardSimpleGrid" => "SimpleSelect",
+			"ChooseCard" => "SimpleSelect",
+			_ => mode
 		};
 	}
 
