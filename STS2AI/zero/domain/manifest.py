@@ -12,6 +12,12 @@ class TrainingSummary:
     delta_loss: float = 0.0
     uncertainty_loss: float = 0.0
     total_loss: float = 0.0
+    grad_norm: float = 0.0
+    learning_rate: float = 0.0
+    teacher_sample_ratio: float = 0.0
+    skipped_non_finite_steps: int = 0
+    zero_step: bool = False
+    pool_usage: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

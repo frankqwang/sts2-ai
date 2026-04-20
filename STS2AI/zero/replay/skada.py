@@ -16,6 +16,7 @@ V0 目标很克制：
 
 import json
 import sqlite3
+import time
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
@@ -23,7 +24,8 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from ..adapters.game_bridge import GameBridgeCombatRuntime
-from ..domain import EvalSummary, FightLabel, TeacherLabel, TeacherRequest
+from ..buffers import ArtifactStore
+from ..domain import EvalSummary, FightLabel, TeacherLabel, TeacherRequest, assess_transition_progress
 
 
 @dataclass(slots=True)
@@ -533,7 +535,7 @@ class AggregateCardUsageTeacher:
             for card_id, stats in case.card_usage.items()
         }
 
-    def label_request(self, request: TeacherRequest, runtime_factory=None) -> TeacherLabel:
+    def label_request(self, request: TeacherRequest, runtime_factory=None, seed: str | None = None) -> TeacherLabel:
         sample = request.sample
         if not sample.legal_actions:
             return TeacherLabel(teacher_value=float(self._case.won))
@@ -582,17 +584,17 @@ class MultiCaseAggregateTeacher:
             raise ValueError("MultiCaseAggregateTeacher 需要至少一个 case。")
         self._teachers = teacher_map
 
-    def label_request(self, request: TeacherRequest, runtime_factory=None) -> TeacherLabel:
+    def label_request(self, request: TeacherRequest, runtime_factory=None, seed: str | None = None) -> TeacherLabel:
         case_id = str(request.sample.state.context.metadata.get("skada_case_id") or "")
         teacher = self._teachers.get(case_id)
         if teacher is None:
             fallback_teacher = next(iter(self._teachers.values()))
-            label = fallback_teacher.label_request(request, runtime_factory=runtime_factory)
+            label = fallback_teacher.label_request(request, runtime_factory=runtime_factory, seed=seed)
             metadata = dict(label.metadata)
             metadata["teacher_fallback_case_id"] = case_id
             label.metadata = metadata
             return label
-        return teacher.label_request(request, runtime_factory=runtime_factory)
+        return teacher.label_request(request, runtime_factory=runtime_factory, seed=seed)
 
 
 class SkadaReplayRuntime:
@@ -647,69 +649,226 @@ class SkadaReplayRuntime:
 class FixedSkadaCaseEvaluator:
     """Evaluate a policy on one or more fixed skada-derived combat roots."""
 
-    def __init__(self, cases: list[SkadaCombatCase], *, port: int = 15527, auto_launch: bool = True, connect_timeout_s: float = 30.0):
+    def __init__(
+        self,
+        cases: list[SkadaCombatCase],
+        *,
+        port: int = 15527,
+        auto_launch: bool = True,
+        connect_timeout_s: float = 30.0,
+        episodes_per_case: int = 1,
+        artifact_store: ArtifactStore | None = None,
+    ):
         self._cases = cases
         self._port = port
         self._auto_launch = auto_launch
         self._connect_timeout_s = connect_timeout_s
+        self._episodes_per_case = max(1, int(episodes_per_case))
+        self._artifact_store = artifact_store
+        self._trace_name = "eval_trace"
+
+    def set_trace_context(self, *, iteration: int, phase: str) -> None:
+        self._trace_name = f"iter_{iteration:04d}_{phase}"
 
     def evaluate(self, policy) -> list[EvalSummary]:
         summaries: list[EvalSummary] = []
-        for case in self._cases:
-            runtime = GameBridgeCombatRuntime(
-                port=self._port,
-                auto_launch=self._auto_launch,
-                connect_timeout_s=self._connect_timeout_s,
-                character_id=case.character_id,
-                encounter_id=case.encounter_id,
-                seed=case.seed,
-                build=case.build.to_build_dict(),
-            )
-            try:
-                reset_hook = getattr(policy, "reset_episode", None)
-                if callable(reset_hook):
-                    reset_hook()
-                state = runtime.reset()
-                for _ in range(200):
-                    if state.terminal or not state.legal_actions:
-                        break
-                    action_index = policy.select_action(state)
-                    next_state = runtime.step(action_index)
-                    observe_hook = getattr(policy, "observe_transition", None)
-                    if callable(observe_hook):
-                        observe_hook(state, action_index, next_state)
-                    state = next_state
-                    if state.terminal:
-                        break
-                label = _build_eval_label(state)
-                summaries.append(
-                    EvalSummary(
-                        cohort_name=f"skada_floor_{case.floor}_{case.encounter_id.lower()}",
-                        fight_win_rate=label.fight_win,
-                        enemy_hp_fraction_dealt=label.enemy_hp_fraction_dealt,
-                        self_hp_fraction_remaining=label.self_hp_fraction_remaining,
-                        metadata={
+        for case_index, case in enumerate(self._cases):
+            episode_labels: list[FightLabel] = []
+            episode_metrics: list[dict[str, float | int | bool]] = []
+            agreement_hits = 0.0
+            overlap_hits = 0.0
+            agreement_steps = 0
+            teacher = AggregateCardUsageTeacher(case)
+            for episode_index in range(self._episodes_per_case):
+                fight_started_at = time.perf_counter()
+                runtime = GameBridgeCombatRuntime(
+                    port=self._port,
+                    auto_launch=self._auto_launch,
+                    connect_timeout_s=self._connect_timeout_s,
+                    character_id=case.character_id,
+                    encounter_id=case.encounter_id,
+                    seed=case.seed,
+                    build=case.build.to_build_dict(),
+                )
+                try:
+                    reset_hook = getattr(policy, "reset_episode", None)
+                    if callable(reset_hook):
+                        reset_hook()
+                    state = runtime.reset()
+                    step_count = 0
+                    progress_steps = 0
+                    no_progress_steps = 0
+                    max_no_progress_streak = 0
+                    current_no_progress_streak = 0
+                    for _ in range(200):
+                        if state.terminal or not state.legal_actions:
+                            break
+                        action_index = policy.select_action(state)
+                        teacher_label = _teacher_label_for_actions(teacher, state.legal_actions)
+                        if teacher_label.best_action_index >= 0:
+                            agreement_steps += 1
+                            agreement_hits += 1.0 if action_index == teacher_label.best_action_index else 0.0
+                            overlap_hits += 1.0 if action_index in teacher_label.topk_indices else 0.0
+                        chosen_action = state.legal_actions[action_index] if state.legal_actions else None
+                        next_state = runtime.step(action_index)
+                        progress = assess_transition_progress(state, next_state)
+                        if progress.made_progress:
+                            progress_steps += 1
+                            current_no_progress_streak = 0
+                        else:
+                            no_progress_steps += 1
+                            current_no_progress_streak += 1
+                            max_no_progress_streak = max(max_no_progress_streak, current_no_progress_streak)
+                        self._append_eval_trace_row(
+                            {
+                                "event": "step",
+                                "case_index": case_index,
+                                "episode_index": episode_index,
+                                "case_id": case.case_id,
+                                "run_id": case.run_id,
+                                "floor": case.floor,
+                                "encounter_id": case.encounter_id,
+                                "step_idx": step_count,
+                                "player_hp": state.player.hp,
+                                "player_block": state.player.block,
+                                "player_energy": state.player.energy,
+                                "enemy_hp": [enemy.hp for enemy in state.enemies],
+                                "enemy_block": [enemy.block for enemy in state.enemies],
+                                "action_index": action_index,
+                                "action_id": chosen_action.action_id if chosen_action is not None else "",
+                                "card_id": chosen_action.card_id if chosen_action is not None else "",
+                                "target_id": chosen_action.target_id if chosen_action is not None else "",
+                                "teacher_best_action_index": teacher_label.best_action_index,
+                                "teacher_topk_indices": teacher_label.topk_indices,
+                                "made_progress": bool(progress.made_progress),
+                                "enemy_hp_delta": float(progress.enemy_hp_delta),
+                                "enemy_count_delta": int(progress.enemy_count_delta),
+                            }
+                        )
+                        observe_hook = getattr(policy, "observe_transition", None)
+                        if callable(observe_hook):
+                            observe_hook(state, action_index, next_state)
+                        state = next_state
+                        step_count += 1
+                        if state.terminal:
+                            break
+                    truncated = bool(not state.terminal and step_count >= 200)
+                    episode_labels.append(_build_eval_label(state, truncated=truncated))
+                    episode_metrics.append(
+                        {
+                            "truncated": truncated,
+                            "progress_steps": progress_steps,
+                            "no_progress_steps": no_progress_steps,
+                            "no_progress_ratio": (no_progress_steps / max(step_count, 1)),
+                            "max_no_progress_streak": max_no_progress_streak,
+                        }
+                    )
+                    self._append_eval_trace_row(
+                        {
+                            "event": "fight_end",
+                            "case_index": case_index,
+                            "episode_index": episode_index,
+                            "case_id": case.case_id,
                             "run_id": case.run_id,
                             "floor": case.floor,
                             "encounter_id": case.encounter_id,
-                        },
+                            "duration_s": round(time.perf_counter() - fight_started_at, 6),
+                            "steps": step_count,
+                            "outcome": "timeout" if truncated else str(state.run_outcome),
+                            "terminal": bool(state.terminal),
+                            "truncated": truncated,
+                            "final_player_hp": state.player.hp,
+                            "final_enemy_hp": [enemy.hp for enemy in state.enemies],
+                            "progress_steps": progress_steps,
+                            "no_progress_steps": no_progress_steps,
+                            "no_progress_ratio": round(no_progress_steps / max(step_count, 1), 6),
+                            "max_no_progress_streak": max_no_progress_streak,
+                        }
                     )
+                finally:
+                    runtime.close()
+
+            aggregate = _aggregate_eval_labels(episode_labels)
+            timeout_count = sum(1 for item in episode_metrics if bool(item.get("truncated", False)))
+            avg_no_progress_ratio = (
+                sum(float(item.get("no_progress_ratio", 0.0)) for item in episode_metrics) / max(len(episode_metrics), 1)
+            )
+            avg_max_no_progress_streak = (
+                sum(float(item.get("max_no_progress_streak", 0.0)) for item in episode_metrics) / max(len(episode_metrics), 1)
+            )
+            summaries.append(
+                EvalSummary(
+                    cohort_name=f"skada_floor_{case.floor}_{case.encounter_id.lower()}",
+                    fight_win_rate=aggregate.fight_win,
+                    enemy_hp_fraction_dealt=aggregate.enemy_hp_fraction_dealt,
+                    self_hp_fraction_remaining=aggregate.self_hp_fraction_remaining,
+                    teacher_agreement_at_1=(agreement_hits / agreement_steps) if agreement_steps else 0.0,
+                    teacher_topk_overlap=(overlap_hits / agreement_steps) if agreement_steps else 0.0,
+                    metadata={
+                        "run_id": case.run_id,
+                        "floor": case.floor,
+                        "encounter_id": case.encounter_id,
+                        "encounter_type": case.encounter_type,
+                        "eval_bucket": str(case.encounter_type or "default").lower(),
+                        "num_episodes": self._episodes_per_case,
+                        "timeout_rate": timeout_count / max(len(episode_metrics), 1),
+                        "avg_no_progress_ratio": avg_no_progress_ratio,
+                        "avg_max_no_progress_streak": avg_max_no_progress_streak,
+                    },
                 )
-            finally:
-                runtime.close()
+            )
         return summaries
 
+    def _append_eval_trace_row(self, row: dict[str, object]) -> None:
+        if self._artifact_store is None:
+            return
+        self._artifact_store.append_eval_trace_row(self._trace_name, row)
 
-def _build_eval_label(state) -> FightLabel:
+
+def _build_eval_label(state, *, truncated: bool = False) -> FightLabel:
     enemy_max_hp = sum(enemy.max_hp for enemy in state.enemies) or 1.0
     enemy_remaining = sum(max(0.0, enemy.hp) for enemy in state.enemies)
     enemy_hp_fraction_dealt = max(0.0, min(1.0, 1.0 - enemy_remaining / enemy_max_hp))
     self_hp_fraction_remaining = 0.0
     if state.player.max_hp > 0:
         self_hp_fraction_remaining = max(0.0, min(1.0, state.player.hp / state.player.max_hp))
-    fight_win = 1.0 if str(state.run_outcome).lower() in {"victory", "win"} else 0.0
+    if truncated:
+        self_hp_fraction_remaining = 0.0
+    fight_win = 1.0 if (not truncated and str(state.run_outcome).lower() in {"victory", "win"}) else 0.0
     return FightLabel(
         fight_win=fight_win,
         enemy_hp_fraction_dealt=enemy_hp_fraction_dealt,
         self_hp_fraction_remaining=self_hp_fraction_remaining,
+    )
+
+
+def _aggregate_eval_labels(labels: list[FightLabel]) -> FightLabel:
+    if not labels:
+        return FightLabel(fight_win=0.0, enemy_hp_fraction_dealt=0.0, self_hp_fraction_remaining=0.0)
+    denom = float(len(labels))
+    return FightLabel(
+        fight_win=sum(label.fight_win for label in labels) / denom,
+        enemy_hp_fraction_dealt=sum(label.enemy_hp_fraction_dealt for label in labels) / denom,
+        self_hp_fraction_remaining=sum(label.self_hp_fraction_remaining for label in labels) / denom,
+    )
+
+
+def _teacher_label_for_actions(teacher: AggregateCardUsageTeacher, legal_actions) -> TeacherLabel:
+    if not legal_actions:
+        return TeacherLabel(best_action_index=-1)
+    scores = []
+    for action in legal_actions:
+        score = teacher._score_table.get(action.card_id.upper(), 0.05)
+        if action.action_type == "end_turn":
+            score = 0.01
+        scores.append(float(score))
+    total = sum(scores) or 1.0
+    policy = [score / total for score in scores]
+    best_action_index = max(range(len(scores)), key=lambda idx: scores[idx])
+    return TeacherLabel(
+        policy=policy,
+        topk_indices=sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[: min(3, len(scores))],
+        best_action_index=best_action_index,
+        ranking_margin=0.0,
+        teacher_value=0.0,
     )

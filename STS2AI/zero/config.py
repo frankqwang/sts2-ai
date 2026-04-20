@@ -20,6 +20,20 @@ class RuntimeDefaults:
 
 
 @dataclass(slots=True)
+class CollectConfig:
+    """Collector 行为配置。
+
+    `episodes_per_iteration` 只控制每轮收集多少局，和评估阶段的
+    `episodes_per_cohort` 分开，避免两者共用一个字段产生歧义。
+    """
+
+    episodes_per_iteration: int = 32
+    max_steps_per_episode: int = 200
+    epsilon_greedy: float = 0.0
+    temperature: float = 0.0
+
+
+@dataclass(slots=True)
 class EncoderConfig:
     hidden_dim: int = 256
     action_dim: int = 192
@@ -69,6 +83,11 @@ class TrainConfig:
     weight_decay: float = 1e-4
     steps_per_iteration: int = 200
     grad_clip_norm: float = 1.0
+    warmup_steps: int = 32
+    min_lr_ratio: float = 0.10
+    device: str = "auto"
+    amp_enabled: bool = True
+    prefetch_batches: int = 2
 
 
 @dataclass(slots=True)
@@ -76,17 +95,32 @@ class EvalConfig:
     episodes_per_cohort: int = 32
     promote_min_win_rate_gain: float = 0.01
     allow_hp_remaining_drop: float = 0.02
+    promote_min_teacher_agreement_gain: float = 0.0
+    promote_min_enemy_hp_gain: float = 0.0
+    significance_z: float = 0.0
+    max_timeout_rate: float = 0.0
+    max_no_progress_ratio: float = 0.95
+    max_no_progress_streak: float = 128.0
+
+
+@dataclass(slots=True)
+class CheckpointConfig:
+    keep_rejected_checkpoints: bool = False
+    active_pointer_name: str = "active.json"
 
 
 @dataclass(slots=True)
 class ZeroConfig:
+    seed: int = 20260420
     paths: ZeroPaths = field(default_factory=ZeroPaths)
+    collect: CollectConfig = field(default_factory=CollectConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     losses: LossWeights = field(default_factory=LossWeights)
     pools: PoolConfig = field(default_factory=PoolConfig)
     teacher: TeacherConfig = field(default_factory=TeacherConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     evaluation: EvalConfig = field(default_factory=EvalConfig)
+    checkpoints: CheckpointConfig = field(default_factory=CheckpointConfig)
 
 
 ZERO_RUNTIME_DEFAULTS = RuntimeDefaults()

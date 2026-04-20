@@ -28,6 +28,7 @@ class EncodedSample:
     behavior_action_index: int
     teacher_policy: list[float] | None
     teacher_best_action_index: int
+    teacher_ranking_margin: float
     fight_targets: list[float]
     delta_targets: list[float]
     uncertainty_target: float
@@ -56,6 +57,7 @@ class FeatureExtractor:
             behavior_action_index=sample.behavior_action_index,
             teacher_policy=sample.teacher_label.policy if sample.teacher_label else None,
             teacher_best_action_index=sample.teacher_label.best_action_index if sample.teacher_label else -1,
+            teacher_ranking_margin=float(sample.teacher_label.ranking_margin if sample.teacher_label else 0.0),
             fight_targets=[
                 sample.fight_label.fight_win,
                 sample.fight_label.enemy_hp_fraction_dealt,
@@ -64,6 +66,31 @@ class FeatureExtractor:
             delta_targets=self._encode_delta(sample.delta),
             uncertainty_target=float(sample.metadata.get("uncertainty_target", 0.0) or 0.0),
             sample_weight=max(0.1, sample.fight_label.fight_score + 0.5),
+        )
+
+    def encode_inference(self, state: BattleState, history: list[HistoryStep], legal_actions: list[LegalAction]) -> EncodedSample:
+        return EncodedSample(
+            player_numeric=self._encode_player(state),
+            static_numeric=self._encode_static_numeric(state),
+            static_ids=self._encode_static_ids(state),
+            enemy_numeric=self._encode_enemies(state),
+            enemy_ids=[self._hash_id(enemy.enemy_id) for enemy in state.enemies],
+            enemy_intent_ids=[self._hash_id(enemy.intent_id) for enemy in state.enemies],
+            hand_numeric=self._encode_hand(state),
+            hand_card_ids=[self._hash_id(card.card_id) for card in state.hand],
+            pile_numeric=self._encode_piles(state),
+            history_numeric=self._encode_history(history),
+            action_numeric=self._encode_actions(legal_actions),
+            action_type_ids=[self._hash_id(action.action_type) for action in legal_actions],
+            action_card_ids=[self._hash_id(action.card_id or action.potion_id or action.special_id) for action in legal_actions],
+            behavior_action_index=0,
+            teacher_policy=None,
+            teacher_best_action_index=-1,
+            teacher_ranking_margin=0.0,
+            fight_targets=[0.0, 0.0, 0.0],
+            delta_targets=[0.0] * (3 + self._config.max_enemies * 2 + 3),
+            uncertainty_target=0.0,
+            sample_weight=1.0,
         )
 
     def _encode_player(self, state: BattleState) -> list[float]:

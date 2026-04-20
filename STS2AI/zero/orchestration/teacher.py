@@ -3,6 +3,7 @@ from __future__ import annotations
 """Teacher queue construction and label materialization."""
 
 import heapq
+from collections import defaultdict, deque
 
 from ..config import TeacherConfig
 from ..domain import TeacherRequest, TrainingSample
@@ -14,7 +15,7 @@ class TeacherQueueBuilder:
         self._config = config
 
     def select(self, samples: list[TrainingSample]) -> list[TeacherRequest]:
-        heap: list[tuple[float, int, TeacherRequest]] = []
+        bucketed: dict[str, list[tuple[float, int, TeacherRequest]]] = defaultdict(list)
         for index, sample in enumerate(samples):
             score, tags = self._priority(sample)
             if score <= 0:
@@ -25,12 +26,19 @@ class TeacherQueueBuilder:
                 priority=score,
                 reason_tags=tags,
             )
-            heapq.heappush(heap, (-score, index, request))
+            bucket = tags[0] if tags else sample.state.context.encounter_class or "default"
+            heapq.heappush(bucketed[bucket], (-score, index, request))
 
         result: list[TeacherRequest] = []
         limit = self._config.max_requests_per_iteration
-        while heap and len(result) < limit:
-            result.append(heapq.heappop(heap)[2])
+        bucket_keys = deque(sorted(bucketed.keys()))
+        while bucket_keys and len(result) < limit:
+            bucket = bucket_keys.popleft()
+            heap = bucketed[bucket]
+            if heap:
+                result.append(heapq.heappop(heap)[2])
+            if heap:
+                bucket_keys.append(bucket)
         return result
 
     def _priority(self, sample: TrainingSample) -> tuple[float, list[str]]:
@@ -45,8 +53,6 @@ class TeacherQueueBuilder:
             score += 1.0
             tags.append("near_lethal")
 
-        # Prefer the derived target used for supervision so queueing does not
-        # overfit to the online policy's own uncertainty head calibration.
         uncertainty = float(
             sample.metadata.get("uncertainty_target", sample.metadata.get("uncertainty", 0.0)) or 0.0
         )
@@ -68,13 +74,33 @@ class TeacherQueueBuilder:
 
 class TeacherQueueProcessor:
     def label(self, requests: list[TeacherRequest], teacher: TeacherOracle, runtime_factory=None) -> list[TrainingSample]:
+        if not requests:
+            return []
+
+        labels = None
+        batch_hook = getattr(teacher, "label_requests", None)
+        if callable(batch_hook):
+            labels = batch_hook(
+                requests,
+                runtime_factory=runtime_factory,
+            )
+        if labels is None:
+            labels = [
+                teacher.label_request(
+                    request,
+                    runtime_factory=runtime_factory,
+                    seed=str(request.sample.state.context.metadata.get("seed", "")),
+                )
+                for request in requests
+            ]
+
         labeled: list[TrainingSample] = []
-        for request in requests:
+        for request, label in zip(requests, labels, strict=False):
             labeled_sample = request.sample.clone_for_pool(
                 pool_name=request.sample.pool_name,
                 keep_score=max(request.sample.keep_score, request.priority),
                 metadata={"teacher_priority": request.priority},
-                teacher_label=teacher.label_request(request, runtime_factory=runtime_factory),
+                teacher_label=label,
             )
             labeled.append(labeled_sample)
         return labeled

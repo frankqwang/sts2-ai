@@ -14,6 +14,7 @@ from .battle import (
 )
 from .labels import FightLabel, TeacherLabel
 from .manifest import EvalSummary, IterationManifest, PromotionDecision, TrainingSummary
+from .progress import ProgressSignal, assess_transition_progress
 from .samples import RawTransition, TeacherRequest, TrainingSample
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "PileSummary",
     "PlayerState",
     "PromotionDecision",
+    "ProgressSignal",
     "RawTransition",
     "StaticContext",
     "TargetSummary",
@@ -36,4 +38,5 @@ __all__ = [
     "TrainingSample",
     "TrainingSummary",
     "TransitionDelta",
+    "assess_transition_progress",
 ]

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from zero.buffers import ArtifactStore
-from zero.config import EvalConfig, TrainConfig, ZeroConfig
+from zero.config import CollectConfig, EvalConfig, TrainConfig, ZeroConfig
 from zero.domain import BattleState, EnemyState, EvalSummary, HandCardState, LegalAction, PileSummary, PlayerState, StaticContext
 from zero.orchestration import LocalCheckpointStore, ZeroLoopRunner
 from zero.paths import ZeroPaths
@@ -48,7 +48,7 @@ class FakePolicy:
 
 
 class FakeTeacher:
-    def label_request(self, request, runtime_factory=None):
+    def label_request(self, request, runtime_factory=None, seed=None):
         from zero.domain import TeacherLabel
 
         return TeacherLabel(policy=[0.8, 0.2], topk_indices=[0], best_action_index=0, ranking_margin=0.6, teacher_value=0.9)
@@ -89,8 +89,9 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             root = Path(temp_dir)
             config = ZeroConfig(
                 paths=ZeroPaths(root=root),
+                collect=CollectConfig(episodes_per_iteration=2, max_steps_per_episode=2),
                 train=TrainConfig(batch_size=2, steps_per_iteration=1),
-                evaluation=EvalConfig(episodes_per_cohort=2),
+                evaluation=EvalConfig(episodes_per_cohort=2, promote_min_win_rate_gain=-1.0),
             )
             runner = ZeroLoopRunner(
                 config=config,
@@ -109,8 +110,15 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             self.assertEqual(manifest.collector_version, "FakePolicy")
             self.assertEqual(manifest.sample_counts["teacher_requests"], 4)
             self.assertTrue((config.paths.manifests / "iter_0001.json").exists())
+            self.assertEqual(runner.checkpoint_store.read_active_version(), "student_v0001")
 
-            manifest2 = runner.run_iteration(
+            resumed_runner = ZeroLoopRunner(
+                config=config,
+                artifact_store=ArtifactStore(config.paths),
+                checkpoint_store=LocalCheckpointStore(config.paths.checkpoints),
+                evaluator=FakeEvaluator(),
+            )
+            manifest2 = resumed_runner.run_iteration(
                 iteration=2,
                 runtime_factory=FakeRuntime,
                 student_policy=None,

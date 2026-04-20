@@ -16,11 +16,13 @@ from zero.domain import (
     TeacherRequest,
     TrainingSample,
     TransitionDelta,
+    assess_transition_progress,
 )
 from zero.replay.skada import (
     MultiCaseAggregateTeacher,
     SkadaBuild,
     SkadaCombatCase,
+    _build_eval_label,
     default_starter_build,
     _reconstruct_build_before_floor,
     _split_upgrade_suffix,
@@ -28,6 +30,43 @@ from zero.replay.skada import (
 
 
 class SkadaReplayTests(unittest.TestCase):
+    def test_assess_transition_progress_marks_enemy_hp_drop(self):
+        previous = BattleState(
+            player=PlayerState(hp=80.0, max_hp=80.0, block=0.0, energy=3.0),
+            enemies=[EnemyState(enemy_id="enemy", hp=20.0, max_hp=20.0, block=0.0, intent_id="attack")],
+            hand=[],
+            piles=PileSummary(),
+            context=StaticContext(character_id="IRONCLAD"),
+            legal_actions=[],
+        )
+        current = BattleState(
+            player=PlayerState(hp=78.0, max_hp=80.0, block=0.0, energy=2.0),
+            enemies=[EnemyState(enemy_id="enemy", hp=14.0, max_hp=20.0, block=0.0, intent_id="attack")],
+            hand=[],
+            piles=PileSummary(),
+            context=StaticContext(character_id="IRONCLAD"),
+            legal_actions=[],
+        )
+        progress = assess_transition_progress(previous, current)
+        self.assertTrue(progress.made_progress)
+        self.assertAlmostEqual(progress.enemy_hp_delta, 6.0)
+
+    def test_build_eval_label_timeout_counts_as_failure(self):
+        state = BattleState(
+            player=PlayerState(hp=60.0, max_hp=80.0, block=0.0, energy=3.0),
+            enemies=[EnemyState(enemy_id="enemy", hp=10.0, max_hp=40.0, block=0.0, intent_id="attack")],
+            hand=[],
+            piles=PileSummary(),
+            context=StaticContext(character_id="IRONCLAD"),
+            legal_actions=[],
+            terminal=False,
+            run_outcome="",
+        )
+        label = _build_eval_label(state, truncated=True)
+        self.assertEqual(label.fight_win, 0.0)
+        self.assertEqual(label.self_hp_fraction_remaining, 0.0)
+        self.assertGreater(label.enemy_hp_fraction_dealt, 0.0)
+
     def test_split_upgrade_suffix(self):
         self.assertEqual(_split_upgrade_suffix("SHRUG_IT_OFF++"), ("SHRUG_IT_OFF", 2))
         self.assertEqual(_split_upgrade_suffix("armaments"), ("ARMAMENTS", 0))

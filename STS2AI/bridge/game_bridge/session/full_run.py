@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+from game_bridge.session.base import PipeSnapshotMixin
 from game_bridge.session.singleplayer_api import (
     SingleplayerApiError,
     SingleplayerClient,
@@ -492,7 +493,7 @@ class FullRunClientLike(Protocol):
 
 
 @dataclass(slots=True)
-class PipeBackedFullRunClient:
+class PipeBackedFullRunClient(PipeSnapshotMixin):
     """Full-run client using named pipe IPC (~0.5ms/call vs ~24ms HTTP).
 
     Requires the Godot simulator to be running with pipe server enabled.
@@ -521,6 +522,7 @@ class PipeBackedFullRunClient:
     _connected: bool = field(default=False, init=False, repr=False)
     _last_step_info: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _owned_host_proc: Any | None = field(default=None, init=False, repr=False)
+    _pipe_snapshot_scope_name: str = field(default="Pipe full-run env", init=False, repr=False)
 
     _consecutive_failures: int = field(default=0, init=False, repr=False)
     _dead: bool = field(default=False, init=False, repr=False)
@@ -787,39 +789,6 @@ class PipeBackedFullRunClient:
         # In pure-sim mode, state is already settled after step/reset.
         # Just return current state.
         return self.get_state()
-
-    def save_state(self) -> str:
-        result = self._call("save_state")
-        state_id = result.get("state_id")
-        if isinstance(state_id, str) and state_id:
-            return state_id
-        raise SingleplayerApiError("Pipe save_state response did not include a state_id.")
-
-    def export_state(self, path: str, *, state_id: str | None = None) -> str:
-        params: dict[str, Any] = {"path": str(path)}
-        if state_id:
-            params["state_id"] = str(state_id)
-        result = self._call("export_state", params)
-        written_path = result.get("path")
-        if isinstance(written_path, str) and written_path:
-            return written_path
-        raise SingleplayerApiError("Pipe export_state response did not include a path.")
-
-    def import_state(self, path: str) -> dict[str, Any]:
-        result = self._call("import_state", {"path": str(path)})
-        if isinstance(result, dict):
-            return result
-        raise SingleplayerApiError("Pipe import_state response did not include a state payload.")
-
-    def load_state(self, state_id: str) -> dict[str, Any]:
-        result = self._call("load_state", {"state_id": str(state_id)})
-        if isinstance(result, dict):
-            return result
-        raise SingleplayerApiError("Pipe load_state response did not include a state payload.")
-
-    def delete_state(self, state_id: str) -> bool:
-        result = self._call("delete_state", {"state_id": str(state_id)})
-        return bool(result.get("deleted", False))
 
     def clear_state_cache(self) -> bool:
         result = self._call("delete_state", {"clear_all": True})

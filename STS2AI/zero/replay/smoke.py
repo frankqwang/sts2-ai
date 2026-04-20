@@ -20,9 +20,9 @@ if str(ZERO_PACKAGE_ROOT) not in sys.path:
 from zero import ZeroConfig, ZeroLoopRunner
 from zero.adapters.game_bridge import GameBridgeCombatRuntime
 from zero.buffers import ArtifactStore
-from zero.config import EvalConfig, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
+from zero.config import CollectConfig, EvalConfig, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
 from zero.orchestration.trainer import LocalCheckpointStore
-from zero.paths import ZeroPaths
+from zero.paths import REPO_ROOT, STS2AI_ROOT, ZeroPaths
 from zero.replay.skada import (
     AggregateCardUsageTeacher,
     FixedSkadaCaseEvaluator,
@@ -31,6 +31,8 @@ from zero.replay.skada import (
     load_skada_run_record,
     resolve_starting_build_from_runtime,
 )
+from zero.replay.naming import dated_artifact_dir_name
+from zero.replay.shared_sim import launch_shared_proto_sim
 
 
 class RandomPolicy:
@@ -51,7 +53,7 @@ class RandomPolicy:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--skada-root", type=Path, default=Path("STS2AI/data/skada/runs_full_detail"))
+    parser.add_argument("--skada-root", type=Path, default=STS2AI_ROOT / "data" / "skada" / "runs_full_detail")
     parser.add_argument("--game-version", type=str, default="v0.103.2")
     parser.add_argument("--ascension", type=int, default=0)
     parser.add_argument("--player-count", type=int, default=1)
@@ -59,8 +61,9 @@ def main() -> None:
     parser.add_argument("--combat-index", type=int, default=0)
     parser.add_argument("--port", type=int, default=ZERO_RUNTIME_DEFAULTS.default_port)
     parser.add_argument("--episodes", type=int, default=8)
+    parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--train-steps", type=int, default=40)
-    parser.add_argument("--output-root", type=Path, default=Path("STS2AI/Artifacts/zero/skada_replay_smoke_2026-04-20"))
+    parser.add_argument("--output-root", type=Path, default=STS2AI_ROOT / "Artifacts" / "zero")
     args = parser.parse_args()
 
     source_path, source_line = find_first_matching_run(
@@ -90,7 +93,11 @@ def main() -> None:
         combat_index=args.combat_index,
     )
 
-    output_root = args.output_root / f"run_{case.run_id}_floor_{case.floor}_{case.encounter_id.lower()}"
+    output_root = (
+        args.output_root
+        / dated_artifact_dir_name("skada-replay-smoke")
+        / f"run_{case.run_id}_floor_{case.floor}_{case.encounter_id.lower()}"
+    )
     output_root.mkdir(parents=True, exist_ok=True)
     (output_root / "selected_case.json").write_text(
         json.dumps(case.to_dict(), ensure_ascii=False, indent=2),
@@ -99,6 +106,7 @@ def main() -> None:
 
     config = ZeroConfig(
         paths=ZeroPaths(root=output_root),
+        collect=CollectConfig(episodes_per_iteration=args.episodes),
         teacher=TeacherConfig(
             top2_gap_threshold=1.0,
             uncertainty_threshold=0.0,
@@ -113,7 +121,7 @@ def main() -> None:
             grad_clip_norm=1.0,
         ),
         evaluation=EvalConfig(
-            episodes_per_cohort=args.episodes,
+            episodes_per_cohort=args.eval_episodes,
             promote_min_win_rate_gain=-1.0,
             allow_hp_remaining_drop=1.0,
         ),
@@ -121,37 +129,49 @@ def main() -> None:
 
     artifact_store = ArtifactStore(config.paths)
     checkpoint_store = LocalCheckpointStore(config.paths.checkpoints)
-    evaluator = FixedSkadaCaseEvaluator([case], port=args.port, auto_launch=True, connect_timeout_s=45.0)
-    runner = ZeroLoopRunner(
-        config=config,
-        artifact_store=artifact_store,
-        checkpoint_store=checkpoint_store,
-        evaluator=evaluator,
-    )
-    teacher = AggregateCardUsageTeacher(case)
-
-    def runtime_factory():
-        return GameBridgeCombatRuntime(
+    with launch_shared_proto_sim(port=args.port, connect_timeout_s=45.0) as sim_info:
+        evaluator = FixedSkadaCaseEvaluator(
+            [case],
             port=args.port,
-            auto_launch=True,
+            auto_launch=False,
             connect_timeout_s=45.0,
-            character_id=case.character_id,
-            encounter_id=case.encounter_id,
-            seed=case.seed,
-            build=case.build.to_build_dict(),
+            episodes_per_case=config.evaluation.episodes_per_cohort,
+            artifact_store=artifact_store,
         )
+        runner = ZeroLoopRunner(
+            config=config,
+            artifact_store=artifact_store,
+            checkpoint_store=checkpoint_store,
+            evaluator=evaluator,
+        )
+        teacher = AggregateCardUsageTeacher(case)
 
-    baseline = evaluator.evaluate(RandomPolicy())
-    manifest = runner.run_iteration(
-        iteration=1,
-        runtime_factory=runtime_factory,
-        student_policy=RandomPolicy(),
-        teacher_oracle=teacher,
-        baseline_eval=baseline,
-    )
+        def runtime_factory():
+            return GameBridgeCombatRuntime(
+                port=args.port,
+                auto_launch=False,
+                connect_timeout_s=45.0,
+                character_id=case.character_id,
+                encounter_id=case.encounter_id,
+                seed=case.seed,
+                build=case.build.to_build_dict(),
+            )
+
+        set_trace_context = getattr(evaluator, "set_trace_context", None)
+        if callable(set_trace_context):
+            set_trace_context(iteration=0, phase="baseline_eval")
+        baseline = evaluator.evaluate(RandomPolicy())
+        manifest = runner.run_iteration(
+            iteration=1,
+            runtime_factory=runtime_factory,
+            student_policy=RandomPolicy(),
+            teacher_oracle=teacher,
+            baseline_eval=baseline,
+        )
 
     metrics = {
         "selected_case": case.to_dict(),
+        "shared_sim": sim_info,
         "baseline": [asdict(summary) for summary in baseline],
         "manifest": manifest.to_dict(),
     }

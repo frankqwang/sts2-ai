@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+from collections import defaultdict
+
 from ..config import EvalConfig
 from ..domain import EvalSummary, PromotionDecision
 
@@ -27,12 +30,115 @@ class PromotionJudge:
                 return PromotionDecision(promoted=False, reason=f"缺少 cohort: {cohort_name}")
             if cand.self_hp_fraction_remaining + self._config.allow_hp_remaining_drop < base.self_hp_fraction_remaining:
                 return PromotionDecision(promoted=False, reason=f"{cohort_name} 剩余血量退化")
+            timeout_rate = float(cand.metadata.get("timeout_rate", 0.0) or 0.0)
+            no_progress_ratio = float(cand.metadata.get("avg_no_progress_ratio", 0.0) or 0.0)
+            no_progress_streak = float(cand.metadata.get("avg_max_no_progress_streak", 0.0) or 0.0)
+            if timeout_rate > self._config.max_timeout_rate:
+                return PromotionDecision(promoted=False, reason=f"{cohort_name} timeout 率过高")
+            if no_progress_ratio > self._config.max_no_progress_ratio:
+                return PromotionDecision(promoted=False, reason=f"{cohort_name} 无进展比例过高")
+            if no_progress_streak > self._config.max_no_progress_streak:
+                return PromotionDecision(promoted=False, reason=f"{cohort_name} 无进展连续回合过长")
 
-        main_current = current_map.get("main")
-        main_baseline = baseline_map.get("main")
-        if main_current and main_baseline:
-            gain = main_current.fight_win_rate - main_baseline.fight_win_rate
-            if gain < self._config.promote_min_win_rate_gain:
-                return PromotionDecision(promoted=False, reason="主 cohort 胜率提升不足")
+        current_agg = _aggregate(current)
+        baseline_agg = _aggregate(baseline)
+        if current_agg["timeout_rate"] > self._config.max_timeout_rate:
+            return PromotionDecision(promoted=False, reason="整体 timeout 率过高")
+        if current_agg["avg_no_progress_ratio"] > self._config.max_no_progress_ratio:
+            return PromotionDecision(promoted=False, reason="整体无进展比例过高")
+        if current_agg["avg_max_no_progress_streak"] > self._config.max_no_progress_streak:
+            return PromotionDecision(promoted=False, reason="整体无进展连续回合过长")
+        if current_agg["fight_win_rate"] - baseline_agg["fight_win_rate"] < self._config.promote_min_win_rate_gain:
+            return PromotionDecision(promoted=False, reason="整体胜率提升不足")
+        if current_agg["enemy_hp_fraction_dealt"] - baseline_agg["enemy_hp_fraction_dealt"] < self._config.promote_min_enemy_hp_gain:
+            return PromotionDecision(promoted=False, reason="整体敌方掉血提升不足")
+        if current_agg["teacher_agreement_at_1"] - baseline_agg["teacher_agreement_at_1"] < self._config.promote_min_teacher_agreement_gain:
+            return PromotionDecision(promoted=False, reason="teacher agreement 提升不足")
+
+        z_threshold = float(self._config.significance_z)
+        if z_threshold > 0.0:
+            win_z = _two_proportion_z(
+                current_agg["fight_win_rate"],
+                int(current_agg["num_episodes"]),
+                baseline_agg["fight_win_rate"],
+                int(baseline_agg["num_episodes"]),
+            )
+            if win_z < z_threshold:
+                return PromotionDecision(promoted=False, reason="整体胜率提升未达统计显著")
+            teacher_z = _two_proportion_z(
+                current_agg["teacher_agreement_at_1"],
+                int(current_agg["num_episodes"]),
+                baseline_agg["teacher_agreement_at_1"],
+                int(baseline_agg["num_episodes"]),
+            )
+            if teacher_z < z_threshold and self._config.promote_min_teacher_agreement_gain > 0.0:
+                return PromotionDecision(promoted=False, reason="teacher agreement 提升未达统计显著")
+
+        for bucket, base_bucket in _bucketed(baseline).items():
+            cand_bucket = _bucketed(current).get(bucket)
+            if cand_bucket is None:
+                return PromotionDecision(promoted=False, reason=f"缺少 bucket: {bucket}")
+            if cand_bucket["self_hp_fraction_remaining"] + self._config.allow_hp_remaining_drop < base_bucket["self_hp_fraction_remaining"]:
+                return PromotionDecision(promoted=False, reason=f"{bucket} bucket 剩余血量退化")
+            if cand_bucket["timeout_rate"] > self._config.max_timeout_rate:
+                return PromotionDecision(promoted=False, reason=f"{bucket} bucket timeout 率过高")
+            if cand_bucket["avg_no_progress_ratio"] > self._config.max_no_progress_ratio:
+                return PromotionDecision(promoted=False, reason=f"{bucket} bucket 无进展比例过高")
+            if cand_bucket["avg_max_no_progress_streak"] > self._config.max_no_progress_streak:
+                return PromotionDecision(promoted=False, reason=f"{bucket} bucket 无进展连续回合过长")
 
         return PromotionDecision(promoted=True, reason="评估通过", new_version=candidate_version)
+
+
+def _aggregate(rows: list[EvalSummary]) -> dict[str, float]:
+    if not rows:
+        return {
+            "fight_win_rate": 0.0,
+            "enemy_hp_fraction_dealt": 0.0,
+            "self_hp_fraction_remaining": 0.0,
+            "teacher_agreement_at_1": 0.0,
+            "timeout_rate": 0.0,
+            "avg_no_progress_ratio": 0.0,
+            "avg_max_no_progress_streak": 0.0,
+            "num_episodes": 0.0,
+        }
+    total_weight = 0.0
+    totals = defaultdict(float)
+    for row in rows:
+        weight = float(row.metadata.get("num_episodes", 1) or 1)
+        total_weight += weight
+        totals["fight_win_rate"] += row.fight_win_rate * weight
+        totals["enemy_hp_fraction_dealt"] += row.enemy_hp_fraction_dealt * weight
+        totals["self_hp_fraction_remaining"] += row.self_hp_fraction_remaining * weight
+        totals["teacher_agreement_at_1"] += row.teacher_agreement_at_1 * weight
+        totals["timeout_rate"] += float(row.metadata.get("timeout_rate", 0.0) or 0.0) * weight
+        totals["avg_no_progress_ratio"] += float(row.metadata.get("avg_no_progress_ratio", 0.0) or 0.0) * weight
+        totals["avg_max_no_progress_streak"] += float(row.metadata.get("avg_max_no_progress_streak", 0.0) or 0.0) * weight
+    return {
+        "fight_win_rate": totals["fight_win_rate"] / max(total_weight, 1.0),
+        "enemy_hp_fraction_dealt": totals["enemy_hp_fraction_dealt"] / max(total_weight, 1.0),
+        "self_hp_fraction_remaining": totals["self_hp_fraction_remaining"] / max(total_weight, 1.0),
+        "teacher_agreement_at_1": totals["teacher_agreement_at_1"] / max(total_weight, 1.0),
+        "timeout_rate": totals["timeout_rate"] / max(total_weight, 1.0),
+        "avg_no_progress_ratio": totals["avg_no_progress_ratio"] / max(total_weight, 1.0),
+        "avg_max_no_progress_streak": totals["avg_max_no_progress_streak"] / max(total_weight, 1.0),
+        "num_episodes": total_weight,
+    }
+
+
+def _bucketed(rows: list[EvalSummary]) -> dict[str, dict[str, float]]:
+    buckets: dict[str, list[EvalSummary]] = defaultdict(list)
+    for row in rows:
+        bucket = str(row.metadata.get("eval_bucket", row.metadata.get("encounter_type", "default")) or "default")
+        buckets[bucket].append(row)
+    return {bucket: _aggregate(items) for bucket, items in buckets.items()}
+
+
+def _two_proportion_z(p1: float, n1: int, p0: float, n0: int) -> float:
+    if n1 <= 0 or n0 <= 0:
+        return 0.0
+    pooled = ((p1 * n1) + (p0 * n0)) / float(n1 + n0)
+    variance = pooled * (1.0 - pooled) * ((1.0 / float(n1)) + (1.0 / float(n0)))
+    if variance <= 1e-9:
+        return 0.0
+    return (p1 - p0) / math.sqrt(variance)

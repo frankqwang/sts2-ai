@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from game_bridge.generated import game_state_pb2 as pb
+from game_bridge.session.base import PIPE_SNAPSHOT_RPC_METHODS, PipeSnapshotMixin
 from game_bridge.transport import (
     PipeConnection,
     PipeConnectionConfig,
@@ -115,7 +116,7 @@ class BuildSpecPy:
 # CombatSession - 唯一对外 combat API
 # ---------------------------------------------------------------------------
 
-class CombatSession:
+class CombatSession(PipeSnapshotMixin):
     """Combat 训练的统一 session (proto wire)。
 
     Usage:
@@ -134,6 +135,8 @@ class CombatSession:
 
     线程模型:一个 session 一 thread。多 worker 各建一个 session。
     """
+
+    _pipe_snapshot_scope_name = "CombatSession"
 
     def __init__(
         self,
@@ -318,11 +321,11 @@ class CombatSession:
     def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """兼容 GameCatalog.attach_sim 的接口。
 
-        proto wire 支持的 method (combat_reset/combat_step/combat_state) 直接转发;
+        proto wire 支持的 method (combat_reset/combat_step/combat_state + snapshot opcodes) 直接转发;
         其他 method (game_catalog/combat_catalog 等 static 数据)目前 proto 不支持,
         raise NotImplementedError,上层 (`GameCatalog`) 自动 fallback 到 sqlite。
         """
-        if method in {"combat_reset", "combat_step", "combat_state"}:
+        if method in {"combat_reset", "combat_step", "combat_state"} | PIPE_SNAPSHOT_RPC_METHODS:
             if not self._conn.is_connected():
                 self._conn.connect()
             return self._conn.safe_call(method, params)

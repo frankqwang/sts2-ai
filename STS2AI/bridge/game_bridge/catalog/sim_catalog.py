@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import Any
 
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "source_knowledge.sqlite"
+_NEW_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "game_wiki" / "game_catalog.sqlite"
+_OLD_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "source_knowledge.sqlite"
+_DB_PATH = _NEW_DB_PATH if _NEW_DB_PATH.exists() else _OLD_DB_PATH
 
 
 def _pascal_to_snake(s: str) -> str:

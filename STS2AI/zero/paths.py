@@ -34,6 +34,10 @@ class ZeroPaths:
         return self.root / "eval"
 
     @property
+    def logs(self) -> Path:
+        return self.root / "logs"
+
+    @property
     def manifests(self) -> Path:
         return self.root / "manifests"
 
@@ -44,6 +48,7 @@ class ZeroPaths:
             self.dataset_shards,
             self.checkpoints,
             self.evaluations,
+            self.logs,
             self.manifests,
         ):
             path.mkdir(parents=True, exist_ok=True)

@@ -72,7 +72,7 @@ class SampleBuilderTests(unittest.TestCase):
         samples = builder.build(transitions)
         self.assertEqual(len(samples), 2)
         self.assertEqual(samples[0].fight_label.fight_win, 1.0)
-        self.assertEqual(samples[1].history[0].delta.self_hp, -2.0)
+        self.assertAlmostEqual(samples[1].history[0].delta.self_hp, -0.025)
         self.assertTrue(samples[0].bucket_key.startswith("combat|A1_"))
         self.assertEqual(samples[1].behavior_action_index, 0)
         self.assertGreater(samples[0].keep_score, 0.0)

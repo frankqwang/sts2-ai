@@ -32,6 +32,8 @@ SPECTATOR_MOD_ROOT = ENV_ROOT / "Spectator" / "SpectatorBridgeMod"
 
 SOURCE_KNOWLEDGE_DB = PYTHON_ROOT / "data" / "source_knowledge.sqlite"
 SOURCE_KNOWLEDGE_MANIFEST = PYTHON_ROOT / "data" / "source_knowledge.manifest.json"
+GAME_WIKI_ROOT = PYTHON_ROOT / "data" / "game_wiki"
+GAME_WIKI_DB = GAME_WIKI_ROOT / "game_catalog.sqlite"
 VOCAB_JSON = PYTHON_ROOT / "data" / "vocab.json"
 CARD_TAGS_JSON = PYTHON_ROOT / "data" / "card_tags.json"
 RELIC_TAGS_JSON = PYTHON_ROOT / "data" / "relic_tags.json"

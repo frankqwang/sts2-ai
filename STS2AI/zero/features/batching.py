@@ -33,10 +33,14 @@ class TensorBatch:
     teacher_policy: torch.Tensor
     teacher_policy_mask: torch.Tensor
     teacher_best_action_index: torch.Tensor
+    teacher_ranking_margin: torch.Tensor
     fight_targets: torch.Tensor
     delta_targets: torch.Tensor
     uncertainty_target: torch.Tensor
     sample_weight: torch.Tensor
+
+    def to(self, device: torch.device | str) -> "TensorBatch":
+        return TensorBatch(**{field: getattr(self, field).to(device) for field in self.__dataclass_fields__})
 
 
 class BatchCollator:
@@ -46,6 +50,13 @@ class BatchCollator:
 
     def collate(self, samples: list) -> TensorBatch:
         encoded = [self._extractor.encode_sample(sample) for sample in samples]
+        return self._collate_encoded(encoded)
+
+    def collate_inference(self, state, history, legal_actions) -> TensorBatch:
+        encoded = [self._extractor.encode_inference(state, history, legal_actions)]
+        return self._collate_encoded(encoded)
+
+    def _collate_encoded(self, encoded: list[EncodedSample]) -> TensorBatch:
         action_width = max(1, max(len(item.action_numeric) for item in encoded))
         return TensorBatch(
             player_numeric=_to_tensor_2d([item.player_numeric for item in encoded]),
@@ -96,6 +107,7 @@ class BatchCollator:
                 [1.0 if item.teacher_policy is not None else 0.0 for item in encoded], dtype=torch.float32
             ),
             teacher_best_action_index=torch.tensor([item.teacher_best_action_index for item in encoded], dtype=torch.long),
+            teacher_ranking_margin=torch.tensor([item.teacher_ranking_margin for item in encoded], dtype=torch.float32),
             fight_targets=_to_tensor_2d([item.fight_targets for item in encoded]),
             delta_targets=_to_tensor_2d([item.delta_targets for item in encoded]),
             uncertainty_target=torch.tensor([item.uncertainty_target for item in encoded], dtype=torch.float32),

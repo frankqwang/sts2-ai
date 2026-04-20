@@ -24,6 +24,7 @@ class LossesTests(unittest.TestCase):
                 "delta_targets": torch.zeros((1, 14), dtype=torch.float32),
                 "uncertainty_target": torch.tensor([0.0], dtype=torch.float32),
                 "teacher_best_action_index": torch.tensor([0], dtype=torch.long),
+                "teacher_ranking_margin": torch.tensor([0.2], dtype=torch.float32),
             },
         )()
         output = ZeroNetOutput(
@@ -39,6 +40,36 @@ class LossesTests(unittest.TestCase):
 
         self.assertTrue(torch.isfinite(losses.policy))
         self.assertTrue(torch.isfinite(losses.total))
+
+    def test_teacher_samples_do_not_use_behavior_cross_entropy(self) -> None:
+        batch = type(
+            "Batch",
+            (),
+            {
+                "teacher_policy_mask": torch.tensor([1.0], dtype=torch.float32),
+                "teacher_policy": torch.tensor([[0.0, 1.0]], dtype=torch.float32),
+                "action_mask": torch.tensor([[1.0, 1.0]], dtype=torch.float32),
+                "behavior_action_index": torch.tensor([0], dtype=torch.long),
+                "sample_weight": torch.tensor([1.0], dtype=torch.float32),
+                "fight_targets": torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
+                "delta_targets": torch.zeros((1, 14), dtype=torch.float32),
+                "uncertainty_target": torch.tensor([1.0], dtype=torch.float32),
+                "teacher_best_action_index": torch.tensor([1], dtype=torch.long),
+                "teacher_ranking_margin": torch.tensor([0.3], dtype=torch.float32),
+            },
+        )()
+        output = ZeroNetOutput(
+            policy_logits=torch.tensor([[0.2, 0.9]], dtype=torch.float32),
+            fight_win=torch.tensor([0.0], dtype=torch.float32),
+            enemy_hp_fraction_dealt=torch.tensor([0.0], dtype=torch.float32),
+            self_hp_fraction_remaining=torch.tensor([0.0], dtype=torch.float32),
+            delta_pred=torch.zeros((1, 14), dtype=torch.float32),
+            uncertainty=torch.tensor([4.0], dtype=torch.float32),
+        )
+
+        losses = compute_losses(output, batch, LossWeights())
+        self.assertLess(float(losses.policy), 0.5)
+        self.assertTrue(torch.isfinite(losses.uncertainty))
 
 
 if __name__ == "__main__":

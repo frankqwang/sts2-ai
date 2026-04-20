@@ -12,6 +12,7 @@ if str(_python_root) not in sys.path:
 
 import game_bridge
 from game_bridge.session.base import SessionFactory
+from game_bridge.session.combat import CombatSession
 from game_bridge.session.full_run import PipeBackedFullRunClient, create_full_run_client
 from game_bridge.session.pool import SessionPool
 from game_bridge.spectate.controller import SpectatorController
@@ -172,3 +173,62 @@ def test_full_run_auto_launch_defaults_are_resolved():
 def test_create_full_run_client_rejects_auto_launch_without_pipe():
     with pytest.raises(ValueError, match="auto_launch requires use_pipe=True"):
         create_full_run_client(auto_launch=True, use_pipe=False)
+
+
+def test_combat_session_snapshot_methods_reuse_pipe_mixin():
+    session = object.__new__(CombatSession)
+    calls: list[tuple[str, dict[str, object] | None]] = []
+
+    def _fake_call(method: str, params: dict[str, object] | None = None):
+        calls.append((method, params))
+        if method == "save_state":
+            return {"state_id": "combat-state-1"}
+        if method == "load_state":
+            return {"state_type": "monster"}
+        if method == "export_state":
+            return {"path": str(params["path"])}
+        if method == "import_state":
+            return {"state_type": "monster"}
+        if method == "delete_state":
+            return {"deleted": True}
+        raise AssertionError(f"unexpected method: {method}")
+
+    session._call = _fake_call
+
+    assert session.save_state() == "combat-state-1"
+    assert session.load_state("combat-state-1")["state_type"] == "monster"
+    assert session.export_state("C:/tmp/state.json") == "C:/tmp/state.json"
+    assert session.import_state("C:/tmp/state.json")["state_type"] == "monster"
+    assert session.delete_state("combat-state-1") is True
+    assert [name for name, _ in calls] == [
+        "save_state",
+        "load_state",
+        "export_state",
+        "import_state",
+        "delete_state",
+    ]
+
+
+def test_combat_session_call_allows_snapshot_rpcs():
+    class _FakeConn:
+        def __init__(self):
+            self.connected = False
+            self.calls: list[tuple[str, dict[str, object] | None]] = []
+
+        def is_connected(self):
+            return self.connected
+
+        def connect(self):
+            self.connected = True
+
+        def safe_call(self, method, params):
+            self.calls.append((method, params))
+            return {"state_id": "snap-1"}
+
+    session = object.__new__(CombatSession)
+    session._conn = _FakeConn()
+
+    result = CombatSession._call(session, "save_state")
+
+    assert result == {"state_id": "snap-1"}
+    assert session._conn.calls == [("save_state", None)]

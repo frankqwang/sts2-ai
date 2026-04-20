@@ -19,16 +19,17 @@ ZERO_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 if str(ZERO_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(ZERO_PACKAGE_ROOT))
 
+from zero.paths import STS2AI_ROOT
 from zero.replay import build_cases_from_record, default_starter_build, iter_matching_run_records
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--skada-root", type=Path, default=Path("STS2AI/data/skada/runs_full_detail"))
+    parser.add_argument("--skada-root", type=Path, default=STS2AI_ROOT / "data" / "skada" / "runs_full_detail")
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("Assets/datasets/zero_skada_replay_cases/v0_103_2_a0_single_combat_v1"),
+        default=STS2AI_ROOT / "Assets" / "datasets" / "zero_skada_replay_cases" / "v0_103_2_a0_single_combat_v1",
     )
     parser.add_argument("--game-version", type=str, default="v0.103.2")
     parser.add_argument("--ascension", type=int, default=0)
