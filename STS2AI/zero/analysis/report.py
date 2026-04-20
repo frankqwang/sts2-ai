@@ -51,6 +51,7 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
 
     _plot_training_metrics(training_df, analysis_dir / "training_metrics.png")
     _plot_sampling_metrics(sampling_df, episode_df, analysis_dir / "sampling_metrics.png")
+    _plot_pool_diagnostics(sampling_df, analysis_dir / "pool_diagnostics.png")
     _plot_eval_metrics(eval_df, analysis_dir / "evaluation_metrics.png")
     _plot_rollout_behavior(rollout_df, analysis_dir / "rollout_behavior.png")
     _plot_cohort_heatmap(eval_df, analysis_dir / "cohort_overview.png")
@@ -104,8 +105,18 @@ def _build_sampling_dataframe(manifests: list[dict[str, Any]]) -> pd.DataFrame:
             "iteration": int(manifest.get("iteration") or 0),
         }
         row.update({f"sample_{key}": value for key, value in (manifest.get("sample_counts") or {}).items()})
+        admission = dict(manifest.get("admission_stats") or {})
+        row.update({f"admission_{key}": value for key, value in admission.items() if key != "pool_mutation_counters"})
+        for pool_name, counters in dict(admission.get("pool_mutation_counters") or {}).items():
+            for key, value in dict(counters or {}).items():
+                row[f"pool_counter_{pool_name}_{key}"] = value
         row.update({f"pool_{key}": value for key, value in (manifest.get("pool_sizes") or {}).items()})
         row.update({f"pool_capacity_{key}": value for key, value in (manifest.get("pool_capacities") or {}).items()})
+        for pool_name, stats in dict(manifest.get("pool_stats") or {}).items():
+            stats_dict = dict(stats or {})
+            for key in ("keep_score_min", "keep_score_avg", "keep_score_max", "sample_weight_avg", "bucket_count"):
+                if key in stats_dict:
+                    row[f"pool_stat_{pool_name}_{key}"] = stats_dict[key]
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -268,7 +279,15 @@ def _plot_sampling_metrics(sampling_df: pd.DataFrame, episode_df: pd.DataFrame, 
         axes[1, 1].legend(fontsize=8)
     else:
         axes[1, 0].axis("off")
-        axes[1, 1].axis("off")
+        counter_columns = [col for col in sampling_df.columns if col.startswith("pool_counter_")]
+        if counter_columns:
+            for column in counter_columns:
+                if column.endswith("_accepted_adds") or column.endswith("_rejected_adds"):
+                    axes[1, 1].plot(x, sampling_df[column], marker="o", label=column.replace("pool_counter_", ""))
+            axes[1, 1].set_title("Pool Admission / Rejection")
+            axes[1, 1].legend(fontsize=8)
+        else:
+            axes[1, 1].axis("off")
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
@@ -298,6 +317,41 @@ def _plot_eval_metrics(eval_df: pd.DataFrame, output_path: Path) -> None:
     axes[1].plot(x, grouped["avg_no_progress_ratio"], marker="o", label="avg_no_progress_ratio")
     axes[1].set_title("Evaluation Failure Signals")
     axes[1].legend(fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_pool_diagnostics(sampling_df: pd.DataFrame, output_path: Path) -> None:
+    if sampling_df.empty:
+        return
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8))
+    x = sampling_df["iteration"]
+
+    counter_columns = [col for col in sampling_df.columns if col.startswith("pool_counter_")]
+    plotted = False
+    for column in counter_columns:
+        if column.endswith("_accepted_adds") or column.endswith("_rejected_adds") or column.endswith("_evicted_items"):
+            axes[0].plot(x, sampling_df[column], marker="o", label=column.replace("pool_counter_", ""))
+            plotted = True
+    axes[0].set_title("Pool Admission / Rejection / Eviction")
+    if plotted:
+        axes[0].legend(fontsize=8)
+    else:
+        axes[0].axis("off")
+
+    stat_columns = [col for col in sampling_df.columns if col.startswith("pool_stat_")]
+    plotted = False
+    for column in stat_columns:
+        if column.endswith("_keep_score_avg") or column.endswith("_sample_weight_avg"):
+            axes[1].plot(x, sampling_df[column], marker="o", label=column.replace("pool_stat_", ""))
+            plotted = True
+    axes[1].set_title("Pool Quality Signals")
+    if plotted:
+        axes[1].legend(fontsize=8)
+    else:
+        axes[1].axis("off")
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)

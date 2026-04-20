@@ -16,7 +16,14 @@ from .labels import FightLabel, TeacherLabel
 from .manifest import EvalSummary, IterationManifest, PromotionDecision, TrainingSummary
 from .progress import ProgressSignal, assess_transition_progress
 from .scoring import compute_episode_score_proxy, compute_fight_score, compute_step_progress_score
-from .samples import RawTransition, TeacherRequest, TrainingSample
+from .samples import (
+    RawTransition,
+    TeacherRequest,
+    TrainingSample,
+    compact_battle_state,
+    compact_legal_action,
+    compact_raw_transition,
+)
 
 __all__ = [
     "BattleState",
@@ -40,6 +47,9 @@ __all__ = [
     "TrainingSummary",
     "TransitionDelta",
     "assess_transition_progress",
+    "compact_battle_state",
+    "compact_legal_action",
+    "compact_raw_transition",
     "compute_episode_score_proxy",
     "compute_fight_score",
     "compute_step_progress_score",

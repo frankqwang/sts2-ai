@@ -14,7 +14,7 @@ import torch
 from ..buffers import SamplePoolSet
 from ..config import LossWeights, TrainConfig
 from ..domain import BattleState, HistoryStep, TrainingSummary
-from ..features import BatchCollator, compute_transition_delta
+from ..features import BatchCollator, FeatureExtractor, compute_transition_delta
 from ..model import ZeroNet, compute_losses
 from ..ports import Policy
 
@@ -190,6 +190,7 @@ class ModelPolicyAdapter(Policy):
     def __init__(self, model: ZeroNet, collator: BatchCollator, history_steps: int):
         self._model = model
         self._collator = collator
+        self._history_extractor = FeatureExtractor(collator._config)
         self._history: deque = deque(maxlen=history_steps)
         self._device = next(model.parameters()).device
         self._cached_state_ref = None
@@ -203,11 +204,17 @@ class ModelPolicyAdapter(Policy):
     def observe_transition(self, state: BattleState, action_index: int, next_state: BattleState) -> None:
         if not (0 <= action_index < len(state.legal_actions)):
             return
+        delta = compute_transition_delta(state, next_state)
         self._history.append(
             HistoryStep(
-                state=state,
-                action=state.legal_actions[action_index],
-                delta=compute_transition_delta(state, next_state),
+                state=None,
+                action=None,
+                delta=delta,
+                history_token=self._history_extractor.encode_history_step_token(
+                    state,
+                    state.legal_actions[action_index],
+                    delta,
+                ),
             )
         )
         self._cached_state_ref = None

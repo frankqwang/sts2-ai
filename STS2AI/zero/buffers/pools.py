@@ -22,28 +22,47 @@ class BucketedSamplePool:
     _score_buckets: dict[str, list[tuple[float, int, TrainingSample]]] = field(default_factory=lambda: defaultdict(list))
     _bucket_card_counts: dict[str, Counter[str]] = field(default_factory=lambda: defaultdict(Counter))
     _sequence: int = 0
+    _size: int = 0
+    _attempted_adds: int = 0
+    _accepted_adds: int = 0
+    _replaced_adds: int = 0
+    _rejected_adds: int = 0
+    _evicted_items: int = 0
+    _sampled_items: int = 0
 
     def add(self, sample: TrainingSample) -> None:
         bucket = sample.bucket_key or "default"
+        self._attempted_adds += 1
         if self.retention_mode == "score":
             heap = self._score_buckets[bucket]
             score_entry = (sample.keep_score, self._sequence, sample)
             if len(heap) < self.bucket_capacity:
                 heapq.heappush(heap, score_entry)
                 self._increment_card_count(bucket, sample)
+                self._accepted_adds += 1
+                self._size += 1
             elif heap and score_entry[:2] > heap[0][:2]:
                 removed = heapq.heapreplace(heap, score_entry)[2]
                 self._decrement_card_count(bucket, removed)
                 self._increment_card_count(bucket, sample)
+                self._accepted_adds += 1
+                self._replaced_adds += 1
+                self._evicted_items += 1
+            else:
+                self._rejected_adds += 1
             self._sequence += 1
             return
 
         queue = self._fifo_buckets[bucket]
         queue.append(sample)
         self._increment_card_count(bucket, sample)
+        self._accepted_adds += 1
+        self._size += 1
         while len(queue) > self.bucket_capacity:
             removed = queue.popleft()
             self._decrement_card_count(bucket, removed)
+            self._evicted_items += 1
+            self._size -= 1
 
     def set_bucket_capacity(self, bucket_capacity: int) -> None:
         self.bucket_capacity = max(1, int(bucket_capacity))
@@ -52,11 +71,15 @@ class BucketedSamplePool:
                 while len(heap) > self.bucket_capacity:
                     removed = heapq.heappop(heap)[2]
                     self._decrement_card_count(bucket, removed)
+                    self._evicted_items += 1
+                    self._size -= 1
             return
         for bucket, queue in self._fifo_buckets.items():
             while len(queue) > self.bucket_capacity:
                 removed = queue.popleft()
                 self._decrement_card_count(bucket, removed)
+                self._evicted_items += 1
+                self._size -= 1
 
     def sample(self, count: int) -> list[TrainingSample]:
         if count <= 0:
@@ -71,6 +94,7 @@ class BucketedSamplePool:
             if not items:
                 continue
             result.append(_sample_with_card_diversity(items, self._bucket_card_counts.get(bucket_key)))
+        self._sampled_items += len(result)
         return result
 
     def items(self) -> list[TrainingSample]:
@@ -79,7 +103,49 @@ class BucketedSamplePool:
         return [item for bucket in self._fifo_buckets.values() for item in bucket]
 
     def size(self) -> int:
-        return len(self.items())
+        return self._size
+
+    def reset_iteration_counters(self) -> None:
+        self._attempted_adds = 0
+        self._accepted_adds = 0
+        self._replaced_adds = 0
+        self._rejected_adds = 0
+        self._evicted_items = 0
+        self._sampled_items = 0
+
+    def counters(self) -> dict[str, int]:
+        return {
+            "attempted_adds": self._attempted_adds,
+            "accepted_adds": self._accepted_adds,
+            "replaced_adds": self._replaced_adds,
+            "rejected_adds": self._rejected_adds,
+            "evicted_items": self._evicted_items,
+            "sampled_items": self._sampled_items,
+        }
+
+    def describe(self) -> dict[str, object]:
+        items = self.items()
+        keep_scores = [float(item.keep_score) for item in items]
+        sample_weights = [float(item.sample_weight) for item in items]
+        encounter_counts: Counter[str] = Counter(str(item.state.context.encounter_id or "unknown") for item in items)
+        score_band_counts: Counter[str] = Counter(str(item.metadata.get("score_band", "unknown") or "unknown") for item in items)
+        if self.retention_mode == "score":
+            top_buckets = sorted(((bucket, len(entries)) for bucket, entries in self._score_buckets.items()), key=lambda item: item[1], reverse=True)[:5]
+            bucket_count = len(self._score_buckets)
+        else:
+            top_buckets = sorted(((bucket, len(entries)) for bucket, entries in self._fifo_buckets.items()), key=lambda item: item[1], reverse=True)[:5]
+            bucket_count = len(self._fifo_buckets)
+        return {
+            "size": self._size,
+            "bucket_count": bucket_count,
+            "keep_score_min": min(keep_scores) if keep_scores else 0.0,
+            "keep_score_avg": (sum(keep_scores) / len(keep_scores)) if keep_scores else 0.0,
+            "keep_score_max": max(keep_scores) if keep_scores else 0.0,
+            "sample_weight_avg": (sum(sample_weights) / len(sample_weights)) if sample_weights else 0.0,
+            "top_encounters": encounter_counts.most_common(5),
+            "score_band_counts": dict(score_band_counts),
+            "top_buckets": top_buckets,
+        }
 
     def _iter_buckets(self):
         if self.retention_mode == "score":
@@ -158,11 +224,21 @@ class SamplePoolSet:
                 break
         return result[:batch_size]
 
+    def reset_iteration_counters(self) -> None:
+        for pool in self._pools.values():
+            pool.reset_iteration_counters()
+
     def size_by_pool(self) -> dict[str, int]:
         return {name: pool.size() for name, pool in self._pools.items()}
 
     def capacity_by_pool(self) -> dict[str, int]:
         return dict(self._current_capacities)
+
+    def iteration_counters(self) -> dict[str, dict[str, int]]:
+        return {name: pool.counters() for name, pool in self._pools.items()}
+
+    def describe(self) -> dict[str, dict[str, object]]:
+        return {name: pool.describe() for name, pool in self._pools.items()}
 
     def update_capacity_plan(self, *, logical_samples: int) -> dict[str, int]:
         if logical_samples > 0:

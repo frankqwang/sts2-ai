@@ -24,12 +24,13 @@ from ..domain import (
     compute_fight_score,
     compute_step_progress_score,
 )
-from ..features import compute_transition_delta
+from ..features import FeatureExtractor, compute_transition_delta
 
 
 class SampleBuilder:
     def __init__(self, config: EncoderConfig):
         self._history_steps = config.history_steps
+        self._history_extractor = FeatureExtractor(config)
 
     def build(self, transitions: list[RawTransition]) -> list[TrainingSample]:
         by_fight: dict[str, list[RawTransition]] = defaultdict(list)
@@ -120,7 +121,18 @@ class SampleBuilder:
                 },
             )
             samples.append(sample)
-            history_window.append(HistoryStep(state=transition.state, action=transition.action, delta=delta))
+            history_window.append(
+                HistoryStep(
+                    state=None,
+                    action=None,
+                    delta=delta,
+                    history_token=self._history_extractor.encode_history_step_token(
+                        transition.state,
+                        transition.action,
+                        delta,
+                    ),
+                )
+            )
         _assign_sample_weights(
             samples,
             fight_timeout=bool(fight_stats["truncated"]),

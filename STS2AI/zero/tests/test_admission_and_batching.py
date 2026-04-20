@@ -71,6 +71,26 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         self.assertNotIn("teacher_priority", online_entries[0].metadata)
         self.assertEqual(teacher_entries[0].metadata["teacher_priority"], 1.5)
 
+    def test_online_admission_thins_redundant_no_progress_samples(self) -> None:
+        planner = SampleAdmissionPlanner()
+        samples = []
+        for step_idx in range(12):
+            sample = make_sample()
+            sample.sample_id = f"sample-{step_idx}"
+            sample.step_idx = step_idx
+            sample.fight_id = "fight-timeout"
+            sample.behavior_action_id = "end_turn" if step_idx % 2 == 0 else "play_strike"
+            sample.step_progress_score = 0.0
+            sample.metadata["fight_timeout"] = True
+            sample.metadata["fight_no_progress_ratio"] = 1.0
+            sample.metadata["score_band"] = "normal"
+            samples.append(sample)
+
+        entries = planner.build_online_entries(samples)
+        self.assertLess(len(entries), len(samples))
+        kept_ids = {item.sample_id for item in entries}
+        self.assertIn("sample-0", kept_ids)
+
     def test_dead_enemy_is_masked_out(self) -> None:
         collator = BatchCollator(EncoderConfig())
         batch = collator.collate([make_sample(alive_enemy=False)])
@@ -126,6 +146,27 @@ class AdmissionAndBatchingTests(unittest.TestCase):
 
         recent_items = {item.sample_id for item in pools._pools["recent_online"].items()}
         self.assertIn("high", recent_items)
+
+    def test_pool_counters_report_add_reject_and_sample(self) -> None:
+        pools = SamplePoolSet(PoolConfig(bucket_capacity=1, teacher_bucket_capacity=1, rare_bucket_capacity=1))
+        low = make_sample()
+        low.sample_id = "low"
+        low.keep_score = 0.1
+        high = make_sample()
+        high.sample_id = "high"
+        high.keep_score = 1.5
+
+        pools.reset_iteration_counters()
+        pools.add(low.clone_for_pool(pool_name="recent_online"))
+        pools.add(high.clone_for_pool(pool_name="recent_online"))
+        pools.mixed_sample(1)
+
+        counters = pools.iteration_counters()["recent_online"]
+        self.assertEqual(counters["attempted_adds"], 2)
+        self.assertEqual(counters["accepted_adds"], 2)
+        self.assertEqual(counters["replaced_adds"], 1)
+        self.assertEqual(counters["evicted_items"], 1)
+        self.assertGreaterEqual(counters["sampled_items"], 1)
 
     def test_sample_serialization_skips_runtime_raw_payloads(self) -> None:
         sample = make_sample()

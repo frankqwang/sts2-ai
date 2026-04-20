@@ -89,6 +89,7 @@ class ZeroLoopRunner:
         baseline_eval: list | None = None,
     ) -> IterationManifest:
         self.artifact_store.reset_iteration_outputs(iteration)
+        self._pools.reset_iteration_counters()
         collector_policy = self._active_policy or student_policy
         if collector_policy is None:
             raise ValueError("run_iteration 需要 student_policy，或已有晋级后的 active policy。")
@@ -175,6 +176,8 @@ class ZeroLoopRunner:
         self._pools.add_many(online_entries)
         self._pools.add_many(teacher_entries)
         pool_admission_duration_s = time.perf_counter() - teacher_entry_started_at
+        pool_counters_after_admission = self._pools.iteration_counters()
+        pool_stats_after_admission = self._pools.describe()
         self._write_progress(
             iteration,
             phase="pool_admission",
@@ -182,8 +185,10 @@ class ZeroLoopRunner:
             duration_s=round(pool_admission_duration_s, 6),
             online_entries=len(online_entries),
             teacher_entries=len(teacher_entries),
+            pool_mutation_counters=pool_counters_after_admission,
             pool_capacities=pool_capacities,
             pool_sizes=self._pools.size_by_pool(),
+            pool_stats=pool_stats_after_admission,
         )
         self._write_progress(
             iteration,
@@ -211,6 +216,8 @@ class ZeroLoopRunner:
         trainer = self._build_trainer()
         train_started_at = time.perf_counter()
         training_summary = trainer.train_iteration(self._pools)
+        pool_counters_after_train = self._pools.iteration_counters()
+        pool_stats_after_train = self._pools.describe()
         self._write_progress(
             iteration,
             phase="train",
@@ -220,6 +227,7 @@ class ZeroLoopRunner:
             total_loss=training_summary.total_loss,
             learning_rate=training_summary.learning_rate,
             skipped_non_finite_steps=training_summary.skipped_non_finite_steps,
+            pool_mutation_counters=pool_counters_after_train,
         )
         self._write_status(
             iteration,
@@ -289,8 +297,16 @@ class ZeroLoopRunner:
                 "labeled_samples": len(labeled_samples),
                 "teacher_entries": len(teacher_entries),
             },
+            admission_stats={
+                "online_candidates": len(samples),
+                "online_entries": len(online_entries),
+                "teacher_requests": len(teacher_requests),
+                "teacher_entries": len(teacher_entries),
+                "pool_mutation_counters": pool_counters_after_train,
+            },
             pool_sizes=self._pools.size_by_pool(),
             pool_capacities=self._pools.capacity_by_pool(),
+            pool_stats=pool_stats_after_train,
             training=training_summary,
             evaluations=evaluations,
             promotion=promotion,

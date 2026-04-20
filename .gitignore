@@ -19,6 +19,7 @@ RiderTestRunner
 /steam
 *.uid
 *.sqlite
+!STS2AI/data/game_wiki/game_catalog.sqlite
 icudt_godot.dat
 
 /STS2AI/ENV/Sim/Host/bin/

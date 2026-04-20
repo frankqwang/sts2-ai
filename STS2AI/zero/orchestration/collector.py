@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Callable
 
-from ..domain import RawTransition, assess_transition_progress
+from ..domain import RawTransition, assess_transition_progress, compact_raw_transition
 from ..ports import BattleRuntime, Policy
 
 
@@ -116,18 +116,19 @@ class TrajectoryCollector:
                             "enemy_count_delta": int(progress.enemy_count_delta),
                         },
                     )
-                    transitions.append(transition)
                     if on_transition is not None:
                         emit_started_at = time.perf_counter()
                         on_transition(transition)
                         emit_duration_s += time.perf_counter() - emit_started_at
+                    transition = compact_raw_transition(transition)
+                    transitions.append(transition)
                     emitted_steps = step_idx + 1
                     observe_hook = getattr(policy, "observe_transition", None)
                     if callable(observe_hook):
                         observe_started_at = time.perf_counter()
                         observe_hook(state, action_index, next_state)
                         observe_duration_s += time.perf_counter() - observe_started_at
-                    state = next_state
+                    state = transition.next_state
                     last_state = state
                     if state.terminal:
                         break

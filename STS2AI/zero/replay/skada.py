@@ -25,7 +25,7 @@ from typing import Any, Iterable, Iterator
 
 from ..adapters.game_bridge import GameBridgeCombatRuntime
 from ..buffers import ArtifactStore
-from ..domain import EvalSummary, FightLabel, TeacherLabel, TeacherRequest, assess_transition_progress
+from ..domain import EvalSummary, FightLabel, RawTransition, TeacherLabel, TeacherRequest, assess_transition_progress
 
 
 _SHARED_REPLAY_RUNTIMES: dict[tuple[int, bool, float], GameBridgeCombatRuntime] = {}
@@ -962,6 +962,26 @@ def _rollout_case_episode(
                 no_progress_steps += 1
                 current_no_progress_streak += 1
                 max_no_progress_streak = max(max_no_progress_streak, current_no_progress_streak)
+            serialized_transition = RawTransition(
+                run_id=str(case.run_id),
+                fight_id=f"{case.case_id}|ep{episode_index}",
+                step_idx=step_count,
+                seed=case.seed,
+                action_index=action_index,
+                state=state,
+                action=chosen_action if chosen_action is not None else state.legal_actions[0],
+                next_state=next_state,
+                done=next_state.terminal,
+                fight_outcome=next_state.run_outcome,
+                run_outcome=next_state.run_outcome,
+                metadata={
+                    "uncertainty": float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0),
+                    "top2_gap": 0.0,
+                    "made_progress": bool(progress.made_progress),
+                    "enemy_hp_delta": float(progress.enemy_hp_delta),
+                    "enemy_count_delta": int(progress.enemy_count_delta),
+                },
+            ).to_dict()
             trace_started_at = time.perf_counter()
             _append_eval_trace_row(
                 artifact_store,
@@ -984,6 +1004,9 @@ def _rollout_case_episode(
                     "action_id": chosen_action.action_id if chosen_action is not None else "",
                     "card_id": chosen_action.card_id if chosen_action is not None else "",
                     "target_id": chosen_action.target_id if chosen_action is not None else "",
+                    "state": serialized_transition["state"],
+                    "action": serialized_transition["action"],
+                    "next_state": serialized_transition["next_state"],
                     "teacher_best_action_index": teacher_label.best_action_index,
                     "teacher_topk_indices": teacher_label.topk_indices,
                     "made_progress": bool(progress.made_progress),

@@ -176,6 +176,10 @@ class FeatureExtractor:
         return tokens
 
     def _history_token(self, step: HistoryStep) -> list[float]:
+        if step.history_token:
+            return list(step.history_token)
+        if step.state is None or step.action is None:
+            return [0.0] * 17
         total_enemy_hp_ratio = sum(_safe_ratio(enemy.hp, enemy.max_hp) for enemy in step.state.enemies)
         return [
             _safe_ratio(step.state.player.hp, step.state.player.max_hp),
@@ -196,6 +200,10 @@ class FeatureExtractor:
             float(self._hash_id(step.action.action_type)) / float(self._config.id_hash_buckets),
             float(self._hash_id(step.action.card_id or step.action.special_id)) / float(self._config.id_hash_buckets),
         ]
+
+    def encode_history_step_token(self, state: BattleState, action: LegalAction, delta: TransitionDelta) -> list[float]:
+        """预编码 history token，供样本池长期存放时减少完整 state/action 挂载。"""
+        return self._history_token(HistoryStep(state=state, action=action, delta=delta))
 
     def _encode_actions(self, actions: list[LegalAction]) -> list[list[float]]:
         rows: list[list[float]] = []

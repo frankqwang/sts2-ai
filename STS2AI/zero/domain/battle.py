@@ -125,6 +125,7 @@ class TransitionDelta:
 
 @dataclass(slots=True)
 class HistoryStep:
-    state: BattleState
-    action: LegalAction
+    state: BattleState | None
+    action: LegalAction | None
     delta: TransitionDelta
+    history_token: list[float] = field(default_factory=list)

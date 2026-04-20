@@ -187,6 +187,9 @@ def _render_eval_fight(group_key: str, events: list[dict[str, Any]], *, name_cat
             continue
         if row.get("event") != "step":
             continue
+        if isinstance(row.get("state"), dict) and isinstance(row.get("next_state"), dict):
+            lines.extend(_render_eval_step_detailed(row, name_catalog=name_catalog))
+            continue
         line1 = (
             f"[Step {int(row.get('step_idx', 0)):>3}] HP {float(row.get('player_hp', 0.0)):.0f} "
             f"格挡 {float(row.get('player_block', 0.0)):.0f} 能量 {float(row.get('player_energy', 0.0)):.0f} | "
@@ -221,6 +224,52 @@ def _render_eval_fight(group_key: str, events: list[dict[str, Any]], *, name_cat
             )
         )
     return lines
+
+
+def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, str]) -> list[str]:
+    state = row["state"]
+    next_state = row["next_state"]
+    action = row.get("action") or {}
+    legal_actions = state.get("legal_actions") or []
+    teacher_bits: list[str] = []
+    teacher_best = row.get("teacher_best_action_index")
+    action_index = row.get("action_index")
+    if teacher_best is not None and action_index is not None:
+        teacher_bits.append("teacher=一致" if int(teacher_best) == int(action_index) else "teacher=不一致")
+    teacher_topk = row.get("teacher_topk_indices") or []
+    if teacher_topk and action_index is not None:
+        teacher_bits.append("topk=命中" if int(action_index) in {int(v) for v in teacher_topk} else "topk=未命中")
+    line1 = (
+        f"[Step {int(row.get('step_idx', 0)):>3}] HP {float(state['player']['hp']):.0f}/{float(state['player']['max_hp']):.0f} "
+        f"格挡 {float(state['player']['block']):.0f} 能量 {float(state['player']['energy']):.0f} | "
+        f"敌方 {_enemy_brief(state.get('enemies') or [], name_catalog=name_catalog)}"
+    )
+    line2 = f"手牌：{_hand_brief(state.get('hand') or [], name_catalog=name_catalog)}"
+    legal_action_lines = _legal_action_lines(legal_actions, name_catalog=name_catalog)
+    line3 = (
+        f"选择：{_format_action(action, name_catalog=name_catalog)}"
+        + (f" | {' '.join(teacher_bits)}" if teacher_bits else "")
+    )
+    line4 = (
+        f"结果 HP {float(next_state['player']['hp']):.0f}/{float(next_state['player']['max_hp']):.0f} "
+        f"格挡 {float(next_state['player']['block']):.0f} 能量 {float(next_state['player']['energy']):.0f} | "
+        f"敌方 {_enemy_brief(next_state.get('enemies') or [], name_catalog=name_catalog)}"
+    )
+    line5 = (
+        f"prog={'Y' if bool(row.get('made_progress', False)) else 'N'} "
+        f"enemy_hp_delta={float(row.get('enemy_hp_delta', 0.0) or 0.0):.1f} "
+        f"enemy_count_delta={int(row.get('enemy_count_delta', 0) or 0)}"
+    )
+    return [
+        _wrap(line1),
+        _wrap(line2),
+        f"合法动作（{len(legal_actions)} 个）：",
+        *legal_action_lines,
+        _wrap(line3),
+        _wrap(line4),
+        _wrap(line5),
+        "",
+    ]
 
 
 def _enemy_brief(enemies: list[dict[str, Any]], *, name_catalog: dict[str, str]) -> str:
