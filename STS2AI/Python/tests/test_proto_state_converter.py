@@ -16,8 +16,8 @@ if _python_root not in sys.path:
     sys.path.insert(0, _python_root)
 
 import pytest
-from networkV2.s0_bridge.generated import game_state_pb2 as pb
-from networkV2.s0_bridge.proto_state_converter import game_state_to_dict
+from game_bridge.generated import game_state_pb2 as pb
+from game_bridge.transport.proto_state_converter import game_state_to_dict
 
 
 # ======================================================================

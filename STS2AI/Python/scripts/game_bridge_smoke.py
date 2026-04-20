@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+THIS_FILE = Path(__file__).resolve()
+PYTHON_ROOT = THIS_FILE.parents[1]
+if str(PYTHON_ROOT) not in sys.path:
+    sys.path.insert(0, str(PYTHON_ROOT))
+
+from game_bridge import SpectatorController, create_full_run_session
+from game_bridge.sim import DEFAULT_HOST_PATH, launch_headless_sim
+from game_bridge.spectate import NullPolicy, OverlayWriter, ReplayPolicy
+
+
+@dataclass
+class FakeSpectateSession:
+    terminal_after_act: bool = True
+
+    def __post_init__(self) -> None:
+        self._state = {
+            "state_type": "map",
+            "terminal": False,
+            "run_outcome": None,
+            "legal_actions": [
+                {
+                    "action": "proceed",
+                    "label": "Proceed",
+                    "is_enabled": True,
+                }
+            ],
+        }
+
+    def reset(self, **_kwargs) -> dict[str, Any]:
+        self._state = {
+            "state_type": "map",
+            "terminal": False,
+            "run_outcome": None,
+            "legal_actions": [
+                {
+                    "action": "proceed",
+                    "label": "Proceed",
+                    "is_enabled": True,
+                }
+            ],
+        }
+        return dict(self._state)
+
+    def get_state(self) -> dict[str, Any]:
+        return dict(self._state)
+
+    def act(self, _action: dict[str, Any]) -> dict[str, Any]:
+        self._state = {
+            "state_type": "game_over",
+            "terminal": self.terminal_after_act,
+            "run_outcome": "victory" if self.terminal_after_act else None,
+            "legal_actions": [],
+        }
+        return dict(self._state)
+
+    def close(self) -> None:
+        return None
+
+
+def run_fake_spectate(*, output_dir: Path) -> int:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    replay_path = output_dir / "replay.jsonl"
+    overlay_path = output_dir / "overlay.json"
+    replay_path.write_text(json.dumps({"action": "proceed"}) + "\n", encoding="utf-8")
+
+    session = FakeSpectateSession()
+    policy = ReplayPolicy.from_jsonl(replay_path)
+    controller = SpectatorController(
+        session=session,
+        policy=policy,
+        overlay=OverlayWriter(overlay_path),
+    )
+    result = controller.play_episode(max_steps=4)
+    print(json.dumps({"mode": "fake_spectate", "result": result}, ensure_ascii=False, indent=2))
+    print(f"overlay={overlay_path}")
+    return 0
+
+
+def run_sim_launch_check(*, port: int) -> int:
+    if not DEFAULT_HOST_PATH.exists():
+        print(
+            json.dumps(
+                {
+                    "mode": "sim_launch",
+                    "ready": False,
+                    "reason": "missing_host_binary",
+                    "host_path": str(DEFAULT_HOST_PATH),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 2
+
+    handle = launch_headless_sim(port=port, protocol="proto", connect_timeout_s=10.0)
+    try:
+        print(
+            json.dumps(
+                {
+                    "mode": "sim_launch",
+                    "ready": True,
+                    "pid": handle.pid,
+                    "port": port,
+                    "log_dir": str(handle.log_dir),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    finally:
+        handle.process.terminate()
+        handle.process.wait(timeout=5)
+    return 0
+
+
+def run_full_run_state_check(*, port: int) -> int:
+    session = create_full_run_session(
+        port=port,
+        use_pipe=True,
+        transport="proto",
+        auto_launch=True,
+    )
+    try:
+        state = session.get_state()
+        print(json.dumps({"mode": "full_run_state", "state_type": state.get("state_type")}, ensure_ascii=False, indent=2))
+    finally:
+        session.close()
+    return 0
+
+
+def run_full_run_reset_check(*, port: int) -> int:
+    session = create_full_run_session(
+        port=port,
+        use_pipe=True,
+        transport="proto",
+        auto_launch=True,
+    )
+    try:
+        state = session.reset(character_id="IRONCLAD", seed=None)
+        print(
+            json.dumps(
+                {
+                    "mode": "full_run_reset",
+                    "state_type": state.get("state_type"),
+                    "legal_actions": len(state.get("legal_actions") or []),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    finally:
+        session.close()
+    return 0
+
+
+def run_real_spectate_null(*, output_dir: Path, port: int) -> int:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    overlay_path = output_dir / "real_overlay.json"
+    session = create_full_run_session(
+        port=port,
+        use_pipe=True,
+        transport="proto",
+        auto_launch=True,
+    )
+    try:
+        controller = SpectatorController(
+            session=session,
+            policy=NullPolicy(),
+            overlay=OverlayWriter(overlay_path),
+        )
+        result = controller.play_episode(max_steps=5)
+        print(
+            json.dumps(
+                {
+                    "mode": "real_spectate_null",
+                    "result": result,
+                    "overlay_file": str(overlay_path),
+                    "overlay_exists": overlay_path.exists(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    finally:
+        session.close()
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Smoke tests for game_bridge.")
+    parser.add_argument(
+        "--mode",
+        choices=("fake_spectate", "sim_launch", "full_run_state", "full_run_reset", "real_spectate_null"),
+        default="fake_spectate",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=PYTHON_ROOT.parent / "Artifacts" / "smoke" / "game_bridge",
+    )
+    parser.add_argument("--port", type=int, default=15527)
+    args = parser.parse_args()
+
+    print(
+        json.dumps(
+            {
+                "mode": args.mode,
+                "port": args.port,
+                "output_dir": str(args.output_dir),
+                "default_host_path": str(DEFAULT_HOST_PATH),
+                "default_host_exists": DEFAULT_HOST_PATH.exists(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+    if args.mode == "fake_spectate":
+        return run_fake_spectate(output_dir=args.output_dir)
+    if args.mode == "sim_launch":
+        return run_sim_launch_check(port=args.port)
+    if args.mode == "full_run_state":
+        return run_full_run_state_check(port=args.port)
+    if args.mode == "full_run_reset":
+        return run_full_run_reset_check(port=args.port)
+    return run_real_spectate_null(output_dir=args.output_dir, port=args.port)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
