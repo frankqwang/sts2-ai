@@ -12,6 +12,10 @@ from __future__ import annotations
 - 每步用 3 行左右描述，便于快速扫读
 - 单行尽量不超过 200 列
 - 每个 iter 随机抽若干把 fight，聚焦最近结果
+
+这是一个离线分析工具，不绑定训练主循环：
+- 训练只负责把 raw_runs / eval 日志落盘
+- 需要复盘时，再单独运行这个脚本抽样生成中文摘要
 """
 
 import argparse
@@ -61,6 +65,7 @@ def main() -> None:
             name_catalog=name_catalog,
         )
 
+    # 这里只返回输入输出位置，方便外层脚本或人工二次调用。
     print(
         json.dumps(
             {

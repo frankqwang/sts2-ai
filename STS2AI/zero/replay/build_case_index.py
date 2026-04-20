@@ -7,6 +7,14 @@ from __future__ import annotations
 - 过滤 skada runs
 - 还原每场战斗开局 build
 - 输出长期复用的 replay case 数据集
+
+输出说明：
+- `cases.jsonl`：训练 / 评估直接消费的长期复用 case 索引
+- `summary.json`：过滤条件、数量统计、角色/encounter 分布摘要
+
+注意：
+- `runs_full_detail` 只是上游原始底库，不进 git，也不作为训练直接输入
+- 训练主线默认读取这里清洗后的 `cases.jsonl`
 """
 
 import argparse
@@ -65,6 +73,7 @@ def main() -> None:
             run = record.get("run", {})
             character_id = str(run.get("character") or "")
             try:
+                # starter build 统一从角色模板出发，再叠加 run timeline 里的非战斗选择。
                 starter_build = default_starter_build(character_id)
             except ValueError:
                 skipped_runs += 1

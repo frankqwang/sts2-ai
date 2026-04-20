@@ -6,6 +6,14 @@ from __future__ import annotations
 - 读取单次训练 run 目录里的 `run_metrics / manifests / raw_runs / eval / logs`
 - 生成面向排查的摘要表和 PNG 图
 - 输出统一放到当前 run 根目录下的 `analysis/`
+
+这是训练后的离线分析层，不参与训练决策本身。
+如果之后要扩展图表，请优先保持：
+- 训练指标
+- 采样/样本池指标
+- 评估指标
+- rollout 行为
+这四块结构稳定，方便跨 run 对比。
 """
 
 import json
@@ -20,6 +28,7 @@ import pandas as pd
 
 
 def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Path:
+    # analysis 目录是“单次 run 的可读侧产物”，不作为训练输入回灌。
     analysis_dir = run_root / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 

@@ -4,6 +4,14 @@ from __future__ import annotations
 
 默认值统一从 `zero.config.ZERO_RUNTIME_DEFAULTS` 读取，方便入口运行，
 但角色/build 等权威数据仍需来自 game_wiki sqlite 与 runtime。
+
+用途：
+- 快速验证 bridge / replay / collect / train / eval 整条链是否还能跑通
+- 不追求正式结论，只看系统有没有坏、日志和产物是否完整
+
+建议：
+- 想看单个 case 是否能过拟合，优先用这个入口
+- 想看真正的多 case / ordered-run 训练，使用 `zero.replay.train`
 """
 
 import argparse
@@ -79,6 +87,7 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, default=STS2AI_ROOT / "Artifacts" / "zero")
     args = parser.parse_args()
 
+    # smoke 默认从 skada run 里挑第一条匹配记录，再按 combat-index 取某一场战斗。
     source_path, source_line = find_first_matching_run(
         root=args.skada_root,
         game_version=args.game_version,
@@ -106,6 +115,7 @@ def main() -> None:
         combat_index=args.combat_index,
     )
 
+    # smoke 输出目录按 run + floor + encounter 命名，方便人工回看同一场战斗。
     output_root = (
         args.output_root
         / dated_artifact_dir_name("skada-replay-smoke")

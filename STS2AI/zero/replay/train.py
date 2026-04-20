@@ -1,6 +1,24 @@
 from __future__ import annotations
 
-"""基于 skada replay case 索引跑多 case combat 训练。"""
+"""基于 skada replay case 索引跑多 case combat 训练。
+
+这是当前 zero combat 训练的主入口，常见用途有两类：
+1. 单 case / 少量 case 的 smoke 与过拟合验证
+2. ordered-run curriculum 训练：按同一条 run 的战斗顺序推进，
+   中途失败就从第一场重新开始，尽量贴近真实 run 的战斗阶段学习
+
+脚本职责：
+- 读取已经清洗好的 `cases.jsonl`
+- 选择训练 / 评估用的 case 集合
+- 启动 shared sim
+- 驱动 `ZeroLoopRunner` 完成 collect -> teacher -> train -> eval -> promote
+- 把 run_metrics / analysis / checkpoints 落到本次产物目录
+
+注意：
+- 这里默认依赖已经清洗好的 replay case 索引，不直接读取 `runs_full_detail`
+- 想重建索引，请用 `zero.replay.build_case_index`
+- collect 支持探索；eval 始终保持贪心，便于稳定比较版本差异
+"""
 
 import argparse
 import json
@@ -126,6 +144,9 @@ def main() -> None:
     if not cases:
         raise ValueError(f"case index 为空: {args.case_index}")
 
+    # 训练集 / 评估集的选择逻辑：
+    # - 指定 run_id 时，优先走“同一条 run 的多场战斗课程”
+    # - 未指定 run_id 时，按清洗后的 case 索引随机切 train / eval
     curriculum_mode = "random_cases"
     if args.run_id:
         run_cases = [case for case in cases if int(case.run_id) == int(args.run_id)]
@@ -147,6 +168,9 @@ def main() -> None:
         if args.ordered_run:
             curriculum_mode = "ordered_cases"
 
+    # 产物目录结构：
+    # STS2AI/Artifacts/zero/MM-DD-HH-MM-skada-replay-train/<run_name>
+    # run_name 里保留课程模式、case 数、iter 数和 seed，方便之后直接比较。
     run_name = (
         f"{curriculum_mode}_cases_{len(train_cases)}_eval_{len(eval_cases)}"
         f"_iters_{args.iterations}_seed_{args.seed}"
@@ -202,6 +226,7 @@ def main() -> None:
 
         try:
             if curriculum_mode == "ordered_run":
+                # ordered-run 评估会从第一场开始，失败后直接停止，不再继续评后续战斗。
                 evaluator = OrderedRunCaseEvaluator(
                     eval_cases,
                     port=args.port,
@@ -244,6 +269,8 @@ def main() -> None:
                 evaluator=evaluator,
             )
             if args.parallel_envs > 1:
+                # 并发 collect 目前只并发 rollout，不并发 trainer / evaluator；
+                # 这样能提吞吐，同时避免评估语义和晋级判定变复杂。
                 runner._collector = ParallelTrajectoryCollector(
                     parallel_envs=args.parallel_envs,
                     ports=collect_ports,
