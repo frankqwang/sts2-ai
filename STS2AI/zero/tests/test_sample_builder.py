@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from zero.config import EncoderConfig
+from zero.config import EncoderConfig, TeacherConfig
 from zero.domain import (
     BattleState,
     EnemyState,
@@ -13,6 +13,7 @@ from zero.domain import (
     RawTransition,
     StaticContext,
 )
+from zero.orchestration.teacher import TeacherQueueBuilder
 from zero.orchestration.sample_builder import SampleBuilder
 
 
@@ -77,6 +78,9 @@ class SampleBuilderTests(unittest.TestCase):
         self.assertEqual(samples[1].behavior_action_index, 0)
         self.assertGreater(samples[0].keep_score, 0.0)
         self.assertAlmostEqual(samples[0].metadata["uncertainty_target"], 0.45)
+        self.assertGreater(samples[0].fight_score, 0.0)
+        self.assertGreater(samples[0].sample_weight, 0.1)
+        self.assertIn("score_band", samples[0].metadata)
 
     def test_filters_empty_legal_actions(self) -> None:
         builder = SampleBuilder(EncoderConfig(history_steps=4))
@@ -103,6 +107,106 @@ class SampleBuilderTests(unittest.TestCase):
         )
 
         self.assertEqual(samples, [])
+
+    def test_good_fight_samples_are_weighted_above_bad_fight_samples(self) -> None:
+        builder = SampleBuilder(EncoderConfig(history_steps=4))
+        good_state0 = make_state(hp=80.0, enemy_hp=40.0, step=0)
+        good_state1 = make_state(hp=80.0, enemy_hp=28.0, step=1)
+        good_state2 = make_state(hp=78.0, enemy_hp=0.0, step=2, terminal=True, outcome="victory")
+        bad_state0 = make_state(hp=80.0, enemy_hp=40.0, step=0)
+        bad_state1 = make_state(hp=68.0, enemy_hp=40.0, step=1)
+        bad_state2 = make_state(hp=52.0, enemy_hp=40.0, step=2, terminal=True, outcome="defeat")
+        transitions = [
+            RawTransition(
+                run_id="run-good",
+                fight_id="fight-good",
+                step_idx=0,
+                seed="seed",
+                action_index=0,
+                state=good_state0,
+                action=good_state0.legal_actions[0],
+                next_state=good_state1,
+                done=False,
+                fight_outcome="",
+                run_outcome="",
+                metadata={"top2_gap": 0.1, "made_progress": True},
+            ),
+            RawTransition(
+                run_id="run-good",
+                fight_id="fight-good",
+                step_idx=1,
+                seed="seed",
+                action_index=0,
+                state=good_state1,
+                action=good_state1.legal_actions[0],
+                next_state=good_state2,
+                done=True,
+                fight_outcome="victory",
+                run_outcome="victory",
+                metadata={"top2_gap": 0.1, "made_progress": True},
+            ),
+            RawTransition(
+                run_id="run-bad",
+                fight_id="fight-bad",
+                step_idx=0,
+                seed="seed",
+                action_index=1,
+                state=bad_state0,
+                action=bad_state0.legal_actions[1],
+                next_state=bad_state1,
+                done=False,
+                fight_outcome="",
+                run_outcome="",
+                metadata={"top2_gap": 0.1, "made_progress": False},
+            ),
+            RawTransition(
+                run_id="run-bad",
+                fight_id="fight-bad",
+                step_idx=1,
+                seed="seed",
+                action_index=1,
+                state=bad_state1,
+                action=bad_state1.legal_actions[1],
+                next_state=bad_state2,
+                done=True,
+                fight_outcome="defeat",
+                run_outcome="defeat",
+                metadata={"top2_gap": 0.1, "made_progress": False},
+            ),
+        ]
+
+        samples = builder.build(transitions)
+        good_weights = [sample.sample_weight for sample in samples if sample.fight_id == "fight-good"]
+        bad_weights = [sample.sample_weight for sample in samples if sample.fight_id == "fight-bad"]
+        self.assertGreater(sum(good_weights) / len(good_weights), sum(bad_weights) / len(bad_weights))
+
+    def test_timeout_like_samples_are_prioritized_for_teacher(self) -> None:
+        builder = SampleBuilder(EncoderConfig(history_steps=4))
+        state0 = make_state(hp=60.0, enemy_hp=40.0, step=0)
+        state0.context.encounter_class = "elite"
+        state1 = make_state(hp=48.0, enemy_hp=40.0, step=1, terminal=True, outcome="defeat")
+        transition = RawTransition(
+            run_id="run1",
+            fight_id="fight1",
+            step_idx=0,
+            seed="seed",
+            action_index=1,
+            state=state0,
+            action=state0.legal_actions[1],
+            next_state=state1,
+            done=True,
+            fight_outcome="defeat",
+            run_outcome="defeat",
+            metadata={"top2_gap": 0.0, "made_progress": False},
+        )
+        sample = builder.build([transition])[0]
+        sample.metadata["fight_timeout"] = True
+        sample.metadata["fight_no_progress_ratio"] = 1.0
+        queue = TeacherQueueBuilder(TeacherConfig(max_requests_per_iteration=8))
+        requests = queue.select([sample])
+        self.assertEqual(len(requests), 1)
+        self.assertIn("fight_timeout", requests[0].reason_tags)
+        self.assertIn("high_no_progress", requests[0].reason_tags)
 
 
 if __name__ == "__main__":

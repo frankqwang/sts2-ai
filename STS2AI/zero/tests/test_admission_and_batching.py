@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from zero.config import EncoderConfig
-from zero.buffers.pools import _allocate_counts
+from zero.buffers.pools import SamplePoolSet, _allocate_capacities, _allocate_counts
+from zero.config import EncoderConfig, PoolConfig
 from zero.domain import (
     BattleState,
     EnemyState,
@@ -90,6 +90,42 @@ class AdmissionAndBatchingTests(unittest.TestCase):
 
         self.assertEqual(sum(counts.values()), 3)
         self.assertGreaterEqual(counts["recent_online"], 1)
+
+    def test_allocate_capacities_expand_with_recent_two_iterations(self) -> None:
+        capacities = _allocate_capacities(
+            target_total=12000,
+            weighted_bases=[
+                ("recent_online", 0.35, 2048),
+                ("teacher", 0.25, 1024),
+                ("rare", 0.20, 256),
+                ("reanalyse", 0.10, 1024),
+                ("legacy", 0.10, 2048),
+            ],
+        )
+
+        self.assertEqual(sum(capacities.values()), 12000)
+        self.assertGreater(capacities["recent_online"], 2048)
+        self.assertGreater(capacities["teacher"], 1024)
+
+    def test_sample_pool_set_expands_capacity_and_prefers_higher_keep_score(self) -> None:
+        pools = SamplePoolSet(PoolConfig())
+        capacities = pools.update_capacity_plan(logical_samples=7000)
+
+        self.assertGreaterEqual(sum(capacities.values()), 7000)
+        self.assertGreater(capacities["recent_online"], 2048)
+
+        low = make_sample()
+        low.sample_id = "low"
+        low.keep_score = 0.1
+        high = make_sample()
+        high.sample_id = "high"
+        high.keep_score = 1.5
+
+        pools.add(low.clone_for_pool(pool_name="recent_online"))
+        pools.add(high.clone_for_pool(pool_name="recent_online"))
+
+        recent_items = {item.sample_id for item in pools._pools["recent_online"].items()}
+        self.assertIn("high", recent_items)
 
 
 if __name__ == "__main__":

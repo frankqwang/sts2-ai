@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from zero.domain import (
     BattleState,
@@ -20,6 +21,8 @@ from zero.domain import (
 )
 from zero.replay.skada import (
     MultiCaseAggregateTeacher,
+    OrderedRunCaseEvaluator,
+    OrderedRunRuntimeFactory,
     SkadaBuild,
     SkadaCombatCase,
     _build_eval_label,
@@ -30,6 +33,30 @@ from zero.replay.skada import (
 
 
 class SkadaReplayTests(unittest.TestCase):
+    def _make_case(self, *, floor: int, encounter_id: str, run_id: int = 12) -> SkadaCombatCase:
+        return SkadaCombatCase(
+            source_path="abc.jsonl",
+            source_line=7,
+            run_id=run_id,
+            seed="seed-x",
+            game_version="v0.103.2",
+            character_id="IRONCLAD",
+            ascension=0,
+            player_count=1,
+            floor=floor,
+            encounter_id=encounter_id,
+            encounter_type="Normal",
+            won=True,
+            build=SkadaBuild(
+                deck=[{"id": "STRIKE_IRONCLAD", "upgrade_level": 0}],
+                relics=[{"id": "BURNING_BLOOD"}],
+                current_hp=80,
+                max_hp=80,
+                max_energy=3,
+                gold=99,
+            ),
+        )
+
     def test_assess_transition_progress_marks_enemy_hp_drop(self):
         previous = BattleState(
             player=PlayerState(hp=80.0, max_hp=80.0, block=0.0, energy=3.0),
@@ -137,56 +164,14 @@ class SkadaReplayTests(unittest.TestCase):
         self.assertEqual(build.relics, [{"id": "BURNING_BLOOD"}])
 
     def test_skada_case_round_trip(self):
-        case = SkadaCombatCase(
-            source_path="abc.jsonl",
-            source_line=7,
-            run_id=12,
-            seed="seed-x",
-            game_version="v0.103.2",
-            character_id="IRONCLAD",
-            ascension=0,
-            player_count=1,
-            floor=2,
-            encounter_id="SHRINKER_BEETLE_WEAK",
-            encounter_type="Normal",
-            won=True,
-            build=SkadaBuild(
-                deck=[{"id": "STRIKE_IRONCLAD", "upgrade_level": 0}],
-                relics=[{"id": "BURNING_BLOOD"}],
-                current_hp=80,
-                max_hp=80,
-                max_energy=3,
-                gold=99,
-            ),
-        )
+        case = self._make_case(floor=2, encounter_id="SHRINKER_BEETLE_WEAK")
         restored = SkadaCombatCase.from_dict(case.to_dict())
         self.assertEqual(restored.case_id, case.case_id)
         self.assertEqual(restored.build.deck[0]["id"], "STRIKE_IRONCLAD")
 
     def test_multi_case_teacher_routes_by_case_id(self):
-        case = SkadaCombatCase(
-            source_path="abc.jsonl",
-            source_line=7,
-            run_id=12,
-            seed="seed-x",
-            game_version="v0.103.2",
-            character_id="IRONCLAD",
-            ascension=0,
-            player_count=1,
-            floor=2,
-            encounter_id="SHRINKER_BEETLE_WEAK",
-            encounter_type="Normal",
-            won=True,
-            build=SkadaBuild(
-                deck=[{"id": "STRIKE_IRONCLAD", "upgrade_level": 0}],
-                relics=[{"id": "BURNING_BLOOD"}],
-                current_hp=80,
-                max_hp=80,
-                max_energy=3,
-                gold=99,
-            ),
-            card_usage={"STRIKE_IRONCLAD": {"plays": 3, "damage": 9.0, "block": 0.0, "energy": 3.0}},
-        )
+        case = self._make_case(floor=2, encounter_id="SHRINKER_BEETLE_WEAK")
+        case.card_usage = {"STRIKE_IRONCLAD": {"plays": 3, "damage": 9.0, "block": 0.0, "energy": 3.0}}
         teacher = MultiCaseAggregateTeacher([case])
         sample = TrainingSample(
             sample_id="sample1",
@@ -220,6 +205,69 @@ class SkadaReplayTests(unittest.TestCase):
         request = TeacherRequest(request_id="req1", sample=sample, priority=1.0)
         label = teacher.label_request(request)
         self.assertEqual(label.best_action_index, 0)
+
+    def test_ordered_run_runtime_factory_resets_after_failure(self):
+        cases = [
+            self._make_case(floor=2, encounter_id="CASE_A"),
+            self._make_case(floor=4, encounter_id="CASE_B"),
+        ]
+        factory = OrderedRunRuntimeFactory(cases, auto_launch=False)
+        self.assertEqual(factory.current_case_id, cases[0].case_id)
+        factory.on_episode_end({"outcome": "victory", "truncated": False})
+        self.assertEqual(factory.current_case_id, cases[1].case_id)
+        factory.on_episode_end({"outcome": "defeat", "truncated": False})
+        self.assertEqual(factory.current_case_id, cases[0].case_id)
+
+    def test_ordered_run_evaluator_stops_after_failure(self):
+        cases = [
+            self._make_case(floor=2, encounter_id="CASE_A"),
+            self._make_case(floor=4, encounter_id="CASE_B"),
+            self._make_case(floor=6, encounter_id="CASE_C"),
+        ]
+        evaluator = OrderedRunCaseEvaluator(cases, auto_launch=False, episodes_per_case=2)
+        outcomes = {
+            cases[0].case_id: [
+                {"success": True},
+                {"success": False},
+            ],
+            cases[1].case_id: [
+                {"success": False},
+            ],
+            cases[2].case_id: [],
+        }
+
+        def fake_rollout_case_episode(**kwargs):
+            case = kwargs["case"]
+            queue = outcomes[case.case_id]
+            if not queue:
+                self.fail(f"unexpected rollout for {case.case_id}")
+            result = queue.pop(0)
+            return {
+                "label": FightLabel(
+                    fight_win=1.0 if result["success"] else 0.0,
+                    enemy_hp_fraction_dealt=1.0 if result["success"] else 0.2,
+                    self_hp_fraction_remaining=0.9 if result["success"] else 0.0,
+                ),
+                "metrics": {
+                    "truncated": False,
+                    "progress_steps": 3,
+                    "no_progress_steps": 1,
+                    "no_progress_ratio": 0.25,
+                    "max_no_progress_streak": 1,
+                },
+                "agreement_hits": 1.0,
+                "overlap_hits": 1.0,
+                "agreement_steps": 1,
+                "success": result["success"],
+            }
+
+        with patch("zero.replay.skada._rollout_case_episode", side_effect=fake_rollout_case_episode):
+            summaries = evaluator.evaluate(policy=object())
+
+        summary_by_floor = {int(item.metadata["floor"]): item for item in summaries}
+        self.assertEqual(summary_by_floor[2].metadata["num_episodes"], 2)
+        self.assertEqual(summary_by_floor[4].metadata["num_episodes"], 1)
+        self.assertEqual(summary_by_floor[6].metadata["num_episodes"], 0)
 
 
 if __name__ == "__main__":

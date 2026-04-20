@@ -67,6 +67,7 @@ class ZeroLoopRunner:
             raise ValueError("run_iteration 需要 student_policy，或已有晋级后的 active policy。")
 
         collector_version = self._active_version or type(collector_policy).__name__
+        external_episode_end = getattr(runtime_factory, "on_episode_end", None)
         iteration_started_at = time.perf_counter()
         self._write_progress(
             iteration,
@@ -92,7 +93,11 @@ class ZeroLoopRunner:
             seed=self.config.seed + iteration,
             on_episode_start=lambda event: self._write_progress(iteration, phase="collect_episode", status="started", **event),
             on_transition=lambda transition: self.artifact_store.append_raw_run_row(iteration, transition.to_dict()),
-            on_episode_end=lambda event: self._write_progress(iteration, phase="collect_episode", status="completed", **event),
+            on_episode_end=lambda event: self._handle_collect_episode_end(
+                iteration,
+                event,
+                external_callback=external_episode_end,
+            ),
         )
         self._write_progress(
             iteration,
@@ -110,17 +115,58 @@ class ZeroLoopRunner:
 
         build_started_at = time.perf_counter()
         samples = self._sample_builder.build(transitions)
+        sample_build_duration_s = time.perf_counter() - build_started_at
+        pool_capacities = self._pools.update_capacity_plan(logical_samples=len(samples))
+        self._write_progress(
+            iteration,
+            phase="sample_build",
+            status="completed",
+            duration_s=round(sample_build_duration_s, 6),
+            samples=len(samples),
+            pool_capacities=pool_capacities,
+        )
+
+        admission_started_at = time.perf_counter()
         online_entries = self._admission.build_online_entries(samples)
         teacher_requests = self._teacher_queue.select(samples)
+        pre_teacher_duration_s = time.perf_counter() - admission_started_at
+
+        teacher_started_at = time.perf_counter()
         labeled_samples = self._teacher_processor.label(teacher_requests, teacher_oracle, runtime_factory=runtime_factory)
+        teacher_duration_s = time.perf_counter() - teacher_started_at
+        self._write_progress(
+            iteration,
+            phase="teacher_label",
+            status="completed",
+            duration_s=round(teacher_duration_s, 6),
+            teacher_requests=len(teacher_requests),
+            labeled_samples=len(labeled_samples),
+        )
+
+        teacher_entry_started_at = time.perf_counter()
         teacher_entries = self._admission.build_teacher_entries(labeled_samples)
         self._pools.add_many(online_entries)
         self._pools.add_many(teacher_entries)
+        pool_admission_duration_s = time.perf_counter() - teacher_entry_started_at
+        self._write_progress(
+            iteration,
+            phase="pool_admission",
+            status="completed",
+            duration_s=round(pool_admission_duration_s, 6),
+            online_entries=len(online_entries),
+            teacher_entries=len(teacher_entries),
+            pool_capacities=pool_capacities,
+            pool_sizes=self._pools.size_by_pool(),
+        )
         self._write_progress(
             iteration,
             phase="build_and_label",
             status="completed",
             duration_s=round(time.perf_counter() - build_started_at, 6),
+            sample_build_duration_s=round(sample_build_duration_s, 6),
+            pre_teacher_duration_s=round(pre_teacher_duration_s, 6),
+            teacher_duration_s=round(teacher_duration_s, 6),
+            pool_admission_duration_s=round(pool_admission_duration_s, 6),
             samples=len(samples),
             online_entries=len(online_entries),
             teacher_requests=len(teacher_requests),
@@ -210,6 +256,7 @@ class ZeroLoopRunner:
                 "teacher_entries": len(teacher_entries),
             },
             pool_sizes=self._pools.size_by_pool(),
+            pool_capacities=self._pools.capacity_by_pool(),
             training=training_summary,
             evaluations=evaluations,
             promotion=promotion,
@@ -297,3 +344,14 @@ class ZeroLoopRunner:
         configure = getattr(self.evaluator, "set_trace_context", None)
         if callable(configure):
             configure(iteration=iteration, phase=phase)
+
+    def _handle_collect_episode_end(
+        self,
+        iteration: int,
+        event: dict[str, object],
+        *,
+        external_callback: Callable[[dict[str, object]], None] | None = None,
+    ) -> None:
+        self._write_progress(iteration, phase="collect_episode", status="completed", **event)
+        if callable(external_callback):
+            external_callback(event)

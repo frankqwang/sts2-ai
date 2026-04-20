@@ -65,7 +65,7 @@ class FeatureExtractor:
             ],
             delta_targets=self._encode_delta(sample.delta),
             uncertainty_target=float(sample.metadata.get("uncertainty_target", 0.0) or 0.0),
-            sample_weight=max(0.1, sample.fight_label.fight_score + 0.5),
+            sample_weight=max(0.1, float(sample.sample_weight)),
         )
 
     def encode_inference(self, state: BattleState, history: list[HistoryStep], legal_actions: list[LegalAction]) -> EncodedSample:

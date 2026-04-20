@@ -15,11 +15,19 @@ if str(ZERO_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(ZERO_PACKAGE_ROOT))
 
 from zero import ZeroConfig, ZeroLoopRunner
+from zero.analysis import generate_training_analysis
 from zero.buffers import ArtifactStore
 from zero.config import CollectConfig, EvalConfig, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
 from zero.orchestration.trainer import LocalCheckpointStore
 from zero.paths import STS2AI_ROOT, ZeroPaths
-from zero.replay import FixedSkadaCaseEvaluator, MultiCaseAggregateTeacher, SkadaReplayRuntime, load_case_index
+from zero.replay import (
+    FixedSkadaCaseEvaluator,
+    MultiCaseAggregateTeacher,
+    OrderedRunCaseEvaluator,
+    OrderedRunRuntimeFactory,
+    SkadaReplayRuntime,
+    load_case_index,
+)
 from zero.replay.naming import dated_artifact_dir_name
 from zero.replay.shared_sim import launch_shared_proto_sim
 
@@ -124,14 +132,42 @@ def main() -> None:
     artifact_store = ArtifactStore(config.paths)
     checkpoint_store = LocalCheckpointStore(config.paths.checkpoints)
     with launch_shared_proto_sim(port=args.port, connect_timeout_s=45.0) as sim_info:
-        evaluator = FixedSkadaCaseEvaluator(
-            eval_cases,
-            port=args.port,
-            auto_launch=False,
-            connect_timeout_s=45.0,
-            episodes_per_case=config.evaluation.episodes_per_cohort,
-            artifact_store=artifact_store,
-        )
+        if curriculum_mode == "ordered_run":
+            evaluator = OrderedRunCaseEvaluator(
+                eval_cases,
+                port=args.port,
+                auto_launch=False,
+                connect_timeout_s=45.0,
+                episodes_per_case=config.evaluation.episodes_per_cohort,
+                artifact_store=artifact_store,
+            )
+            runtime_factory = OrderedRunRuntimeFactory(
+                train_cases,
+                port=args.port,
+                auto_launch=False,
+                connect_timeout_s=45.0,
+            )
+        else:
+            evaluator = FixedSkadaCaseEvaluator(
+                eval_cases,
+                port=args.port,
+                auto_launch=False,
+                connect_timeout_s=45.0,
+                episodes_per_case=config.evaluation.episodes_per_cohort,
+                artifact_store=artifact_store,
+            )
+            train_case_cycle = list(train_cases)
+            selection_rng = random.Random(args.seed)
+            ordered_cycle = deque(train_case_cycle)
+
+            def runtime_factory():
+                if curriculum_mode == "ordered_cases":
+                    case = ordered_cycle[0]
+                    ordered_cycle.rotate(-1)
+                else:
+                    case = selection_rng.choice(train_case_cycle)
+                return SkadaReplayRuntime(case, port=args.port, auto_launch=False, connect_timeout_s=45.0)
+
         runner = ZeroLoopRunner(
             config=config,
             artifact_store=artifact_store,
@@ -139,21 +175,6 @@ def main() -> None:
             evaluator=evaluator,
         )
         teacher = MultiCaseAggregateTeacher(train_cases)
-
-        train_case_cycle = list(train_cases)
-        selection_rng = random.Random(args.seed)
-        ordered_cycle = deque(train_case_cycle)
-
-        def runtime_factory():
-            if curriculum_mode == "ordered_run":
-                case = ordered_cycle[0]
-                ordered_cycle.rotate(-1)
-            elif curriculum_mode == "ordered_cases":
-                case = ordered_cycle[0]
-                ordered_cycle.rotate(-1)
-            else:
-                case = selection_rng.choice(train_case_cycle)
-            return SkadaReplayRuntime(case, port=args.port, auto_launch=False, connect_timeout_s=45.0)
 
         baseline_policy = RandomPolicy()
         set_trace_context = getattr(evaluator, "set_trace_context", None)
@@ -185,7 +206,17 @@ def main() -> None:
     }
     metrics_path = output_root / "run_metrics.json"
     metrics_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"output_root": str(output_root), "metrics_path": str(metrics_path)}, ensure_ascii=False))
+    analysis_dir = generate_training_analysis(run_root=output_root, run_metrics_path=metrics_path)
+    print(
+        json.dumps(
+            {
+                "output_root": str(output_root),
+                "metrics_path": str(metrics_path),
+                "analysis_dir": str(analysis_dir),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

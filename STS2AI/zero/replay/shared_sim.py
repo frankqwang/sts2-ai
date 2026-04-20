@@ -28,20 +28,29 @@ def _ensure_python_bridge_path() -> None:
 
 
 @contextmanager
-def launch_shared_proto_sim(*, port: int, connect_timeout_s: float = 45.0) -> Iterator[dict[str, object]]:
+def launch_shared_proto_sim(
+    *,
+    port: int,
+    connect_timeout_s: float = 45.0,
+    host_path: str | Path | None = None,
+) -> Iterator[dict[str, object]]:
     _ensure_python_bridge_path()
     from game_bridge.sim.launcher import start_headless_sim, stop_process
 
-    proc = start_headless_sim(
-        port=port,
-        connect_timeout_s=connect_timeout_s,
-        protocol="proto",
-    )
+    start_kwargs = {
+        "port": port,
+        "connect_timeout_s": connect_timeout_s,
+        "protocol": "proto",
+    }
+    if host_path is not None:
+        start_kwargs["host_path"] = str(host_path)
+    proc = start_headless_sim(**start_kwargs)
     try:
         yield {
             "pid": int(proc.pid),
             "log_path": str(getattr(proc, "_sim_log_path", "")),
             "port": int(port),
+            "host_path": str(host_path) if host_path is not None else "",
         }
     finally:
         stop_process(proc)

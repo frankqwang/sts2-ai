@@ -7,6 +7,7 @@ import random
 from collections import Counter
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from math import floor
 
 from ..config import PoolConfig
 from ..domain import TrainingSample
@@ -25,10 +26,11 @@ class BucketedSamplePool:
         bucket = sample.bucket_key or "default"
         if self.retention_mode == "score":
             heap = self._score_buckets[bucket]
+            score_entry = (sample.keep_score, self._sequence, sample)
             if len(heap) < self.bucket_capacity:
-                heapq.heappush(heap, (sample.keep_score, self._sequence, sample))
-            elif heap and sample.keep_score > heap[0][0]:
-                heapq.heapreplace(heap, (sample.keep_score, self._sequence, sample))
+                heapq.heappush(heap, score_entry)
+            elif heap and score_entry[:2] > heap[0][:2]:
+                heapq.heapreplace(heap, score_entry)
             self._sequence += 1
             return
 
@@ -36,6 +38,17 @@ class BucketedSamplePool:
         queue.append(sample)
         while len(queue) > self.bucket_capacity:
             queue.popleft()
+
+    def set_bucket_capacity(self, bucket_capacity: int) -> None:
+        self.bucket_capacity = max(1, int(bucket_capacity))
+        if self.retention_mode == "score":
+            for heap in self._score_buckets.values():
+                while len(heap) > self.bucket_capacity:
+                    heapq.heappop(heap)
+            return
+        for queue in self._fifo_buckets.values():
+            while len(queue) > self.bucket_capacity:
+                queue.popleft()
 
     def sample(self, count: int) -> list[TrainingSample]:
         if count <= 0:
@@ -77,13 +90,22 @@ class BucketedSamplePool:
 class SamplePoolSet:
     def __init__(self, config: PoolConfig):
         self._config = config
+        self._recent_iteration_samples: deque[int] = deque(maxlen=max(1, config.dynamic_capacity_recent_iterations))
+        self._base_capacities = {
+            "recent_online": config.bucket_capacity,
+            "teacher": config.teacher_bucket_capacity,
+            "rare": config.rare_bucket_capacity,
+            "reanalyse": max(1, config.bucket_capacity // 2),
+            "legacy": config.bucket_capacity,
+        }
         self._pools = {
-            "recent_online": BucketedSamplePool("recent_online", config.bucket_capacity, retention_mode="fifo"),
+            "recent_online": BucketedSamplePool("recent_online", config.bucket_capacity, retention_mode="score"),
             "teacher": BucketedSamplePool("teacher", config.teacher_bucket_capacity, retention_mode="score"),
             "rare": BucketedSamplePool("rare", config.rare_bucket_capacity, retention_mode="score"),
-            "reanalyse": BucketedSamplePool("reanalyse", config.bucket_capacity // 2, retention_mode="score"),
-            "legacy": BucketedSamplePool("legacy", config.bucket_capacity, retention_mode="fifo"),
+            "reanalyse": BucketedSamplePool("reanalyse", max(1, config.bucket_capacity // 2), retention_mode="score"),
+            "legacy": BucketedSamplePool("legacy", config.bucket_capacity, retention_mode="score"),
         }
+        self._current_capacities = dict(self._base_capacities)
 
     def add(self, sample: TrainingSample) -> None:
         pool = self._pools.get(sample.pool_name, self._pools["recent_online"])
@@ -117,6 +139,31 @@ class SamplePoolSet:
 
     def size_by_pool(self) -> dict[str, int]:
         return {name: pool.size() for name, pool in self._pools.items()}
+
+    def capacity_by_pool(self) -> dict[str, int]:
+        return dict(self._current_capacities)
+
+    def update_capacity_plan(self, *, logical_samples: int) -> dict[str, int]:
+        if logical_samples > 0:
+            self._recent_iteration_samples.append(int(logical_samples))
+        if not self._config.dynamic_capacity_enabled:
+            return self.capacity_by_pool()
+
+        target_total = max(sum(self._base_capacities.values()), sum(self._recent_iteration_samples))
+        capacities = _allocate_capacities(
+            target_total=target_total,
+            weighted_bases=[
+                ("recent_online", self._config.recent_online_weight, self._base_capacities["recent_online"]),
+                ("teacher", self._config.teacher_weight, self._base_capacities["teacher"]),
+                ("rare", self._config.rare_weight, self._base_capacities["rare"]),
+                ("reanalyse", self._config.reanalyse_weight, self._base_capacities["reanalyse"]),
+                ("legacy", self._config.legacy_weight, self._base_capacities["legacy"]),
+            ],
+        )
+        for name, capacity in capacities.items():
+            self._pools[name].set_bucket_capacity(capacity)
+        self._current_capacities = capacities
+        return self.capacity_by_pool()
 
 
 def _sample_with_card_diversity(items: list[TrainingSample]) -> TrainingSample:
@@ -162,3 +209,38 @@ def _allocate_counts(batch_size: int, weighted_sizes: list[tuple[str, float, int
             assigned += 1
 
     return {name: counts.get(name, 0) for name, _, _ in weighted_sizes}
+
+
+def _allocate_capacities(target_total: int, weighted_bases: list[tuple[str, float, int]]) -> dict[str, int]:
+    if target_total <= 0:
+        return {name: base for name, _weight, base in weighted_bases}
+
+    positive = [(name, weight, base) for name, weight, base in weighted_bases if weight > 0.0]
+    if not positive:
+        return {name: base for name, _weight, base in weighted_bases}
+
+    base_total = sum(base for _name, _weight, base in weighted_bases)
+    target_total = max(target_total, base_total)
+    extra_total = target_total - base_total
+    total_weight = sum(weight for _name, weight, _base in positive)
+    extra_by_name = {name: 0 for name, _weight, _base in weighted_bases}
+
+    raw = []
+    assigned_extra = 0
+    for name, weight, _base in positive:
+        value = extra_total * (weight / total_weight)
+        integer = floor(value)
+        extra_by_name[name] = integer
+        assigned_extra += integer
+        raw.append((value - integer, name))
+
+    for _remainder, name in sorted(raw, reverse=True):
+        if assigned_extra >= extra_total:
+            break
+        extra_by_name[name] += 1
+        assigned_extra += 1
+
+    return {
+        name: max(1, base + extra_by_name.get(name, 0))
+        for name, _weight, base in weighted_bases
+    }

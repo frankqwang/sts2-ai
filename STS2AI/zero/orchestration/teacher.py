@@ -69,6 +69,23 @@ class TeacherQueueBuilder:
             score += 0.5
             tags.append("rare_cohort")
 
+        if bool(sample.metadata.get("fight_timeout", False)):
+            score += 1.0
+            tags.append("fight_timeout")
+
+        no_progress_ratio = float(sample.metadata.get("fight_no_progress_ratio", 0.0) or 0.0)
+        if no_progress_ratio >= 0.70:
+            score += 0.75 * no_progress_ratio
+            tags.append("high_no_progress")
+
+        if sample.step_progress_score < 0.0:
+            score += min(0.5, abs(sample.step_progress_score))
+            tags.append("negative_step_progress")
+
+        if sample.fight_score <= 0.45:
+            score += 0.5
+            tags.append("low_fight_score")
+
         return score, tags
 
 

@@ -45,6 +45,7 @@ class IterationManifest:
     teacher_version: str
     sample_counts: dict[str, int] = field(default_factory=dict)
     pool_sizes: dict[str, int] = field(default_factory=dict)
+    pool_capacities: dict[str, int] = field(default_factory=dict)
     training: TrainingSummary = field(default_factory=TrainingSummary)
     evaluations: list[EvalSummary] = field(default_factory=list)
     promotion: PromotionDecision = field(

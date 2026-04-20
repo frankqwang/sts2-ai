@@ -67,4 +67,8 @@ skada 相关脚本位于 `STS2AI/Python/data/skada`，按具体任务直接运�
 
 - 除根目录 `README.md` 外，其它文档统一放在 `STS2AI/Docs`。
 - 运行产物、日志、临时输出统一放在 `STS2AI/Artifacts`。
+- `STS2AI/Artifacts/zero` 下的直接子目录统一使用 `MM-DD-HH-MM-name` 命名，例如 `04-20-19-30-skada-replay-train`，方便按名称顺序直接定位最新输出目录。
+- `zero` 相关的分析、可视化、数据挖掘脚本统一放在 `STS2AI/zero/analysis`，训练结束后默认把图表和摘要输出到当次产物目录下的 `analysis`。
+- 关键文件和关键函数要写“说明意图”的短注释，尤其是 loss、采样、晋级、teacher 这类容易演化的逻辑；代码注释默认用中文。当代码语义发生变更时，注释必须在同一次提交里同步更新，避免注释落后于实现。
+- PowerShell、bash 等脚本凡是涉及文件输入输出，默认显式使用 UTF-8 读写，避免中文日志、文档和数据文件出现乱码。
 - `src` 默认视为只读参考，不直接修改。

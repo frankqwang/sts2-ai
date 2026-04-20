@@ -40,6 +40,11 @@ class TrajectoryCollector:
             fight_id = uuid.uuid4().hex
             runtime = runtime_factory()
             episode_started_at = time.perf_counter()
+            reset_duration_s = 0.0
+            policy_infer_duration_s = 0.0
+            env_step_duration_s = 0.0
+            observe_duration_s = 0.0
+            emit_duration_s = 0.0
             emitted_steps = 0
             last_state = None
             progress_steps = 0
@@ -55,7 +60,9 @@ class TrajectoryCollector:
                     }
                 )
             try:
+                reset_started_at = time.perf_counter()
                 state = runtime.reset()
+                reset_duration_s = time.perf_counter() - reset_started_at
                 last_state = state
                 reset_hook = getattr(policy, "reset_episode", None)
                 if callable(reset_hook):
@@ -63,7 +70,9 @@ class TrajectoryCollector:
                 for step_idx in range(max_steps):
                     if state.terminal or not state.legal_actions:
                         break
+                    infer_started_at = time.perf_counter()
                     inference = self._infer_policy(policy, state)
+                    policy_infer_duration_s += time.perf_counter() - infer_started_at
                     scores = inference["scores"]
                     greedy_action = inference["action_index"]
                     uncertainty = inference["uncertainty"]
@@ -74,7 +83,9 @@ class TrajectoryCollector:
                         temperature=temperature,
                         rng=rng,
                     )
+                    env_step_started_at = time.perf_counter()
                     next_state = runtime.step(action_index)
+                    env_step_duration_s += time.perf_counter() - env_step_started_at
                     action = state.legal_actions[action_index]
                     progress = assess_transition_progress(state, next_state)
                     if progress.made_progress:
@@ -107,11 +118,15 @@ class TrajectoryCollector:
                     )
                     transitions.append(transition)
                     if on_transition is not None:
+                        emit_started_at = time.perf_counter()
                         on_transition(transition)
+                        emit_duration_s += time.perf_counter() - emit_started_at
                     emitted_steps = step_idx + 1
                     observe_hook = getattr(policy, "observe_transition", None)
                     if callable(observe_hook):
+                        observe_started_at = time.perf_counter()
                         observe_hook(state, action_index, next_state)
+                        observe_duration_s += time.perf_counter() - observe_started_at
                     state = next_state
                     last_state = state
                     if state.terminal:
@@ -119,14 +134,34 @@ class TrajectoryCollector:
             finally:
                 runtime.close()
                 if on_episode_end is not None:
+                    duration_s = time.perf_counter() - episode_started_at
                     truncated = bool(last_state is not None and not last_state.terminal and emitted_steps >= max_steps)
+                    accounted_duration_s = (
+                        reset_duration_s
+                        + policy_infer_duration_s
+                        + env_step_duration_s
+                        + observe_duration_s
+                        + emit_duration_s
+                    )
+                    overhead_duration_s = max(0.0, duration_s - accounted_duration_s)
                     on_episode_end(
                         {
                             "episode_index": episode_index,
                             "run_id": run_id,
                             "fight_id": fight_id,
-                            "duration_s": round(time.perf_counter() - episode_started_at, 6),
+                            "duration_s": round(duration_s, 6),
                             "steps": emitted_steps,
+                            "step_throughput": round(emitted_steps / max(duration_s, 1e-6), 6),
+                            "core_step_throughput": round(
+                                emitted_steps / max(policy_infer_duration_s + env_step_duration_s, 1e-6),
+                                6,
+                            ),
+                            "reset_duration_s": round(reset_duration_s, 6),
+                            "policy_infer_duration_s": round(policy_infer_duration_s, 6),
+                            "env_step_duration_s": round(env_step_duration_s, 6),
+                            "observe_duration_s": round(observe_duration_s, 6),
+                            "emit_duration_s": round(emit_duration_s, 6),
+                            "overhead_duration_s": round(overhead_duration_s, 6),
                             "terminal": bool(last_state.terminal) if last_state is not None else False,
                             "truncated": truncated,
                             "outcome": "timeout" if truncated else (str(last_state.run_outcome) if last_state is not None else ""),

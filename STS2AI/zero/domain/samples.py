@@ -73,6 +73,10 @@ class TrainingSample:
     rare_cohort_tags: list[str] = field(default_factory=list)
     student_disagreement: float = 0.0
     teacher_budget: float = 0.0
+    step_progress_score: float = 0.0
+    fight_score: float = 0.0
+    episode_score_proxy: float = 0.0
+    sample_weight: float = 1.0
     keep_score: float = 0.0
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 

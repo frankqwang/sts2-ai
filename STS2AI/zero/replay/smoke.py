@@ -18,6 +18,7 @@ if str(ZERO_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(ZERO_PACKAGE_ROOT))
 
 from zero import ZeroConfig, ZeroLoopRunner
+from zero.analysis import generate_training_analysis
 from zero.adapters.game_bridge import GameBridgeCombatRuntime
 from zero.buffers import ArtifactStore
 from zero.config import CollectConfig, EvalConfig, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
@@ -177,7 +178,17 @@ def main() -> None:
     }
     metrics_path = output_root / "smoke_metrics.json"
     metrics_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"output_root": str(output_root), "metrics_path": str(metrics_path)}, ensure_ascii=False))
+    analysis_dir = generate_training_analysis(run_root=output_root, run_metrics_path=metrics_path)
+    print(
+        json.dumps(
+            {
+                "output_root": str(output_root),
+                "metrics_path": str(metrics_path),
+                "analysis_dir": str(analysis_dir),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

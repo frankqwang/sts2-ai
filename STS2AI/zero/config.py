@@ -66,6 +66,15 @@ class PoolConfig:
     bucket_capacity: int = 2048
     rare_bucket_capacity: int = 256
     teacher_bucket_capacity: int = 1024
+    """样本池默认权重与基础容量。
+
+    基础容量只是冷启动下限。运行中会根据最近若干轮样本量动态放大，
+    目标是让总池容量至少覆盖最近两轮的逻辑样本总量，再在此基础上按
+    `keep_score` 做留优淘汰。
+    """
+
+    dynamic_capacity_enabled: bool = True
+    dynamic_capacity_recent_iterations: int = 2
 
 
 @dataclass(slots=True)
