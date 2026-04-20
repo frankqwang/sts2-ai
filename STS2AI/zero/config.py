@@ -103,9 +103,10 @@ class TrainConfig:
 class EvalConfig:
     episodes_per_cohort: int = 32
     promote_min_win_rate_gain: float = 0.01
-    allow_hp_remaining_drop: float = 0.02
+    allow_hp_quality_drop: float = 0.02
     promote_min_teacher_agreement_gain: float = 0.0
     promote_min_enemy_hp_gain: float = 0.0
+    promote_min_fight_quality_gain: float = 0.0
     significance_z: float = 0.0
     max_timeout_rate: float = 0.0
     max_no_progress_ratio: float = 0.95

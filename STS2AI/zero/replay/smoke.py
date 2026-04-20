@@ -150,7 +150,7 @@ def main() -> None:
         evaluation=EvalConfig(
             episodes_per_cohort=args.eval_episodes,
             promote_min_win_rate_gain=-1.0,
-            allow_hp_remaining_drop=1.0,
+            allow_hp_quality_drop=1.0,
         ),
     )
 

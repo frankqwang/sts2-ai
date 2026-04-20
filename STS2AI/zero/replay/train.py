@@ -76,18 +76,18 @@ class RandomPolicy:
 def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> EvalConfig:
     """构造 EvalConfig，strict 模式走 dataclass 默认（生产晋级阈值）。
 
-    非 strict 模式下把 `promote_min_win_rate_gain` / `allow_hp_remaining_drop`
+    非 strict 模式下把 `promote_min_win_rate_gain` / `allow_hp_quality_drop`
     放开，让 V1 smoke 跑不至于因为随机 eval 噪声永远无法晋级；此行为仅用于
     训练链路早期 debug，真正产出 checkpoint 时应加 `--strict-promotion`。
     """
 
     if strict_promotion:
         return EvalConfig(episodes_per_cohort=episodes_per_cohort)
-    return EvalConfig(
-        episodes_per_cohort=episodes_per_cohort,
-        promote_min_win_rate_gain=-1.0,
-        allow_hp_remaining_drop=1.0,
-    )
+        return EvalConfig(
+            episodes_per_cohort=episodes_per_cohort,
+            promote_min_win_rate_gain=-1.0,
+            allow_hp_quality_drop=1.0,
+        )
 
 
 def main() -> None:

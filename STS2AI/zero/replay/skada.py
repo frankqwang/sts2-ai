@@ -25,7 +25,16 @@ from typing import Any, Iterable, Iterator
 
 from ..adapters.game_bridge import GameBridgeCombatRuntime
 from ..buffers import ArtifactStore
-from ..domain import EvalSummary, FightLabel, RawTransition, TeacherLabel, TeacherRequest, assess_transition_progress
+from ..domain import (
+    EvalSummary,
+    FightLabel,
+    RawTransition,
+    TeacherLabel,
+    TeacherRequest,
+    assess_transition_progress,
+    compute_fight_score,
+    compute_hp_quality_score,
+)
 
 
 _SHARED_REPLAY_RUNTIMES: dict[tuple[int, bool, float], GameBridgeCombatRuntime] = {}
@@ -569,6 +578,8 @@ class AggregateCardUsageTeacher:
                         / float(max(int(self._case.build.max_hp), 1)),
                     ),
                 ),
+                player_hp=float(self._case.floor_state.get("hp_after", 0) or 0),
+                player_max_hp=float(max(int(self._case.build.max_hp), 1)),
             ).fight_score,
             metadata={"teacher": "AggregateCardUsageTeacher"},
         )
@@ -1112,6 +1123,11 @@ def _build_case_eval_summary(
 ) -> EvalSummary:
     aggregate = _aggregate_eval_labels(labels)
     timeout_count = sum(1 for item in metrics if bool(item.get("truncated", False)))
+    avg_step_count = (
+        sum(float(item.get("step_count", 0.0)) for item in metrics) / max(len(metrics), 1)
+        if metrics
+        else 0.0
+    )
     avg_no_progress_ratio = (
         sum(float(item.get("no_progress_ratio", 0.0)) for item in metrics) / max(len(metrics), 1)
         if metrics
@@ -1122,6 +1138,18 @@ def _build_case_eval_summary(
         if metrics
         else 0.0
     )
+    fight_quality_score = compute_fight_score(
+        aggregate,
+        encounter_class=case.encounter_type,
+        truncated=bool(timeout_count),
+        no_progress_ratio=avg_no_progress_ratio,
+        max_no_progress_streak=int(round(avg_max_no_progress_streak)),
+        step_count=int(round(avg_step_count)),
+    )
+    hp_quality_score = compute_hp_quality_score(
+        aggregate,
+        encounter_class=case.encounter_type,
+    )
     metadata = {
         "run_id": case.run_id,
         "floor": case.floor,
@@ -1129,9 +1157,12 @@ def _build_case_eval_summary(
         "encounter_type": case.encounter_type,
         "eval_bucket": str(case.encounter_type or "default").lower(),
         "num_episodes": len(labels),
+        "avg_step_count": avg_step_count,
         "timeout_rate": timeout_count / max(len(metrics), 1) if metrics else 0.0,
         "avg_no_progress_ratio": avg_no_progress_ratio,
         "avg_max_no_progress_streak": avg_max_no_progress_streak,
+        "fight_quality_score": fight_quality_score,
+        "hp_quality_score": hp_quality_score,
         **metadata_extra,
     }
     return EvalSummary(
@@ -1169,6 +1200,8 @@ def _build_eval_label(state, *, truncated: bool = False) -> FightLabel:
         fight_win=fight_win,
         enemy_hp_fraction_dealt=enemy_hp_fraction_dealt,
         self_hp_fraction_remaining=self_hp_fraction_remaining,
+        player_hp=max(0.0, float(state.player.hp)),
+        player_max_hp=max(0.0, float(state.player.max_hp)),
     )
 
 
@@ -1180,6 +1213,8 @@ def _aggregate_eval_labels(labels: list[FightLabel]) -> FightLabel:
         fight_win=sum(label.fight_win for label in labels) / denom,
         enemy_hp_fraction_dealt=sum(label.enemy_hp_fraction_dealt for label in labels) / denom,
         self_hp_fraction_remaining=sum(label.self_hp_fraction_remaining for label in labels) / denom,
+        player_hp=sum(label.player_hp for label in labels) / denom,
+        player_max_hp=sum(label.player_max_hp for label in labels) / denom,
     )
 
 

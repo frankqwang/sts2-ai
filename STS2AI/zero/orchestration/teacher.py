@@ -86,6 +86,11 @@ class TeacherQueueBuilder:
             score += 0.5
             tags.append("low_fight_score")
 
+        hp_quality_score = float(sample.metadata.get("hp_quality_score", 1.0) or 0.0)
+        if hp_quality_score <= 0.55:
+            score += 0.45 * (1.0 - hp_quality_score)
+            tags.append("low_hp_quality")
+
         return score, tags
 
 

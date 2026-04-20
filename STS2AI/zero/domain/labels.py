@@ -8,6 +8,8 @@ class FightLabel:
     fight_win: float
     enemy_hp_fraction_dealt: float
     self_hp_fraction_remaining: float
+    player_hp: float = 0.0
+    player_max_hp: float = 0.0
     potion_cost: float = 0.0
 
     @property

@@ -22,6 +22,7 @@ from ..domain import (
     TrainingSample,
     compute_episode_score_proxy,
     compute_fight_score,
+    compute_hp_quality_score,
     compute_step_progress_score,
 )
 from ..features import FeatureExtractor, compute_transition_delta
@@ -57,6 +58,11 @@ class SampleBuilder:
             truncated=bool(fight_stats["truncated"]),
             no_progress_ratio=float(fight_stats["no_progress_ratio"]),
             max_no_progress_streak=int(fight_stats["max_no_progress_streak"]),
+            step_count=int(fight_stats["step_count"]),
+        )
+        hp_quality_score = compute_hp_quality_score(
+            fight_label,
+            encounter_class=final_state.context.encounter_class,
         )
         floor_value = _resolve_floor_value(transitions, final_state)
         episode_score_proxy = compute_episode_score_proxy(
@@ -74,7 +80,11 @@ class SampleBuilder:
                 # 行为动作一旦对不齐，就不能把“第一个合法动作”当成伪标签继续学。
                 # 这里直接丢弃，避免静默污染 imitation 信号。
                 continue
-            step_progress_score = compute_step_progress_score(transition.state, transition.next_state)
+            step_progress_score = compute_step_progress_score(
+                transition.state,
+                transition.next_state,
+                chosen_action=transition.action,
+            )
             sample = TrainingSample(
                 sample_id=f"{transition.fight_id}:{transition.step_idx}",
                 run_id=transition.run_id,
@@ -102,6 +112,7 @@ class SampleBuilder:
                     transition,
                     step_progress_score=step_progress_score,
                     fight_score=fight_score,
+                    hp_quality_score=hp_quality_score,
                     episode_score_proxy=episode_score_proxy,
                     fight_timeout=bool(fight_stats["truncated"]),
                     no_progress_ratio=float(fight_stats["no_progress_ratio"]),
@@ -112,8 +123,10 @@ class SampleBuilder:
                     "uncertainty_target": _compute_uncertainty_target(transition),
                     "step_progress_score": step_progress_score,
                     "fight_score": fight_score,
+                    "hp_quality_score": hp_quality_score,
                     "episode_score_proxy": episode_score_proxy,
                     "fight_timeout": bool(fight_stats["truncated"]),
+                    "fight_step_count": int(fight_stats["step_count"]),
                     "fight_no_progress_ratio": float(fight_stats["no_progress_ratio"]),
                     "fight_max_no_progress_streak": int(fight_stats["max_no_progress_streak"]),
                     "fight_progress_steps": int(fight_stats["progress_steps"]),
@@ -155,6 +168,8 @@ def _build_fight_label(final_state, *, truncated: bool = False) -> FightLabel:
         fight_win=fight_win,
         enemy_hp_fraction_dealt=enemy_hp_fraction_dealt,
         self_hp_fraction_remaining=self_hp_fraction_remaining,
+        player_hp=max(0.0, float(final_state.player.hp)),
+        player_max_hp=max(0.0, float(final_state.player.max_hp)),
     )
 
 
@@ -218,6 +233,7 @@ def _compute_keep_score(
     *,
     step_progress_score: float,
     fight_score: float,
+    hp_quality_score: float,
     episode_score_proxy: float,
     fight_timeout: bool,
     no_progress_ratio: float,
@@ -234,6 +250,7 @@ def _compute_keep_score(
         + 0.20 * rarity
         + 0.14 * max(hardness, near_lethal)
         + 0.14 * max(0.0, min(1.0, fight_score / 1.5))
+        + 0.08 * hp_quality_score
         + 0.10 * max(0.0, min(1.0, episode_score_proxy / 1.5))
         + 0.10 * progress_attention
         + 0.10 * max(timeout_attention, max(0.0, min(1.0, no_progress_ratio)))
@@ -268,6 +285,7 @@ def _summarize_fight(transitions: list[RawTransition], final_state) -> dict[str,
     truncated = bool(not final_state.terminal and step_count >= 200)
     return {
         "truncated": truncated,
+        "step_count": step_count,
         "progress_steps": progress_steps,
         "no_progress_steps": no_progress_steps,
         "no_progress_ratio": (no_progress_steps / max(step_count, 1)),
@@ -310,6 +328,7 @@ def _assign_sample_weights(
         base_weight = _base_sample_weight(
             step_progress_score=sample.step_progress_score,
             fight_score=sample.fight_score,
+            hp_quality_score=float(sample.metadata.get("hp_quality_score", 0.0) or 0.0),
             episode_score_proxy=sample.episode_score_proxy,
             fight_timeout=fight_timeout,
             no_progress_ratio=no_progress_ratio,
@@ -331,13 +350,23 @@ def _base_sample_weight(
     *,
     step_progress_score: float,
     fight_score: float,
+    hp_quality_score: float,
     episode_score_proxy: float,
     fight_timeout: bool,
     no_progress_ratio: float,
 ) -> float:
     step_component = max(0.0, min(1.0, (step_progress_score + 0.2) / 1.2))
     fight_component = max(0.0, min(1.2, fight_score / 1.5))
+    hp_component = max(0.0, min(1.0, hp_quality_score))
     episode_component = max(0.0, min(1.2, episode_score_proxy / 1.5))
     timeout_penalty = 0.55 if fight_timeout else 0.0
     no_progress_penalty = 0.35 * max(0.0, min(1.0, no_progress_ratio))
-    return 0.35 + 0.70 * fight_component + 0.30 * episode_component + 0.20 * step_component - timeout_penalty - no_progress_penalty
+    return (
+        0.30
+        + 0.62 * fight_component
+        + 0.24 * hp_component
+        + 0.26 * episode_component
+        + 0.22 * step_component
+        - timeout_penalty
+        - no_progress_penalty
+    )
