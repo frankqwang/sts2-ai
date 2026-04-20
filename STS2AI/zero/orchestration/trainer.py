@@ -13,7 +13,7 @@ import torch
 
 from ..buffers import SamplePoolSet
 from ..config import LossWeights, TrainConfig
-from ..domain import BattleState, TrainingSummary
+from ..domain import BattleState, HistoryStep, TrainingSummary
 from ..features import BatchCollator, compute_transition_delta
 from ..model import ZeroNet, compute_losses
 from ..ports import Policy
@@ -192,15 +192,17 @@ class ModelPolicyAdapter(Policy):
         self._collator = collator
         self._history: deque = deque(maxlen=history_steps)
         self._device = next(model.parameters()).device
+        self._cached_state_ref = None
+        self._cached_inference: dict[str, Any] | None = None
 
     def reset_episode(self) -> None:
         self._history.clear()
+        self._cached_state_ref = None
+        self._cached_inference = None
 
     def observe_transition(self, state: BattleState, action_index: int, next_state: BattleState) -> None:
         if not (0 <= action_index < len(state.legal_actions)):
             return
-        from ..domain import HistoryStep
-
         self._history.append(
             HistoryStep(
                 state=state,
@@ -208,10 +210,17 @@ class ModelPolicyAdapter(Policy):
                 delta=compute_transition_delta(state, next_state),
             )
         )
+        self._cached_state_ref = None
+        self._cached_inference = None
 
     def infer(self, state: BattleState) -> dict[str, Any]:
+        if self._cached_state_ref is state and self._cached_inference is not None:
+            return self._cached_inference
         if not state.legal_actions:
-            return {"scores": [], "action_index": 0, "uncertainty": 0.0}
+            result = {"scores": [], "action_index": 0, "uncertainty": 0.0}
+            self._cached_state_ref = state
+            self._cached_inference = result
+            return result
         self._model.eval()
         batch = self._collator.collate_inference(state, list(self._history), state.legal_actions).to(self._device)
         with torch.no_grad():
@@ -221,11 +230,14 @@ class ModelPolicyAdapter(Policy):
         scores = logits[:valid].tolist()
         action_index = max(range(len(scores)), key=lambda index: scores[index]) if scores else 0
         uncertainty = float(torch.sigmoid(output.uncertainty)[0].item())
-        return {
+        result = {
             "scores": scores,
             "action_index": action_index,
             "uncertainty": uncertainty,
         }
+        self._cached_state_ref = state
+        self._cached_inference = result
+        return result
 
     def select_action(self, state: BattleState) -> int:
         return int(self.infer(state)["action_index"])
@@ -253,6 +265,10 @@ class LocalCheckpointStore:
     @property
     def _active_pointer_path(self) -> Path:
         return self.root / self.active_pointer_name
+
+    @property
+    def _baseline_pointer_path(self) -> Path:
+        return self.root / "baseline_eval.json"
 
     def save(self, version: str, payload: dict[str, object]) -> Path:
         path = self.root / f"{version}.pt"
@@ -283,6 +299,20 @@ class LocalCheckpointStore:
             return None
         payload = json.loads(path.read_text(encoding="utf-8"))
         return str(payload.get("active_version") or "") or None
+
+    def write_baseline_eval(self, rows: list[dict[str, object]]) -> Path:
+        self._atomic_write_text(
+            self._baseline_pointer_path,
+            json.dumps(rows, ensure_ascii=False, indent=2),
+        )
+        return self._baseline_pointer_path
+
+    def read_baseline_eval(self) -> list[dict[str, object]] | None:
+        path = self._baseline_pointer_path
+        if not path.exists():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, list) else None
 
     def _atomic_torch_save(self, path: Path, payload: dict[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

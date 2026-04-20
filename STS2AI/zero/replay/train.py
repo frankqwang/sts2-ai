@@ -26,6 +26,7 @@ from zero.replay import (
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaReplayRuntime,
+    close_shared_replay_runtimes,
     load_case_index,
 )
 from zero.replay.naming import dated_artifact_dir_name
@@ -48,6 +49,23 @@ class RandomPolicy:
         return 0.5
 
 
+def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> EvalConfig:
+    """构造 EvalConfig，strict 模式走 dataclass 默认（生产晋级阈值）。
+
+    非 strict 模式下把 `promote_min_win_rate_gain` / `allow_hp_remaining_drop`
+    放开，让 V1 smoke 跑不至于因为随机 eval 噪声永远无法晋级；此行为仅用于
+    训练链路早期 debug，真正产出 checkpoint 时应加 `--strict-promotion`。
+    """
+
+    if strict_promotion:
+        return EvalConfig(episodes_per_cohort=episodes_per_cohort)
+    return EvalConfig(
+        episodes_per_cohort=episodes_per_cohort,
+        promote_min_win_rate_gain=-1.0,
+        allow_hp_remaining_drop=1.0,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -66,6 +84,12 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=2)
     parser.add_argument("--train-steps", type=int, default=40)
+    parser.add_argument(
+        "--strict-promotion",
+        action="store_true",
+        help="启用 EvalConfig 默认晋级阈值（生产训练用）；不加此 flag 时保持 V1 smoke "
+        "放开的行为，便于早期迭代观察闭环数据。",
+    )
     parser.add_argument(
         "--output-root",
         type=Path,
@@ -122,76 +146,78 @@ def main() -> None:
             weight_decay=1e-4,
             grad_clip_norm=1.0,
         ),
-        evaluation=EvalConfig(
+        evaluation=_build_eval_config(
             episodes_per_cohort=args.eval_episodes,
-            promote_min_win_rate_gain=-1.0,
-            allow_hp_remaining_drop=1.0,
+            strict_promotion=args.strict_promotion,
         ),
     )
 
     artifact_store = ArtifactStore(config.paths)
     checkpoint_store = LocalCheckpointStore(config.paths.checkpoints)
     with launch_shared_proto_sim(port=args.port, connect_timeout_s=45.0) as sim_info:
-        if curriculum_mode == "ordered_run":
-            evaluator = OrderedRunCaseEvaluator(
-                eval_cases,
-                port=args.port,
-                auto_launch=False,
-                connect_timeout_s=45.0,
-                episodes_per_case=config.evaluation.episodes_per_cohort,
+        try:
+            if curriculum_mode == "ordered_run":
+                evaluator = OrderedRunCaseEvaluator(
+                    eval_cases,
+                    port=args.port,
+                    auto_launch=False,
+                    connect_timeout_s=45.0,
+                    episodes_per_case=config.evaluation.episodes_per_cohort,
+                    artifact_store=artifact_store,
+                )
+                runtime_factory = OrderedRunRuntimeFactory(
+                    train_cases,
+                    port=args.port,
+                    auto_launch=False,
+                    connect_timeout_s=45.0,
+                )
+            else:
+                evaluator = FixedSkadaCaseEvaluator(
+                    eval_cases,
+                    port=args.port,
+                    auto_launch=False,
+                    connect_timeout_s=45.0,
+                    episodes_per_case=config.evaluation.episodes_per_cohort,
+                    artifact_store=artifact_store,
+                )
+                train_case_cycle = list(train_cases)
+                selection_rng = random.Random(args.seed)
+                ordered_cycle = deque(train_case_cycle)
+
+                def runtime_factory():
+                    if curriculum_mode == "ordered_cases":
+                        case = ordered_cycle[0]
+                        ordered_cycle.rotate(-1)
+                    else:
+                        case = selection_rng.choice(train_case_cycle)
+                    return SkadaReplayRuntime(case, port=args.port, auto_launch=False, connect_timeout_s=45.0)
+
+            runner = ZeroLoopRunner(
+                config=config,
                 artifact_store=artifact_store,
+                checkpoint_store=checkpoint_store,
+                evaluator=evaluator,
             )
-            runtime_factory = OrderedRunRuntimeFactory(
-                train_cases,
-                port=args.port,
-                auto_launch=False,
-                connect_timeout_s=45.0,
-            )
-        else:
-            evaluator = FixedSkadaCaseEvaluator(
-                eval_cases,
-                port=args.port,
-                auto_launch=False,
-                connect_timeout_s=45.0,
-                episodes_per_case=config.evaluation.episodes_per_cohort,
-                artifact_store=artifact_store,
-            )
-            train_case_cycle = list(train_cases)
-            selection_rng = random.Random(args.seed)
-            ordered_cycle = deque(train_case_cycle)
+            teacher = MultiCaseAggregateTeacher(train_cases)
 
-            def runtime_factory():
-                if curriculum_mode == "ordered_cases":
-                    case = ordered_cycle[0]
-                    ordered_cycle.rotate(-1)
-                else:
-                    case = selection_rng.choice(train_case_cycle)
-                return SkadaReplayRuntime(case, port=args.port, auto_launch=False, connect_timeout_s=45.0)
-
-        runner = ZeroLoopRunner(
-            config=config,
-            artifact_store=artifact_store,
-            checkpoint_store=checkpoint_store,
-            evaluator=evaluator,
-        )
-        teacher = MultiCaseAggregateTeacher(train_cases)
-
-        baseline_policy = RandomPolicy()
-        set_trace_context = getattr(evaluator, "set_trace_context", None)
-        if callable(set_trace_context):
-            set_trace_context(iteration=0, phase="baseline_eval")
-        baseline = evaluator.evaluate(baseline_policy)
-        manifests = []
-        student_policy = RandomPolicy()
-        for iteration in range(1, args.iterations + 1):
-            manifest = runner.run_iteration(
-                iteration=iteration,
-                runtime_factory=runtime_factory,
-                student_policy=student_policy,
-                teacher_oracle=teacher,
-                baseline_eval=baseline if iteration == 1 else None,
-            )
-            manifests.append(manifest.to_dict())
+            baseline_policy = RandomPolicy()
+            set_trace_context = getattr(evaluator, "set_trace_context", None)
+            if callable(set_trace_context):
+                set_trace_context(iteration=0, phase="baseline_eval")
+            baseline = evaluator.evaluate(baseline_policy)
+            manifests = []
+            student_policy = RandomPolicy()
+            for iteration in range(1, args.iterations + 1):
+                manifest = runner.run_iteration(
+                    iteration=iteration,
+                    runtime_factory=runtime_factory,
+                    student_policy=student_policy,
+                    teacher_oracle=teacher,
+                    baseline_eval=baseline if iteration == 1 else None,
+                )
+                manifests.append(manifest.to_dict())
+        finally:
+            close_shared_replay_runtimes()
 
     metadata = {
         "case_index": str(args.case_index),

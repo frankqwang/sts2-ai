@@ -3,6 +3,7 @@ from __future__ import annotations
 """Top-level iterative loop for collect -> label -> train -> evaluate -> promote."""
 
 import json
+import logging
 import random
 import time
 from dataclasses import asdict, dataclass
@@ -22,6 +23,32 @@ from .promotion import PromotionJudge
 from .sample_builder import SampleBuilder
 from .teacher import TeacherQueueBuilder, TeacherQueueProcessor
 from .trainer import ModelPolicyAdapter, ZeroTrainer
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _load_model_state(model: ZeroNet, payload: dict, *, version: str | None, context: str) -> None:
+    """Load state_dict with strict=False but warn on key mismatch.
+
+    strict=False 是为兼容 encoder 小幅演进时继续复用 weights；但无声丢 key
+    会让 "checkpoint 结构改了" 和 "正常微调" 看起来一样，因此凡有 missing /
+    unexpected 必须显式告警，便于排查。
+    """
+
+    state = payload.get("model_state", payload)
+    result = model.load_state_dict(state, strict=False)
+    if result.missing_keys or result.unexpected_keys:
+        _logger.warning(
+            "zero.loop %s: load_state_dict mismatch version=%s missing=%d unexpected=%d "
+            "missing_keys=%s unexpected_keys=%s",
+            context,
+            version,
+            len(result.missing_keys),
+            len(result.unexpected_keys),
+            list(result.missing_keys),
+            list(result.unexpected_keys),
+        )
 
 
 @dataclass
@@ -228,6 +255,12 @@ class ZeroLoopRunner:
         baseline = baseline_eval if baseline_eval is not None else self._baseline_eval
         promotion = self._promotion.decide(candidate_version=version, current=evaluations, baseline=baseline)
 
+        if self._baseline_eval is None:
+            # 即使首轮没有晋级，也要把第一次评估结果沉淀成后续基线，
+            # 否则下一轮会被误判成“首次评估通过”。
+            self._baseline_eval = evaluations
+            self._write_baseline_eval(evaluations)
+
         if promotion.promoted:
             promoted_payload = {
                 **candidate_payload,
@@ -240,6 +273,7 @@ class ZeroLoopRunner:
             self._active_policy = candidate_policy
             self._active_training_state = trainer.state_dict()
             self._baseline_eval = evaluations
+            self._write_baseline_eval(evaluations)
         elif not self.config.checkpoints.keep_rejected_checkpoints:
             self.checkpoint_store.discard(candidate_path)
 
@@ -288,7 +322,7 @@ class ZeroLoopRunner:
         trainer = ZeroTrainer(model, self.config.train, self.config.losses, self._collator)
         if self._active_version is not None:
             payload = self.checkpoint_store.load(self._active_version)
-            model.load_state_dict(payload.get("model_state", payload), strict=False)
+            _load_model_state(model, payload, version=self._active_version, context="build_trainer")
             trainer.load_state_dict(payload.get("training_state", self._active_training_state))
         elif self._active_training_state is not None:
             trainer.load_state_dict(self._active_training_state)
@@ -303,7 +337,7 @@ class ZeroLoopRunner:
             return
         payload = self.checkpoint_store.load(version)
         model = ZeroNet(self.config.encoder)
-        model.load_state_dict(payload.get("model_state", payload), strict=False)
+        _load_model_state(model, payload, version=version, context="resume")
         self._active_version = version
         self._active_policy = ModelPolicyAdapter(model, self._collator, self.config.encoder.history_steps)
         self._active_training_state = payload.get("training_state")
@@ -312,6 +346,14 @@ class ZeroLoopRunner:
             from ..domain import EvalSummary
 
             self._baseline_eval = [EvalSummary(**row) for row in baseline_rows]
+            return
+        read_baseline = getattr(self.checkpoint_store, "read_baseline_eval", None)
+        if callable(read_baseline):
+            baseline_rows = read_baseline()
+            if baseline_rows:
+                from ..domain import EvalSummary
+
+                self._baseline_eval = [EvalSummary(**row) for row in baseline_rows]
 
     def _seed_everything(self, seed: int) -> None:
         random.seed(seed)
@@ -355,3 +397,8 @@ class ZeroLoopRunner:
         self._write_progress(iteration, phase="collect_episode", status="completed", **event)
         if callable(external_callback):
             external_callback(event)
+
+    def _write_baseline_eval(self, evaluations: list) -> None:
+        write_baseline = getattr(self.checkpoint_store, "write_baseline_eval", None)
+        if callable(write_baseline):
+            write_baseline([asdict(item) for item in evaluations])
