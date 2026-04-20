@@ -62,6 +62,18 @@ def main() -> None:
     parser.add_argument("--combat-index", type=int, default=0)
     parser.add_argument("--port", type=int, default=ZERO_RUNTIME_DEFAULTS.default_port)
     parser.add_argument("--episodes", type=int, default=8)
+    parser.add_argument(
+        "--collect-epsilon-greedy",
+        type=float,
+        default=0.0,
+        help="仅作用于 collect rollout 的 epsilon-greedy 探索概率；评估仍保持贪心。",
+    )
+    parser.add_argument(
+        "--collect-temperature",
+        type=float,
+        default=0.0,
+        help="仅作用于 collect rollout 的 softmax 温度；0 表示关闭温度采样。",
+    )
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--train-steps", type=int, default=40)
     parser.add_argument("--output-root", type=Path, default=STS2AI_ROOT / "Artifacts" / "zero")
@@ -107,7 +119,11 @@ def main() -> None:
 
     config = ZeroConfig(
         paths=ZeroPaths(root=output_root),
-        collect=CollectConfig(episodes_per_iteration=args.episodes),
+        collect=CollectConfig(
+            episodes_per_iteration=args.episodes,
+            epsilon_greedy=args.collect_epsilon_greedy,
+            temperature=args.collect_temperature,
+        ),
         teacher=TeacherConfig(
             top2_gap_threshold=1.0,
             uncertainty_threshold=0.0,

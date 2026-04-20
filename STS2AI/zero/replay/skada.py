@@ -28,6 +28,9 @@ from ..buffers import ArtifactStore
 from ..domain import EvalSummary, FightLabel, TeacherLabel, TeacherRequest, assess_transition_progress
 
 
+_SHARED_REPLAY_RUNTIMES: dict[tuple[int, bool, float], GameBridgeCombatRuntime] = {}
+
+
 @dataclass(slots=True)
 class SkadaBuild:
     deck: list[dict[str, int | str]] = field(default_factory=list)
@@ -609,10 +612,21 @@ class SkadaReplayRuntime:
         connect_timeout_s: float = 30.0,
     ):
         self._case = case
-        self._runtime = GameBridgeCombatRuntime(
-            port=port,
-            auto_launch=auto_launch,
-            connect_timeout_s=connect_timeout_s,
+        runtime_key = (int(port), bool(auto_launch), float(connect_timeout_s))
+        runtime = _SHARED_REPLAY_RUNTIMES.get(runtime_key)
+        if runtime is None:
+            runtime = GameBridgeCombatRuntime(
+                port=port,
+                auto_launch=auto_launch,
+                connect_timeout_s=connect_timeout_s,
+                character_id=case.character_id,
+                encounter_id=case.encounter_id,
+                seed=case.seed,
+                build=case.build.to_build_dict(),
+            )
+            _SHARED_REPLAY_RUNTIMES[runtime_key] = runtime
+        self._runtime = runtime
+        self._runtime.configure(
             character_id=case.character_id,
             encounter_id=case.encounter_id,
             seed=case.seed,
@@ -620,6 +634,12 @@ class SkadaReplayRuntime:
         )
 
     def reset(self, *, seed: str | None = None):
+        self._runtime.configure(
+            character_id=self._case.character_id,
+            encounter_id=self._case.encounter_id,
+            seed=seed or self._case.seed,
+            build=self._case.build.to_build_dict(),
+        )
         return self._decorate_state(self._runtime.reset(seed=seed))
 
     def get_state(self):
@@ -629,7 +649,9 @@ class SkadaReplayRuntime:
         return self._decorate_state(self._runtime.step(action_index))
 
     def close(self) -> None:
-        self._runtime.close()
+        # 训练/评估会频繁创建轻量 runtime wrapper，这里保留底层 session，
+        # 让后续 episode 继续复用 reset-only 路径，真正关闭交给进程级清理。
+        return None
 
     def _decorate_state(self, state):
         metadata = dict(state.context.metadata)
@@ -644,6 +666,12 @@ class SkadaReplayRuntime:
         )
         state.context.metadata = metadata
         return state
+
+
+def close_shared_replay_runtimes() -> None:
+    for runtime in list(_SHARED_REPLAY_RUNTIMES.values()):
+        runtime.close()
+    _SHARED_REPLAY_RUNTIMES.clear()
 
 
 class OrderedRunRuntimeFactory:
@@ -688,6 +716,14 @@ class OrderedRunRuntimeFactory:
             self._index += 1
             return
         self._index = 0
+
+    def clone_for_port(self, port: int) -> "OrderedRunRuntimeFactory":
+        return OrderedRunRuntimeFactory(
+            list(self._cases),
+            port=port,
+            auto_launch=self._auto_launch,
+            connect_timeout_s=self._connect_timeout_s,
+        )
 
     @property
     def current_case_id(self) -> str:
@@ -882,14 +918,11 @@ def _rollout_case_episode(
     env_step_duration_s = 0.0
     observe_duration_s = 0.0
     trace_write_duration_s = 0.0
-    runtime = GameBridgeCombatRuntime(
+    runtime = SkadaReplayRuntime(
+        case,
         port=port,
         auto_launch=auto_launch,
         connect_timeout_s=connect_timeout_s,
-        character_id=case.character_id,
-        encounter_id=case.encounter_id,
-        seed=case.seed,
-        build=case.build.to_build_dict(),
     )
     try:
         reset_hook = getattr(policy, "reset_episode", None)

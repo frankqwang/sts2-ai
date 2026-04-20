@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .skada import (
     AggregateCardUsageTeacher,
+    close_shared_replay_runtimes,
     default_starter_build,
     FixedSkadaCaseEvaluator,
     MultiCaseAggregateTeacher,
@@ -21,6 +22,7 @@ from .skada import (
 
 __all__ = [
     "AggregateCardUsageTeacher",
+    "close_shared_replay_runtimes",
     "default_starter_build",
     "FixedSkadaCaseEvaluator",
     "MultiCaseAggregateTeacher",

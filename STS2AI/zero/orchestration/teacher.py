@@ -113,6 +113,7 @@ class TeacherQueueProcessor:
 
         labeled: list[TrainingSample] = []
         for request, label in zip(requests, labels, strict=False):
+            self._validate_label(request, label)
             labeled_sample = request.sample.clone_for_pool(
                 pool_name=request.sample.pool_name,
                 keep_score=max(request.sample.keep_score, request.priority),
@@ -121,3 +122,22 @@ class TeacherQueueProcessor:
             )
             labeled.append(labeled_sample)
         return labeled
+
+    def _validate_label(self, request: TeacherRequest, label) -> None:
+        legal_action_count = len(request.sample.legal_actions)
+        if label.policy and len(label.policy) != legal_action_count:
+            raise ValueError(
+                f"teacher policy 长度与 legal_actions 不匹配: "
+                f"sample={request.sample.sample_id} policy={len(label.policy)} legal={legal_action_count}"
+            )
+        if label.best_action_index >= legal_action_count:
+            raise ValueError(
+                f"teacher best_action_index 越界: sample={request.sample.sample_id} "
+                f"best={label.best_action_index} legal={legal_action_count}"
+            )
+        for index in label.topk_indices:
+            if index < 0 or index >= legal_action_count:
+                raise ValueError(
+                    f"teacher topk index 越界: sample={request.sample.sample_id} "
+                    f"index={index} legal={legal_action_count}"
+                )

@@ -144,13 +144,14 @@ def _to_tensor_2d_int(rows: list[list[int]], width: int) -> torch.Tensor:
 
 
 def _to_tensor_3d(rows: list[list[list[float]]], width: int, feature_dim: int) -> torch.Tensor:
-    padded = []
-    for row in rows:
-        values = [list(item[:feature_dim]) + [0.0] * max(0, feature_dim - len(item[:feature_dim])) for item in row[:width]]
-        while len(values) < width:
-            values.append([0.0] * feature_dim)
-        padded.append(values)
-    return torch.tensor(padded, dtype=torch.float32)
+    tensor = torch.zeros((len(rows), width, feature_dim), dtype=torch.float32)
+    for batch_index, row in enumerate(rows):
+        for item_index, item in enumerate(row[:width]):
+            limit = min(feature_dim, len(item))
+            if limit <= 0:
+                continue
+            tensor[batch_index, item_index, :limit] = torch.tensor(item[:limit], dtype=torch.float32)
+    return tensor
 
 
 def _mask_from_lengths(lengths: list[int], width: int) -> torch.Tensor:

@@ -208,6 +208,30 @@ class SampleBuilderTests(unittest.TestCase):
         self.assertIn("fight_timeout", requests[0].reason_tags)
         self.assertIn("high_no_progress", requests[0].reason_tags)
 
+    def test_behavior_index_mismatch_drops_sample_instead_of_falling_back_to_zero(self) -> None:
+        builder = SampleBuilder(EncoderConfig(history_steps=4))
+        state0 = make_state(hp=80.0, enemy_hp=40.0, step=0)
+        state1 = make_state(hp=78.0, enemy_hp=34.0, step=1)
+        missing_action = LegalAction(action_id="missing_action", action_type="play_card", card_id="ghost")
+        samples = builder.build(
+            [
+                RawTransition(
+                    run_id="run1",
+                    fight_id="fight1",
+                    step_idx=0,
+                    seed="seed",
+                    action_index=99,
+                    state=state0,
+                    action=missing_action,
+                    next_state=state1,
+                    done=False,
+                    fight_outcome="",
+                    run_outcome="",
+                )
+            ]
+        )
+        self.assertEqual(samples, [])
+
 
 if __name__ == "__main__":
     unittest.main()

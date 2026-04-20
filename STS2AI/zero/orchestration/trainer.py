@@ -248,6 +248,9 @@ class ModelPolicyAdapter(Policy):
     def estimate_uncertainty(self, state: BattleState) -> float:
         return float(self.infer(state)["uncertainty"])
 
+    def clone_for_rollout(self) -> "ModelPolicyAdapter":
+        return ModelPolicyAdapter(self._model, self._collator, self._history.maxlen or 0)
+
 
 @dataclass(slots=True)
 class LocalCheckpointStore:

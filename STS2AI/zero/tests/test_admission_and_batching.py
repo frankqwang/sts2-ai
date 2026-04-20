@@ -127,6 +127,15 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         recent_items = {item.sample_id for item in pools._pools["recent_online"].items()}
         self.assertIn("high", recent_items)
 
+    def test_sample_serialization_skips_runtime_raw_payloads(self) -> None:
+        sample = make_sample()
+        sample.state.raw = {"battle": {"hand": [{"id": "strike"}]}}
+        sample.legal_actions[0].raw = {"action": "play_card", "index": 0}
+        payload = sample.to_dict()
+
+        self.assertNotIn("raw", payload["state"])
+        self.assertNotIn("raw", payload["legal_actions"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

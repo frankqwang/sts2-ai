@@ -20,6 +20,7 @@ class BucketedSamplePool:
     retention_mode: str = "fifo"
     _fifo_buckets: dict[str, deque[TrainingSample]] = field(default_factory=lambda: defaultdict(deque))
     _score_buckets: dict[str, list[tuple[float, int, TrainingSample]]] = field(default_factory=lambda: defaultdict(list))
+    _bucket_card_counts: dict[str, Counter[str]] = field(default_factory=lambda: defaultdict(Counter))
     _sequence: int = 0
 
     def add(self, sample: TrainingSample) -> None:
@@ -29,26 +30,33 @@ class BucketedSamplePool:
             score_entry = (sample.keep_score, self._sequence, sample)
             if len(heap) < self.bucket_capacity:
                 heapq.heappush(heap, score_entry)
+                self._increment_card_count(bucket, sample)
             elif heap and score_entry[:2] > heap[0][:2]:
-                heapq.heapreplace(heap, score_entry)
+                removed = heapq.heapreplace(heap, score_entry)[2]
+                self._decrement_card_count(bucket, removed)
+                self._increment_card_count(bucket, sample)
             self._sequence += 1
             return
 
         queue = self._fifo_buckets[bucket]
         queue.append(sample)
+        self._increment_card_count(bucket, sample)
         while len(queue) > self.bucket_capacity:
-            queue.popleft()
+            removed = queue.popleft()
+            self._decrement_card_count(bucket, removed)
 
     def set_bucket_capacity(self, bucket_capacity: int) -> None:
         self.bucket_capacity = max(1, int(bucket_capacity))
         if self.retention_mode == "score":
-            for heap in self._score_buckets.values():
+            for bucket, heap in self._score_buckets.items():
                 while len(heap) > self.bucket_capacity:
-                    heapq.heappop(heap)
+                    removed = heapq.heappop(heap)[2]
+                    self._decrement_card_count(bucket, removed)
             return
-        for queue in self._fifo_buckets.values():
+        for bucket, queue in self._fifo_buckets.items():
             while len(queue) > self.bucket_capacity:
-                queue.popleft()
+                removed = queue.popleft()
+                self._decrement_card_count(bucket, removed)
 
     def sample(self, count: int) -> list[TrainingSample]:
         if count <= 0:
@@ -62,7 +70,7 @@ class BucketedSamplePool:
             items = self._bucket_items(bucket_key)
             if not items:
                 continue
-            result.append(_sample_with_card_diversity(items))
+            result.append(_sample_with_card_diversity(items, self._bucket_card_counts.get(bucket_key)))
         return result
 
     def items(self) -> list[TrainingSample]:
@@ -85,6 +93,19 @@ class BucketedSamplePool:
         if self.retention_mode == "score":
             return [entry[2] for entry in self._score_buckets.get(bucket, [])]
         return list(self._fifo_buckets.get(bucket, []))
+
+    def _increment_card_count(self, bucket: str, sample: TrainingSample) -> None:
+        key = sample.main_card_id or "__none__"
+        self._bucket_card_counts[bucket][key] += 1
+
+    def _decrement_card_count(self, bucket: str, sample: TrainingSample) -> None:
+        key = sample.main_card_id or "__none__"
+        counts = self._bucket_card_counts[bucket]
+        counts[key] -= 1
+        if counts[key] <= 0:
+            counts.pop(key, None)
+        if not counts:
+            self._bucket_card_counts.pop(bucket, None)
 
 
 class SamplePoolSet:
@@ -166,8 +187,9 @@ class SamplePoolSet:
         return self.capacity_by_pool()
 
 
-def _sample_with_card_diversity(items: list[TrainingSample]) -> TrainingSample:
-    card_counts = Counter(sample.main_card_id or "__none__" for sample in items)
+def _sample_with_card_diversity(items: list[TrainingSample], card_counts: Counter[str] | None = None) -> TrainingSample:
+    if not card_counts:
+        card_counts = Counter(sample.main_card_id or "__none__" for sample in items)
     weights = []
     for sample in items:
         key = sample.main_card_id or "__none__"

@@ -69,6 +69,10 @@ class SampleBuilder:
         for transition in transitions:
             delta = compute_transition_delta(transition.state, transition.next_state)
             behavior_action_index = _resolve_behavior_index(transition)
+            if behavior_action_index is None:
+                # 行为动作一旦对不齐，就不能把“第一个合法动作”当成伪标签继续学。
+                # 这里直接丢弃，避免静默污染 imitation 信号。
+                continue
             step_progress_score = compute_step_progress_score(transition.state, transition.next_state)
             sample = TrainingSample(
                 sample_id=f"{transition.fight_id}:{transition.step_idx}",
@@ -142,13 +146,13 @@ def _build_fight_label(final_state, *, truncated: bool = False) -> FightLabel:
     )
 
 
-def _resolve_behavior_index(transition: RawTransition) -> int:
+def _resolve_behavior_index(transition: RawTransition) -> int | None:
     if 0 <= transition.action_index < len(transition.state.legal_actions):
         return transition.action_index
     for index, action in enumerate(transition.state.legal_actions):
         if action.action_id == transition.action.action_id:
             return index
-    return 0
+    return None
 
 
 def _build_bucket_key(transition: RawTransition) -> str:
@@ -176,12 +180,6 @@ def _risk_band(state) -> str:
 
 def _rare_tags(transition: RawTransition) -> list[str]:
     tags = []
-    if transition.state.context.encounter_class == "elite":
-        tags.append("elite")
-    if transition.state.context.encounter_class == "boss":
-        tags.append("boss")
-    if _risk_band(transition.state) == "near_lethal":
-        tags.append("near_lethal")
     if bool(transition.metadata.get("rare_build", False)):
         tags.append("rare_build")
     return tags

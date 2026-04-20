@@ -43,6 +43,8 @@ BRIDGE_ROOT = STS2AI_ROOT / "bridge"
 GAME_WIKI_ROOT = STS2AI_ROOT / "data" / "game_wiki"
 DEFAULT_OUTPUT = GAME_WIKI_ROOT / "game_catalog.sqlite"
 SOURCE_ROOT = REPO_ROOT / "src" / "Core" / "Models"
+DEFAULT_TEXT_LOCALES = ("en", "zh-cn")
+LOCALIZATION_ROOT = REPO_ROOT / "localization"
 DEFAULT_SIM_HOST_CANDIDATES = (
     STS2AI_ROOT / "ENV" / "Sim" / "HeadlessSim" / "bin" / "Release" / "net9.0" / "HeadlessSim.exe",
     STS2AI_ROOT / "ENV" / "Sim" / "HeadlessSim" / "bin" / "Debug" / "net9.0" / "HeadlessSim.exe",
@@ -75,6 +77,12 @@ DROP TABLE IF EXISTS skada_potions;
 CREATE TABLE cards (
     id            TEXT PRIMARY KEY,
     class_name    TEXT,
+    name_en       TEXT,
+    description_en TEXT,
+    upgrade_preview_en TEXT,
+    name_zh       TEXT,
+    description_zh TEXT,
+    upgrade_preview_zh TEXT,
     card_type     TEXT,
     rarity        TEXT,
     target_type   TEXT,
@@ -213,6 +221,16 @@ class CharacterSourceRecord:
     starting_potions: list[str]
 
 
+@dataclass(slots=True)
+class CardTextBundle:
+    name_en: str = ""
+    description_en: str = ""
+    upgrade_preview_en: str = ""
+    name_zh: str = ""
+    description_zh: str = ""
+    upgrade_preview_zh: str = ""
+
+
 def _resolve_sim_host(user_path: str | None) -> Path:
     if user_path:
         path = Path(user_path)
@@ -272,6 +290,49 @@ def _connect_client(port: int, timeout_s: float = SIM_READY_TIMEOUT):
             last_err = exc
             time.sleep(0.3)
     raise ConnectionError(f"cannot connect to sim on port {port} within {timeout_s}s: {last_err}")
+
+
+def _normalize_locale_code(locale: str) -> str:
+    text = str(locale or "").strip().lower().replace("_", "-")
+    return {
+        "en": "eng",
+        "eng": "eng",
+        "zh": "zhs",
+        "zh-cn": "zhs",
+        "zh-hans": "zhs",
+        "zhs": "zhs",
+    }.get(text, text)
+
+
+def _load_card_runtime_texts(locales: Iterable[str]) -> dict[str, CardTextBundle]:
+    """从官方本地化表补齐卡牌文本，不在 Python 里硬编码翻译。"""
+    bundles: dict[str, CardTextBundle] = {}
+    for locale in locales:
+        locale_dir = LOCALIZATION_ROOT / _normalize_locale_code(str(locale))
+        cards_path = locale_dir / "cards.json"
+        if not cards_path.exists():
+            logger.warning("card localization file missing: %s", cards_path)
+            continue
+        rows = json.loads(cards_path.read_text(encoding="utf-8"))
+        for key, value in rows.items():
+            text_key = str(key or "")
+            if not text_key:
+                continue
+            if text_key.endswith(".title"):
+                card_id = text_key.removesuffix(".title").lower()
+                bundle = bundles.setdefault(card_id, CardTextBundle())
+                if _normalize_locale_code(str(locale)) == "zhs":
+                    bundle.name_zh = str(value or "")
+                elif _normalize_locale_code(str(locale)) == "eng":
+                    bundle.name_en = str(value or "")
+            elif text_key.endswith(".description"):
+                card_id = text_key.removesuffix(".description").lower()
+                bundle = bundles.setdefault(card_id, CardTextBundle())
+                if _normalize_locale_code(str(locale)) == "zhs":
+                    bundle.description_zh = str(value or "")
+                elif _normalize_locale_code(str(locale)) == "eng":
+                    bundle.description_en = str(value or "")
+    return bundles
 
 
 def _class_name_to_snake(name: str) -> str:
@@ -442,6 +503,7 @@ def _skada_character(runtime_card_id: str, character_ids: Iterable[str]) -> str:
 def _write_db(
     *,
     runtime_payload: dict[str, Any],
+    card_texts: dict[str, CardTextBundle],
     source_models: list[SourceModelRecord],
     source_characters: list[CharacterSourceRecord],
     out_path: Path,
@@ -469,10 +531,30 @@ def _write_db(
             if not card_id:
                 continue
             source_path = source_path_by_kind_class.get(("card", class_name), "")
+            text_bundle = card_texts.get(card_id, CardTextBundle())
+            card_payload = dict(card)
+            if text_bundle.name_en:
+                card_payload["name_en"] = text_bundle.name_en
+            if text_bundle.description_en:
+                card_payload["description_en"] = text_bundle.description_en
+            if text_bundle.upgrade_preview_en:
+                card_payload["upgrade_preview_en"] = text_bundle.upgrade_preview_en
+            if text_bundle.name_zh:
+                card_payload["name_zh"] = text_bundle.name_zh
+            if text_bundle.description_zh:
+                card_payload["description_zh"] = text_bundle.description_zh
+            if text_bundle.upgrade_preview_zh:
+                card_payload["upgrade_preview_zh"] = text_bundle.upgrade_preview_zh
             card_rows.append(
                 (
                     card_id,
                     class_name,
+                    text_bundle.name_en,
+                    text_bundle.description_en,
+                    text_bundle.upgrade_preview_en,
+                    text_bundle.name_zh,
+                    text_bundle.description_zh,
+                    text_bundle.upgrade_preview_zh,
                     str(card.get("card_type") or "").lower(),
                     str(card.get("rarity") or "").lower(),
                     str(card.get("target_type") or "").lower(),
@@ -482,7 +564,7 @@ def _write_db(
                     json.dumps(card.get("tags") or [], ensure_ascii=False),
                     json.dumps(card.get("keywords") or [], ensure_ascii=False),
                     source_path,
-                    json.dumps(card, ensure_ascii=False),
+                    json.dumps(card_payload, ensure_ascii=False),
                 )
             )
             skada_card_rows.append(
@@ -496,8 +578,8 @@ def _write_db(
                 )
             )
         con.executemany(
-            "INSERT INTO cards (id,class_name,card_type,rarity,target_type,base_cost,is_x_cost,gains_block,tags_json,keywords_json,source_path,payload_json) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO cards (id,class_name,name_en,description_en,upgrade_preview_en,name_zh,description_zh,upgrade_preview_zh,card_type,rarity,target_type,base_cost,is_x_cost,gains_block,tags_json,keywords_json,source_path,payload_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             card_rows,
         )
         con.executemany(
@@ -664,11 +746,13 @@ def _write_db(
         stats["source_models"] = len(source_rows)
 
         metadata_rows = [
-            ("schema_version", "3"),
+            ("schema_version", "4"),
             ("authority_db", "game_wiki"),
             ("authority_source_runtime", "game_catalog_rpc"),
+            ("authority_source_card_texts", "repo_localization_cards_json"),
             ("authority_source_code", "src/Core/Models"),
             ("generated_at", datetime.now(timezone.utc).isoformat(timespec="seconds")),
+            ("text_locales", ",".join(DEFAULT_TEXT_LOCALES)),
             ("runtime_cards", str(stats["cards"])),
             ("runtime_relics", str(stats["relics"])),
             ("runtime_potions", str(stats["potions"])),
@@ -699,12 +783,14 @@ def export_catalog(
     spawn_sim: bool = True,
     keep_sim: bool = False,
     source_root: Path = SOURCE_ROOT,
+    text_locales: tuple[str, ...] = DEFAULT_TEXT_LOCALES,
 ) -> dict[str, int]:
     proc: subprocess.Popen | None = None
     client = None
     try:
+        resolved_sim_host = _resolve_sim_host(str(sim_host) if sim_host else None)
         if spawn_sim:
-            proc = _spawn_sim(_resolve_sim_host(str(sim_host) if sim_host else None), port)
+            proc = _spawn_sim(resolved_sim_host, port)
 
         logger.info("connecting to sim on port %s ...", port)
         client = _connect_client(port=port)
@@ -725,10 +811,13 @@ def export_catalog(
 
         logger.info("scanning source models from %s ...", source_root)
         source_models, source_characters = _scan_source_models(source_root=source_root, runtime_payload=payload)
+        logger.info("loading localized card texts from %s ...", LOCALIZATION_ROOT)
+        card_texts = _load_card_runtime_texts(text_locales)
         logger.info(
-            "source scan complete: source_models=%d source_characters=%d",
+            "source scan complete: source_models=%d source_characters=%d localized_cards=%d",
             len(source_models),
             len(source_characters),
+            len(card_texts),
         )
 
         source_meta = {
@@ -738,6 +827,7 @@ def export_catalog(
         }
         stats = _write_db(
             runtime_payload=payload,
+            card_texts=card_texts,
             source_models=source_models,
             source_characters=source_characters,
             out_path=output,
@@ -771,6 +861,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-spawn-sim", dest="spawn_sim", action="store_false", default=True)
     parser.add_argument("--keep-sim", action="store_true")
     parser.add_argument("--source-root", type=Path, default=SOURCE_ROOT)
+    parser.add_argument("--text-locales", type=str, default=",".join(DEFAULT_TEXT_LOCALES))
     return parser
 
 
@@ -784,6 +875,7 @@ def main() -> int:
             spawn_sim=args.spawn_sim,
             keep_sim=args.keep_sim,
             source_root=args.source_root,
+            text_locales=tuple(part.strip().lower() for part in str(args.text_locales).split(",") if part.strip()),
         )
     except Exception as exc:
         logger.error("export failed: %s: %s", type(exc).__name__, exc)

@@ -14,10 +14,13 @@ ZERO_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 if str(ZERO_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(ZERO_PACKAGE_ROOT))
 
+from contextlib import ExitStack
+
 from zero import ZeroConfig, ZeroLoopRunner
 from zero.analysis import generate_training_analysis
 from zero.buffers import ArtifactStore
 from zero.config import CollectConfig, EvalConfig, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
+from zero.orchestration import ParallelTrajectoryCollector
 from zero.orchestration.trainer import LocalCheckpointStore
 from zero.paths import STS2AI_ROOT, ZeroPaths
 from zero.replay import (
@@ -47,6 +50,9 @@ class RandomPolicy:
 
     def estimate_uncertainty(self, state) -> float:
         return 0.5
+
+    def clone_for_rollout(self):
+        return RandomPolicy()
 
 
 def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> EvalConfig:
@@ -81,9 +87,27 @@ def main() -> None:
     parser.add_argument("--ordered-run", action="store_true")
     parser.add_argument("--max-run-combats", type=int, default=0)
     parser.add_argument("--collect-episodes", type=int, default=8)
+    parser.add_argument("--parallel-envs", type=int, default=1)
+    parser.add_argument(
+        "--collect-epsilon-greedy",
+        type=float,
+        default=0.0,
+        help="仅作用于 collect rollout 的 epsilon-greedy 探索概率；评估仍保持贪心。",
+    )
+    parser.add_argument(
+        "--collect-temperature",
+        type=float,
+        default=0.0,
+        help="仅作用于 collect rollout 的 softmax 温度；0 表示关闭温度采样。",
+    )
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=2)
     parser.add_argument("--train-steps", type=int, default=40)
+    parser.add_argument(
+        "--host-path",
+        type=Path,
+        default=STS2AI_ROOT / "Artifacts" / "tmp" / "headlesssim_build_dynamic_pool" / "HeadlessSim.dll",
+    )
     parser.add_argument(
         "--strict-promotion",
         action="store_true",
@@ -132,7 +156,11 @@ def main() -> None:
 
     config = ZeroConfig(
         paths=ZeroPaths(root=output_root),
-        collect=CollectConfig(episodes_per_iteration=args.collect_episodes),
+        collect=CollectConfig(
+            episodes_per_iteration=args.collect_episodes,
+            epsilon_greedy=args.collect_epsilon_greedy,
+            temperature=args.collect_temperature,
+        ),
         teacher=TeacherConfig(
             top2_gap_threshold=1.0,
             uncertainty_threshold=0.0,
@@ -154,7 +182,24 @@ def main() -> None:
 
     artifact_store = ArtifactStore(config.paths)
     checkpoint_store = LocalCheckpointStore(config.paths.checkpoints)
-    with launch_shared_proto_sim(port=args.port, connect_timeout_s=45.0) as sim_info:
+    with ExitStack() as stack:
+        sim_info = stack.enter_context(
+            launch_shared_proto_sim(port=args.port, connect_timeout_s=45.0, host_path=args.host_path)
+        )
+        collect_ports = [args.port]
+        if args.parallel_envs > 1:
+            if curriculum_mode != "ordered_run":
+                raise ValueError("并发 collect 目前仅支持 ordered_run 模式。")
+            collect_ports = [args.port + 1 + offset for offset in range(args.parallel_envs)]
+            for collect_port in collect_ports:
+                stack.enter_context(
+                    launch_shared_proto_sim(
+                        port=collect_port,
+                        connect_timeout_s=45.0,
+                        host_path=args.host_path,
+                    )
+                )
+
         try:
             if curriculum_mode == "ordered_run":
                 evaluator = OrderedRunCaseEvaluator(
@@ -198,6 +243,11 @@ def main() -> None:
                 checkpoint_store=checkpoint_store,
                 evaluator=evaluator,
             )
+            if args.parallel_envs > 1:
+                runner._collector = ParallelTrajectoryCollector(
+                    parallel_envs=args.parallel_envs,
+                    ports=collect_ports,
+                )
             teacher = MultiCaseAggregateTeacher(train_cases)
 
             baseline_policy = RandomPolicy()

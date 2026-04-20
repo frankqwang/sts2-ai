@@ -67,6 +67,33 @@ class FakeEvaluator:
         ]
 
 
+class WeakEvaluator:
+    def __init__(self) -> None:
+        self._calls = 0
+
+    def evaluate(self, policy) -> list[EvalSummary]:
+        self._calls += 1
+        if self._calls == 1:
+            return [
+                EvalSummary(
+                    cohort_name="main",
+                    fight_win_rate=0.1,
+                    enemy_hp_fraction_dealt=0.2,
+                    self_hp_fraction_remaining=0.1,
+                    teacher_agreement_at_1=0.1,
+                )
+            ]
+        return [
+            EvalSummary(
+                cohort_name="main",
+                fight_win_rate=0.1,
+                enemy_hp_fraction_dealt=0.2,
+                self_hp_fraction_remaining=0.1,
+                teacher_agreement_at_1=0.1,
+            )
+        ]
+
+
 def _make_state(*, step: int, terminal: bool = False, outcome: str = "") -> BattleState:
     return BattleState(
         player=PlayerState(hp=80.0 - step * 2, max_hp=80.0, block=3.0, energy=3.0),
@@ -128,6 +155,54 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             self.assertTrue((config.paths.checkpoints / "student_v0002.pt").exists())
             self.assertEqual(manifest2.iteration, 2)
             self.assertEqual(manifest2.collector_version, "student_v0001")
+
+    def test_first_non_promoted_iteration_still_seeds_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = ZeroConfig(
+                paths=ZeroPaths(root=root),
+                collect=CollectConfig(episodes_per_iteration=1, max_steps_per_episode=2),
+                train=TrainConfig(batch_size=2, steps_per_iteration=1),
+                evaluation=EvalConfig(
+                    episodes_per_cohort=1,
+                    promote_min_win_rate_gain=0.5,
+                    promote_min_enemy_hp_gain=0.5,
+                    promote_min_teacher_agreement_gain=0.5,
+                ),
+            )
+            runner = ZeroLoopRunner(
+                config=config,
+                artifact_store=ArtifactStore(config.paths),
+                checkpoint_store=LocalCheckpointStore(config.paths.checkpoints),
+                evaluator=WeakEvaluator(),
+            )
+            manifest1 = runner.run_iteration(
+                iteration=1,
+                runtime_factory=FakeRuntime,
+                student_policy=FakePolicy(),
+                teacher_oracle=FakeTeacher(),
+                baseline_eval=[
+                    EvalSummary(
+                        cohort_name="main",
+                        fight_win_rate=0.9,
+                        enemy_hp_fraction_dealt=0.9,
+                        self_hp_fraction_remaining=0.9,
+                        teacher_agreement_at_1=0.9,
+                    )
+                ],
+            )
+            self.assertFalse(manifest1.promotion.promoted)
+            self.assertEqual(runner._baseline_eval[0].fight_win_rate, 0.1)
+
+            manifest2 = runner.run_iteration(
+                iteration=2,
+                runtime_factory=FakeRuntime,
+                student_policy=FakePolicy(),
+                teacher_oracle=FakeTeacher(),
+                baseline_eval=None,
+            )
+            self.assertFalse(manifest2.promotion.promoted)
+            self.assertNotEqual(manifest2.promotion.reason, "首次评估通过")
 
 
 if __name__ == "__main__":

@@ -153,6 +153,24 @@ class GameBridgeCombatRuntime:
         self._encounter_class = _resolve_encounter_class(encounter_id)
         self._latest_state: BattleState | None = None
 
+    def configure(
+        self,
+        *,
+        character_id: str | None = None,
+        encounter_id: str | None = None,
+        seed: str | None = None,
+        build: dict[str, Any] | None = None,
+    ) -> None:
+        if character_id is not None:
+            self._character_id = character_id
+        if encounter_id is not None:
+            self._encounter_id = encounter_id
+            self._encounter_class = _resolve_encounter_class(encounter_id)
+        if seed is not None:
+            self._seed = seed
+        if build is not None:
+            self._build = build
+
     def reset(self, *, seed: str | None = None) -> BattleState:
         resolved_seed = seed or self._seed
         raw = self._session.reset(

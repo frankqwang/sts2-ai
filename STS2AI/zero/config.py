@@ -44,7 +44,7 @@ class EncoderConfig:
     max_enemies: int = 4
     max_hand_cards: int = 10
     buff_slots: int = 16
-    id_hash_buckets: int = 2048
+    id_hash_buckets: int = 8192
 
 
 @dataclass(slots=True)

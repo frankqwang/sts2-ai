@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 
 from .battle import BattleState, HistoryStep, LegalAction, TransitionDelta
 from .labels import FightLabel, TeacherLabel
@@ -32,7 +32,7 @@ class RawTransition:
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return _serialize_without_raw(self)
 
     @property
     def action_id(self) -> str:
@@ -81,7 +81,7 @@ class TrainingSample:
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return _serialize_without_raw(self)
 
     @property
     def behavior_action(self) -> LegalAction:
@@ -110,3 +110,21 @@ class TeacherRequest:
     sample: TrainingSample
     priority: float
     reason_tags: list[str] = field(default_factory=list)
+
+
+def _serialize_without_raw(value):
+    """导出训练产物时显式跳过 runtime raw 负载，避免深展开冗余。"""
+    if is_dataclass(value):
+        result = {}
+        for item in fields(value):
+            if item.name == "raw":
+                continue
+            result[item.name] = _serialize_without_raw(getattr(value, item.name))
+        return result
+    if isinstance(value, list):
+        return [_serialize_without_raw(item) for item in value]
+    if isinstance(value, tuple):
+        return [_serialize_without_raw(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _serialize_without_raw(item) for key, item in value.items()}
+    return value
