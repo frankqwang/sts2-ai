@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable, Protocol
+
+from ..domain import BattleState, EvalSummary, TeacherLabel, TeacherRequest
+
+
+class BattleRuntime(Protocol):
+    def reset(self, *, seed: str | None = None) -> BattleState: ...
+    def get_state(self) -> BattleState: ...
+    def step(self, action_index: int) -> BattleState: ...
+    def close(self) -> None: ...
+
+
+class Policy(Protocol):
+    def select_action(self, state: BattleState) -> int: ...
+    def score_actions(self, state: BattleState) -> list[float]: ...
+    def estimate_uncertainty(self, state: BattleState) -> float: ...
+
+
+class TeacherOracle(Protocol):
+    def label_request(
+        self,
+        request: TeacherRequest,
+        runtime_factory: Callable[[], BattleRuntime] | None = None,
+    ) -> TeacherLabel: ...
+
+
+class Evaluator(Protocol):
+    def evaluate(self, policy: Policy) -> list[EvalSummary]: ...
+
+
+class CheckpointStore(Protocol):
+    def save(self, version: str, model_state: dict[str, object]) -> Path: ...
+    def load(self, version: str) -> dict[str, object]: ...
