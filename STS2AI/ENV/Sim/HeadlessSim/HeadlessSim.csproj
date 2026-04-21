@@ -140,6 +140,9 @@
     <Compile Include="CombatAi\*.cs" Link="HeadlessSim\CombatAi\%(Filename)%(Extension)" />
     <Protobuf Include="..\..\proto\game_state.proto" GrpcServices="None" />
     <Compile Include="Program.cs" Link="HeadlessSim\Program.cs" />
+    <Compile Include="Program.Pipe.cs" Link="HeadlessSim\Program.Pipe.cs" />
+    <Compile Include="Program.Proto.cs" Link="HeadlessSim\Program.Proto.cs" />
+    <Compile Include="Program.Json.cs" Link="HeadlessSim\Program.Json.cs" />
     <Compile Include="Program.StepSupport.cs" Link="HeadlessSim\Program.StepSupport.cs" />
     <Compile Include="..\GodotSharpStub\src\**\*.cs" Link="GodotSharpStub\%(RecursiveDir)%(Filename)%(Extension)" />
 
