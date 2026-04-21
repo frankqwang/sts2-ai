@@ -209,7 +209,6 @@
 - 代码：
   [ProtoStateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/ProtoStateBuilder.cs:711)
   [FullRunApiStateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Simulation/FullRunApiStateBuilder.cs:266)
-  [HumanFullRunCaptureStateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/Training/HumanFullRunCaptureStateBuilder.cs:203)
 - 验证：
   `556677` 已打通，见：
   [parity_20260421_556677_after_finished_event_fix.json](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Artifacts/parity/game_bridge/parity_20260421_556677_after_finished_event_fix.json:1)
