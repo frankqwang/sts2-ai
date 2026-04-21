@@ -1,6 +1,9 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Training;
 
 namespace MegaCrit.Sts2.Core.Simulation;
 
@@ -43,7 +46,11 @@ public sealed class FullRunTrainingEnvService
 	/// <summary>Save current game state. Returns a state_id for later restore.</summary>
 	public string SaveState()
 	{
-		return ExecuteSerialized(() => ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).SaveState());
+		return ExecuteSerialized(() =>
+		{
+			PrepareExternalCombatSnapshotSupport();
+			return ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).SaveState();
+		});
 	}
 
 	/// <summary>
@@ -52,7 +59,11 @@ public sealed class FullRunTrainingEnvService
 	/// </summary>
 	public string SaveSearchState(bool includeFullFallback = false)
 	{
-		return ExecuteSerialized(() => ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).SaveSearchState(includeFullFallback));
+		return ExecuteSerialized(() =>
+		{
+			PrepareExternalCombatSnapshotSupport();
+			return ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).SaveSearchState(includeFullFallback);
+		});
 	}
 
 	/// <summary>Restore game to a previously saved state.</summary>
@@ -64,7 +75,11 @@ public sealed class FullRunTrainingEnvService
 	/// <summary>Export a saved snapshot (or current state) to a JSON file.</summary>
 	public string ExportStateToFile(string path, string? stateId = null)
 	{
-		return ExecuteSerialized(() => ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).ExportStateToFile(path, stateId));
+		return ExecuteSerialized(() =>
+		{
+			PrepareExternalCombatSnapshotSupport();
+			return ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).ExportStateToFile(path, stateId);
+		});
 	}
 
 	/// <summary>Load a previously exported snapshot JSON file.</summary>
@@ -97,6 +112,30 @@ public sealed class FullRunTrainingEnvService
 	internal void ResetCombatFollowupStateForExternalCombatResolution()
 	{
 		ExecuteSerialized(() => ((FullRunSimulatorRuntimeFacade)SimulatorRuntime).ResetCombatFollowupStateForExternalCombatResolution());
+	}
+
+	private static void PrepareExternalCombatSnapshotSupport()
+	{
+		if (!RunManager.Instance.IsInProgress)
+		{
+			return;
+		}
+		if (CombatManager.Instance.DebugOnlyGetState() == null)
+		{
+			return;
+		}
+
+		CombatTrainingStateSnapshot combatSnapshot = CombatTrainingEnvService.BuildStateSnapshot();
+		if (string.IsNullOrWhiteSpace(combatSnapshot.Seed) && string.IsNullOrWhiteSpace(combatSnapshot.CharacterId))
+		{
+			return;
+		}
+
+		((FullRunSimulatorRuntimeFacade)SimulatorRuntime).AdoptExternalEpisodeForSnapshots(
+			combatSnapshot.Seed,
+			combatSnapshot.CharacterId,
+			combatSnapshot.AscensionLevel,
+			combatSnapshot.EpisodeNumber);
 	}
 
 	/// <summary>

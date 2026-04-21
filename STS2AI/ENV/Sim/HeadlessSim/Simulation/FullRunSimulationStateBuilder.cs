@@ -53,6 +53,7 @@ internal static class FullRunSimulationStateBuilder
 		}
 
 		AbstractRoom? currentRoom = runState.CurrentRoom;
+		CombatState? activeCombatState = ResolveActiveCombatState(runState, currentRoom);
 		Player localPlayer = ResolveLocalPlayer(runState);
 		snapshot.IsRunActive = true;
 		snapshot.CharacterId = overrideCharacterId ?? localPlayer.Character.Id.Entry;
@@ -61,9 +62,9 @@ internal static class FullRunSimulationStateBuilder
 		snapshot.CurrentActIndex = runState.CurrentActIndex;
 		snapshot.ActFloor = runState.ActFloor;
 		snapshot.TotalFloor = runState.TotalFloor;
-		snapshot.RoomType = currentRoom?.RoomType.ToString().ToLowerInvariant();
-		snapshot.RoomModelId = currentRoom?.ModelId?.Entry;
-		snapshot.StateType = ResolveStateType(runState, currentRoom, bridge, forceMapView, localPlayer);
+		snapshot.RoomType = (currentRoom?.RoomType ?? activeCombatState?.Encounter.RoomType)?.ToString().ToLowerInvariant();
+		snapshot.RoomModelId = currentRoom?.ModelId?.Entry ?? activeCombatState?.Encounter.Id.Entry;
+		snapshot.StateType = ResolveStateType(runState, currentRoom, bridge, forceMapView, localPlayer, activeCombatState);
 		if (snapshot.StateType == "map")
 		{
 			// When we force the map view after a room clear, currentRoom may still
@@ -111,7 +112,23 @@ internal static class FullRunSimulationStateBuilder
 			actions);
 	}
 
-private static string ResolveStateType(RunState runState, AbstractRoom? currentRoom, FullRunSimulationChoiceBridge bridge, bool forceMapView, Player localPlayer)
+	private static CombatState? ResolveActiveCombatState(RunState runState, AbstractRoom? currentRoom)
+	{
+		if (currentRoom is CombatRoom combatRoom)
+		{
+			return combatRoom.CombatState;
+		}
+
+		CombatState? combatState = CombatManager.Instance.DebugOnlyGetState();
+		if (!CombatManager.Instance.IsInProgress || combatState == null)
+		{
+			return null;
+		}
+
+		return ReferenceEquals(combatState.RunState, runState) ? combatState : null;
+	}
+
+private static string ResolveStateType(RunState runState, AbstractRoom? currentRoom, FullRunSimulationChoiceBridge bridge, bool forceMapView, Player localPlayer, CombatState? activeCombatState)
 	{
 		if (runState.IsGameOver)
 		{
@@ -137,9 +154,9 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 		{
 			return "map";
 		}
-		if (currentRoom is CombatRoom combatRoom && CombatManager.Instance.IsInProgress)
+		if (activeCombatState != null && CombatManager.Instance.IsInProgress)
 		{
-			return combatRoom.RoomType switch
+			return activeCombatState.Encounter.RoomType switch
 			{
 				RoomType.Monster => "monster",
 				RoomType.Elite => "elite",

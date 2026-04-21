@@ -1,0 +1,136 @@
+{
+  "filters": {
+    "game_version": "v0.103.2",
+    "ascension": 0,
+    "player_count": 1,
+    "character_id": "*",
+    "victory_only": false,
+    "max_runs": 0,
+    "max_cases": 0
+  },
+  "counts": {
+    "runs": 1207,
+    "cases": 16502,
+    "skipped_runs": 0
+  },
+  "top_characters": [
+    [
+      "IRONCLAD",
+      4024
+    ],
+    [
+      "REGENT",
+      3948
+    ],
+    [
+      "NECROBINDER",
+      2994
+    ],
+    [
+      "DEFECT",
+      2900
+    ],
+    [
+      "SILENT",
+      2636
+    ]
+  ],
+  "skipped_characters": [],
+  "top_encounter_types": [
+    [
+      "Normal",
+      13334
+    ],
+    [
+      "Boss",
+      1745
+    ],
+    [
+      "Elite",
+      1423
+    ]
+  ],
+  "top_encounters": [
+    [
+      "THIEVING_HOPPER_WEAK",
+      459
+    ],
+    [
+      "NIBBITS_WEAK",
+      447
+    ],
+    [
+      "SHRINKER_BEETLE_WEAK",
+      447
+    ],
+    [
+      "FUZZY_WURM_CRAWLER_WEAK",
+      442
+    ],
+    [
+      "EXOSKELETONS_WEAK",
+      425
+    ],
+    [
+      "BOWLBUGS_WEAK",
+      420
+    ],
+    [
+      "SLIMES_WEAK",
+      418
+    ],
+    [
+      "TUNNELER_WEAK",
+      412
+    ],
+    [
+      "SEAPUNK_WEAK",
+      377
+    ],
+    [
+      "TOADPOLES_WEAK",
+      363
+    ],
+    [
+      "CORPSE_SLUGS_WEAK",
+      357
+    ],
+    [
+      "SLUDGE_SPINNER_WEAK",
+      354
+    ],
+    [
+      "TURRET_OPERATOR_WEAK",
+      351
+    ],
+    [
+      "SCROLLS_OF_BITING_WEAK",
+      346
+    ],
+    [
+      "DEVOTED_SCULPTOR_WEAK",
+      309
+    ],
+    [
+      "OVICOPTER_NORMAL",
+      280
+    ],
+    [
+      "LOUSE_PROGENITOR_NORMAL",
+      260
+    ],
+    [
+      "THE_OBSCURA_NORMAL",
+      259
+    ],
+    [
+      "HUNTER_KILLER_NORMAL",
+      249
+    ],
+    [
+      "MYTES_NORMAL",
+      248
+    ]
+  ],
+  "cases_path": "Assets\\datasets\\zero_skada_replay_cases\\v0_103_2_a0_single_combat_v1\\cases.jsonl"
+}

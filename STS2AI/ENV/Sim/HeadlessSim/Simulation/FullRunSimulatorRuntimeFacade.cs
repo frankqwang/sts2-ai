@@ -378,7 +378,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 	public FullRunSimulationStateSnapshot GetState()
 	{
-		return BuildStateSnapshot(RunManager.Instance.DebugOnlyGetState(), cachedCombatState: null);
+		return BuildStateSnapshot(ResolveSnapshotRunState(), cachedCombatState: null);
 	}
 
 	private FullRunSimulationStateSnapshot BuildStateSnapshot(RunState? runState, CombatTrainingStateSnapshot? cachedCombatState)
@@ -1734,7 +1734,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			throw new FullRunSimulationRuntimeException("no_active_episode", "No active episode to save.");
 
 		FullRunSimulationStateSnapshot state = _lastObservedState ?? GetState();
-		RunState? runState = RunManager.Instance.DebugOnlyGetState();
+		RunState? runState = ResolveSnapshotRunState();
 		if (runState == null)
 		{
 			throw new FullRunSimulationRuntimeException("run_state_unavailable", "Could not resolve active run state.");
@@ -1772,9 +1772,27 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		return stateId;
 	}
 
+	private static RunState? ResolveSnapshotRunState()
+	{
+		RunState? runState = RunManager.Instance.DebugOnlyGetState();
+		if (runState?.CurrentRoom != null || !CombatManager.Instance.IsInProgress)
+		{
+			return runState;
+		}
+
+		if (CombatManager.Instance.DebugOnlyGetState()?.RunState is RunState combatRunState)
+		{
+			return combatRunState;
+		}
+
+		return runState;
+	}
+
 	private Saves.SerializableRun CreateFullRunSnapshot(RunState runState, FullRunSimulationStateSnapshot state)
 	{
-		AbstractRoom? preFinishedRoom = state.StateType == "map" ? null : runState.CurrentRoom;
+		AbstractRoom? preFinishedRoom = state.StateType == "map"
+			? null
+			: (AbstractRoom?)ResolveCombatRoomForSnapshot(runState, state) ?? runState.CurrentRoom;
 		return RunManager.Instance.ToSave(preFinishedRoom: preFinishedRoom);
 	}
 
@@ -2629,6 +2647,34 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		_suppressTerminalRewardsTransitionOnce = false;
 	}
 
+	/// <summary>
+	/// Reuses the full-run snapshot pipeline for a combat episode that was started
+	/// outside this facade (for example via combat_reset / combat_step).
+	///
+	/// We intentionally avoid replacing an existing CardSelectCmd selector because
+	/// combat trainer / combat simulator backends may already own the active
+	/// selection bridge for hand-pick prompts.
+	/// </summary>
+	internal void AdoptExternalEpisodeForSnapshots(string? seed, string? characterId, int ascensionLevel, int episodeNumber)
+	{
+		if (_runtimeScope == null)
+		{
+			_runtimeScope = new SimulationRuntimeScope();
+		}
+		if (_selectorScope == null && CardSelectCmd.Selector == null)
+		{
+			FullRunSimulationChoiceBridge.Instance.Reset();
+			_selectorScope = CardSelectCmd.UseSelector(FullRunSimulationChoiceBridge.Instance);
+		}
+		LocalContext.NetId = NetSingleplayerGameService.defaultNetId;
+		CurrentSeed = seed;
+		CurrentCharacterId = characterId;
+		CurrentAscensionLevel = ascensionLevel;
+		EpisodeNumber = episodeNumber;
+		_lastObservedState = null;
+		ResetCombatFollowupStateForExternalCombatResolution();
+	}
+
 	private void CleanUpPreviousEpisode()
 	{
 		_forceMapView = false;
@@ -2971,7 +3017,8 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 	private SavedCombatSnapshot? CaptureCombatSnapshot(RunState runState, FullRunSimulationStateSnapshot state)
 	{
-		if (!IsCombatState(state.StateType) || runState.CurrentRoom is not CombatRoom combatRoom)
+		CombatRoom? combatRoom = ResolveCombatRoomForSnapshot(runState, state);
+		if (!IsCombatState(state.StateType) || combatRoom == null)
 		{
 			return null;
 		}
@@ -3045,6 +3092,25 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			Creatures = creatures,
 			MonsterMoves = monsterMoves
 		};
+	}
+
+	private static CombatRoom? ResolveCombatRoomForSnapshot(RunState runState, FullRunSimulationStateSnapshot state)
+	{
+		if (!IsCombatState(state.StateType))
+		{
+			return null;
+		}
+		if (runState.CurrentRoom is CombatRoom combatRoom)
+		{
+			return combatRoom;
+		}
+		if (CombatManager.Instance.DebugOnlyGetState() is CombatState activeCombatState
+			&& CombatManager.Instance.IsInProgress
+			&& ReferenceEquals(activeCombatState.RunState, runState))
+		{
+			return new CombatRoom(activeCombatState);
+		}
+		return null;
 	}
 
 	private static SavedCombatMonsterMoveSnapshot CaptureMonsterMoveSnapshot(Creature creature)

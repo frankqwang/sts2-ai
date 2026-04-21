@@ -19,6 +19,7 @@ RiderTestRunner
 /steam
 *.uid
 *.sqlite
+!STS2AI/data/game_wiki/game_catalog.sqlite
 icudt_godot.dat
 
 /STS2AI/ENV/Sim/Host/bin/
@@ -31,6 +32,10 @@ STS2AI/Python/data/skada/runs_victory
 STS2AI/Python/data/skada/runs_full_detail
 STS2AI/Python/data/skada/runs_failure
 STS2AI/Python/data/skada/derived
+
+STS2AI/data/skada/runs_full_detail
+STS2AI/data/skada/runs_full_detail.zip
+
 # System files
 **/.DS_Store
 Thumbs.db
