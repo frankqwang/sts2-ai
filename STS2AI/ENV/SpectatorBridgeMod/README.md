@@ -3,7 +3,7 @@
 Build against the upstream `0991` game assembly:
 
 ```powershell
-dotnet build STS2AI/ENV/Spectator/SpectatorBridgeMod/sts2_mcp_spectator.csproj -c Debug
+dotnet build STS2AI/ENV/SpectatorBridgeMod/sts2_mcp_spectator.csproj -c Debug
 ```
 
 The output directory contains:
