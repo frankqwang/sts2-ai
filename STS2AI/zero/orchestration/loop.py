@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Top-level iterative loop for collect -> label -> train -> evaluate -> promote."""
 
@@ -16,12 +16,12 @@ from ..config import ZeroConfig
 from ..domain import IterationManifest
 from ..features import BatchCollator
 from ..model import ZeroNet
-from ..ports import BattleRuntime, CheckpointStore, Evaluator, Policy, SearchTeacher
+from ..ports import BattleRuntime, CheckpointStore, Evaluator, Policy, SearchBackend
 from .admission import SampleAdmissionPlanner
 from .collector import SearchGuidedActionSelector, SearchSelfPlaySelector, TrajectoryCollector
 from .promotion import PromotionJudge
 from .sample_builder import SampleBuilder
-from .teacher import TeacherQueueBuilder, TeacherQueueProcessor
+from .search import SearchQueueBuilder, SearchQueueProcessor
 from .trainer import ModelPolicyAdapter, ZeroTrainer
 
 
@@ -64,8 +64,8 @@ class ZeroLoopRunner:
         self._collector = TrajectoryCollector()
         self._sample_builder = SampleBuilder(self.config.encoder)
         self._admission = SampleAdmissionPlanner()
-        self._teacher_queue = TeacherQueueBuilder(self.config.teacher)
-        self._teacher_processor = TeacherQueueProcessor()
+        self._search_queue = SearchQueueBuilder(self.config.search)
+        self._search_processor = SearchQueueProcessor()
         self._promotion = PromotionJudge(self.config.evaluation)
         self._collator = BatchCollator(self.config.encoder)
         self._active_version: str | None = None
@@ -84,17 +84,18 @@ class ZeroLoopRunner:
         *,
         iteration: int,
         runtime_factory: Callable[[], BattleRuntime],
-        student_policy: Policy | None = None,
-        search_teacher: SearchTeacher,
+        policy: Policy | None = None,
+        search_backend: SearchBackend,
         baseline_eval: list | None = None,
     ) -> IterationManifest:
         self.artifact_store.reset_iteration_outputs(iteration)
         self._pools.reset_iteration_counters()
-        collector_policy = self._active_policy or student_policy
+        collector_policy = self._active_policy or policy
         if collector_policy is None:
-            raise ValueError("run_iteration 需要 student_policy，或已有晋级后的 active policy。")
+            raise ValueError("run_iteration 需要 policy，或已有晋级后的 active policy。")
 
         collector_version = self._active_version or type(collector_policy).__name__
+        search_version = _public_search_backend_name(search_backend)
         external_episode_end = getattr(runtime_factory, "on_episode_end", None)
         iteration_started_at = time.perf_counter()
         self._write_progress(
@@ -102,23 +103,23 @@ class ZeroLoopRunner:
             phase="iteration",
             status="started",
             collector_version=collector_version,
-            teacher_version=type(search_teacher).__name__,
+            search_version=search_version,
         )
         self._write_status(
             iteration,
             phase="started",
             collector_version=collector_version,
-            teacher_version=type(search_teacher).__name__,
+            search_version=search_version,
         )
         collect_started_at = time.perf_counter()
         search_guidance_factory = None
         search_self_play_factory = None
         if self.config.collect.mode == "search_guided_collect":
             base_port = getattr(runtime_factory, "_port", None)
-            search_guidance_factory = self._build_search_guidance_factory(search_teacher, collector_policy, base_port=base_port)
+            search_guidance_factory = self._build_search_guidance_factory(search_backend, collector_policy, base_port=base_port)
         elif self.config.collect.mode == "search_only_collect":
             base_port = getattr(runtime_factory, "_port", None)
-            search_self_play_factory = self._build_search_self_play_factory(search_teacher, collector_policy, base_port=base_port)
+            search_self_play_factory = self._build_search_self_play_factory(search_backend, collector_policy, base_port=base_port)
         transitions = self._collector.collect(
             runtime_factory=runtime_factory,
             policy=collector_policy,
@@ -167,39 +168,39 @@ class ZeroLoopRunner:
         admission_started_at = time.perf_counter()
         online_entries = self._admission.build_online_entries(samples)
         if self.config.collect.mode == "search_only_collect":
-            teacher_requests = []
+            search_requests = []
         else:
-            teacher_requests = self._teacher_queue.select(samples)
-        pre_teacher_duration_s = time.perf_counter() - admission_started_at
+            search_requests = self._search_queue.select(samples)
+        pre_search_duration_s = time.perf_counter() - admission_started_at
 
-        teacher_started_at = time.perf_counter()
-        if teacher_requests:
-            labeled_samples = self._teacher_processor.label(
-                teacher_requests,
-                search_teacher,
+        search_started_at = time.perf_counter()
+        if search_requests:
+            labeled_search_samples = self._search_processor.label(
+                search_requests,
+                search_backend,
                 runtime_factory=runtime_factory,
                 policy=collector_policy,
             )
         else:
-            labeled_samples = []
-        teacher_duration_s = time.perf_counter() - teacher_started_at
+            labeled_search_samples = []
+        search_duration_s = time.perf_counter() - search_started_at
         self._write_progress(
             iteration,
-            phase="teacher_label",
+            phase="search_label",
             status="completed",
-            duration_s=round(teacher_duration_s, 6),
-            teacher_requests=len(teacher_requests),
-            labeled_samples=len(labeled_samples),
+            duration_s=round(search_duration_s, 6),
+            search_requests=len(search_requests),
+            search_labeled_samples=len(labeled_search_samples),
         )
 
-        teacher_entry_started_at = time.perf_counter()
+        search_entry_started_at = time.perf_counter()
         if self.config.collect.mode == "search_only_collect":
-            teacher_entries = self._admission.build_teacher_entries([sample for sample in samples if sample.teacher_label is not None])
+            search_entries = self._admission.build_search_entries([sample for sample in samples if sample.search_label is not None])
         else:
-            teacher_entries = self._admission.build_teacher_entries(labeled_samples)
+            search_entries = self._admission.build_search_entries(labeled_search_samples)
         self._pools.add_many(online_entries)
-        self._pools.add_many(teacher_entries)
-        pool_admission_duration_s = time.perf_counter() - teacher_entry_started_at
+        self._pools.add_many(search_entries)
+        pool_admission_duration_s = time.perf_counter() - search_entry_started_at
         pool_counters_after_admission = self._pools.iteration_counters()
         pool_stats_after_admission = self._pools.describe()
         self._write_progress(
@@ -208,7 +209,7 @@ class ZeroLoopRunner:
             status="completed",
             duration_s=round(pool_admission_duration_s, 6),
             online_entries=len(online_entries),
-            teacher_entries=len(teacher_entries),
+            search_entries=len(search_entries),
             pool_mutation_counters=pool_counters_after_admission,
             pool_capacities=pool_capacities,
             pool_sizes=self._pools.size_by_pool(),
@@ -220,20 +221,20 @@ class ZeroLoopRunner:
             status="completed",
             duration_s=round(time.perf_counter() - build_started_at, 6),
             sample_build_duration_s=round(sample_build_duration_s, 6),
-            pre_teacher_duration_s=round(pre_teacher_duration_s, 6),
-            teacher_duration_s=round(teacher_duration_s, 6),
+            pre_search_duration_s=round(pre_search_duration_s, 6),
+            search_duration_s=round(search_duration_s, 6),
             pool_admission_duration_s=round(pool_admission_duration_s, 6),
             samples=len(samples),
             online_entries=len(online_entries),
-            teacher_requests=len(teacher_requests),
-            labeled_samples=len(labeled_samples),
-            teacher_entries=len(teacher_entries),
+            search_requests=len(search_requests),
+            search_labeled_samples=len(labeled_search_samples),
+            search_entries=len(search_entries),
         )
         self._write_status(
             iteration,
             phase="build_and_label_completed",
             samples=len(samples),
-            teacher_requests=len(teacher_requests),
+            search_requests=len(search_requests),
             elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
         )
 
@@ -266,7 +267,7 @@ class ZeroLoopRunner:
             "training_state": trainer.state_dict(),
             "seed": self.config.seed,
         }
-        version = f"student_v{iteration:04d}"
+        version = f"policy_v{iteration:04d}"
         candidate_path = self.checkpoint_store.save_candidate(version, candidate_payload)
         self._set_evaluator_trace_context(iteration=iteration, phase="candidate_eval")
         eval_started_at = time.perf_counter()
@@ -312,20 +313,20 @@ class ZeroLoopRunner:
         manifest = IterationManifest(
             iteration=iteration,
             collector_version=collector_version,
-            teacher_version=type(search_teacher).__name__,
+            search_version=search_version,
             sample_counts={
                 "transitions": len(transitions),
                 "samples": len(samples),
                 "online_entries": len(online_entries),
-                "teacher_requests": len(teacher_requests),
-                "labeled_samples": len(labeled_samples),
-                "teacher_entries": len(teacher_entries),
+                "search_requests": len(search_requests),
+                "search_labeled_samples": len(labeled_search_samples),
+                "search_entries": len(search_entries),
             },
             admission_stats={
                 "online_candidates": len(samples),
                 "online_entries": len(online_entries),
-                "teacher_requests": len(teacher_requests),
-                "teacher_entries": len(teacher_entries),
+                "search_requests": len(search_requests),
+                "search_entries": len(search_entries),
                 "pool_mutation_counters": pool_counters_after_train,
             },
             pool_sizes=self._pools.size_by_pool(),
@@ -337,8 +338,8 @@ class ZeroLoopRunner:
         )
 
         self.artifact_store.write_raw_runs(iteration, [transition.to_dict() for transition in transitions])
-        self.artifact_store.write_teacher_labels(iteration, teacher_requests)
-        self.artifact_store.write_dataset_shard(iteration, online_entries + teacher_entries)
+        self.artifact_store.write_search_labels(iteration, search_requests)
+        self.artifact_store.write_dataset_shard(iteration, online_entries + search_entries)
         self.artifact_store.write_manifest(manifest)
         self._write_progress(
             iteration,
@@ -368,7 +369,7 @@ class ZeroLoopRunner:
             trainer.load_state_dict(self._active_training_state)
         return trainer
 
-    def _build_search_guidance_factory(self, search_teacher: SearchTeacher, collector_policy: Policy, *, base_port: int | None):
+    def _build_search_guidance_factory(self, search_backend: SearchBackend, collector_policy: Policy, *, base_port: int | None):
         target_encounters = tuple(
             value.strip().upper()
             for value in self.config.collect.search_guidance_target_encounters
@@ -377,19 +378,19 @@ class ZeroLoopRunner:
         port_offset = int(self.config.collect.search_guidance_port_offset)
 
         def factory(port: int | None):
-            teacher = search_teacher
+            search_runtime = search_backend
             guidance_port = None
             if port is not None:
                 guidance_port = port + port_offset
             elif base_port is not None:
                 guidance_port = int(base_port) + port_offset
             if guidance_port is not None:
-                clone_hook = getattr(search_teacher, "clone_for_port", None)
+                clone_hook = getattr(search_backend, "clone_for_port", None)
                 if callable(clone_hook):
-                    teacher = clone_hook(guidance_port)
+                    search_runtime = clone_hook(guidance_port)
             return SearchGuidedActionSelector(
-                search_teacher=teacher,
-                queue_builder=self._teacher_queue,
+                search_backend=search_runtime,
+                queue_builder=self._search_queue,
                 policy=collector_policy,
                 priority_threshold=self.config.collect.search_guidance_priority_threshold,
                 max_guided_steps_per_episode=self.config.collect.search_guidance_max_steps_per_episode,
@@ -398,21 +399,21 @@ class ZeroLoopRunner:
 
         return factory
 
-    def _build_search_self_play_factory(self, search_teacher: SearchTeacher, collector_policy: Policy, *, base_port: int | None):
+    def _build_search_self_play_factory(self, search_backend: SearchBackend, collector_policy: Policy, *, base_port: int | None):
         port_offset = int(self.config.collect.search_guidance_port_offset)
 
         def factory(port: int | None):
-            teacher = search_teacher
+            search_runtime = search_backend
             search_port = None
             if port is not None:
                 search_port = port + port_offset
             elif base_port is not None:
                 search_port = int(base_port) + port_offset
             if search_port is not None:
-                clone_hook = getattr(search_teacher, "clone_for_port", None)
+                clone_hook = getattr(search_backend, "clone_for_port", None)
                 if callable(clone_hook):
-                    teacher = clone_hook(search_port)
-            return SearchSelfPlaySelector(search_teacher=teacher, policy=collector_policy)
+                    search_runtime = clone_hook(search_port)
+            return SearchSelfPlaySelector(search_backend=search_runtime, policy=collector_policy)
 
         return factory
 
@@ -490,3 +491,12 @@ class ZeroLoopRunner:
         write_baseline = getattr(self.checkpoint_store, "write_baseline_eval", None)
         if callable(write_baseline):
             write_baseline([asdict(item) for item in evaluations])
+
+
+def _public_search_backend_name(search_backend: SearchBackend) -> str:
+    raw_name = type(search_backend).__name__
+    if raw_name == "MultiCaseSearchBackend":
+        return "MultiCaseMctsSearcher"
+    if raw_name == "MultiCaseAggregateSearchBackend":
+        return "MultiCaseAggregatePrior"
+    return raw_name

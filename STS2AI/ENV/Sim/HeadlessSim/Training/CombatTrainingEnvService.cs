@@ -414,6 +414,15 @@ public sealed class CombatTrainingEnvService
 		return snapshot;
 	}
 
+	internal static void ClearCombatOutcomeForRestore()
+	{
+		CombatTrainingSession.Instance?.ClearCombatOutcomeForRestore();
+		if (SimulatorRuntime is CombatSimulatorRuntimeFacade runtimeFacade)
+		{
+			runtimeFacade.ClearCombatOutcomeForRestore();
+		}
+	}
+
 	private static CombatTrainingPlayerSnapshot BuildPlayerSnapshot(Player player)
 	{
 		return new CombatTrainingPlayerSnapshot

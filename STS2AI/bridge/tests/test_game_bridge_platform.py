@@ -18,6 +18,7 @@ from game_bridge.session.pool import SessionPool
 from game_bridge.spectate.controller import SpectatorController
 from game_bridge.spectate.overlay import OverlayWriter
 from game_bridge.spectate.policy import NullPolicy, ReplayPolicy
+from game_bridge.transport.connection import PipeConnection, PipeConnectionConfig
 from game_bridge.types import PolicyContext, SessionConfig
 
 
@@ -178,10 +179,11 @@ def test_create_full_run_client_rejects_auto_launch_without_pipe():
 def test_combat_session_snapshot_methods_reuse_pipe_mixin():
     session = object.__new__(CombatSession)
     calls: list[tuple[str, dict[str, object] | None]] = []
+    session._current_raw = {"state_type": "stale"}
 
     def _fake_call(method: str, params: dict[str, object] | None = None):
         calls.append((method, params))
-        if method == "save_state":
+        if method == "save_search_state":
             return {"state_id": "combat-state-1"}
         if method == "load_state":
             return {"state_type": "monster"}
@@ -201,12 +203,34 @@ def test_combat_session_snapshot_methods_reuse_pipe_mixin():
     assert session.import_state("C:/tmp/state.json")["state_type"] == "monster"
     assert session.delete_state("combat-state-1") is True
     assert [name for name, _ in calls] == [
-        "save_state",
+        "save_search_state",
         "load_state",
         "export_state",
         "import_state",
         "delete_state",
     ]
+
+
+def test_combat_session_load_state_refreshes_current_state():
+    session = object.__new__(CombatSession)
+    session._current_raw = {"state_type": "stale", "legal_actions": []}
+
+    def _fake_call(method: str, params: dict[str, object] | None = None):
+        assert method == "load_state"
+        assert params == {"state_id": "combat-state-2"}
+        return {
+            "state_type": "monster",
+            "terminal": False,
+            "legal_actions": [{"action": "play_card", "card_index": 0}],
+        }
+
+    session._call = _fake_call
+
+    restored = session.load_state("combat-state-2")
+
+    assert restored["state_type"] == "monster"
+    assert session.current_state["state_type"] == "monster"
+    assert session.legal_actions == [{"action": "play_card", "card_index": 0}]
 
 
 def test_combat_session_call_allows_snapshot_rpcs():
@@ -228,7 +252,49 @@ def test_combat_session_call_allows_snapshot_rpcs():
     session = object.__new__(CombatSession)
     session._conn = _FakeConn()
 
-    result = CombatSession._call(session, "save_state")
+    result = CombatSession._call(session, "save_search_state")
 
     assert result == {"state_id": "snap-1"}
-    assert session._conn.calls == [("save_state", None)]
+    assert session._conn.calls == [("save_search_state", None)]
+
+
+def test_pipe_connection_auto_launch_uses_short_probe_timeout(monkeypatch: pytest.MonkeyPatch):
+    connect_timeouts: list[float] = []
+    launcher_calls: list[int] = []
+
+    class _FakeTransport:
+        connect_attempts = 0
+
+        def __init__(self, _pipe_name: str):
+            self._connected = False
+
+        def connect(self, timeout_s: float = 10.0):
+            connect_timeouts.append(timeout_s)
+            type(self).connect_attempts += 1
+            if type(self).connect_attempts == 1:
+                raise ConnectionError("pipe not ready")
+            self._connected = True
+
+        def is_connected(self):
+            return self._connected
+
+        def close(self):
+            self._connected = False
+
+    monkeypatch.setattr("game_bridge.transport.connection.PipeTransport", _FakeTransport)
+    monkeypatch.setattr(PipeConnection, "_handshake", lambda self: None)
+
+    cfg = PipeConnectionConfig(
+        port=19999,
+        protocol="proto",
+        connect_timeout_s=5.0,
+        auto_launch=True,
+        sim_launcher=lambda port: launcher_calls.append(port) or object(),
+    )
+    conn = PipeConnection(cfg)
+
+    conn.connect()
+
+    assert launcher_calls == [19999]
+    assert connect_timeouts == [1.0, 15.0]
+    assert conn.is_connected() is True

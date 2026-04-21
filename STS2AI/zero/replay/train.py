@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """基于 skada replay case 索引跑多 case combat 训练。
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 - 读取已经清洗好的 `cases.jsonl`
 - 选择训练 / 评估用的 case 集合
 - 启动 shared sim
-- 驱动 `ZeroLoopRunner` 完成 collect -> teacher -> train -> eval -> promote
+- 驱动 `ZeroLoopRunner` 完成 collect -> search -> train -> eval -> promote
 - 把 run_metrics / analysis / checkpoints 落到本次产物目录
 
 注意：
@@ -37,14 +37,16 @@ from contextlib import ExitStack
 from zero import ZeroConfig, ZeroLoopRunner
 from zero.analysis import generate_training_analysis
 from zero.buffers import ArtifactStore
-from zero.config import CollectConfig, EvalConfig, LossWeights, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
-from zero.orchestration import ParallelTrajectoryCollector
+from zero.config import CollectConfig, EvalConfig, LossWeights, SearchConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
+from zero.features import BatchCollator
+from zero.model import ZeroNet
+from zero.orchestration import ModelPolicyAdapter, ParallelTrajectoryCollector
 from zero.orchestration.trainer import LocalCheckpointStore
 from zero.paths import STS2AI_ROOT, ZeroPaths
 from zero.replay import (
     FixedSkadaCaseEvaluator,
-    MultiCaseAggregateTeacher,
-    MultiCaseSearchTeacher,
+    MultiCaseAggregateSearchBackend,
+    MultiCaseSearchBackend,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaReplayRuntime,
@@ -74,6 +76,14 @@ class RandomPolicy:
         return RandomPolicy()
 
 
+def build_fresh_policy(config: ZeroConfig) -> ModelPolicyAdapter:
+    """首轮 bootstrap：随机初始化的 ZeroNet，而不是 RandomPolicy。"""
+
+    model = ZeroNet(config.encoder)
+    collator = BatchCollator(config.encoder)
+    return ModelPolicyAdapter(model, collator, config.encoder.history_steps)
+
+
 def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> EvalConfig:
     """构造 EvalConfig，strict 模式走 dataclass 默认（生产晋级阈值）。
 
@@ -91,36 +101,47 @@ def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> E
     )
 
 
-def config_losses_for_teacher_mode(teacher_mode: str) -> LossWeights:
-    """按 teacher 强度给一版保守但可用的损失权重。"""
+def config_losses_for_search_mode(search_mode: str) -> LossWeights:
+    """按 search 强度给一版保守但可用的损失权重。"""
     weights = LossWeights()
-    if teacher_mode == "weak":
+    if search_mode == "weak":
         return weights
     weights.ranking = 0.9
     weights.delta = 0.08
     weights.uncertainty = 0.04
-    weights.policy_teacher_kl_weight = 1.8
+    weights.policy_search_kl_weight = 1.8
     weights.policy_behavior_ce_weight = 0.0
     weights.policy_bad_rollout_ce_scale = 0.0
     return weights
 
 
-def _apply_target_filters(cases, *, target_encounter: str, target_case_id: str):
-    if target_case_id:
-        filtered = [case for case in cases if str(case.case_id) == str(target_case_id)]
-        if not filtered:
-            raise ValueError(f"未找到 target_case_id={target_case_id}")
-        return filtered
-    if target_encounter:
-        normalized = target_encounter.strip().upper()
-        filtered = [case for case in cases if str(case.encounter_id).upper() == normalized]
-        if not filtered:
-            raise ValueError(f"未找到 target_encounter={target_encounter}")
-        return filtered
-    return list(cases)
+def normalize_search_mode(search_mode: str) -> str:
+    """统一搜索模式命名。"""
+    return search_mode
 
 
-def main() -> None:
+def build_search_backend(
+    cases,
+    *,
+    search_mode: str,
+    config: SearchConfig,
+    port: int,
+    auto_launch: bool,
+    connect_timeout_s: float,
+):
+    normalized_mode = normalize_search_mode(search_mode)
+    if normalized_mode == "weak":
+        return MultiCaseAggregateSearchBackend(cases)
+    return MultiCaseSearchBackend(
+        cases,
+        config=config,
+        port=port,
+        auto_launch=auto_launch,
+        connect_timeout_s=connect_timeout_s,
+    )
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--case-index",
@@ -167,14 +188,16 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=2)
     parser.add_argument("--train-steps", type=int, default=40)
     parser.add_argument(
-        "--teacher-mode",
-        choices=["weak", "search_root_sweep", "search_branching", "oracle_root_sweep", "oracle_branching"],
-        default="weak",
+        "--search-mode",
+        dest="search_mode",
+        choices=["weak", "search_root_sweep", "search_branching"],
+        default="search_root_sweep",
+        help="搜索后端模式；默认走 root MCTS 自博弈。",
     )
-    parser.add_argument("--teacher-max-root-actions", type=int, default=8)
-    parser.add_argument("--teacher-rollouts-per-action", type=int, default=2)
-    parser.add_argument("--teacher-max-branch-steps", type=int, default=24)
-    parser.add_argument("--teacher-rollout-policy", choices=["aggregate_teacher"], default="aggregate_teacher")
+    parser.add_argument("--search-max-root-actions", type=int, default=8)
+    parser.add_argument("--search-rollouts-per-action", type=int, default=2)
+    parser.add_argument("--search-max-branch-steps", type=int, default=24)
+    parser.add_argument("--search-rollout-policy", choices=["aggregate_search_prior"], default="aggregate_search_prior")
     parser.add_argument(
         "--host-path",
         type=Path,
@@ -189,13 +212,71 @@ def main() -> None:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=STS2AI_ROOT / "Artifacts" / "zero",
+        default=STS2AI_ROOT / "Artifacts",
     )
+    parser.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help="显式新开一套训练产物目录；默认优先复用同名 run 目录续训。",
+    )
+    return parser
+
+
+def _legacy_run_candidates(base_output_root: Path, run_name: str) -> list[Path]:
+    if not base_output_root.exists():
+        return []
+    candidates: list[Path] = []
+    for child in base_output_root.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name.endswith(run_name):
+            candidates.append(child)
+        nested = child / run_name
+        if nested.is_dir():
+            candidates.append(nested)
+    return sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def resolve_run_output_root(
+    *,
+    base_output_root: Path,
+    run_name: str,
+    from_scratch: bool,
+) -> Path:
+    """默认复用同名 run 目录；fresh run 直接落到 `Artifacts/<时间+名字>`。"""
+
+    if from_scratch:
+        return base_output_root / dated_artifact_dir_name(run_name)
+
+    stable_root = base_output_root / run_name
+    if stable_root.exists():
+        return stable_root
+
+    legacy_candidates = _legacy_run_candidates(base_output_root, run_name)
+    if legacy_candidates:
+        return legacy_candidates[0]
+    return stable_root
+
+
+def _apply_target_filters(cases, *, target_encounter: str, target_case_id: str):
+    if target_case_id:
+        filtered = [case for case in cases if str(case.case_id) == str(target_case_id)]
+        if not filtered:
+            raise ValueError(f"未找到 target_case_id={target_case_id}")
+        return filtered
+    if target_encounter:
+        normalized = target_encounter.strip().upper()
+        filtered = [case for case in cases if str(case.encounter_id).upper() == normalized]
+        if not filtered:
+            raise ValueError(f"未找到 target_encounter={target_encounter}")
+        return filtered
+    return list(cases)
+
+
+def main() -> None:
+    parser = build_arg_parser()
     args = parser.parse_args()
-    if args.teacher_mode == "oracle_root_sweep":
-        args.teacher_mode = "search_root_sweep"
-    elif args.teacher_mode == "oracle_branching":
-        args.teacher_mode = "search_branching"
+    args.search_mode = normalize_search_mode(args.search_mode)
 
     random.seed(args.seed)
     cases = load_case_index(args.case_index)
@@ -241,13 +322,18 @@ def main() -> None:
             curriculum_mode = "targeted_cases"
 
     # 产物目录结构：
-    # STS2AI/Artifacts/zero/MM-DD-HH-MM-skada-replay-train/<run_name>
+    # - fresh run: STS2AI/Artifacts/MM-DD-HH-MM-<run_name>
+    # - resume run: STS2AI/Artifacts/<run_name>
     # run_name 里保留课程模式、case 数、iter 数和 seed，方便之后直接比较。
     run_name = (
         f"{curriculum_mode}_cases_{len(train_cases)}_eval_{len(eval_cases)}"
         f"_iters_{args.iterations}_seed_{args.seed}"
     )
-    output_root = args.output_root / dated_artifact_dir_name("skada-replay-train") / run_name
+    output_root = resolve_run_output_root(
+        base_output_root=args.output_root,
+        run_name=run_name,
+        from_scratch=bool(args.from_scratch),
+    )
     output_root.mkdir(parents=True, exist_ok=True)
 
     config = ZeroConfig(
@@ -263,7 +349,7 @@ def main() -> None:
                 value for value in [args.target_encounter.strip().upper()] if value
             ),
         ),
-        teacher=TeacherConfig(
+        search=SearchConfig(
             top2_gap_threshold=1.0,
             uncertainty_threshold=0.0,
             near_lethal_hp_ratio=1.0,
@@ -276,18 +362,18 @@ def main() -> None:
             weight_decay=1e-4,
             grad_clip_norm=1.0,
         ),
-        losses=config_losses_for_teacher_mode(args.teacher_mode),
+        losses=config_losses_for_search_mode(args.search_mode),
         evaluation=_build_eval_config(
             episodes_per_cohort=args.eval_episodes,
             strict_promotion=args.strict_promotion,
         ),
     )
-    config.teacher.mode = args.teacher_mode
-    config.teacher.max_root_actions = args.teacher_max_root_actions
-    config.teacher.rollouts_per_action = args.teacher_rollouts_per_action
-    config.teacher.max_branch_steps = args.teacher_max_branch_steps
-    config.teacher.allow_branching = args.teacher_mode == "search_branching"
-    config.teacher.rollout_policy = args.teacher_rollout_policy
+    config.search.mode = args.search_mode
+    config.search.max_root_actions = args.search_max_root_actions
+    config.search.rollouts_per_action = args.search_rollouts_per_action
+    config.search.max_branch_steps = args.search_max_branch_steps
+    config.search.allow_branching = args.search_mode == "search_branching"
+    config.search.rollout_policy = args.search_rollout_policy
 
     artifact_store = ArtifactStore(config.paths)
     checkpoint_store = LocalCheckpointStore(config.paths.checkpoints)
@@ -373,16 +459,13 @@ def main() -> None:
                     parallel_envs=args.parallel_envs,
                     ports=collect_ports,
                 )
-            teacher = (
-                MultiCaseAggregateTeacher(train_cases)
-                if args.teacher_mode == "weak"
-                else MultiCaseSearchTeacher(
-                    train_cases,
-                    config=config.teacher,
-                    port=args.port,
-                    auto_launch=False,
-                    connect_timeout_s=45.0,
-                )
+            search_backend = build_search_backend(
+                train_cases,
+                search_mode=args.search_mode,
+                config=config.search,
+                port=args.port,
+                auto_launch=False,
+                connect_timeout_s=45.0,
             )
 
             baseline_policy = RandomPolicy()
@@ -391,13 +474,13 @@ def main() -> None:
                 set_trace_context(iteration=0, phase="baseline_eval")
             baseline = evaluator.evaluate(baseline_policy)
             manifests = []
-            student_policy = RandomPolicy()
+            policy = build_fresh_policy(config)
             for iteration in range(1, args.iterations + 1):
                 manifest = runner.run_iteration(
                     iteration=iteration,
                     runtime_factory=runtime_factory,
-                    student_policy=student_policy,
-                    search_teacher=teacher,
+                    policy=policy,
+                    search_backend=search_backend,
                     baseline_eval=baseline if iteration == 1 else None,
                 )
                 manifests.append(manifest.to_dict())
@@ -412,7 +495,9 @@ def main() -> None:
         "run_id": args.run_id or None,
         "target_encounter": args.target_encounter or None,
         "target_case_id": args.target_case_id or None,
-        "teacher_mode": args.teacher_mode,
+        "from_scratch": bool(args.from_scratch),
+        "resolved_output_root": str(output_root),
+        "search_mode": args.search_mode,
         "train_cases": [case.to_dict() for case in train_cases],
         "eval_cases": [case.to_dict() for case in eval_cases],
         "baseline": [asdict(item) for item in baseline],

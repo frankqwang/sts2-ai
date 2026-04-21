@@ -1,4 +1,4 @@
-现在这条 `zero` 链路，可以理解成 8 步：
+﻿现在这条 `zero` 链路，可以理解成 8 步：
 
 1. `sim state -> BattleState`
    入口是 [game_bridge.py](/C:/dev/sts2-ai/STS2AI/zero/adapters/game_bridge.py:19)。它把 bridge 返回的原始 combat payload 归一成 zero 自己的领域对象：
@@ -6,7 +6,7 @@
    - `legal_actions` 变成带实例唯一 `action_id` 的 `LegalAction`
    - `GameBridgeCombatRuntime.reset/get_state/step` 把 bridge session 包成统一 runtime 端口，见 [game_bridge.py](/C:/dev/sts2-ai/STS2AI/zero/adapters/game_bridge.py:128)
 
-2. `学生策略采样轨迹`
+2. `当前策略采样轨迹`
    `TrajectoryCollector` 用某个 policy 去跑战斗，每一步记下：
    - 当前状态 `state`
    - 选择的 `action_index`
@@ -32,25 +32,24 @@
    它的作用是把“一个逻辑样本” clone 成不同池里的独立 entry：
    - 在线样本进 `recent_online`
    - rare 样本额外进 `rare`
-   - teacher 标注后的样本进 `teacher`
+   - search 标注后的样本进 `search`
    
    这样避免了“同一个 sample 对象多池共享、后续再被改坏”的问题。
 
-5. `teacher_queue -> 老师打标`
-   `TeacherQueueBuilder` 先从在线样本里挑“值得老师介入”的状态，规则在 [teacher.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/teacher.py:12)：
+5. `search_queue -> 搜索打标`
+   `SearchQueueBuilder` 先从在线样本里挑“值得搜索介入”的状态，规则在 [search.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/search.py:12)：
    - elite / boss
    - near-lethal
    - 高 uncertainty
    - top1/top2 很接近
    - rare cohort
    
-   然后 `TeacherQueueProcessor` 调 `teacher.label_request(...)` 真正产出 `TeacherLabel`，见 [teacher.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/teacher.py:69)。现在 teacher 是可插拔端口，正式 same-seed search teacher 就接这里。
+   然后 `SearchQueueProcessor` 调 `search_backend.label_request(...)` 真正产出 `SearchLabel`，见 [search.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/search.py:69)。现在 search backend 是可插拔端口，正式 same-seed search 就接这里。
 
 6. `池内保留 + 混采 batch`
-   `SamplePoolSet` 管 5 个池：`recent_online / teacher / rare / reanalyse / legacy`，见 [pools.py](/C:/dev/sts2-ai/STS2AI/zero/buffers/pools.py:77)。
+   `SamplePoolSet` 管 5 个池：`recent_online / search / rare / reanalyse / legacy`，见 [pools.py](/C:/dev/sts2-ai/STS2AI/zero/buffers/pools.py:77)。
    当前策略是：
-   - `recent_online` 用 FIFO
-   - `teacher/rare/reanalyse` 用 `keep_score` 保留高价值样本
+   - `recent_online/search/rare/reanalyse/legacy` 都用 `keep_score` 保留高价值样本
    - 训练时先按池权重分配 batch，再在池内按 bucket 抽，再做一点 `main_card_id` 多样性倾斜，见 [pools.py](/C:/dev/sts2-ai/STS2AI/zero/buffers/pools.py:96)
 
 7. `样本编码 -> 模型训练`
@@ -78,11 +77,11 @@
    一轮 `run_iteration()` 的顺序就是：
    - collect transitions
    - build samples
-   - 选 teacher queue
-   - 老师打标
+   - 选 search queue
+   - 搜索打标
    - 入池
    - 从当前 active checkpoint 加载模型继续训练
-   - 保存 `student_vXXXX`
+   - 保存 `policy_vXXXX`
    - evaluator 评估
    - promotion judge 决定是否晋级
    
@@ -91,18 +90,18 @@
    - `_active_policy`
    - `_baseline_eval`
    
-   下一轮就不再从零开始，而是沿着上轮学生继续采样和训练，见 [loop.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/loop.py:79) 和 [loop.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/loop.py:91)。
+   下一轮就不再从零开始，而是沿着上轮 policy 继续采样和训练，见 [loop.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/loop.py:79) 和 [loop.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/loop.py:91)。
 
 一句话概括就是：
 
 `bridge/sim` 提供战斗状态和合法动作  
--> `collector` 采学生轨迹  
+-> `collector` 采当前 policy 轨迹  
 -> `sample_builder` 变训练样本  
--> `teacher` 给关键状态补强标签  
+-> `search` 给关键状态补强标签  
 -> `pools` 做样本保留和混采  
--> `trainer` 训练新学生  
+-> `trainer` 训练新 policy  
 -> `loop` 评估、晋级，并把晋级模型变成下一轮 collector
 
 现在这条链路已经能跑通，但还缺两块“正式版能力”：
-- 真正的 same-seed search teacher
+- 真正的 same-seed search backend
 - 真正固定且够大的 evaluator cohort

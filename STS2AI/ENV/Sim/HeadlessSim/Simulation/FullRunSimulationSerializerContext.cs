@@ -14,6 +14,7 @@ namespace MegaCrit.Sts2.Core.Simulation;
 [JsonSerializable(typeof(FullRunPendingCombatCardSelectionRestoreSnapshot))]
 [JsonSerializable(typeof(FullRunPendingRewardRestoreEntrySnapshot))]
 [JsonSerializable(typeof(FullRunSimulatorRuntimeFacade.SavedCombatSnapshot))]
+[JsonSerializable(typeof(FullRunSimulatorRuntimeFacade.SavedCombatEncounterMonsterSnapshot))]
 [JsonSerializable(typeof(FullRunSimulatorRuntimeFacade.SavedCombatPlayerSnapshot))]
 [JsonSerializable(typeof(FullRunSimulatorRuntimeFacade.SavedCombatMonsterMoveSnapshot))]
 [JsonSerializable(typeof(FullRunSimulatorRuntimeFacade.SavedShopSnapshot))]

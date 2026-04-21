@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 import random
@@ -8,9 +8,9 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
-from ..domain import FightLabel, HistoryStep, RawTransition, TeacherRequest, TrainingSample, TransitionDelta, assess_transition_progress, compact_raw_transition
-from ..ports import BattleRuntime, Policy, SearchTeacher
-from .teacher import TeacherQueueBuilder
+from ..domain import FightLabel, HistoryStep, RawTransition, SearchRequest, TrainingSample, TransitionDelta, assess_transition_progress, compact_raw_transition
+from ..ports import BattleRuntime, Policy, SearchBackend
+from .search import SearchQueueBuilder
 
 
 @dataclass(slots=True)
@@ -19,11 +19,11 @@ class SearchDecision:
     priority: float
     reason_tags: list[str]
     search_policy: list[float]
-    teacher_topk: list[int]
-    teacher_best_action_index: int
-    teacher_ranking_margin: float
-    teacher_value: float
-    teacher_search_trace: list[dict[str, float | int | str | bool]]
+    search_topk: list[int]
+    search_best_action_index: int
+    search_ranking_margin: float
+    search_value: float
+    search_trace: list[dict[str, float | int | str | bool]]
     source: str = "search"
     search_duration_s: float = 0.0
     search_simulations: int = 0
@@ -31,19 +31,19 @@ class SearchDecision:
 
 
 class SearchGuidedActionSelector:
-    """在 collect 时按优先级让 search teacher 接管动作选择。"""
+    """在 collect 时按优先级让 search backend 接管动作选择。"""
 
     def __init__(
         self,
         *,
-        search_teacher: SearchTeacher,
-        queue_builder: TeacherQueueBuilder,
+        search_backend: SearchBackend,
+        queue_builder: SearchQueueBuilder,
         policy: Policy | None = None,
         priority_threshold: float,
         max_guided_steps_per_episode: int,
         target_encounters: tuple[str, ...] = (),
     ):
-        self._search_teacher = search_teacher
+        self._search_backend = search_backend
         self._queue_builder = queue_builder
         self._policy = policy
         self._priority_threshold = float(priority_threshold)
@@ -63,11 +63,11 @@ class SearchGuidedActionSelector:
         state,
         history: list[HistoryStep],
         prefix_action_indices: list[int],
-        student_scores: list[float],
-        student_uncertainty: float,
-        student_fight_win_prob: float,
-        student_enemy_hp_fraction_dealt: float,
-        student_self_hp_fraction_remaining: float,
+        policy_scores: list[float],
+        policy_uncertainty: float,
+        policy_fight_win_prob: float,
+        policy_enemy_hp_fraction_dealt: float,
+        policy_self_hp_fraction_remaining: float,
         greedy_action: int,
     ) -> SearchDecision | None:
         if not state.legal_actions or self._guided_steps >= self._max_guided_steps_per_episode:
@@ -79,11 +79,11 @@ class SearchGuidedActionSelector:
             state=state,
             history=history,
             prefix_action_indices=prefix_action_indices,
-            student_uncertainty=student_uncertainty,
-            student_scores=student_scores,
-            student_fight_win_prob=student_fight_win_prob,
-            student_enemy_hp_fraction_dealt=student_enemy_hp_fraction_dealt,
-            student_self_hp_fraction_remaining=student_self_hp_fraction_remaining,
+            policy_uncertainty=policy_uncertainty,
+            policy_scores=policy_scores,
+            policy_fight_win_prob=policy_fight_win_prob,
+            policy_enemy_hp_fraction_dealt=policy_enemy_hp_fraction_dealt,
+            policy_self_hp_fraction_remaining=policy_self_hp_fraction_remaining,
             greedy_action=greedy_action,
         )
         priority, reason_tags = self._queue_builder.score_sample(sample)
@@ -92,8 +92,8 @@ class SearchGuidedActionSelector:
         if not force_guidance and priority < self._priority_threshold:
             return None
         label = _label_with_optional_policy(
-            self._search_teacher,
-            TeacherRequest(
+            self._search_backend,
+            SearchRequest(
                 request_id=sample.sample_id,
                 sample=sample,
                 priority=max(priority, self._priority_threshold),
@@ -111,11 +111,11 @@ class SearchGuidedActionSelector:
             priority=max(priority, self._priority_threshold),
             reason_tags=(["search_guided_target"] if force_guidance else []) + list(reason_tags),
             search_policy=list(label.policy),
-            teacher_topk=list(label.topk_indices),
-            teacher_best_action_index=int(label.best_action_index),
-            teacher_ranking_margin=float(label.ranking_margin),
-            teacher_value=float(label.teacher_value),
-            teacher_search_trace=list(label.search_trace),
+            search_topk=list(label.topk_indices),
+            search_best_action_index=int(label.best_action_index),
+            search_ranking_margin=float(label.ranking_margin),
+            search_value=float(label.search_value),
+            search_trace=list(label.search_trace),
             search_duration_s=float(label.metadata.get("search_duration_s", 0.0) or 0.0),
             search_simulations=int(label.metadata.get("search_simulations", 0) or 0),
             search_cache_hit=bool(label.metadata.get("search_cache_hit", False)),
@@ -126,8 +126,8 @@ class SearchGuidedActionSelector:
 class SearchSelfPlaySelector:
     """每个决策点都调用搜索，并直接按搜索分布出动作。"""
 
-    def __init__(self, *, search_teacher: SearchTeacher, policy: Policy | None = None):
-        self._search_teacher = search_teacher
+    def __init__(self, *, search_backend: SearchBackend, policy: Policy | None = None):
+        self._search_backend = search_backend
         self._policy = policy
 
     def select_action(
@@ -139,11 +139,11 @@ class SearchSelfPlaySelector:
         state,
         history: list[HistoryStep],
         prefix_action_indices: list[int],
-        student_scores: list[float],
-        student_uncertainty: float,
-        student_fight_win_prob: float,
-        student_enemy_hp_fraction_dealt: float,
-        student_self_hp_fraction_remaining: float,
+        policy_scores: list[float],
+        policy_uncertainty: float,
+        policy_fight_win_prob: float,
+        policy_enemy_hp_fraction_dealt: float,
+        policy_self_hp_fraction_remaining: float,
         greedy_action: int,
         temperature: float,
         epsilon_greedy: float,
@@ -158,16 +158,16 @@ class SearchSelfPlaySelector:
             state=state,
             history=history,
             prefix_action_indices=prefix_action_indices,
-            student_uncertainty=student_uncertainty,
-            student_scores=student_scores,
-            student_fight_win_prob=student_fight_win_prob,
-            student_enemy_hp_fraction_dealt=student_enemy_hp_fraction_dealt,
-            student_self_hp_fraction_remaining=student_self_hp_fraction_remaining,
+            policy_uncertainty=policy_uncertainty,
+            policy_scores=policy_scores,
+            policy_fight_win_prob=policy_fight_win_prob,
+            policy_enemy_hp_fraction_dealt=policy_enemy_hp_fraction_dealt,
+            policy_self_hp_fraction_remaining=policy_self_hp_fraction_remaining,
             greedy_action=greedy_action,
         )
         label = _label_with_optional_policy(
-            self._search_teacher,
-            TeacherRequest(
+            self._search_backend,
+            SearchRequest(
                 request_id=sample.sample_id,
                 sample=sample,
                 priority=1.0,
@@ -192,11 +192,11 @@ class SearchSelfPlaySelector:
             priority=1.0,
             reason_tags=["search_self_play"],
             search_policy=list(label.policy),
-            teacher_topk=list(label.topk_indices),
-            teacher_best_action_index=int(label.best_action_index),
-            teacher_ranking_margin=float(label.ranking_margin),
-            teacher_value=float(label.teacher_value),
-            teacher_search_trace=list(label.search_trace),
+            search_topk=list(label.topk_indices),
+            search_best_action_index=int(label.best_action_index),
+            search_ranking_margin=float(label.ranking_margin),
+            search_value=float(label.search_value),
+            search_trace=list(label.search_trace),
             search_duration_s=float(label.metadata.get("search_duration_s", 0.0) or 0.0),
             search_simulations=int(label.metadata.get("search_simulations", 0) or 0),
             search_cache_hit=bool(label.metadata.get("search_cache_hit", False)),
@@ -290,11 +290,11 @@ class TrajectoryCollector:
                             state=state,
                             history=list(history_window),
                             prefix_action_indices=prefix_action_indices,
-                            student_scores=scores,
-                            student_uncertainty=uncertainty,
-                            student_fight_win_prob=float(inference.get("fight_win_prob", 0.0) or 0.0),
-                            student_enemy_hp_fraction_dealt=float(inference.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
-                            student_self_hp_fraction_remaining=float(inference.get("self_hp_fraction_remaining", 0.0) or 0.0),
+                            policy_scores=scores,
+                            policy_uncertainty=uncertainty,
+                            policy_fight_win_prob=float(inference.get("fight_win_prob", 0.0) or 0.0),
+                            policy_enemy_hp_fraction_dealt=float(inference.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
+                            policy_self_hp_fraction_remaining=float(inference.get("self_hp_fraction_remaining", 0.0) or 0.0),
                             greedy_action=greedy_action,
                             temperature=temperature,
                             epsilon_greedy=epsilon_greedy,
@@ -308,11 +308,11 @@ class TrajectoryCollector:
                             state=state,
                             history=list(history_window),
                             prefix_action_indices=prefix_action_indices,
-                            student_scores=scores,
-                            student_uncertainty=uncertainty,
-                            student_fight_win_prob=float(inference.get("fight_win_prob", 0.0) or 0.0),
-                            student_enemy_hp_fraction_dealt=float(inference.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
-                            student_self_hp_fraction_remaining=float(inference.get("self_hp_fraction_remaining", 0.0) or 0.0),
+                            policy_scores=scores,
+                            policy_uncertainty=uncertainty,
+                            policy_fight_win_prob=float(inference.get("fight_win_prob", 0.0) or 0.0),
+                            policy_enemy_hp_fraction_dealt=float(inference.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
+                            policy_self_hp_fraction_remaining=float(inference.get("self_hp_fraction_remaining", 0.0) or 0.0),
                             greedy_action=greedy_action,
                         )
                     if search_decision is not None:
@@ -330,9 +330,12 @@ class TrajectoryCollector:
                             rng=rng,
                         )
                         action_index = search_decision.action_index if search_decision is not None else sampled_action_index
-                    raw_actions = state.raw.get("legal_actions") if isinstance(state.raw, dict) else []
-                    raw_actions = raw_actions if isinstance(raw_actions, list) else []
-                    if search_decision is not None and action_index >= len(raw_actions):
+                    # 搜索返回的是当前 `state.legal_actions` 语义空间里的 index。
+                    # 后端 runtime 已支持在 `step(...)` 时把 legal index 映射回 raw action，
+                    # 因此这里不能再用 `state.raw["legal_actions"]` 的长度做过严校验，
+                    # 否则会把“legal 有效 / raw 稀疏或顺序不同”的搜索决策误清空，
+                    # 退回学生 greedy，看起来像“只有 step0 在搜”。
+                    if search_decision is not None and (action_index < 0 or action_index >= len(state.legal_actions)):
                         search_decision = None
                         action_index = greedy_action if search_self_play is not None else sampled_action_index
                     env_step_started_at = time.perf_counter()
@@ -371,11 +374,11 @@ class TrajectoryCollector:
                             "search_guidance_priority": float(search_decision.priority) if search_decision else 0.0,
                             "search_guidance_tags": "|".join(search_decision.reason_tags) if search_decision else "",
                             "search_policy": list(search_decision.search_policy) if search_decision else [],
-                            "search_teacher_topk": list(search_decision.teacher_topk) if search_decision else [],
-                            "search_teacher_best_action_index": int(search_decision.teacher_best_action_index) if search_decision else -1,
-                            "search_teacher_ranking_margin": float(search_decision.teacher_ranking_margin) if search_decision else 0.0,
-                            "search_teacher_value": float(search_decision.teacher_value) if search_decision else 0.0,
-                            "search_teacher_trace": list(search_decision.teacher_search_trace) if search_decision else [],
+                            "search_topk": list(search_decision.search_topk) if search_decision else [],
+                            "search_best_action_index": int(search_decision.search_best_action_index) if search_decision else -1,
+                            "search_ranking_margin": float(search_decision.search_ranking_margin) if search_decision else 0.0,
+                            "search_value": float(search_decision.search_value) if search_decision else 0.0,
+                            "search_trace": list(search_decision.search_trace) if search_decision else [],
                             "search_source": str(search_decision.source) if search_decision else "",
                             "search_duration_s": float(search_decision.search_duration_s) if search_decision else 0.0,
                             "search_simulations": int(search_decision.search_simulations) if search_decision else 0,
@@ -530,13 +533,13 @@ def _sample_policy_action(
     return rng.choices(range(len(policy)), weights=adjusted, k=1)[0]
 
 
-def _label_with_optional_policy(search_teacher: SearchTeacher, request: TeacherRequest, *, seed: str, policy: Policy | None):
+def _label_with_optional_policy(search_backend: SearchBackend, request: SearchRequest, *, seed: str, policy: Policy | None):
     if policy is None:
-        return search_teacher.label_request(request, seed=seed)
+        return search_backend.label_request(request, seed=seed)
     try:
-        return search_teacher.label_request(request, seed=seed, policy=policy)
+        return search_backend.label_request(request, seed=seed, policy=policy)
     except TypeError:
-        return search_teacher.label_request(request, seed=seed)
+        return search_backend.label_request(request, seed=seed)
 
 
 def _build_guidance_sample(
@@ -547,11 +550,11 @@ def _build_guidance_sample(
     state,
     history: list[HistoryStep],
     prefix_action_indices: list[int],
-    student_uncertainty: float,
-    student_scores: list[float],
-    student_fight_win_prob: float,
-    student_enemy_hp_fraction_dealt: float,
-    student_self_hp_fraction_remaining: float,
+    policy_uncertainty: float,
+    policy_scores: list[float],
+    policy_fight_win_prob: float,
+    policy_enemy_hp_fraction_dealt: float,
+    policy_self_hp_fraction_remaining: float,
     greedy_action: int,
 ) -> TrainingSample:
     return TrainingSample(
@@ -583,12 +586,12 @@ def _build_guidance_sample(
         keep_score=0.0,
         metadata={
             "prefix_action_indices": list(prefix_action_indices),
-            "uncertainty": float(student_uncertainty),
-            "top2_gap": _top2_gap(student_scores),
-            "student_policy_scores": list(student_scores),
-            "student_fight_win_prob": float(student_fight_win_prob),
-            "student_enemy_hp_fraction_dealt": float(student_enemy_hp_fraction_dealt),
-            "student_self_hp_fraction_remaining": float(student_self_hp_fraction_remaining),
+            "uncertainty": float(policy_uncertainty),
+            "top2_gap": _top2_gap(policy_scores),
+            "policy_scores": list(policy_scores),
+            "policy_fight_win_prob": float(policy_fight_win_prob),
+            "policy_enemy_hp_fraction_dealt": float(policy_enemy_hp_fraction_dealt),
+            "policy_self_hp_fraction_remaining": float(policy_self_hp_fraction_remaining),
             "fight_timeout": False,
             "fight_no_progress_ratio": 0.0,
             "hp_quality_score": 1.0,

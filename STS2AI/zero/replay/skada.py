@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """skada 人类对局 -> combat replay case.
 
@@ -29,8 +29,8 @@ from ..domain import (
     EvalSummary,
     FightLabel,
     RawTransition,
-    TeacherLabel,
-    TeacherRequest,
+    SearchLabel,
+    SearchRequest,
     assess_transition_progress,
     compute_fight_score,
     compute_hp_quality_score,
@@ -526,8 +526,8 @@ def _build_card_usage_map(combat: dict[str, Any]) -> dict[str, dict[str, float |
     return usage
 
 
-class AggregateCardUsageTeacher:
-    """Weak teacher from human combat aggregates.
+class AggregateCardUsageSearchBackend:
+    """Weak search prior from human combat aggregates.
 
     This is intentionally not a true oracle. It only says:
     - actions whose card ids were used more / dealt more / blocked more in the
@@ -547,10 +547,10 @@ class AggregateCardUsageTeacher:
             for card_id, stats in case.card_usage.items()
         }
 
-    def label_request(self, request: TeacherRequest, runtime_factory=None, seed: str | None = None) -> TeacherLabel:
+    def label_request(self, request: SearchRequest, runtime_factory=None, seed: str | None = None) -> SearchLabel:
         sample = request.sample
         if not sample.legal_actions:
-            return TeacherLabel(teacher_value=float(self._case.won))
+            return SearchLabel(search_value=float(self._case.won))
         scores = []
         for action in sample.legal_actions:
             score = self._score_table.get(action.card_id.upper(), 0.05)
@@ -562,12 +562,12 @@ class AggregateCardUsageTeacher:
         best_action_index = max(range(len(scores)), key=lambda idx: scores[idx])
         ordered = sorted(scores, reverse=True)
         margin = float(ordered[0] - ordered[1]) if len(ordered) >= 2 else float(ordered[0])
-        return TeacherLabel(
+        return SearchLabel(
             policy=policy,
             topk_indices=sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[: min(3, len(scores))],
             best_action_index=best_action_index,
             ranking_margin=margin,
-            teacher_value=FightLabel(
+            search_value=FightLabel(
                 fight_win=1.0 if self._case.won else 0.0,
                 enemy_hp_fraction_dealt=1.0 if self._case.won else 0.7,
                 self_hp_fraction_remaining=max(
@@ -581,39 +581,39 @@ class AggregateCardUsageTeacher:
                 player_hp=float(self._case.floor_state.get("hp_after", 0) or 0),
                 player_max_hp=float(max(int(self._case.build.max_hp), 1)),
             ).fight_score,
-            metadata={"teacher": "AggregateCardUsageTeacher"},
+            metadata={"search_prior": "AggregateCardUsageSearchBackend"},
         )
 
 
-class MultiCaseAggregateTeacher:
-    """Dispatch aggregate card-usage teachers by replay case id.
+class MultiCaseAggregateSearchBackend:
+    """Dispatch aggregate card-usage search backends by replay case id.
 
-    This keeps the V0 teacher simple while allowing one training job to mix
+    This keeps the V0 aggregate prior simple while allowing one training job to mix
     many skada-derived combat roots.
     """
 
     def __init__(self, cases: Iterable[SkadaCombatCase]):
         case_list = list(cases)
-        teacher_map = {case.case_id: AggregateCardUsageTeacher(case) for case in case_list}
-        if not teacher_map:
-            raise ValueError("MultiCaseAggregateTeacher 需要至少一个 case。")
+        search_backend_map = {case.case_id: AggregateCardUsageSearchBackend(case) for case in case_list}
+        if not search_backend_map:
+            raise ValueError("MultiCaseAggregateSearchBackend 需要至少一个 case。")
         self._cases = case_list
-        self._teachers = teacher_map
+        self._search_backends = search_backend_map
 
-    def label_request(self, request: TeacherRequest, runtime_factory=None, seed: str | None = None) -> TeacherLabel:
+    def label_request(self, request: SearchRequest, runtime_factory=None, seed: str | None = None) -> SearchLabel:
         case_id = str(request.sample.state.context.metadata.get("skada_case_id") or "")
-        teacher = self._teachers.get(case_id)
-        if teacher is None:
-            fallback_teacher = next(iter(self._teachers.values()))
-            label = fallback_teacher.label_request(request, runtime_factory=runtime_factory, seed=seed)
+        search_backend = self._search_backends.get(case_id)
+        if search_backend is None:
+            fallback_search_backend = next(iter(self._search_backends.values()))
+            label = fallback_search_backend.label_request(request, runtime_factory=runtime_factory, seed=seed)
             metadata = dict(label.metadata)
-            metadata["teacher_fallback_case_id"] = case_id
+            metadata["search_fallback_case_id"] = case_id
             label.metadata = metadata
             return label
-        return teacher.label_request(request, runtime_factory=runtime_factory, seed=seed)
+        return search_backend.label_request(request, runtime_factory=runtime_factory, seed=seed)
 
-    def clone_for_port(self, port: int) -> "MultiCaseAggregateTeacher":
-        return MultiCaseAggregateTeacher(self._cases)
+    def clone_for_port(self, port: int) -> "MultiCaseAggregateSearchBackend":
+        return MultiCaseAggregateSearchBackend(self._cases)
 
 
 class SkadaReplayRuntime:
@@ -793,7 +793,7 @@ class FixedSkadaCaseEvaluator:
             agreement_hits = 0.0
             overlap_hits = 0.0
             agreement_steps = 0
-            teacher = AggregateCardUsageTeacher(case)
+            search_backend = AggregateCardUsageSearchBackend(case)
             for episode_index in range(self._episodes_per_case):
                 result = _rollout_case_episode(
                     case=case,
@@ -803,7 +803,7 @@ class FixedSkadaCaseEvaluator:
                     connect_timeout_s=self._connect_timeout_s,
                     trace_name=self._trace_name,
                     artifact_store=self._artifact_store,
-                    teacher=teacher,
+                    search_backend=search_backend,
                     case_index=case_index,
                     episode_index=episode_index,
                 )
@@ -877,7 +877,7 @@ class OrderedRunCaseEvaluator:
                     connect_timeout_s=self._connect_timeout_s,
                     trace_name=self._trace_name,
                     artifact_store=self._artifact_store,
-                    teacher=AggregateCardUsageTeacher(case),
+                    search_backend=AggregateCardUsageSearchBackend(case),
                     case_index=case_index,
                     episode_index=attempt_index,
                 )
@@ -928,7 +928,7 @@ def _rollout_case_episode(
     connect_timeout_s: float,
     trace_name: str,
     artifact_store: ArtifactStore | None,
-    teacher: AggregateCardUsageTeacher,
+    search_backend: AggregateCardUsageSearchBackend,
     case_index: int,
     episode_index: int,
 ) -> dict[str, object]:
@@ -974,18 +974,18 @@ def _rollout_case_episode(
             inference = infer_hook(state) if callable(infer_hook) else None
             if isinstance(inference, dict):
                 action_index = int(inference.get("action_index", 0) or 0)
-                student_scores = list(inference.get("scores", []) or [])
-                student_uncertainty = float(inference.get("uncertainty", 0.0) or 0.0)
+                policy_scores = list(inference.get("scores", []) or [])
+                policy_uncertainty = float(inference.get("uncertainty", 0.0) or 0.0)
             else:
                 action_index = policy.select_action(state)
-                student_scores = []
-                student_uncertainty = float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0)
+                policy_scores = []
+                policy_uncertainty = float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0)
             policy_select_duration_s += time.perf_counter() - infer_started_at
-            teacher_label = _teacher_label_for_actions(teacher, state.legal_actions)
-            if teacher_label.best_action_index >= 0:
+            search_label = _search_label_for_actions(search_backend, state.legal_actions)
+            if search_label.best_action_index >= 0:
                 agreement_steps += 1
-                agreement_hits += 1.0 if action_index == teacher_label.best_action_index else 0.0
-                overlap_hits += 1.0 if action_index in teacher_label.topk_indices else 0.0
+                agreement_hits += 1.0 if action_index == search_label.best_action_index else 0.0
+                overlap_hits += 1.0 if action_index in search_label.topk_indices else 0.0
             chosen_action = state.legal_actions[action_index] if state.legal_actions else None
             env_step_started_at = time.perf_counter()
             next_state = runtime.step(action_index)
@@ -1040,16 +1040,16 @@ def _rollout_case_episode(
                     "action_id": chosen_action.action_id if chosen_action is not None else "",
                     "card_id": chosen_action.card_id if chosen_action is not None else "",
                     "target_id": chosen_action.target_id if chosen_action is not None else "",
-                    "student_scores": student_scores,
-                    "student_uncertainty": student_uncertainty,
-                    "student_topk_indices": _topk_indices_from_scores(student_scores, topk=4),
+                    "policy_scores": policy_scores,
+                    "policy_uncertainty": policy_uncertainty,
+                    "policy_topk_indices": _topk_indices_from_scores(policy_scores, topk=4),
                     "state": serialized_transition["state"],
                     "action": serialized_transition["action"],
                     "next_state": serialized_transition["next_state"],
-                    "teacher_best_action_index": teacher_label.best_action_index,
-                    "teacher_topk_indices": teacher_label.topk_indices,
-                    "teacher_policy": teacher_label.policy,
-                    "teacher_search_trace": teacher_label.search_trace,
+                    "search_best_action_index": search_label.best_action_index,
+                    "search_topk_indices": search_label.topk_indices,
+                    "search_policy": search_label.policy,
+                    "search_trace": search_label.search_trace,
                     "made_progress": bool(progress.made_progress),
                     "enemy_hp_delta": float(progress.enemy_hp_delta),
                     "enemy_count_delta": int(progress.enemy_count_delta),
@@ -1201,8 +1201,8 @@ def _build_case_eval_summary(
         fight_win_rate=aggregate.fight_win,
         enemy_hp_fraction_dealt=aggregate.enemy_hp_fraction_dealt,
         self_hp_fraction_remaining=aggregate.self_hp_fraction_remaining,
-        teacher_agreement_at_1=(agreement_hits / agreement_steps) if agreement_steps else 0.0,
-        teacher_topk_overlap=(overlap_hits / agreement_steps) if agreement_steps else 0.0,
+        search_agreement_at_1=(agreement_hits / agreement_steps) if agreement_steps else 0.0,
+        search_topk_overlap=(overlap_hits / agreement_steps) if agreement_steps else 0.0,
         metadata=metadata,
     )
 
@@ -1249,24 +1249,24 @@ def _aggregate_eval_labels(labels: list[FightLabel]) -> FightLabel:
     )
 
 
-def _teacher_label_for_actions(teacher: AggregateCardUsageTeacher, legal_actions) -> TeacherLabel:
+def _search_label_for_actions(search_backend: AggregateCardUsageSearchBackend, legal_actions) -> SearchLabel:
     if not legal_actions:
-        return TeacherLabel(best_action_index=-1)
+        return SearchLabel(best_action_index=-1)
     scores = []
     for action in legal_actions:
-        score = teacher._score_table.get(action.card_id.upper(), 0.05)
+        score = search_backend._score_table.get(action.card_id.upper(), 0.05)
         if action.action_type == "end_turn":
             score = 0.01
         scores.append(float(score))
     total = sum(scores) or 1.0
     policy = [score / total for score in scores]
     best_action_index = max(range(len(scores)), key=lambda idx: scores[idx])
-    return TeacherLabel(
+    return SearchLabel(
         policy=policy,
         topk_indices=sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[: min(3, len(scores))],
         best_action_index=best_action_index,
         ranking_margin=0.0,
-        teacher_value=0.0,
+        search_value=0.0,
     )
 
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """最小 skada replay smoke。
 
@@ -29,11 +29,11 @@ from zero import ZeroConfig, ZeroLoopRunner
 from zero.analysis import generate_training_analysis
 from zero.adapters.game_bridge import GameBridgeCombatRuntime
 from zero.buffers import ArtifactStore
-from zero.config import CollectConfig, EvalConfig, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
+from zero.config import CollectConfig, EvalConfig, SearchConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
 from zero.orchestration.trainer import LocalCheckpointStore
 from zero.paths import REPO_ROOT, STS2AI_ROOT, ZeroPaths
 from zero.replay.skada import (
-    AggregateCardUsageTeacher,
+    AggregateCardUsageSearchBackend,
     FixedSkadaCaseEvaluator,
     build_case_from_record,
     find_first_matching_run,
@@ -134,7 +134,7 @@ def main() -> None:
             epsilon_greedy=args.collect_epsilon_greedy,
             temperature=args.collect_temperature,
         ),
-        teacher=TeacherConfig(
+        search=SearchConfig(
             top2_gap_threshold=1.0,
             uncertainty_threshold=0.0,
             near_lethal_hp_ratio=1.0,
@@ -171,7 +171,7 @@ def main() -> None:
             checkpoint_store=checkpoint_store,
             evaluator=evaluator,
         )
-        teacher = AggregateCardUsageTeacher(case)
+        search_backend = AggregateCardUsageSearchBackend(case)
 
         def runtime_factory():
             return GameBridgeCombatRuntime(
@@ -191,8 +191,8 @@ def main() -> None:
         manifest = runner.run_iteration(
             iteration=1,
             runtime_factory=runtime_factory,
-            student_policy=RandomPolicy(),
-            search_teacher=teacher,
+            policy=RandomPolicy(),
+            search_backend=search_backend,
             baseline_eval=baseline,
         )
 

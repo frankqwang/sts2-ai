@@ -259,6 +259,20 @@ class CombatSession(PipeSnapshotMixin):
         """
         return {"encounters": []}
 
+    def save_state(self) -> str:
+        """Combat 搜索优先走 combat-local snapshot，而不是 full-run save/load。"""
+        result = self._call("save_search_state")
+        state_id = result.get("state_id") if isinstance(result, dict) else None
+        if isinstance(state_id, str) and state_id:
+            return state_id
+        raise SimulatorApiError("CombatSession save_search_state response did not include a state_id.")
+
+    def load_state(self, state_id: str) -> dict[str, Any]:
+        """加载 snapshot 后同步刷新 session 内部 current_state。"""
+        raw = super().load_state(state_id)
+        self._current_raw = _unwrap_state(raw)
+        return self.current_state
+
     def _call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """兼容 GameCatalog.attach_sim 的接口。
 
@@ -266,7 +280,7 @@ class CombatSession(PipeSnapshotMixin):
         其他 method (game_catalog/combat_catalog 等 static 数据)目前 proto 不支持,
         raise NotImplementedError,上层 (`GameCatalog`) 自动 fallback 到 sqlite。
         """
-        if method in {"combat_reset", "combat_step", "combat_state"} | PIPE_SNAPSHOT_RPC_METHODS:
+        if method in {"combat_reset", "combat_step", "combat_state", "save_search_state"} | PIPE_SNAPSHOT_RPC_METHODS:
             if not self._conn.is_connected():
                 self._conn.connect()
             return self._conn.safe_call(method, params)

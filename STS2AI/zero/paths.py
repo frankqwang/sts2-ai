@@ -18,8 +18,8 @@ class ZeroPaths:
         return self.root / "raw_runs"
 
     @property
-    def teacher_labels(self) -> Path:
-        return self.root / "teacher_labels"
+    def search_labels(self) -> Path:
+        return self.root / "search_labels"
 
     @property
     def dataset_shards(self) -> Path:
@@ -48,7 +48,7 @@ class ZeroPaths:
     def ensure(self) -> None:
         for path in (
             self.raw_runs,
-            self.teacher_labels,
+            self.search_labels,
             self.dataset_shards,
             self.checkpoints,
             self.evaluations,

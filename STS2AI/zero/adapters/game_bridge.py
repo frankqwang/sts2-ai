@@ -67,8 +67,8 @@ def convert_game_bridge_state(
         HandCardState(
             card_id=str(_pick(item, "card_id", "id", default="")),
             cost_now=float(_pick(item, "cost_now", "cost", default=0.0)),
-            damage_now=float(_pick(item, "damage_now", "damage", default=0.0)),
-            block_now=float(_pick(item, "block_now", "block", default=0.0)),
+            damage_now=_resolve_hand_card_damage(item),
+            block_now=_resolve_hand_card_block(item),
             magic_now=float(_pick(item, "magic_now", "magic", default=0.0)),
             is_upgraded=bool(_pick(item, "is_upgraded", default=False)),
             retain=bool(_pick(item, "retain", default=False)),
@@ -252,11 +252,13 @@ def _convert_action(raw: dict[str, Any], *, hand_raw: list[dict[str, Any]], enem
     action_index = _pick(raw, "index", default=None)
     card_index = _pick(raw, "card_index", default=None)
     target_id = _pick(raw, "target_id", default=None)
-    hand_card = _lookup_by_index(hand_raw, card_index)
+    hand_card = _lookup_by_index(hand_raw, card_index) if action_name == "play_card" else {}
     target_enemy = _lookup_enemy(enemies_raw, target_id)
     card_id = str(_pick(raw, "card_id", default="") or _pick(hand_card, "id", default=""))
     if not card_id and action_name == "play_card":
         card_id = str(_pick(raw, "label", default=""))
+    damage_now = _resolve_action_damage(raw, hand_card=hand_card, card_id=card_id)
+    block_now = _resolve_action_block(raw, hand_card=hand_card, card_id=card_id)
     return LegalAction(
         action_id=_build_action_instance_id(raw),
         action_type=action_name,
@@ -265,9 +267,9 @@ def _convert_action(raw: dict[str, Any], *, hand_raw: list[dict[str, Any]], enem
         potion_id=str(_pick(raw, "potion_id", default="")),
         special_id=str(_pick(raw, "special_id", default="")),
         target_id=str(target_id or ""),
-        cost_now=float(_pick(raw, "cost_now", "cost", default=_pick(hand_card, "cost", default=0.0))),
-        damage_now=float(_pick(raw, "damage_now", "damage", default=0.0)),
-        block_now=float(_pick(raw, "block_now", "block", default=0.0)),
+        cost_now=float(_pick(raw, "cost_now", "cost", default=_pick(hand_card, "cost", default=0.0) if hand_card else 0.0)),
+        damage_now=damage_now,
+        block_now=block_now,
         magic_now=float(_pick(raw, "magic_now", "magic", default=0.0)),
         tags=_build_action_tags(raw, hand_card=hand_card, action_index=action_index),
         target_summary=_build_target_summary(target_enemy),
@@ -292,6 +294,18 @@ def _pick(mapping: dict[str, Any], *keys: str, default: Any = None) -> Any:
         if key in mapping:
             return mapping[key]
     return default
+
+
+def _pick_number(mapping: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        if key not in mapping:
+            continue
+        value = mapping[key]
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -332,6 +346,87 @@ def _build_hand_tags(card: dict[str, Any]) -> list[str]:
     if bool(_pick(card, "can_play", default=False)):
         tags.append("can_play")
     return tags
+
+
+def _resolve_hand_card_damage(card: dict[str, Any]) -> float:
+    explicit = _pick_number(card, "damage_now", "damage")
+    if explicit is not None:
+        return explicit
+    damage, _ = _infer_card_effects(
+        card_id=str(_pick(card, "card_id", "id", default="")),
+        card_type=str(_pick(card, "type", "card_type", default="")),
+        cost_now=float(_pick(card, "cost_now", "cost", default=0.0)),
+        tags=_build_hand_tags(card),
+    )
+    return damage
+
+
+def _resolve_hand_card_block(card: dict[str, Any]) -> float:
+    explicit = _pick_number(card, "block_now", "block")
+    if explicit is not None:
+        return explicit
+    _, block = _infer_card_effects(
+        card_id=str(_pick(card, "card_id", "id", default="")),
+        card_type=str(_pick(card, "type", "card_type", default="")),
+        cost_now=float(_pick(card, "cost_now", "cost", default=0.0)),
+        tags=_build_hand_tags(card),
+    )
+    return block
+
+
+def _resolve_action_damage(raw: dict[str, Any], *, hand_card: dict[str, Any], card_id: str) -> float:
+    explicit = _pick_number(raw, "damage_now", "damage")
+    if explicit is not None:
+        return explicit
+    hand_explicit = _pick_number(hand_card, "damage_now", "damage")
+    if hand_explicit is not None:
+        return hand_explicit
+    damage, _ = _infer_card_effects(
+        card_id=card_id,
+        card_type=str(_pick(hand_card, "type", "card_type", default="")),
+        cost_now=float(_pick(raw, "cost_now", "cost", default=_pick(hand_card, "cost", default=0.0) if hand_card else 0.0)),
+        tags=_build_action_tags(raw, hand_card=hand_card, action_index=_pick(raw, "index", default=None)),
+    )
+    return damage
+
+
+def _resolve_action_block(raw: dict[str, Any], *, hand_card: dict[str, Any], card_id: str) -> float:
+    explicit = _pick_number(raw, "block_now", "block")
+    if explicit is not None:
+        return explicit
+    hand_explicit = _pick_number(hand_card, "block_now", "block")
+    if hand_explicit is not None:
+        return hand_explicit
+    _, block = _infer_card_effects(
+        card_id=card_id,
+        card_type=str(_pick(hand_card, "type", "card_type", default="")),
+        cost_now=float(_pick(raw, "cost_now", "cost", default=_pick(hand_card, "cost", default=0.0) if hand_card else 0.0)),
+        tags=_build_action_tags(raw, hand_card=hand_card, action_index=_pick(raw, "index", default=None)),
+    )
+    return block
+
+
+def _infer_card_effects(*, card_id: str, card_type: str, cost_now: float, tags: list[str]) -> tuple[float, float]:
+    normalized_id = str(card_id or "").strip().upper()
+    normalized_type = str(card_type or "").strip().lower()
+    tag_set = {str(tag).strip().lower() for tag in tags}
+    is_attack = normalized_type == "attack" or "attack" in tag_set
+    is_skill = normalized_type == "skill" or "skill" in tag_set
+    energy_cost = max(0.0, float(cost_now or 0.0))
+
+    damage = 0.0
+    block = 0.0
+    if normalized_id.startswith("STRIKE"):
+        damage = 6.0
+    elif normalized_id.startswith("DEFEND"):
+        block = 5.0
+    elif any(token in normalized_id for token in ("BODYGUARD", "SHROUD", "GUARD", "WARD", "PROTECT", "BARRIER", "SHIELD")):
+        block = max(5.0, 4.0 + 2.0 * energy_cost)
+    elif is_attack:
+        damage = max(4.0, 4.0 + 2.0 * energy_cost)
+    elif is_skill and any(token in normalized_id for token in ("BLOCK", "LEAP", "GLACIER")):
+        block = max(5.0, 4.0 + 2.0 * energy_cost)
+    return float(damage), float(block)
 
 
 def _lookup_by_index(items: list[dict[str, Any]], index: Any) -> dict[str, Any]:

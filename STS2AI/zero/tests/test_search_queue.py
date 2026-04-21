@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 from zero.domain import (
@@ -10,16 +10,16 @@ from zero.domain import (
     PileSummary,
     PlayerState,
     StaticContext,
-    TeacherLabel,
-    TeacherRequest,
+    SearchLabel,
+    SearchRequest,
     TrainingSample,
     TransitionDelta,
 )
-from zero.orchestration.teacher import TeacherQueueProcessor
+from zero.orchestration.search import SearchQueueProcessor
 
 
-class _BadTeacher:
-    def __init__(self, label: TeacherLabel):
+class _BadSearchBackend:
+    def __init__(self, label: SearchLabel):
         self._label = label
 
     def label_request(self, request, runtime_factory=None, seed=None):
@@ -49,25 +49,25 @@ def _make_sample() -> TrainingSample:
     )
 
 
-class TeacherQueueProcessorTests(unittest.TestCase):
-    def test_rejects_teacher_policy_length_mismatch(self) -> None:
+class SearchQueueProcessorTests(unittest.TestCase):
+    def test_rejects_search_policy_length_mismatch(self) -> None:
         sample = _make_sample()
-        request = TeacherRequest(request_id=sample.sample_id, sample=sample, priority=1.0)
-        processor = TeacherQueueProcessor()
+        request = SearchRequest(request_id=sample.sample_id, sample=sample, priority=1.0)
+        processor = SearchQueueProcessor()
         with self.assertRaises(ValueError):
             processor.label(
                 [request],
-                _BadTeacher(TeacherLabel(policy=[0.5, 0.5], topk_indices=[0], best_action_index=0)),
+                _BadSearchBackend(SearchLabel(policy=[0.5, 0.5], topk_indices=[0], best_action_index=0)),
             )
 
-    def test_rejects_teacher_topk_index_out_of_range(self) -> None:
+    def test_rejects_search_topk_index_out_of_range(self) -> None:
         sample = _make_sample()
-        request = TeacherRequest(request_id=sample.sample_id, sample=sample, priority=1.0)
-        processor = TeacherQueueProcessor()
+        request = SearchRequest(request_id=sample.sample_id, sample=sample, priority=1.0)
+        processor = SearchQueueProcessor()
         with self.assertRaises(ValueError):
             processor.label(
                 [request],
-                _BadTeacher(TeacherLabel(policy=[1.0], topk_indices=[1], best_action_index=0)),
+                _BadSearchBackend(SearchLabel(policy=[1.0], topk_indices=[1], best_action_index=0)),
             )
 
 

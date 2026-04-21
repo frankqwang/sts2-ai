@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Feature extraction from structured domain objects to fixed-width tensors."""
 
@@ -26,9 +26,9 @@ class EncodedSample:
     action_type_ids: list[int]
     action_card_ids: list[int]
     behavior_action_index: int
-    teacher_policy: list[float] | None
-    teacher_best_action_index: int
-    teacher_ranking_margin: float
+    search_policy: list[float] | None
+    search_best_action_index: int
+    search_ranking_margin: float
     fight_targets: list[float]
     delta_targets: list[float]
     uncertainty_target: float
@@ -57,9 +57,9 @@ class FeatureExtractor:
             action_type_ids=[self._hash_id(action.action_type) for action in sample.legal_actions],
             action_card_ids=[self._hash_id(action.card_id or action.potion_id or action.special_id) for action in sample.legal_actions],
             behavior_action_index=sample.behavior_action_index,
-            teacher_policy=sample.teacher_label.policy if sample.teacher_label else None,
-            teacher_best_action_index=sample.teacher_label.best_action_index if sample.teacher_label else -1,
-            teacher_ranking_margin=float(sample.teacher_label.ranking_margin if sample.teacher_label else 0.0),
+            search_policy=sample.search_label.policy if sample.search_label else None,
+            search_best_action_index=sample.search_label.best_action_index if sample.search_label else -1,
+            search_ranking_margin=float(sample.search_label.ranking_margin if sample.search_label else 0.0),
             fight_targets=[
                 sample.fight_label.fight_win,
                 sample.fight_label.enemy_hp_fraction_dealt,
@@ -88,9 +88,9 @@ class FeatureExtractor:
             action_type_ids=[self._hash_id(action.action_type) for action in legal_actions],
             action_card_ids=[self._hash_id(action.card_id or action.potion_id or action.special_id) for action in legal_actions],
             behavior_action_index=0,
-            teacher_policy=None,
-            teacher_best_action_index=-1,
-            teacher_ranking_margin=0.0,
+            search_policy=None,
+            search_best_action_index=-1,
+            search_ranking_margin=0.0,
             fight_targets=[0.0, 0.0, 0.0],
             delta_targets=[0.0] * (3 + self._config.max_enemies * 2 + 3),
             uncertainty_target=0.0,

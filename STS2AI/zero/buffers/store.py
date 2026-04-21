@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Iterable
 
-from ..domain import IterationManifest, TeacherRequest, TrainingSample
+from ..domain import IterationManifest, SearchRequest, TrainingSample
 from ..paths import ZeroPaths
 
 
@@ -21,8 +21,8 @@ class ArtifactStore:
         self._write_jsonl(path, (sample.to_dict() for sample in samples))
         return path
 
-    def write_teacher_labels(self, iteration: int, requests: Iterable[TeacherRequest]) -> Path:
-        path = self._paths.teacher_labels / f"iter_{iteration:04d}.jsonl"
+    def write_search_labels(self, iteration: int, requests: Iterable[SearchRequest]) -> Path:
+        path = self._paths.search_labels / f"iter_{iteration:04d}.jsonl"
         self._write_jsonl(path, (asdict(request) for request in requests))
         return path
 

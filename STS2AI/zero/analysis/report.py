@@ -41,9 +41,9 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     rollout_df = _build_rollout_dataframe(run_root / "raw_runs")
     episode_df = _build_episode_event_dataframe(run_root / "logs")
     encounter_coverage_df = _build_encounter_coverage_dataframe(run_root)
-    encounter_teacher_df = _build_encounter_teacher_dataframe(run_root)
+    encounter_search_df = _build_encounter_search_dataframe(run_root)
     encounter_pool_df = _build_encounter_pool_dataframe(run_root)
-    search_teacher_df = _build_search_teacher_diagnostics_dataframe(run_root)
+    search_df = _build_search_diagnostics_dataframe(run_root)
     search_guidance_df = _build_search_guidance_dataframe(run_root)
 
     summary = {
@@ -63,9 +63,9 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     _write_dataframe(rollout_df, analysis_dir / "rollout_metrics.csv")
     _write_dataframe(episode_df, analysis_dir / "episode_metrics.csv")
     _write_dataframe(encounter_coverage_df, analysis_dir / "encounter_coverage.csv")
-    _write_dataframe(encounter_teacher_df, analysis_dir / "encounter_teacher_stats.csv")
+    _write_dataframe(encounter_search_df, analysis_dir / "encounter_search_stats.csv")
     _write_dataframe(encounter_pool_df, analysis_dir / "encounter_pool_stats.csv")
-    _write_dataframe(search_teacher_df, analysis_dir / "search_teacher_diagnostics.csv")
+    _write_dataframe(search_df, analysis_dir / "search_diagnostics.csv")
     _write_dataframe(search_guidance_df, analysis_dir / "search_guidance_diagnostics.csv")
 
     _plot_training_metrics(training_df, analysis_dir / "training_metrics.png")
@@ -107,8 +107,8 @@ def _build_eval_dataframe(manifests: list[dict[str, Any]]) -> pd.DataFrame:
                     "fight_win_rate": float(item.get("fight_win_rate") or 0.0),
                     "enemy_hp_fraction_dealt": float(item.get("enemy_hp_fraction_dealt") or 0.0),
                     "self_hp_fraction_remaining": float(item.get("self_hp_fraction_remaining") or 0.0),
-                    "teacher_agreement_at_1": float(item.get("teacher_agreement_at_1") or 0.0),
-                    "teacher_topk_overlap": float(item.get("teacher_topk_overlap") or 0.0),
+                    "search_agreement_at_1": float(item.get("search_agreement_at_1") or 0.0),
+                    "search_topk_overlap": float(item.get("search_topk_overlap") or 0.0),
                     "fight_quality_score": float(metadata.get("fight_quality_score", 0.0) or 0.0),
                     "hp_quality_score": float(metadata.get("hp_quality_score", 0.0) or 0.0),
                     "avg_step_count": float(metadata.get("avg_step_count", 0.0) or 0.0),
@@ -281,9 +281,9 @@ def _build_encounter_coverage_dataframe(run_root: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _build_encounter_teacher_dataframe(run_root: Path) -> pd.DataFrame:
+def _build_encounter_search_dataframe(run_root: Path) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
-    labels_root = run_root / "teacher_labels"
+    labels_root = run_root / "search_labels"
     if not labels_root.exists():
         return pd.DataFrame()
     for path in sorted(labels_root.glob("iter_*.jsonl")):
@@ -309,19 +309,19 @@ def _build_encounter_teacher_dataframe(run_root: Path) -> pd.DataFrame:
                     "encounter_id": encounter_id,
                     "floor": floor,
                     "encounter_class": encounter_class,
-                    "teacher_requests": 0,
-                    "avg_teacher_priority": 0.0,
+                    "search_requests": 0,
+                    "avg_search_priority": 0.0,
                     "avg_fight_score": 0.0,
                     "avg_hp_quality_score": 0.0,
                 },
             )
-            item["teacher_requests"] += 1
-            item["avg_teacher_priority"] += float(row.get("priority") or 0.0)
+            item["search_requests"] += 1
+            item["avg_search_priority"] += float(row.get("priority") or 0.0)
             item["avg_fight_score"] += float(metadata.get("fight_score", 0.0) or 0.0)
             item["avg_hp_quality_score"] += float(metadata.get("hp_quality_score", 0.0) or 0.0)
         for item in grouped.values():
-            denom = max(int(item["teacher_requests"]), 1)
-            item["avg_teacher_priority"] /= denom
+            denom = max(int(item["search_requests"]), 1)
+            item["avg_search_priority"] /= denom
             item["avg_fight_score"] /= denom
             item["avg_hp_quality_score"] /= denom
             rows.append(item)
@@ -373,7 +373,7 @@ def _build_encounter_pool_dataframe(run_root: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _build_search_teacher_diagnostics_dataframe(run_root: Path) -> pd.DataFrame:
+def _build_search_diagnostics_dataframe(run_root: Path) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     labels_root = run_root / "dataset_shards"
     if not labels_root.exists():
@@ -385,8 +385,8 @@ def _build_search_teacher_diagnostics_dataframe(run_root: Path) -> pd.DataFrame:
             if not text:
                 continue
             row = json.loads(text)
-            teacher_label = row.get("teacher_label") or {}
-            search_trace = teacher_label.get("search_trace") or []
+            search_label = row.get("search_label") or {}
+            search_trace = search_label.get("search_trace") or []
             if not search_trace:
                 continue
             state = row.get("state") or {}
@@ -442,7 +442,7 @@ def _build_search_guidance_dataframe(run_root: Path) -> pd.DataFrame:
                     "transition_rows": 0,
                     "guided_steps": 0,
                     "guided_progress_steps": 0,
-                    "guided_teacher_value_sum": 0.0,
+                    "guided_search_value_sum": 0.0,
                     "guided_priority_sum": 0.0,
                 },
             )
@@ -450,7 +450,7 @@ def _build_search_guidance_dataframe(run_root: Path) -> pd.DataFrame:
             if bool(metadata.get("search_guided", False)):
                 item["guided_steps"] += 1
                 item["guided_progress_steps"] += 1 if bool(metadata.get("made_progress", False)) else 0
-                item["guided_teacher_value_sum"] += float(metadata.get("search_teacher_value", 0.0) or 0.0)
+                item["guided_search_value_sum"] += float(metadata.get("search_value", 0.0) or 0.0)
                 item["guided_priority_sum"] += float(metadata.get("search_guidance_priority", 0.0) or 0.0)
         for item in grouped.values():
             total_steps = max(int(item["transition_rows"]), 1)
@@ -462,8 +462,8 @@ def _build_search_guidance_dataframe(run_root: Path) -> pd.DataFrame:
             item["avg_guidance_priority"] = (
                 float(item["guided_priority_sum"]) / guided_steps if item["guided_steps"] > 0 else 0.0
             )
-            item["avg_teacher_value"] = (
-                float(item["guided_teacher_value_sum"]) / guided_steps if item["guided_steps"] > 0 else 0.0
+            item["avg_search_value"] = (
+                float(item["guided_search_value_sum"]) / guided_steps if item["guided_steps"] > 0 else 0.0
             )
             rows.append(item)
     return pd.DataFrame(rows)
@@ -487,10 +487,10 @@ def _plot_training_metrics(df: pd.DataFrame, output_path: Path) -> None:
     axes[0, 1].set_title("LR / Grad Norm")
     axes[0, 1].legend(fontsize=8)
 
-    axes[1, 0].bar(x, df["teacher_sample_ratio"], label="teacher_ratio")
+    axes[1, 0].bar(x, df["search_sample_ratio"], label="search_ratio")
     if "skipped_non_finite_steps" in df:
         axes[1, 0].plot(x, df["skipped_non_finite_steps"], marker="o", color="crimson", label="skipped_non_finite")
-    axes[1, 0].set_title("Teacher Ratio / Stability")
+    axes[1, 0].set_title("Search Ratio / Stability")
     axes[1, 0].legend(fontsize=8)
 
     promoted = df["promoted"].astype(int) if "promoted" in df else pd.Series([0] * len(df))
@@ -569,14 +569,14 @@ def _plot_eval_metrics(eval_df: pd.DataFrame, output_path: Path) -> None:
         fight_win_rate=("fight_win_rate", "mean"),
         enemy_hp_fraction_dealt=("enemy_hp_fraction_dealt", "mean"),
         self_hp_fraction_remaining=("self_hp_fraction_remaining", "mean"),
-        teacher_agreement_at_1=("teacher_agreement_at_1", "mean"),
+        search_agreement_at_1=("search_agreement_at_1", "mean"),
         timeout_rate=("timeout_rate", "mean"),
         avg_no_progress_ratio=("avg_no_progress_ratio", "mean"),
     )
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 8))
     x = grouped["iteration"]
-    for column in ("fight_win_rate", "enemy_hp_fraction_dealt", "self_hp_fraction_remaining", "teacher_agreement_at_1"):
+    for column in ("fight_win_rate", "enemy_hp_fraction_dealt", "self_hp_fraction_remaining", "search_agreement_at_1"):
         axes[0].plot(x, grouped[column], marker="o", label=column)
     axes[0].set_title("Evaluation Quality")
     axes[0].legend(fontsize=8)
@@ -712,7 +712,7 @@ def _plot_search_guidance(df: pd.DataFrame, output_path: Path) -> None:
             transition_rows=("transition_rows", "sum"),
             guided_progress_ratio=("guided_progress_ratio", "mean"),
             avg_guidance_priority=("avg_guidance_priority", "mean"),
-            avg_teacher_value=("avg_teacher_value", "mean"),
+            avg_search_value=("avg_search_value", "mean"),
         )
     )
     if grouped.empty:
@@ -727,7 +727,7 @@ def _plot_search_guidance(df: pd.DataFrame, output_path: Path) -> None:
     axes[0].legend(fontsize=8)
 
     axes[1].plot(x, grouped["avg_guidance_priority"], marker="o", label="avg_guidance_priority")
-    axes[1].plot(x, grouped["avg_teacher_value"], marker="o", label="avg_teacher_value")
+    axes[1].plot(x, grouped["avg_search_value"], marker="o", label="avg_search_value")
     axes[1].set_title("Search Guidance Quality")
     axes[1].legend(fontsize=8)
 

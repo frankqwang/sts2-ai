@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -10,13 +10,13 @@ from zero.model.network import ZeroNetOutput
 
 
 class LossesTests(unittest.TestCase):
-    def test_teacher_policy_loss_ignores_masked_invalid_actions(self) -> None:
+    def test_search_policy_loss_ignores_masked_invalid_actions(self) -> None:
         batch = type(
             "Batch",
             (),
             {
-                "teacher_policy_mask": torch.tensor([1.0], dtype=torch.float32),
-                "teacher_policy": torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32),
+                "search_policy_mask": torch.tensor([1.0], dtype=torch.float32),
+                "search_policy": torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32),
                 "action_mask": torch.tensor([[1.0, 1.0, 0.0]], dtype=torch.float32),
                 "behavior_action_index": torch.tensor([0], dtype=torch.long),
                 "sample_weight": torch.tensor([1.0], dtype=torch.float32),
@@ -25,8 +25,8 @@ class LossesTests(unittest.TestCase):
                 "fight_targets": torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
                 "delta_targets": torch.zeros((1, 14), dtype=torch.float32),
                 "uncertainty_target": torch.tensor([0.0], dtype=torch.float32),
-                "teacher_best_action_index": torch.tensor([0], dtype=torch.long),
-                "teacher_ranking_margin": torch.tensor([0.2], dtype=torch.float32),
+                "search_best_action_index": torch.tensor([0], dtype=torch.long),
+                "search_ranking_margin": torch.tensor([0.2], dtype=torch.float32),
             },
         )()
         output = ZeroNetOutput(
@@ -43,13 +43,13 @@ class LossesTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(losses.policy))
         self.assertTrue(torch.isfinite(losses.total))
 
-    def test_teacher_samples_do_not_use_behavior_cross_entropy(self) -> None:
+    def test_search_samples_do_not_use_behavior_cross_entropy(self) -> None:
         batch = type(
             "Batch",
             (),
             {
-                "teacher_policy_mask": torch.tensor([1.0], dtype=torch.float32),
-                "teacher_policy": torch.tensor([[0.0, 1.0]], dtype=torch.float32),
+                "search_policy_mask": torch.tensor([1.0], dtype=torch.float32),
+                "search_policy": torch.tensor([[0.0, 1.0]], dtype=torch.float32),
                 "action_mask": torch.tensor([[1.0, 1.0]], dtype=torch.float32),
                 "behavior_action_index": torch.tensor([0], dtype=torch.long),
                 "sample_weight": torch.tensor([1.0], dtype=torch.float32),
@@ -58,8 +58,8 @@ class LossesTests(unittest.TestCase):
                 "fight_targets": torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
                 "delta_targets": torch.zeros((1, 14), dtype=torch.float32),
                 "uncertainty_target": torch.tensor([1.0], dtype=torch.float32),
-                "teacher_best_action_index": torch.tensor([1], dtype=torch.long),
-                "teacher_ranking_margin": torch.tensor([0.3], dtype=torch.float32),
+                "search_best_action_index": torch.tensor([1], dtype=torch.long),
+                "search_ranking_margin": torch.tensor([0.3], dtype=torch.float32),
             },
         )()
         output = ZeroNetOutput(
@@ -80,8 +80,8 @@ class LossesTests(unittest.TestCase):
             "Batch",
             (),
             {
-                "teacher_policy_mask": torch.tensor([0.0, 0.0], dtype=torch.float32),
-                "teacher_policy": torch.zeros((2, 2), dtype=torch.float32),
+                "search_policy_mask": torch.tensor([0.0, 0.0], dtype=torch.float32),
+                "search_policy": torch.zeros((2, 2), dtype=torch.float32),
                 "action_mask": torch.tensor([[1.0, 1.0], [1.0, 1.0]], dtype=torch.float32),
                 "behavior_action_index": torch.tensor([0, 0], dtype=torch.long),
                 "sample_weight": torch.tensor([1.0, 1.0], dtype=torch.float32),
@@ -90,8 +90,8 @@ class LossesTests(unittest.TestCase):
                 "fight_targets": torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=torch.float32),
                 "delta_targets": torch.zeros((2, 14), dtype=torch.float32),
                 "uncertainty_target": torch.tensor([0.0, 0.0], dtype=torch.float32),
-                "teacher_best_action_index": torch.tensor([-1, -1], dtype=torch.long),
-                "teacher_ranking_margin": torch.tensor([0.0, 0.0], dtype=torch.float32),
+                "search_best_action_index": torch.tensor([-1, -1], dtype=torch.long),
+                "search_ranking_margin": torch.tensor([0.0, 0.0], dtype=torch.float32),
             },
         )()
         output = ZeroNetOutput(

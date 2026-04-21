@@ -5,7 +5,7 @@ from __future__ import annotations
 目标不是把 zero 训练直接改成 RL，而是先把后验质量信号接进：
 - sample_weight
 - keep_score
-- teacher queue priority
+- search queue priority
 
 这样模型不再只是“复制采到的动作”，而会更偏向保留、学习和重标
 那些真正让战斗往胜利推进的状态。

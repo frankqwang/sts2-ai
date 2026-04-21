@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 
@@ -16,7 +16,7 @@ class FightLabel:
     def fight_score(self) -> float:
         """返回轻量级的归一化战斗质量分。
 
-        这里保留一个 0~1 附近的摘要分，方便弱 teacher / 摘要逻辑使用；
+        这里保留一个 0~1 附近的摘要分，方便弱搜索先验 / 摘要逻辑使用；
         训练主链里真正用于样本加权、保留和晋级的分数，统一走
         `zero.domain.scoring.compute_fight_score(...)`。
 
@@ -42,11 +42,11 @@ class FightLabel:
 
 
 @dataclass(slots=True)
-class TeacherLabel:
+class SearchLabel:
     policy: list[float] = field(default_factory=list)
     topk_indices: list[int] = field(default_factory=list)
     best_action_index: int = -1
     ranking_margin: float = 0.0
-    teacher_value: float = 0.0
+    search_value: float = 0.0
     search_trace: list[dict[str, float | int | str | bool]] = field(default_factory=list)
     metadata: dict[str, float | int | str] = field(default_factory=dict)

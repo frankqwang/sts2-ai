@@ -1,30 +1,30 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-"""Teacher queue construction and label materialization."""
+"""Search queue construction and label materialization."""
 
 import heapq
 from collections import defaultdict, deque
 
-from ..config import TeacherConfig
-from ..domain import TeacherRequest, TrainingSample
-from ..ports import SearchTeacher
+from ..config import SearchConfig
+from ..domain import SearchRequest, TrainingSample
+from ..ports import SearchBackend
 
 
-class TeacherQueueBuilder:
-    def __init__(self, config: TeacherConfig):
+class SearchQueueBuilder:
+    def __init__(self, config: SearchConfig):
         self._config = config
 
     def score_sample(self, sample: TrainingSample) -> tuple[float, list[str]]:
-        """对单个样本计算 teacher 介入优先级。"""
+        """对单个样本计算 search 介入优先级。"""
         return self._priority(sample)
 
-    def select(self, samples: list[TrainingSample]) -> list[TeacherRequest]:
-        bucketed: dict[str, list[tuple[float, int, TeacherRequest]]] = defaultdict(list)
+    def select(self, samples: list[TrainingSample]) -> list[SearchRequest]:
+        bucketed: dict[str, list[tuple[float, int, SearchRequest]]] = defaultdict(list)
         for index, sample in enumerate(samples):
             score, tags = self.score_sample(sample)
             if score <= 0:
                 continue
-            request = TeacherRequest(
+            request = SearchRequest(
                 request_id=sample.sample_id,
                 sample=sample,
                 priority=score,
@@ -33,7 +33,7 @@ class TeacherQueueBuilder:
             bucket = tags[0] if tags else sample.state.context.encounter_class or "default"
             heapq.heappush(bucketed[bucket], (-score, index, request))
 
-        result: list[TeacherRequest] = []
+        result: list[SearchRequest] = []
         limit = self._config.max_requests_per_iteration
         bucket_keys = deque(sorted(bucketed.keys()))
         while bucket_keys and len(result) < limit:
@@ -98,13 +98,13 @@ class TeacherQueueBuilder:
         return score, tags
 
 
-class TeacherQueueProcessor:
-    def label(self, requests: list[TeacherRequest], teacher: SearchTeacher, runtime_factory=None, policy=None) -> list[TrainingSample]:
+class SearchQueueProcessor:
+    def label(self, requests: list[SearchRequest], search_backend: SearchBackend, runtime_factory=None, policy=None) -> list[TrainingSample]:
         if not requests:
             return []
 
         labels = None
-        batch_hook = getattr(teacher, "label_requests", None)
+        batch_hook = getattr(search_backend, "label_requests", None)
         if callable(batch_hook):
             try:
                 labels = batch_hook(
@@ -120,7 +120,7 @@ class TeacherQueueProcessor:
         if labels is None:
             labels = [
                 _label_with_optional_policy(
-                    teacher,
+                    search_backend,
                     request,
                     runtime_factory=runtime_factory,
                     seed=str(request.sample.state.context.metadata.get("seed", "")),
@@ -135,48 +135,48 @@ class TeacherQueueProcessor:
             labeled_sample = request.sample.clone_for_pool(
                 pool_name=request.sample.pool_name,
                 keep_score=max(request.sample.keep_score, request.priority),
-                metadata={"teacher_priority": request.priority},
-                teacher_label=label,
+                metadata={"search_priority": request.priority},
+                search_label=label,
             )
             labeled.append(labeled_sample)
         return labeled
 
-    def _validate_label(self, request: TeacherRequest, label) -> None:
+    def _validate_label(self, request: SearchRequest, label) -> None:
         legal_action_count = len(request.sample.legal_actions)
         if label.policy and len(label.policy) != legal_action_count:
             raise ValueError(
-                f"teacher policy 长度与 legal_actions 不匹配: "
+                f"search policy 长度与 legal_actions 不匹配: "
                 f"sample={request.sample.sample_id} policy={len(label.policy)} legal={legal_action_count}"
             )
         if label.best_action_index >= legal_action_count:
             raise ValueError(
-                f"teacher best_action_index 越界: sample={request.sample.sample_id} "
+                f"search best_action_index 越界: sample={request.sample.sample_id} "
                 f"best={label.best_action_index} legal={legal_action_count}"
             )
         for index in label.topk_indices:
             if index < 0 or index >= legal_action_count:
                 raise ValueError(
-                    f"teacher topk index 越界: sample={request.sample.sample_id} "
+                    f"search topk index 越界: sample={request.sample.sample_id} "
                     f"index={index} legal={legal_action_count}"
                 )
 
 
-def _label_with_optional_policy(teacher: SearchTeacher, request: TeacherRequest, *, runtime_factory=None, seed: str, policy=None):
+def _label_with_optional_policy(search_backend: SearchBackend, request: SearchRequest, *, runtime_factory=None, seed: str, policy=None):
     if policy is None:
-        return teacher.label_request(
+        return search_backend.label_request(
             request,
             runtime_factory=runtime_factory,
             seed=seed,
         )
     try:
-        return teacher.label_request(
+        return search_backend.label_request(
             request,
             runtime_factory=runtime_factory,
             seed=seed,
             policy=policy,
         )
     except TypeError:
-        return teacher.label_request(
+        return search_backend.label_request(
             request,
             runtime_factory=runtime_factory,
             seed=seed,

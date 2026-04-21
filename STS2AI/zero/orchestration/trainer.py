@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import math
@@ -107,7 +107,7 @@ class ZeroTrainer:
 
             batch = self._collator.collate(samples).to(self._device)
             pool_counts = Counter(sample.pool_name for sample in samples)
-            teacher_ratio = sum(1 for sample in samples if sample.teacher_label is not None) / max(1, len(samples))
+            search_ratio = sum(1 for sample in samples if sample.search_label is not None) / max(1, len(samples))
             self._optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=self._device.type, enabled=self._amp_enabled):
                 output = self._model(batch)
@@ -147,7 +147,7 @@ class ZeroTrainer:
             metrics.total_loss += float(losses.total.detach())
             metrics.grad_norm += float(grad_norm)
             metrics.learning_rate += float(self._optimizer.param_groups[0]["lr"])
-            metrics.teacher_sample_ratio += float(teacher_ratio)
+            metrics.search_sample_ratio += float(search_ratio)
             for pool_name, count in pool_counts.items():
                 metrics.pool_usage[pool_name] = metrics.pool_usage.get(pool_name, 0) + int(count)
 
@@ -160,7 +160,7 @@ class ZeroTrainer:
             metrics.total_loss /= metrics.steps
             metrics.grad_norm /= metrics.steps
             metrics.learning_rate /= metrics.steps
-            metrics.teacher_sample_ratio /= metrics.steps
+            metrics.search_sample_ratio /= metrics.steps
         else:
             metrics.zero_step = True
         return metrics

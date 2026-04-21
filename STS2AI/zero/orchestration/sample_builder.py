@@ -1,15 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Build raw online combat decisions into stable training samples.
 
 Design notes:
 - `TrainingSample` creation happens exactly once here for the online/base view.
-- Pool-specific duplication (`teacher`, `rare`, `reanalyse`) is handled later by
+- Pool-specific duplication (`search`, `rare`, `reanalyse`) is handled later by
   admission logic so we never mutate one sample instance after insertion.
 - Keep-score and uncertainty target are computed from observable signals here,
   not from the model's own uncertainty head output.
 - 这里还会把 step / fight / episode-proxy 三层后验评分写进样本，
-  供 sample_weight、keep_score 和 teacher queue 共用。
+  供 sample_weight、keep_score 和 search queue 共用。
 """
 
 from collections import defaultdict, deque
@@ -19,7 +19,7 @@ from ..domain import (
     FightLabel,
     HistoryStep,
     RawTransition,
-    TeacherLabel,
+    SearchLabel,
     TrainingSample,
     compute_episode_score_proxy,
     compute_fight_score,
@@ -99,14 +99,14 @@ class SampleBuilder:
                 behavior_action_id=transition.action.action_id,
                 delta=delta,
                 fight_label=fight_label,
-                teacher_label=_build_search_teacher_label(transition),
+                search_label=_build_search_label(transition),
                 bucket_key=_build_bucket_key(transition),
                 pool_name=_default_pool_name(transition),
                 main_card_id=transition.action.card_id,
                 risk_band=_risk_band(transition.state),
                 archetype_tags=_archetype_tags(transition),
                 rare_cohort_tags=_rare_tags(transition),
-                student_disagreement=float(transition.metadata.get("top2_gap", 0.0) or 0.0),
+                policy_disagreement=float(transition.metadata.get("top2_gap", 0.0) or 0.0),
                 step_progress_score=step_progress_score,
                 fight_score=fight_score,
                 episode_score_proxy=episode_score_proxy,
@@ -260,7 +260,7 @@ def _compute_keep_score(
         + 0.10 * progress_attention
         + 0.10 * max(timeout_attention, max(0.0, min(1.0, no_progress_ratio)))
         + 0.10 * freshness
-        + 0.05 * float(transition.metadata.get("teacher_budget", 0.0) or 0.0)
+        + 0.05 * float(transition.metadata.get("search_budget", 0.0) or 0.0)
     )
 
 
@@ -363,26 +363,26 @@ def _assign_sample_weights(
         sample.metadata["score_band"] = score_band
 
 
-def _build_search_teacher_label(transition: RawTransition) -> TeacherLabel | None:
+def _build_search_label(transition: RawTransition) -> SearchLabel | None:
     policy = transition.metadata.get("search_policy")
     if not isinstance(policy, list) or not policy:
         return None
-    teacher_policy = [float(value) for value in policy]
-    return TeacherLabel(
-        policy=teacher_policy,
+    search_policy = [float(value) for value in policy]
+    return SearchLabel(
+        policy=search_policy,
         topk_indices=[
             int(value)
-            for value in list(transition.metadata.get("search_teacher_topk", []))
+            for value in list(transition.metadata.get("search_topk", []))
             if isinstance(value, (int, float))
         ],
-        best_action_index=int(transition.metadata.get("search_teacher_best_action_index", -1) or -1),
-        ranking_margin=max(0.05, float(transition.metadata.get("search_teacher_ranking_margin", 0.05) or 0.05)),
-        teacher_value=float(transition.metadata.get("search_teacher_value", 0.0) or 0.0),
-        search_trace=list(transition.metadata.get("search_teacher_trace", []))
-        if isinstance(transition.metadata.get("search_teacher_trace"), list)
+        best_action_index=int(transition.metadata.get("search_best_action_index", -1) or -1),
+        ranking_margin=max(0.05, float(transition.metadata.get("search_ranking_margin", 0.05) or 0.05)),
+        search_value=float(transition.metadata.get("search_value", 0.0) or 0.0),
+        search_trace=list(transition.metadata.get("search_trace", []))
+        if isinstance(transition.metadata.get("search_trace"), list)
         else [],
         metadata={
-            "teacher": str(transition.metadata.get("search_source", "search_collect") or "search_collect"),
+            "search": str(transition.metadata.get("search_source", "search_collect") or "search_collect"),
         },
     )
 

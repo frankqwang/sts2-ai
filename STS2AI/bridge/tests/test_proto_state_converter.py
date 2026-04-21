@@ -493,8 +493,10 @@ class TestActionLabels:
         la.action = "play_card"
         la.card_index = 0
         la.index = 0
+        la.card_id = "Strike"
         d = game_state_to_dict(gs)
         assert d["legal_actions"][0]["label"] == "Strike"
+        assert d["legal_actions"][0]["card_id"] == "Strike"
 
     def test_map_node_label(self):
         gs = _make_game_state("map")

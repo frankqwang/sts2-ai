@@ -27,6 +27,8 @@ from game_bridge.transport.pipe_transport import (
 
 logger = logging.getLogger(__name__)
 
+_AUTO_LAUNCH_PROBE_TIMEOUT_S = 1.0
+
 
 class SimulatorApiError(RuntimeError):
     """sim 返回 {"error": "..."} 的逻辑错误 (非 pipe 故障)。"""
@@ -102,8 +104,14 @@ class PipeConnection:
             if self._transport is not None and self._transport.is_connected():
                 return
             self._transport = PipeTransport(self.cfg.pipe_name)
+            initial_timeout_s = self.cfg.connect_timeout_s
+            if self.cfg.auto_launch and self.cfg.sim_launcher is not None:
+                # auto_launch 的主目标通常是“没有现成 sim 时，尽快拉起自己的 sim”。
+                # 如果先按完整 connect_timeout_s 去等一个根本不存在的 pipe，
+                # 会把 30s 级白等误算进“冷启动时间”。
+                initial_timeout_s = min(self.cfg.connect_timeout_s, _AUTO_LAUNCH_PROBE_TIMEOUT_S)
             try:
-                self._transport.connect(timeout_s=self.cfg.connect_timeout_s)
+                self._transport.connect(timeout_s=initial_timeout_s)
             except ConnectionError:
                 if not self.cfg.auto_launch or self.cfg.sim_launcher is None:
                     raise

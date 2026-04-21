@@ -39,6 +39,11 @@ public partial class CombatTrainingSession : Node
 
 	public int CurrentEpisodeNumber => _episodeIndex;
 
+	public void ClearCombatOutcomeForRestore()
+	{
+		LastCombatWasVictory = null;
+	}
+
 	public override void _EnterTree()
 	{
 		Instance = this;

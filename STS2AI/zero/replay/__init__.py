@@ -1,17 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from .search_teacher import (
-    CombatOracleTeacher,
-    CombatSearchTeacher,
-    MultiCaseOracleTeacher,
-    MultiCaseSearchTeacher,
-)
+from .search_backend import CombatSearchBackend, MultiCaseSearchBackend
 from .skada import (
-    AggregateCardUsageTeacher,
+    AggregateCardUsageSearchBackend,
     close_shared_replay_runtimes,
     default_starter_build,
     FixedSkadaCaseEvaluator,
-    MultiCaseAggregateTeacher,
+    MultiCaseAggregateSearchBackend,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaBuild,
@@ -27,15 +22,13 @@ from .skada import (
 )
 
 __all__ = [
-    "AggregateCardUsageTeacher",
-    "CombatOracleTeacher",
-    "CombatSearchTeacher",
+    "AggregateCardUsageSearchBackend",
+    "CombatSearchBackend",
     "close_shared_replay_runtimes",
     "default_starter_build",
     "FixedSkadaCaseEvaluator",
-    "MultiCaseAggregateTeacher",
-    "MultiCaseOracleTeacher",
-    "MultiCaseSearchTeacher",
+    "MultiCaseAggregateSearchBackend",
+    "MultiCaseSearchBackend",
     "OrderedRunCaseEvaluator",
     "OrderedRunRuntimeFactory",
     "SkadaBuild",

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -35,7 +35,7 @@ class PromotionJudgeTests(unittest.TestCase):
                 metadata={"num_episodes": 1, "timeout_rate": 1.0, "avg_no_progress_ratio": 1.0, "avg_max_no_progress_streak": 200.0},
             )
         ]
-        decision = judge.decide(candidate_version="student_v0002", current=current, baseline=baseline)
+        decision = judge.decide(candidate_version="policy_v0002", current=current, baseline=baseline)
         self.assertFalse(decision.promoted)
         self.assertIn("timeout", decision.reason)
 
@@ -63,11 +63,11 @@ class PromotionJudgeTests(unittest.TestCase):
                 fight_win_rate=1.0,
                 enemy_hp_fraction_dealt=1.0,
                 self_hp_fraction_remaining=0.5,
-                teacher_agreement_at_1=0.5,
+                search_agreement_at_1=0.5,
                 metadata={"num_episodes": 1, "timeout_rate": 0.0, "avg_no_progress_ratio": 0.3, "avg_max_no_progress_streak": 20.0},
             )
         ]
-        decision = judge.decide(candidate_version="student_v0002", current=current, baseline=baseline)
+        decision = judge.decide(candidate_version="policy_v0002", current=current, baseline=baseline)
         self.assertTrue(decision.promoted)
 
 

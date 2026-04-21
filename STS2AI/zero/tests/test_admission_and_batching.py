@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -51,25 +51,25 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         planner = SampleAdmissionPlanner()
         sample = make_sample(encounter_class="elite")
         online_entries = planner.build_online_entries([sample])
-        teacher_entries = planner.build_teacher_entries([sample.clone_for_pool(pool_name="recent_online")])
+        search_entries = planner.build_search_entries([sample.clone_for_pool(pool_name="recent_online")])
 
         self.assertEqual([item.pool_name for item in online_entries], ["recent_online", "rare"])
-        self.assertEqual([item.pool_name for item in teacher_entries], ["teacher", "rare"])
+        self.assertEqual([item.pool_name for item in search_entries], ["search", "rare"])
         self.assertIsNot(online_entries[0], online_entries[1])
-        self.assertIsNot(teacher_entries[0], teacher_entries[1])
+        self.assertIsNot(search_entries[0], search_entries[1])
 
-    def test_teacher_admission_does_not_back_mutate_online_entry(self) -> None:
+    def test_search_admission_does_not_back_mutate_online_entry(self) -> None:
         planner = SampleAdmissionPlanner()
         sample = make_sample(encounter_class="elite")
         online_entries = planner.build_online_entries([sample])
         labeled_sample = sample.clone_for_pool(
             pool_name="recent_online",
-            metadata={"teacher_priority": 1.5},
+            metadata={"search_priority": 1.5},
         )
-        teacher_entries = planner.build_teacher_entries([labeled_sample])
+        search_entries = planner.build_search_entries([labeled_sample])
 
-        self.assertNotIn("teacher_priority", online_entries[0].metadata)
-        self.assertEqual(teacher_entries[0].metadata["teacher_priority"], 1.5)
+        self.assertNotIn("search_priority", online_entries[0].metadata)
+        self.assertEqual(search_entries[0].metadata["search_priority"], 1.5)
 
     def test_online_admission_thins_redundant_no_progress_samples(self) -> None:
         planner = SampleAdmissionPlanner()
@@ -101,7 +101,7 @@ class AdmissionAndBatchingTests(unittest.TestCase):
             3,
             [
                 ("recent_online", 0.35, 10),
-                ("teacher", 0.25, 10),
+                ("search", 0.25, 10),
                 ("rare", 0.20, 10),
                 ("reanalyse", 0.10, 10),
                 ("legacy", 0.10, 10),
@@ -116,7 +116,7 @@ class AdmissionAndBatchingTests(unittest.TestCase):
             target_total=12000,
             weighted_bases=[
                 ("recent_online", 0.35, 2048),
-                ("teacher", 0.25, 1024),
+                ("search", 0.25, 1024),
                 ("rare", 0.20, 256),
                 ("reanalyse", 0.10, 1024),
                 ("legacy", 0.10, 2048),
@@ -125,7 +125,7 @@ class AdmissionAndBatchingTests(unittest.TestCase):
 
         self.assertEqual(sum(capacities.values()), 12000)
         self.assertGreater(capacities["recent_online"], 2048)
-        self.assertGreater(capacities["teacher"], 1024)
+        self.assertGreater(capacities["search"], 1024)
 
     def test_sample_pool_set_expands_capacity_and_prefers_higher_keep_score(self) -> None:
         pools = SamplePoolSet(PoolConfig())
@@ -148,7 +148,7 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         self.assertIn("high", recent_items)
 
     def test_pool_counters_report_add_reject_and_sample(self) -> None:
-        pools = SamplePoolSet(PoolConfig(bucket_capacity=1, teacher_bucket_capacity=1, rare_bucket_capacity=1))
+        pools = SamplePoolSet(PoolConfig(bucket_capacity=1, search_bucket_capacity=1, rare_bucket_capacity=1))
         low = make_sample()
         low.sample_id = "low"
         low.keep_score = 0.1

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sqlite3
 import tempfile
@@ -14,13 +14,13 @@ from zero.domain import (
     PileSummary,
     PlayerState,
     StaticContext,
-    TeacherRequest,
+    SearchRequest,
     TrainingSample,
     TransitionDelta,
     assess_transition_progress,
 )
 from zero.replay.skada import (
-    MultiCaseAggregateTeacher,
+    MultiCaseAggregateSearchBackend,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaBuild,
@@ -169,10 +169,10 @@ class SkadaReplayTests(unittest.TestCase):
         self.assertEqual(restored.case_id, case.case_id)
         self.assertEqual(restored.build.deck[0]["id"], "STRIKE_IRONCLAD")
 
-    def test_multi_case_teacher_routes_by_case_id(self):
+    def test_multi_case_search_backend_routes_by_case_id(self):
         case = self._make_case(floor=2, encounter_id="SHRINKER_BEETLE_WEAK")
         case.card_usage = {"STRIKE_IRONCLAD": {"plays": 3, "damage": 9.0, "block": 0.0, "energy": 3.0}}
-        teacher = MultiCaseAggregateTeacher([case])
+        search_backend = MultiCaseAggregateSearchBackend([case])
         sample = TrainingSample(
             sample_id="sample1",
             run_id="run1",
@@ -202,8 +202,8 @@ class SkadaReplayTests(unittest.TestCase):
             delta=TransitionDelta(),
             fight_label=FightLabel(fight_win=1.0, enemy_hp_fraction_dealt=1.0, self_hp_fraction_remaining=1.0),
         )
-        request = TeacherRequest(request_id="req1", sample=sample, priority=1.0)
-        label = teacher.label_request(request)
+        request = SearchRequest(request_id="req1", sample=sample, priority=1.0)
+        label = search_backend.label_request(request)
         self.assertEqual(label.best_action_index, 0)
 
     def test_ordered_run_runtime_factory_resets_after_failure(self):

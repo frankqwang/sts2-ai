@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Batch collation with padding and structural masks."""
 
@@ -30,10 +30,10 @@ class TensorBatch:
     action_card_ids: torch.Tensor
     action_mask: torch.Tensor
     behavior_action_index: torch.Tensor
-    teacher_policy: torch.Tensor
-    teacher_policy_mask: torch.Tensor
-    teacher_best_action_index: torch.Tensor
-    teacher_ranking_margin: torch.Tensor
+    search_policy: torch.Tensor
+    search_policy_mask: torch.Tensor
+    search_best_action_index: torch.Tensor
+    search_ranking_margin: torch.Tensor
     fight_targets: torch.Tensor
     delta_targets: torch.Tensor
     uncertainty_target: torch.Tensor
@@ -104,12 +104,12 @@ class BatchCollator:
                 action_width,
             ),
             behavior_action_index=torch.tensor([item.behavior_action_index for item in encoded], dtype=torch.long),
-            teacher_policy=_build_teacher_policy(encoded),
-            teacher_policy_mask=torch.tensor(
-                [1.0 if item.teacher_policy is not None else 0.0 for item in encoded], dtype=torch.float32
+            search_policy=_build_search_policy(encoded),
+            search_policy_mask=torch.tensor(
+                [1.0 if item.search_policy is not None else 0.0 for item in encoded], dtype=torch.float32
             ),
-            teacher_best_action_index=torch.tensor([item.teacher_best_action_index for item in encoded], dtype=torch.long),
-            teacher_ranking_margin=torch.tensor([item.teacher_ranking_margin for item in encoded], dtype=torch.float32),
+            search_best_action_index=torch.tensor([item.search_best_action_index for item in encoded], dtype=torch.long),
+            search_ranking_margin=torch.tensor([item.search_ranking_margin for item in encoded], dtype=torch.float32),
             fight_targets=_to_tensor_2d([item.fight_targets for item in encoded]),
             delta_targets=_to_tensor_2d([item.delta_targets for item in encoded]),
             uncertainty_target=torch.tensor([item.uncertainty_target for item in encoded], dtype=torch.float32),
@@ -119,14 +119,14 @@ class BatchCollator:
         )
 
 
-def _build_teacher_policy(encoded: list[EncodedSample]) -> torch.Tensor:
+def _build_search_policy(encoded: list[EncodedSample]) -> torch.Tensor:
     width = max(len(item.action_numeric) for item in encoded)
     result = []
     for item in encoded:
-        if item.teacher_policy is None:
+        if item.search_policy is None:
             result.append([0.0] * width)
             continue
-        values = list(item.teacher_policy[:width])
+        values = list(item.search_policy[:width])
         if len(values) < width:
             values.extend([0.0] * (width - len(values)))
         result.append(values)

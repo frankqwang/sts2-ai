@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-from zero.config import TeacherConfig
+from zero.config import SearchConfig
 from zero.domain import (
     BattleState,
     EnemyState,
@@ -12,11 +12,11 @@ from zero.domain import (
     PileSummary,
     PlayerState,
     StaticContext,
-    TeacherRequest,
+    SearchRequest,
     TrainingSample,
     TransitionDelta,
 )
-from zero.replay.search_teacher import CombatSearchTeacher
+from zero.replay.search_backend import CombatSearchBackend
 from zero.replay.skada import SkadaBuild, SkadaCombatCase
 
 
@@ -73,7 +73,7 @@ class _FakeReplayRuntime:
         return None
 
 
-class SearchTeacherTests(unittest.TestCase):
+class SearchBackendTests(unittest.TestCase):
     def test_root_sweep_prefers_higher_quality_action(self) -> None:
         case = SkadaCombatCase(
             source_path="test",
@@ -107,20 +107,20 @@ class SearchTeacherTests(unittest.TestCase):
             fight_label=FightLabel(fight_win=0.0, enemy_hp_fraction_dealt=0.0, self_hp_fraction_remaining=0.0),
             metadata={"prefix_action_indices": []},
         )
-        teacher = CombatSearchTeacher(
+        search_backend = CombatSearchBackend(
             case,
-            config=TeacherConfig(max_root_actions=2, rollouts_per_action=1, max_branch_steps=4),
+            config=SearchConfig(max_root_actions=2, rollouts_per_action=1, max_branch_steps=4),
             auto_launch=False,
         )
-        request = TeacherRequest(request_id="req", sample=sample, priority=1.0)
-        with patch("zero.replay.search_teacher.SkadaReplayRuntime", _FakeReplayRuntime):
-            label = teacher.label_request(request)
+        request = SearchRequest(request_id="req", sample=sample, priority=1.0)
+        with patch("zero.replay.search_backend.SkadaReplayRuntime", _FakeReplayRuntime):
+            label = search_backend.label_request(request)
         self.assertEqual(label.best_action_index, 1)
         self.assertEqual(len(label.policy), 2)
         self.assertTrue(label.search_trace)
-        self.assertEqual(label.metadata["teacher"], "CombatSearchTeacher")
+        self.assertEqual(label.metadata["search_backend"], "CombatSearchBackend")
 
-    def test_invalid_prefix_falls_back_to_student_prior_label(self) -> None:
+    def test_invalid_prefix_falls_back_to_policy_prior_label(self) -> None:
         case = SkadaCombatCase(
             source_path="test",
             source_line=1,
@@ -153,15 +153,15 @@ class SearchTeacherTests(unittest.TestCase):
             fight_label=FightLabel(fight_win=0.0, enemy_hp_fraction_dealt=0.0, self_hp_fraction_remaining=0.0),
             metadata={"prefix_action_indices": [99]},
         )
-        teacher = CombatSearchTeacher(
+        search_backend = CombatSearchBackend(
             case,
-            config=TeacherConfig(max_root_actions=2, rollouts_per_action=1, max_branch_steps=4),
+            config=SearchConfig(max_root_actions=2, rollouts_per_action=1, max_branch_steps=4),
             auto_launch=False,
         )
-        request = TeacherRequest(request_id="req", sample=sample, priority=1.0)
-        with patch("zero.replay.search_teacher.SkadaReplayRuntime", _FakeReplayRuntime):
-            label = teacher.label_request(request)
-        self.assertEqual(label.metadata["teacher"], "CombatSearchTeacherFallback")
+        request = SearchRequest(request_id="req", sample=sample, priority=1.0)
+        with patch("zero.replay.search_backend.SkadaReplayRuntime", _FakeReplayRuntime):
+            label = search_backend.label_request(request)
+        self.assertEqual(label.metadata["search_backend"], "CombatSearchBackendFallback")
         self.assertEqual(len(label.policy), 2)
 
 

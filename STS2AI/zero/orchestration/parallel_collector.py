@@ -75,12 +75,19 @@ class ParallelTrajectoryCollector:
         def _run_worker(worker_id: int, worker_episodes: int) -> list[RawTransition]:
             worker_factory = clone_factory(self._ports[worker_id])
             worker_policy = _clone_policy(policy)
+            worker_episode_end = getattr(worker_factory, "on_episode_end", None)
             worker_search_guidance_factory = None
             worker_search_self_play_factory = None
             if search_guidance_factory is not None:
                 worker_search_guidance_factory = lambda _ignored=None, port=self._ports[worker_id]: search_guidance_factory(port)
             if search_self_play_factory is not None:
                 worker_search_self_play_factory = lambda _ignored=None, port=self._ports[worker_id]: search_self_play_factory(port)
+
+            def _handle_episode_end(event: dict[str, object]) -> None:
+                if callable(worker_episode_end):
+                    worker_episode_end(event)
+                _wrap_callback(on_episode_end, {"worker_id": worker_id, **event})
+
             return TrajectoryCollector().collect(
                 runtime_factory=worker_factory,
                 policy=worker_policy,
@@ -93,7 +100,7 @@ class ParallelTrajectoryCollector:
                 search_self_play_factory=worker_search_self_play_factory,
                 on_episode_start=(lambda event: _wrap_callback(on_episode_start, {"worker_id": worker_id, **event})),
                 on_transition=(lambda transition: _wrap_callback(on_transition, transition)),
-                on_episode_end=(lambda event: _wrap_callback(on_episode_end, {"worker_id": worker_id, **event})),
+                on_episode_end=_handle_episode_end,
             )
 
         futures = []

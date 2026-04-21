@@ -131,6 +131,10 @@ class ProtoCodec(ProtocolCodec):
             req.method = pb.SAVE_STATE
             return req.SerializeToString()
 
+        if method == "save_search_state":
+            req.method = pb.SAVE_SEARCH_STATE
+            return req.SerializeToString()
+
         if method == "export_state":
             req.method = pb.EXPORT_STATE
             req.export_state.path = str(params["path"])
@@ -280,7 +284,7 @@ class ProtoCodec(ProtocolCodec):
                 "state": state,
             }
 
-        if resp.method == pb.SAVE_STATE:
+        if resp.method in {pb.SAVE_STATE, pb.SAVE_SEARCH_STATE}:
             return {
                 "state_id": resp.save_state.state_id,
                 "cache_size": int(resp.save_state.cache_size),

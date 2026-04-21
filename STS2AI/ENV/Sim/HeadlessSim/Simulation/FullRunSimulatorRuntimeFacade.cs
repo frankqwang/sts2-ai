@@ -25,6 +25,7 @@ using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Runs.History;
@@ -159,9 +160,20 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 		public Dictionary<ulong, SavedCombatPlayerSnapshot> Players { get; init; } = new();
 
+		public List<SavedCombatEncounterMonsterSnapshot> EncounterMonsters { get; init; } = new();
+
 		public List<SerializableCreatureState> Creatures { get; init; } = new();
 
 		public List<SavedCombatMonsterMoveSnapshot> MonsterMoves { get; init; } = new();
+	}
+
+	public sealed class SavedCombatEncounterMonsterSnapshot
+	{
+		public ModelId MonsterId { get; init; } = ModelId.none;
+
+		public SavedProperties? Props { get; init; }
+
+		public string? SlotName { get; init; }
 	}
 
 	public sealed class SavedCombatPlayerSnapshot
@@ -237,6 +249,9 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 	private static readonly FieldInfo MonsterSpawnedThisTurnField = typeof(MonsterModel).GetField("_spawnedThisTurn", BindingFlags.Instance | BindingFlags.NonPublic)
 		?? throw new InvalidOperationException("Could not locate MonsterModel._spawnedThisTurn field.");
+
+	private static readonly FieldInfo EncounterMonstersWithSlotsField = typeof(EncounterModel).GetField("_monstersWithSlots", BindingFlags.Instance | BindingFlags.NonPublic)
+		?? throw new InvalidOperationException("Could not locate EncounterModel._monstersWithSlots field.");
 
 	private static readonly FieldInfo MerchantEntryCostField = typeof(MerchantEntry).GetField("_cost", BindingFlags.Instance | BindingFlags.NonPublic)
 		?? throw new InvalidOperationException("Could not locate MerchantEntry._cost field.");
@@ -1756,13 +1771,44 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 	public string SaveSearchState(bool includeFullFallback = false)
 	{
-		// Fast snapshot is intentionally disabled.
-		//
-		// The combat-local snapshot path improved search latency, but it has proven too
-		// costly to keep semantically aligned with the full run restore path. MCTS now
-		// always falls back to the full SaveState/LoadState flow so correctness remains
-		// anchored to the original run-level serialization semantics.
-		return SaveState();
+		if (!IsActive)
+		{
+			throw new FullRunSimulationRuntimeException("no_active_episode", "No active episode to save.");
+		}
+
+		FullRunSimulationStateSnapshot state = _lastObservedState ?? GetState();
+		RunState? runState = ResolveSnapshotRunState();
+		if (runState == null)
+		{
+			throw new FullRunSimulationRuntimeException("run_state_unavailable", "Could not resolve active run state.");
+		}
+
+		FullRunPendingSelectionRestoreSnapshot? pendingSelection = FullRunSimulationChoiceBridge.Instance.CapturePendingSelection();
+		if (!CanUseCombatSearchSnapshot(runState, state, pendingSelection))
+		{
+			return SaveState();
+		}
+
+		CombatRoom combatRoom = ResolveCombatRoomForSnapshot(runState, state)
+			?? throw new FullRunSimulationRuntimeException("combat_snapshot_room_unavailable", "Could not resolve active combat room for combat-local snapshot.");
+		SavedCombatSnapshot combatSnapshot = CaptureCombatSnapshot(runState, state)
+			?? throw new FullRunSimulationRuntimeException("combat_snapshot_unavailable", "Could not capture active combat snapshot.");
+		SerializableRoom roomSnapshot = combatRoom.ToSerializable()
+			?? throw new FullRunSimulationRuntimeException("combat_room_snapshot_unavailable", "Could not serialize combat room snapshot.");
+
+		SavedRunSnapshot savedSnapshot = new SavedRunSnapshot
+		{
+			Kind = SavedSnapshotKind.CombatSearch,
+			RunSnapshot = includeFullFallback ? CreateFullRunSnapshot(runState, state) : null,
+			ExactSignature = BuildExactSnapshotSignature(runState, state),
+			StateType = state.StateType,
+			PendingSelection = pendingSelection,
+			CombatSnapshot = combatSnapshot,
+			CombatRoomSnapshot = roomSnapshot,
+			CombatEncounterId = combatRoom.Encounter.Id.Entry,
+			CombatRandomState = CaptureCombatRandomState(runState)
+		};
+		return StoreSavedSnapshot(savedSnapshot);
 	}
 
 	private string StoreSavedSnapshot(SavedRunSnapshot savedSnapshot)
@@ -1796,6 +1842,47 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		return RunManager.Instance.ToSave(preFinishedRoom: preFinishedRoom);
 	}
 
+	private static Saves.SerializableRun CreateBootstrapRunSnapshot(RunState runState)
+	{
+		int latestSchemaVersion = SaveManager.Instance.GetLatestSchemaVersion<Saves.SerializableRun>();
+		List<SerializableActModel> acts = new();
+		for (int i = 0; i < runState.Acts.Count; i++)
+		{
+			SerializableActModel act = runState.Acts[i].ToSave();
+			if (i == runState.CurrentActIndex && runState.Map != null)
+			{
+				act.SavedMap = SerializableActMap.FromActMap(runState.Map);
+			}
+			acts.Add(act);
+		}
+
+		return new Saves.SerializableRun
+		{
+			SchemaVersion = latestSchemaVersion,
+			Acts = acts,
+			Modifiers = runState.Modifiers.Select(static modifier => modifier.ToSerializable()).ToList(),
+			DailyTime = null,
+			CurrentActIndex = runState.CurrentActIndex,
+			EventsSeen = runState.VisitedEventIds.ToList(),
+			GameMode = runState.GameMode,
+			SerializableOdds = runState.Odds.ToSerializable(),
+			SerializableSharedRelicGrabBag = runState.SharedRelicGrabBag.ToSerializable(),
+			Players = runState.Players.Select(static player => player.ToSerializable()).ToList(),
+			SerializableRng = runState.Rng.ToSerializable(),
+			VisitedMapCoords = runState.VisitedMapCoords.ToList(),
+			MapPointHistory = runState.MapPointHistory.Select(static history => history.ToList()).ToList(),
+			SaveTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+			StartTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+			RunTime = 0L,
+			WinTime = 0L,
+			Ascension = runState.AscensionLevel,
+			PlatformType = PlatformType.None,
+			MapDrawings = null,
+			ExtraFields = runState.ExtraFields.ToSerializable(),
+			PreFinishedRoom = null
+		};
+	}
+
 	private static bool CanUseCombatSearchSnapshot(
 		RunState runState,
 		FullRunSimulationStateSnapshot state,
@@ -1816,7 +1903,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			return false;
 		}
 
-		return runState.CurrentRoom is CombatRoom;
+		return ResolveCombatRoomForSnapshot(runState, state) != null;
 	}
 
 	private static SavedCombatRandomStateSnapshot CaptureCombatRandomState(RunState runState)
@@ -1855,6 +1942,18 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			player.PlayerOdds.LoadFromSerializable(savedPlayer.Odds);
 			player.RelicGrabBag.LoadFromSerializable(savedPlayer.RelicGrabBag);
 		}
+	}
+
+	private static RunState EnsureRunManagerReadyForCombatSearchRestore(RunState runState)
+	{
+		if (!RunManager.Instance.IsInProgress)
+		{
+			Saves.SerializableRun bootstrapSave = CreateBootstrapRunSnapshot(runState);
+			RunManager.Instance.SetUpSavedSinglePlayer(runState, bootstrapSave);
+			RunManager.Instance.Launch();
+		}
+
+		return RunManager.Instance.DebugOnlyGetState() ?? runState;
 	}
 
 	public string ExportStateToFile(string path, string? stateId = null)
@@ -2147,16 +2246,29 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 	{
 		if (savedSnapshot.CombatSnapshot == null || savedSnapshot.CombatRoomSnapshot == null || savedSnapshot.CombatRandomState == null)
 		{
+			if (savedSnapshot.RunSnapshot == null)
+			{
+				throw new FullRunSimulationRuntimeException(
+					"combat_fast_snapshot_missing_fields",
+					$"State '{stateId}' is missing combat-local snapshot fields.");
+			}
 			return await LoadFullSnapshotAsync(stateId, savedSnapshot);
 		}
 
 		try
 		{
-			RunState? runState = RunManager.Instance.DebugOnlyGetState();
-			if (!RunManager.Instance.IsInProgress || runState == null || runState.IsGameOver)
+			RunState? runState = ResolveSnapshotRunState();
+			if (runState == null || runState.IsGameOver)
 			{
+				if (savedSnapshot.RunSnapshot == null)
+				{
+					throw new FullRunSimulationRuntimeException(
+						"combat_fast_run_state_unavailable",
+						$"State '{stateId}' could not resolve an active run state for combat-local restore.");
+				}
 				return await LoadFullSnapshotAsync(stateId, savedSnapshot);
 			}
+			runState = EnsureRunManagerReadyForCombatSearchRestore(runState);
 
 			_forceMapView = false;
 			_rewardsTriggered = false;
@@ -2166,17 +2278,45 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 			AbstractRoom restoredRoom = AbstractRoom.FromSerializable(savedSnapshot.CombatRoomSnapshot, runState)
 				?? throw new FullRunSimulationRuntimeException("combat_fast_room_restore_failed", $"State '{stateId}' could not restore its combat room snapshot.");
-			await RunManager.Instance.LoadIntoLatestMapCoord(restoredRoom);
+			if (restoredRoom is CombatRoom bootstrapCombatRoom)
+			{
+				RestoreCombatEncounterLineup(bootstrapCombatRoom, savedSnapshot.CombatSnapshot);
+			}
+			RestoreCombatRandomState(runState, savedSnapshot.CombatRandomState);
+			if (runState.VisitedMapCoords.Count > 0)
+			{
+				await RunManager.Instance.LoadIntoLatestMapCoord(restoredRoom);
+			}
+			else
+			{
+				if (runState.CurrentMapPointHistoryEntry == null)
+				{
+					MapPointType pointType = ResolveMapPointTypeForCombatRoom(restoredRoom.RoomType);
+					runState.AppendToMapPointHistory(pointType, restoredRoom.RoomType, restoredRoom.ModelId);
+				}
+				await RunManager.Instance.EnterMapPointInternal(
+					Math.Max(1, runState.ActFloor),
+					ResolveMapPointTypeForCombatRoom(restoredRoom.RoomType),
+					restoredRoom,
+					saveGame: false);
+			}
 			await WaitForCombatRoomBootstrapAsync();
-			runState = RunManager.Instance.DebugOnlyGetState();
+			runState = ResolveSnapshotRunState();
 
 			if (runState?.CurrentRoom is not CombatRoom restoredCombatRoom || !IsMatchingCombatRoom(restoredCombatRoom, savedSnapshot))
 			{
+				if (savedSnapshot.RunSnapshot == null)
+				{
+					throw new FullRunSimulationRuntimeException(
+						"combat_fast_room_mismatch",
+						$"State '{stateId}' restored a non-matching combat room.");
+				}
 				return await LoadFullSnapshotAsync(stateId, savedSnapshot);
 			}
 
-			RestoreCombatRandomState(runState, savedSnapshot.CombatRandomState);
 			ApplyCombatSnapshot(restoredCombatRoom, savedSnapshot.CombatSnapshot);
+			RestoreCombatRandomState(runState, savedSnapshot.CombatRandomState);
+			CombatTrainingEnvService.ClearCombatOutcomeForRestore();
 			_forceMapView = false;
 			return GetState();
 		}
@@ -2199,6 +2339,17 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		}
 
 		return !combatRoom.IsPreFinished;
+	}
+
+	private static MapPointType ResolveMapPointTypeForCombatRoom(RoomType roomType)
+	{
+		return roomType switch
+		{
+			RoomType.Monster => MapPointType.Monster,
+			RoomType.Elite => MapPointType.Elite,
+			RoomType.Boss => MapPointType.Boss,
+			_ => MapPointType.Monster,
+		};
 	}
 
 	public Task<FullRunSimulationStateSnapshot> LoadStateFromFile(string path)
@@ -3062,6 +3213,15 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			};
 		}
 
+		List<SavedCombatEncounterMonsterSnapshot> encounterMonsters = combatRoom.Encounter.MonstersWithSlots
+			.Select(static monsterWithSlot => new SavedCombatEncounterMonsterSnapshot
+			{
+				MonsterId = monsterWithSlot.Item1.Id,
+				Props = SavedProperties.From(monsterWithSlot.Item1),
+				SlotName = monsterWithSlot.Item2
+			})
+			.ToList();
+
 		List<SerializableCreatureState> creatures = combatRoom.CombatState.Enemies.Select(static creature => new SerializableCreatureState
 		{
 			Id = creature.ModelId.Entry,
@@ -3089,9 +3249,28 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 			PlayerActionsDisabled = CombatManager.Instance.PlayerActionsDisabled,
 			IsEnemyTurnStarted = CombatManager.Instance.IsEnemyTurnStarted,
 			Players = players,
+			EncounterMonsters = encounterMonsters,
 			Creatures = creatures,
 			MonsterMoves = monsterMoves
 		};
+	}
+
+	private static void RestoreCombatEncounterLineup(CombatRoom combatRoom, SavedCombatSnapshot snapshot)
+	{
+		if (snapshot.EncounterMonsters.Count == 0)
+		{
+			return;
+		}
+
+		List<(MonsterModel, string?)> monstersWithSlots = new(snapshot.EncounterMonsters.Count);
+		foreach (SavedCombatEncounterMonsterSnapshot savedMonster in snapshot.EncounterMonsters)
+		{
+			MonsterModel monster = ModelDb.GetById<MonsterModel>(savedMonster.MonsterId).ToMutable();
+			savedMonster.Props?.Fill(monster);
+			monstersWithSlots.Add((monster, savedMonster.SlotName));
+		}
+
+		EncounterMonstersWithSlotsField.SetValue(combatRoom.Encounter, monstersWithSlots);
 	}
 
 	private static CombatRoom? ResolveCombatRoomForSnapshot(RunState runState, FullRunSimulationStateSnapshot state)

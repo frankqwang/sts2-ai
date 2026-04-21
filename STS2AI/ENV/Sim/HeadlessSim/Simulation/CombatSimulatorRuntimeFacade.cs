@@ -42,6 +42,11 @@ public sealed class CombatSimulatorRuntimeFacade : ICombatRuntimeFacade, IDispos
 
 	public int CurrentAscensionLevel { get; private set; }
 
+	public void ClearCombatOutcomeForRestore()
+	{
+		LastCombatWasVictory = null;
+	}
+
 	public CombatSimulatorRuntimeFacade()
 	{
 		SubscribeCombatEvents();

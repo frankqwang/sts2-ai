@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 
@@ -59,7 +59,7 @@ class LossWeights:
     ranking: float = 0.5
     delta: float = 0.2
     uncertainty: float = 0.1
-    policy_teacher_kl_weight: float = 1.25
+    policy_search_kl_weight: float = 1.25
     policy_behavior_ce_weight: float = 0.75
     policy_bad_rollout_ce_scale: float = 0.35
 
@@ -67,13 +67,13 @@ class LossWeights:
 @dataclass(slots=True)
 class PoolConfig:
     recent_online_weight: float = 0.35
-    teacher_weight: float = 0.25
+    search_weight: float = 0.25
     rare_weight: float = 0.20
     reanalyse_weight: float = 0.10
     legacy_weight: float = 0.10
     bucket_capacity: int = 2048
     rare_bucket_capacity: int = 256
-    teacher_bucket_capacity: int = 1024
+    search_bucket_capacity: int = 1024
     """样本池默认权重与基础容量。
 
     基础容量只是冷启动下限。运行中会根据最近若干轮样本量动态放大，
@@ -86,7 +86,7 @@ class PoolConfig:
 
 
 @dataclass(slots=True)
-class TeacherConfig:
+class SearchConfig:
     mode: str = "weak"
     top2_gap_threshold: float = 0.05
     uncertainty_threshold: float = 0.55
@@ -96,7 +96,7 @@ class TeacherConfig:
     rollouts_per_action: int = 2
     max_branch_steps: int = 24
     allow_branching: bool = False
-    rollout_policy: str = "aggregate_teacher"
+    rollout_policy: str = "aggregate_search_prior"
     rollout_scorer: str = "fight_quality"
     trace_topk: int = 4
     enable_snapshot_restore: bool = True
@@ -124,7 +124,7 @@ class EvalConfig:
     episodes_per_cohort: int = 32
     promote_min_win_rate_gain: float = 0.01
     allow_hp_quality_drop: float = 0.02
-    promote_min_teacher_agreement_gain: float = 0.0
+    promote_min_search_agreement_gain: float = 0.0
     promote_min_enemy_hp_gain: float = 0.0
     promote_min_fight_quality_gain: float = 0.0
     significance_z: float = 0.0
@@ -147,7 +147,7 @@ class ZeroConfig:
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     losses: LossWeights = field(default_factory=LossWeights)
     pools: PoolConfig = field(default_factory=PoolConfig)
-    teacher: TeacherConfig = field(default_factory=TeacherConfig)
+    search: SearchConfig = field(default_factory=SearchConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     evaluation: EvalConfig = field(default_factory=EvalConfig)
     checkpoints: CheckpointConfig = field(default_factory=CheckpointConfig)

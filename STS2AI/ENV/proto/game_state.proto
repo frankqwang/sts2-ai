@@ -370,6 +370,7 @@ enum PipeMethod {
   COMBAT_RESET = 17;
   COMBAT_STEP = 18;
   COMBAT_STATE = 19;
+  SAVE_SEARCH_STATE = 20;
 }
 
 enum PipeStatus {

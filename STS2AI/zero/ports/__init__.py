@@ -1,12 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from .runtime import (
     BattleRuntime,
     CheckpointStore,
     Evaluator,
     Policy,
-    SearchTeacher,
-    TeacherOracle,
+    SearchBackend,
 )
 
 __all__ = [
@@ -14,6 +13,5 @@ __all__ = [
     "CheckpointStore",
     "Evaluator",
     "Policy",
-    "SearchTeacher",
-    "TeacherOracle",
+    "SearchBackend",
 ]

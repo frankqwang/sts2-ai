@@ -1,9 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-"""基于 same-seed root MCTS 的 combat search teacher。
+"""基于 same-seed root MCTS 的 combat search backend。
 
 V1 目标：
-- 直接用 root MCTS 产出搜索分布，不再依赖弱 teacher 聚合先验
+- 直接用 root MCTS 产出搜索分布，不再依赖弱搜索先验聚合
 - 统一复用 `compute_fight_score(...)` / `compute_hp_quality_score(...)`
 - 为后续 branching / 类 MCTS 预留预算和 trace 结构
 """
@@ -12,10 +12,10 @@ from collections import OrderedDict
 from dataclasses import dataclass
 import math
 import time
-from typing import Iterable
+from typing import Iterable, TypedDict
 
-from ..config import TeacherConfig
-from ..domain import FightLabel, HistoryStep, TeacherLabel, TeacherRequest, TransitionDelta, assess_transition_progress, compute_fight_score, compute_hp_quality_score
+from ..config import SearchConfig
+from ..domain import FightLabel, HistoryStep, SearchLabel, SearchRequest, TransitionDelta, assess_transition_progress, compute_fight_score, compute_hp_quality_score
 from ..features import compute_transition_delta
 from .skada import SkadaCombatCase, SkadaReplayRuntime
 
@@ -36,18 +36,36 @@ class SearchBudget:
 
 @dataclass(slots=True)
 class CachedSearchResult:
-    label: TeacherLabel
+    label: SearchLabel
     budget_signature: tuple[int, int, int, bool]
 
 
-class CombatSearchTeacher:
+class RootActionStats(TypedDict):
+    visits: int
+    value_sum: float
+    best_score: float
+    hp_sum: float
+    speed_sum: float
+    outcomes: list[str]
+
+
+class BranchResult(TypedDict):
+    fight_quality_score: float
+    hp_quality_score: float
+    speed_quality: float
+    step_count: int
+    truncated: bool
+    outcome: str
+
+
+class CombatSearchBackend:
     """在固定 replay case 上做 same-seed root MCTS。"""
 
     def __init__(
         self,
         case: SkadaCombatCase,
         *,
-        config: TeacherConfig,
+        config: SearchConfig,
         port: int = 15527,
         auto_launch: bool = True,
         connect_timeout_s: float = 30.0,
@@ -72,10 +90,10 @@ class CombatSearchTeacher:
         self._runtime: SkadaReplayRuntime | None = None
         self._cached_labels: OrderedDict[tuple[object, ...], CachedSearchResult] = OrderedDict()
 
-    def label_request(self, request: TeacherRequest, runtime_factory=None, seed: str | None = None, policy=None) -> TeacherLabel:
+    def label_request(self, request: SearchRequest, runtime_factory=None, seed: str | None = None, policy=None) -> SearchLabel:
         sample = request.sample
         if not sample.legal_actions:
-            return TeacherLabel(teacher_value=0.0, metadata={"teacher": "CombatSearchTeacher"})
+            return SearchLabel(search_value=0.0, metadata={"search_backend": "CombatSearchBackend"})
         started_at = time.perf_counter()
         cache_key = self._build_cache_key(sample)
         cached = self._cached_labels.get(cache_key)
@@ -100,7 +118,7 @@ class CombatSearchTeacher:
             replay_ok, current_state = self._replay_prefix(runtime, sample)
             prefix_replay_count += 1
             if not replay_ok or not current_state.legal_actions:
-                return self._fallback_label(sample, teacher_name="CombatSearchTeacherFallback")
+                return self._fallback_label(sample, backend_name="CombatSearchBackendFallback")
             candidate_indices = self._candidate_root_indices(sample)
             priors = self._root_priors(sample, candidate_indices)
             total_simulations = max(1, self._budget.max_root_actions * self._budget.rollouts_per_action)
@@ -134,7 +152,7 @@ class CombatSearchTeacher:
                 runtime.delete_state(root_state_id)
 
         if not candidate_indices:
-            return self._fallback_label(sample, teacher_name="CombatSearchTeacherFallback")
+            return self._fallback_label(sample, backend_name="CombatSearchBackendFallback")
 
         visit_policy = [0.0] * len(sample.legal_actions)
         total_visits = sum(int(stats[index]["visits"]) for index in candidate_indices)
@@ -178,21 +196,21 @@ class CombatSearchTeacher:
         topk = ordered[: min(self._budget.trace_topk, len(ordered))]
         second_score = average_scores[ordered[1]] if len(ordered) > 1 else 0.0
         ranking_margin = max(0.05, float(average_scores[ordered[0]] - second_score))
-        label = TeacherLabel(
+        label = SearchLabel(
             policy=visit_policy,
             topk_indices=topk,
             best_action_index=best_action_index,
             ranking_margin=ranking_margin,
-            teacher_value=float(max(0.0, average_scores[best_action_index])),
+            search_value=float(max(0.0, average_scores[best_action_index])),
             search_trace=sorted(trace_rows, key=lambda item: (int(item["visits"]), float(item["score_avg"])), reverse=True),
             metadata={
-                "teacher": "CombatSearchTeacher",
-                "teacher_mode": "mcts_root_search",
+                "search_backend": "CombatSearchBackend",
+                "search_mode": "mcts_root_search",
                 "search_budget_max_root_actions": self._budget.max_root_actions,
                 "search_budget_rollouts_per_action": self._budget.rollouts_per_action,
                 "search_budget_max_branch_steps": self._budget.max_branch_steps,
                 "search_budget_total_simulations": total_simulations,
-                "teacher_case_id": self._case.case_id,
+                "search_case_id": self._case.case_id,
             },
         )
         self._remember_cached_label(cache_key, label)
@@ -208,12 +226,12 @@ class CombatSearchTeacher:
     def _candidate_root_indices(self, sample) -> list[int]:
         if not sample.legal_actions:
             return []
-        prior_scores = self._extract_student_scores(sample, len(sample.legal_actions))
+        prior_scores = self._extract_policy_scores(sample, len(sample.legal_actions))
         ordered = sorted(range(len(sample.legal_actions)), key=lambda idx: prior_scores[idx], reverse=True)
         limit = min(len(ordered), self._budget.max_root_actions)
         return ordered[:limit]
 
-    def _empty_stats(self, candidate_indices: list[int]) -> dict[int, dict[str, object]]:
+    def _empty_stats(self, candidate_indices: list[int]) -> dict[int, RootActionStats]:
         return {
             action_index: {
                 "visits": 0,
@@ -236,7 +254,7 @@ class CombatSearchTeacher:
         total_simulations: int,
         root_state_id: str | None,
         policy,
-    ) -> tuple[dict[int, dict[str, object]], int, int]:
+    ) -> tuple[dict[int, RootActionStats], int, int]:
         stats = self._empty_stats(candidate_indices)
         search_simulations = 0
         prefix_replays = 0
@@ -297,7 +315,7 @@ class CombatSearchTeacher:
         )
 
     def _build_cache_key(self, sample) -> tuple[object, ...]:
-        student_scores = tuple(round(float(value), 3) for value in self._extract_student_scores(sample, len(sample.legal_actions)))
+        policy_scores = tuple(round(float(value), 3) for value in self._extract_policy_scores(sample, len(sample.legal_actions)))
         enemy_signature = tuple((enemy.enemy_id, round(float(enemy.hp), 1), round(float(enemy.block), 1)) for enemy in sample.state.enemies)
         hand_signature = tuple((card.card_id, round(float(card.cost_now), 1)) for card in sample.state.hand)
         prefix_signature = tuple(int(value) for value in (sample.metadata.get("prefix_action_indices") or []))
@@ -311,18 +329,18 @@ class CombatSearchTeacher:
             enemy_signature,
             hand_signature,
             prefix_signature,
-            student_scores,
+            policy_scores,
         )
 
-    def _remember_cached_label(self, cache_key: tuple[object, ...], label: TeacherLabel) -> None:
+    def _remember_cached_label(self, cache_key: tuple[object, ...], label: SearchLabel) -> None:
         if self._budget.root_cache_size <= 0:
             return
-        cached_label = TeacherLabel(
+        cached_label = SearchLabel(
             policy=list(label.policy),
             topk_indices=list(label.topk_indices),
             best_action_index=int(label.best_action_index),
             ranking_margin=float(label.ranking_margin),
-            teacher_value=float(label.teacher_value),
+            search_value=float(label.search_value),
             search_trace=[dict(item) for item in label.search_trace],
             metadata=dict(label.metadata),
         )
@@ -363,7 +381,7 @@ class CombatSearchTeacher:
         except Exception:
             return False, None
 
-    def _continue_rollout(self, runtime: SkadaReplayRuntime, state, *, policy=None, history: list[HistoryStep] | None = None, root_action=None) -> dict[str, float | int | bool | str]:
+    def _continue_rollout(self, runtime: SkadaReplayRuntime, state, *, policy=None, history: list[HistoryStep] | None = None, root_action=None) -> BranchResult:
         progress_steps = 0
         no_progress_steps = 0
         max_no_progress_streak = 0
@@ -467,23 +485,23 @@ class CombatSearchTeacher:
         scored.sort(reverse=True)
         return scored[0][1] if scored else 0
 
-    def _fallback_label(self, sample, *, teacher_name: str) -> TeacherLabel:
-        prior_scores = self._extract_student_scores(sample, len(sample.legal_actions))
+    def _fallback_label(self, sample, *, backend_name: str) -> SearchLabel:
+        prior_scores = self._extract_policy_scores(sample, len(sample.legal_actions))
         policy = _scores_to_policy(prior_scores)
         ordered = sorted(range(len(policy)), key=lambda idx: policy[idx], reverse=True)
         best_action_index = ordered[0] if ordered else -1
         second = policy[ordered[1]] if len(ordered) > 1 else 0.0
-        return TeacherLabel(
+        return SearchLabel(
             policy=policy,
             topk_indices=ordered[: min(self._budget.trace_topk, len(ordered))],
             best_action_index=best_action_index,
             ranking_margin=max(0.05, float(policy[best_action_index] - second)) if best_action_index >= 0 else 0.05,
-            teacher_value=0.0,
-            metadata={"teacher": teacher_name, "teacher_mode": "mcts_root_search"},
+            search_value=0.0,
+            metadata={"search_backend": backend_name, "search_mode": "mcts_root_search"},
         )
 
-    def _extract_student_scores(self, sample, width: int) -> list[float]:
-        raw_scores = sample.metadata.get("student_policy_scores") if isinstance(sample.metadata, dict) else None
+    def _extract_policy_scores(self, sample, width: int) -> list[float]:
+        raw_scores = sample.metadata.get("policy_scores") if isinstance(sample.metadata, dict) else None
         if isinstance(raw_scores, list) and raw_scores:
             values = [float(value) for value in raw_scores[:width]]
             if len(values) < width:
@@ -493,18 +511,18 @@ class CombatSearchTeacher:
 
     def _root_priors(self, sample, candidate_indices: list[int]) -> dict[int, float]:
         width = len(sample.legal_actions)
-        student_scores = self._extract_student_scores(sample, width)
+        policy_scores = self._extract_policy_scores(sample, width)
         if not candidate_indices:
             return {}
-        max_score = max(student_scores[index] for index in candidate_indices) if candidate_indices else 0.0
+        max_score = max(policy_scores[index] for index in candidate_indices) if candidate_indices else 0.0
         exp_scores = {
-            index: math.exp(max(-50.0, min(50.0, student_scores[index] - max_score)))
+            index: math.exp(max(-50.0, min(50.0, policy_scores[index] - max_score)))
             for index in candidate_indices
         }
         total = sum(exp_scores.values()) or 1.0
         return {index: value / total for index, value in exp_scores.items()}
 
-    def _select_root_action(self, candidate_indices: list[int], priors: dict[int, float], stats: dict[int, dict[str, object]]) -> int:
+    def _select_root_action(self, candidate_indices: list[int], priors: dict[int, float], stats: dict[int, RootActionStats]) -> int:
         unvisited = [index for index in candidate_indices if int(stats[index]["visits"]) <= 0]
         if unvisited:
             return max(unvisited, key=lambda index: float(priors.get(index, 0.0)))
@@ -525,14 +543,14 @@ class CombatSearchTeacher:
 
     def _with_search_metadata(
         self,
-        label: TeacherLabel,
+        label: SearchLabel,
         *,
         search_duration_s: float,
         search_simulations: int,
         search_cache_hit: bool,
         snapshot_used: bool,
         prefix_replay_count: int,
-    ) -> TeacherLabel:
+    ) -> SearchLabel:
         metadata = dict(label.metadata)
         metadata.update(
             {
@@ -547,28 +565,28 @@ class CombatSearchTeacher:
         return label
 
 
-class MultiCaseSearchTeacher:
-    """按 replay case 分发 same-seed search teacher。"""
+class MultiCaseSearchBackend:
+    """按 replay case 分发 same-seed search backend。"""
 
     def __init__(
         self,
         cases: Iterable[SkadaCombatCase],
         *,
-        config: TeacherConfig,
+        config: SearchConfig,
         port: int = 15527,
         auto_launch: bool = True,
         connect_timeout_s: float = 30.0,
     ):
         case_list = list(cases)
         if not case_list:
-            raise ValueError("MultiCaseSearchTeacher 需要至少一个 case。")
+            raise ValueError("MultiCaseSearchBackend 需要至少一个 case。")
         self._cases = case_list
         self._config = config
         self._port = port
         self._auto_launch = auto_launch
         self._connect_timeout_s = connect_timeout_s
-        self._teachers = {
-            case.case_id: CombatSearchTeacher(
+        self._search_backends = {
+            case.case_id: CombatSearchBackend(
                 case,
                 config=config,
                 port=port,
@@ -577,20 +595,20 @@ class MultiCaseSearchTeacher:
             )
             for case in case_list
         }
-        self._fallback = next(iter(self._teachers.values()))
+        self._fallback = next(iter(self._search_backends.values()))
 
-    def label_request(self, request: TeacherRequest, runtime_factory=None, seed: str | None = None, policy=None) -> TeacherLabel:
+    def label_request(self, request: SearchRequest, runtime_factory=None, seed: str | None = None, policy=None) -> SearchLabel:
         case_id = str(request.sample.state.context.metadata.get("skada_case_id") or "")
-        teacher = self._teachers.get(case_id, self._fallback)
-        label = teacher.label_request(request, runtime_factory=runtime_factory, seed=seed, policy=policy)
-        if teacher is self._fallback and case_id not in self._teachers:
+        search_backend = self._search_backends.get(case_id, self._fallback)
+        label = search_backend.label_request(request, runtime_factory=runtime_factory, seed=seed, policy=policy)
+        if search_backend is self._fallback and case_id not in self._search_backends:
             metadata = dict(label.metadata)
-            metadata["teacher_fallback_case_id"] = case_id
+            metadata["search_fallback_case_id"] = case_id
             label.metadata = metadata
         return label
 
-    def clone_for_port(self, port: int) -> "MultiCaseSearchTeacher":
-        return MultiCaseSearchTeacher(
+    def clone_for_port(self, port: int) -> "MultiCaseSearchBackend":
+        return MultiCaseSearchBackend(
             self._cases,
             config=self._config,
             port=port,
@@ -598,13 +616,9 @@ class MultiCaseSearchTeacher:
             connect_timeout_s=self._connect_timeout_s,
         )
 
-    def label_requests(self, requests: list[TeacherRequest], runtime_factory=None, policy=None) -> list[TeacherLabel]:
+    def label_requests(self, requests: list[SearchRequest], runtime_factory=None, policy=None) -> list[SearchLabel]:
         return [self.label_request(request, runtime_factory=runtime_factory, policy=policy) for request in requests]
 
-
-# 兼容旧命名，避免现有脚本和导入直接断掉。
-CombatOracleTeacher = CombatSearchTeacher
-MultiCaseOracleTeacher = MultiCaseSearchTeacher
 
 
 def _scores_to_policy(scores: list[float]) -> list[float]:

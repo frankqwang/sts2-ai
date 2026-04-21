@@ -129,11 +129,11 @@ internal static class ProtoStateBuilder
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildSaveStateResponse(string stateId, int cacheSize)
+	public static byte[] BuildSaveStateResponse(PipeMethod method, string stateId, int cacheSize)
 	{
 		return new PipeResponseEnvelope
 		{
-			Method = PipeMethod.SaveState,
+			Method = method,
 			Status = PipeStatus.Ok,
 			SaveState = new PipeSaveStateResult
 			{

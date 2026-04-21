@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -52,41 +52,41 @@ def compute_losses(output: ZeroNetOutput, batch, weights: LossWeights) -> LossBr
 
 
 def _compute_policy_loss(output: ZeroNetOutput, batch, weights: LossWeights) -> torch.Tensor:
-    """按 teacher / non-teacher 显式分流策略监督。
+    """按 search / non-search 显式分流策略监督。
 
     当前约定：
-    - teacher 样本：只通过 KL 拟合归一化后的 teacher policy
-    - non-teacher 样本：只通过加权 CE 拟合行为动作
+    - search 样本：只通过 KL 拟合归一化后的 search policy
+    - non-search 样本：只通过加权 CE 拟合行为动作
     - 低质量 rollout：额外乘上 `policy_bad_rollout_ce_scale`，避免“拖回合坏行为”
       长时间继续以行为克隆的方式主导训练。
 
     这是刻意做的监督分流；如果后续调整路由、正则或权重，
     必须同步更新这里的注释。
     """
-    teacher_mask = batch.teacher_policy_mask > 0
+    search_mask = batch.search_policy_mask > 0
     losses = []
-    if teacher_mask.any():
-        # teacher 样本只跟 teacher policy 对齐；先把非法动作 mask 掉，
+    if search_mask.any():
+        # search 样本只跟 search policy 对齐；先把非法动作 mask 掉，
         # 避免目标分布把概率落到不可执行动作上。
-        safe_logits = _masked_policy_logits(output.policy_logits[teacher_mask], batch.action_mask[teacher_mask])
-        valid_mask = batch.action_mask[teacher_mask] > 0
-        teacher_log_probs = F.log_softmax(safe_logits, dim=-1)
-        teacher_policy = batch.teacher_policy[teacher_mask] * valid_mask.to(batch.teacher_policy.dtype)
-        teacher_policy = teacher_policy / teacher_policy.sum(dim=-1, keepdim=True).clamp_min(1e-6)
-        if weights.policy_teacher_kl_weight > 0.0:
-            losses.append(weights.policy_teacher_kl_weight * F.kl_div(teacher_log_probs, teacher_policy, reduction="batchmean"))
+        safe_logits = _masked_policy_logits(output.policy_logits[search_mask], batch.action_mask[search_mask])
+        valid_mask = batch.action_mask[search_mask] > 0
+        search_log_probs = F.log_softmax(safe_logits, dim=-1)
+        search_policy = batch.search_policy[search_mask] * valid_mask.to(batch.search_policy.dtype)
+        search_policy = search_policy / search_policy.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+        if weights.policy_search_kl_weight > 0.0:
+            losses.append(weights.policy_search_kl_weight * F.kl_div(search_log_probs, search_policy, reduction="batchmean"))
 
-    non_teacher_mask = ~teacher_mask
-    if non_teacher_mask.any() and weights.policy_behavior_ce_weight > 0.0:
-        # 在线 / 未打 teacher 标签的样本继续走行为克隆；
+    non_search_mask = ~search_mask
+    if non_search_mask.any() and weights.policy_behavior_ce_weight > 0.0:
+        # 在线 / 未打 search 标签的样本继续走行为克隆；
         # sample_weight 决定这些样本在混池训练中的实际影响力。
         imitation_loss = F.cross_entropy(
-            _masked_policy_logits(output.policy_logits[non_teacher_mask], batch.action_mask[non_teacher_mask]),
-            batch.behavior_action_index[non_teacher_mask],
+            _masked_policy_logits(output.policy_logits[non_search_mask], batch.action_mask[non_search_mask]),
+            batch.behavior_action_index[non_search_mask],
             reduction="none",
         )
-        ce_scale = batch.behavior_ce_scale[non_teacher_mask]
-        bad_rollout_mask = batch.fight_quality_score[non_teacher_mask] < 0.55
+        ce_scale = batch.behavior_ce_scale[non_search_mask]
+        bad_rollout_mask = batch.fight_quality_score[non_search_mask] < 0.55
         if bad_rollout_mask.any():
             ce_scale = torch.where(
                 bad_rollout_mask,
@@ -94,7 +94,7 @@ def _compute_policy_loss(output: ZeroNetOutput, batch, weights: LossWeights) -> 
                 ce_scale,
             )
         if torch.any(ce_scale > 0.0):
-            weighted = (imitation_loss * batch.sample_weight[non_teacher_mask] * ce_scale).mean()
+            weighted = (imitation_loss * batch.sample_weight[non_search_mask] * ce_scale).mean()
             losses.append(weights.policy_behavior_ce_weight * weighted)
     if not losses:
         return torch.zeros((), device=output.policy_logits.device)
@@ -111,19 +111,19 @@ def _compute_value_loss(output: ZeroNetOutput, batch) -> torch.Tensor:
 
 
 def _compute_ranking_loss(output: ZeroNetOutput, batch) -> torch.Tensor:
-    """要求 teacher 最优动作的分数至少压过平均合法备选动作。"""
-    mask = batch.teacher_best_action_index >= 0
+    """要求 search 最优动作的分数至少压过平均合法备选动作。"""
+    mask = batch.search_best_action_index >= 0
     if not mask.any():
         return torch.zeros((), device=output.policy_logits.device)
     logits = _masked_policy_logits(output.policy_logits[mask], batch.action_mask[mask])
     if logits.size(1) <= 1:
         return torch.zeros((), device=output.policy_logits.device)
-    best_idx = batch.teacher_best_action_index[mask]
+    best_idx = batch.search_best_action_index[mask]
     best = logits.gather(1, best_idx.unsqueeze(1)).squeeze(1)
     exclude_mask = F.one_hot(best_idx, num_classes=logits.size(1)).bool() | ~(batch.action_mask[mask] > 0)
     valid_other_counts = (~exclude_mask).sum(dim=1).clamp_min(1)
     mean_other = logits.masked_fill(exclude_mask, 0.0).sum(dim=1) / valid_other_counts
-    margin = batch.teacher_ranking_margin[mask].clamp_min(0.05)
+    margin = batch.search_ranking_margin[mask].clamp_min(0.05)
     return torch.relu(margin - (best - mean_other)).mean()
 
 

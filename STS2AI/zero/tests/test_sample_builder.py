@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
-from zero.config import EncoderConfig, TeacherConfig
+from zero.config import EncoderConfig, SearchConfig
 from zero.domain import (
     BattleState,
     EnemyState,
@@ -13,7 +13,7 @@ from zero.domain import (
     RawTransition,
     StaticContext,
 )
-from zero.orchestration.teacher import TeacherQueueBuilder
+from zero.orchestration.search import SearchQueueBuilder
 from zero.orchestration.sample_builder import SampleBuilder
 
 
@@ -180,7 +180,7 @@ class SampleBuilderTests(unittest.TestCase):
         bad_weights = [sample.sample_weight for sample in samples if sample.fight_id == "fight-bad"]
         self.assertGreater(sum(good_weights) / len(good_weights), sum(bad_weights) / len(bad_weights))
 
-    def test_timeout_like_samples_are_prioritized_for_teacher(self) -> None:
+    def test_timeout_like_samples_are_prioritized_for_search(self) -> None:
         builder = SampleBuilder(EncoderConfig(history_steps=4))
         state0 = make_state(hp=60.0, enemy_hp=40.0, step=0)
         state0.context.encounter_class = "elite"
@@ -202,7 +202,7 @@ class SampleBuilderTests(unittest.TestCase):
         sample = builder.build([transition])[0]
         sample.metadata["fight_timeout"] = True
         sample.metadata["fight_no_progress_ratio"] = 1.0
-        queue = TeacherQueueBuilder(TeacherConfig(max_requests_per_iteration=8))
+        queue = SearchQueueBuilder(SearchConfig(max_requests_per_iteration=8))
         requests = queue.select([sample])
         self.assertEqual(len(requests), 1)
         self.assertIn("fight_timeout", requests[0].reason_tags)
@@ -232,7 +232,7 @@ class SampleBuilderTests(unittest.TestCase):
         )
         self.assertEqual(samples, [])
 
-    def test_search_collected_transition_builds_teacher_label_and_disables_behavior_ce(self) -> None:
+    def test_search_collected_transition_builds_search_label_and_disables_behavior_ce(self) -> None:
         builder = SampleBuilder(EncoderConfig(history_steps=4))
         state0 = make_state(hp=80.0, enemy_hp=40.0, step=0)
         state1 = make_state(hp=78.0, enemy_hp=28.0, step=1, terminal=True, outcome="victory")
@@ -256,18 +256,18 @@ class SampleBuilderTests(unittest.TestCase):
                         "search_collected": True,
                         "search_source": "search_self_play",
                         "search_policy": [0.2, 0.8],
-                        "search_teacher_topk": [1, 0],
-                        "search_teacher_best_action_index": 1,
-                        "search_teacher_ranking_margin": 0.35,
-                        "search_teacher_value": 0.91,
-                        "search_teacher_trace": [{"action_index": 1, "visits": 8}],
+                        "search_topk": [1, 0],
+                        "search_best_action_index": 1,
+                        "search_ranking_margin": 0.35,
+                        "search_value": 0.91,
+                        "search_trace": [{"action_index": 1, "visits": 8}],
                     },
                 )
             ]
         )
         self.assertEqual(len(samples), 1)
-        self.assertIsNotNone(samples[0].teacher_label)
-        self.assertEqual(samples[0].teacher_label.best_action_index, 1)
+        self.assertIsNotNone(samples[0].search_label)
+        self.assertEqual(samples[0].search_label.best_action_index, 1)
         self.assertEqual(samples[0].metadata["behavior_ce_scale"], 0.0)
 
 

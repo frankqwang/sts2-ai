@@ -146,7 +146,7 @@ def _convert_legal_action(a: pb.LegalAction) -> dict[str, Any]:
     所以 >=0 的判断是正确的（0 是合法 index）。
     """
     action_name = a.action or "other"
-    return {
+    action = {
         "action": action_name,
         "type": action_name,
         "index": a.index if a.index >= 0 else None,
@@ -157,6 +157,11 @@ def _convert_legal_action(a: pb.LegalAction) -> dict[str, Any]:
         "slot": a.slot if a.slot >= 0 else None,
         "is_enabled": True,
     }
+    if a.label:
+        action["label"] = a.label
+    if a.card_id:
+        action["card_id"] = a.card_id
+    return action
 
 
 # ===================================================================

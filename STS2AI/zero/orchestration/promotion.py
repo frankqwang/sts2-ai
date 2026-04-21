@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 from collections import defaultdict
@@ -62,8 +62,8 @@ class PromotionJudge:
             return PromotionDecision(promoted=False, reason="整体胜率提升不足")
         if current_agg["enemy_hp_fraction_dealt"] - baseline_agg["enemy_hp_fraction_dealt"] < self._config.promote_min_enemy_hp_gain:
             return PromotionDecision(promoted=False, reason="整体敌方掉血提升不足")
-        if current_agg["teacher_agreement_at_1"] - baseline_agg["teacher_agreement_at_1"] < self._config.promote_min_teacher_agreement_gain:
-            return PromotionDecision(promoted=False, reason="teacher agreement 提升不足")
+        if current_agg["search_agreement_at_1"] - baseline_agg["search_agreement_at_1"] < self._config.promote_min_search_agreement_gain:
+            return PromotionDecision(promoted=False, reason="search agreement 提升不足")
 
         z_threshold = float(self._config.significance_z)
         if z_threshold > 0.0:
@@ -75,14 +75,14 @@ class PromotionJudge:
             )
             if win_z < z_threshold:
                 return PromotionDecision(promoted=False, reason="整体胜率提升未达统计显著")
-            teacher_z = _two_proportion_z(
-                current_agg["teacher_agreement_at_1"],
+            search_z = _two_proportion_z(
+                current_agg["search_agreement_at_1"],
                 int(current_agg["num_episodes"]),
-                baseline_agg["teacher_agreement_at_1"],
+                baseline_agg["search_agreement_at_1"],
                 int(baseline_agg["num_episodes"]),
             )
-            if teacher_z < z_threshold and self._config.promote_min_teacher_agreement_gain > 0.0:
-                return PromotionDecision(promoted=False, reason="teacher agreement 提升未达统计显著")
+            if search_z < z_threshold and self._config.promote_min_search_agreement_gain > 0.0:
+                return PromotionDecision(promoted=False, reason="search agreement 提升未达统计显著")
 
         for bucket, base_bucket in _bucketed(baseline).items():
             cand_bucket = _bucketed(current).get(bucket)
@@ -108,7 +108,7 @@ def _aggregate(rows: list[EvalSummary]) -> dict[str, float]:
             "fight_win_rate": 0.0,
             "enemy_hp_fraction_dealt": 0.0,
             "self_hp_fraction_remaining": 0.0,
-            "teacher_agreement_at_1": 0.0,
+            "search_agreement_at_1": 0.0,
             "timeout_rate": 0.0,
             "avg_no_progress_ratio": 0.0,
             "avg_max_no_progress_streak": 0.0,
@@ -124,7 +124,7 @@ def _aggregate(rows: list[EvalSummary]) -> dict[str, float]:
         totals["fight_win_rate"] += row.fight_win_rate * weight
         totals["enemy_hp_fraction_dealt"] += row.enemy_hp_fraction_dealt * weight
         totals["self_hp_fraction_remaining"] += row.self_hp_fraction_remaining * weight
-        totals["teacher_agreement_at_1"] += row.teacher_agreement_at_1 * weight
+        totals["search_agreement_at_1"] += row.search_agreement_at_1 * weight
         totals["timeout_rate"] += float(row.metadata.get("timeout_rate", 0.0) or 0.0) * weight
         totals["avg_no_progress_ratio"] += float(row.metadata.get("avg_no_progress_ratio", 0.0) or 0.0) * weight
         totals["avg_max_no_progress_streak"] += float(row.metadata.get("avg_max_no_progress_streak", 0.0) or 0.0) * weight
@@ -134,7 +134,7 @@ def _aggregate(rows: list[EvalSummary]) -> dict[str, float]:
         "fight_win_rate": totals["fight_win_rate"] / max(total_weight, 1.0),
         "enemy_hp_fraction_dealt": totals["enemy_hp_fraction_dealt"] / max(total_weight, 1.0),
         "self_hp_fraction_remaining": totals["self_hp_fraction_remaining"] / max(total_weight, 1.0),
-        "teacher_agreement_at_1": totals["teacher_agreement_at_1"] / max(total_weight, 1.0),
+        "search_agreement_at_1": totals["search_agreement_at_1"] / max(total_weight, 1.0),
         "timeout_rate": totals["timeout_rate"] / max(total_weight, 1.0),
         "avg_no_progress_ratio": totals["avg_no_progress_ratio"] / max(total_weight, 1.0),
         "avg_max_no_progress_streak": totals["avg_max_no_progress_streak"] / max(total_weight, 1.0),

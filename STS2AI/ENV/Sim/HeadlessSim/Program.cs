@@ -76,13 +76,6 @@ internal static partial class Program
 		using IDisposable standaloneScope = FullRunTrainingEnvService.EnterStandaloneMode();
 		FullRunTrainingEnvService service = FullRunTrainingEnvService.Instance;
 
-		if (options.UseStdio)
-		{
-			Console.Error.WriteLine("HeadlessSim: stdio mode ready");
-			await RunStdioAsync(service);
-			return;
-		}
-
 		Console.Error.WriteLine($"HeadlessSim: pipe mode ready on \\\\.\\pipe\\{options.PipeName}");
 		await RunPipeServerAsync(service, options);
 	}
@@ -154,32 +147,6 @@ internal static partial class Program
 		public string DescriptionRuntime { get; set; } = string.Empty;
 
 		public string UpgradePreviewRuntime { get; set; } = string.Empty;
-	}
-
-	private static async Task RunStdioAsync(FullRunTrainingEnvService service)
-	{
-		string? line;
-		while ((line = await Console.In.ReadLineAsync()) != null)
-		{
-			line = line.TrimStart('\uFEFF');
-			if (string.IsNullOrWhiteSpace(line))
-			{
-				continue;
-			}
-
-			string responseJson;
-			try
-			{
-				responseJson = await ProcessPipeRequestAsync(service, line);
-			}
-			catch (Exception ex)
-			{
-				responseJson = SerializePipeError(GetStructuredErrorCode(ex) ?? "internal_error", ex.ToString());
-			}
-
-			await Console.Out.WriteLineAsync(responseJson);
-			await Console.Out.FlushAsync();
-		}
 	}
 
 	private static async Task RunPipeServerAsync(FullRunTrainingEnvService service, HostOptions options)
@@ -459,7 +426,9 @@ internal static partial class Program
 				PipeMethod.Step => await ProcessProtoStepAsync(service, request, cache),
 				PipeMethod.BatchStep => await ProcessProtoBatchStepAsync(service, request, cache),
 				PipeMethod.SaveState => ProtoStateBuilder.BuildSaveStateResponse(
-					service.SaveState(), service.StateCacheCount),
+					PipeMethod.SaveState, service.SaveState(), service.StateCacheCount),
+				PipeMethod.SaveSearchState => ProtoStateBuilder.BuildSaveStateResponse(
+					PipeMethod.SaveSearchState, service.SaveSearchState(), service.StateCacheCount),
 				PipeMethod.ExportState => ProcessProtoExportState(service, request),
 				PipeMethod.LoadState => await ProcessProtoLoadStateAsync(service, request, cache),
 				PipeMethod.ImportState => await ProcessProtoImportStateAsync(service, request, cache),
@@ -583,7 +552,23 @@ internal static partial class Program
 			snapshot = await service.LoadState(stateId);
 		}
 		cache.Snapshot = snapshot;
+		if (IsCombatLikeLoadSnapshot(snapshot))
+		{
+			CombatTrainingStateSnapshot? combatSnapshot = CombatTrainingEnvService.BuildStateSnapshot();
+			if (combatSnapshot != null && combatSnapshot.IsCombatActive)
+			{
+				return ProtoStateBuilder.BuildCombatStateResponse(PipeMethod.LoadState, combatSnapshot);
+			}
+		}
 		return ProtoStateBuilder.BuildStateResponse(PipeMethod.LoadState, snapshot);
+	}
+
+	private static bool IsCombatLikeLoadSnapshot(FullRunSimulationStateSnapshot snapshot)
+	{
+		return snapshot.StateType == "monster"
+			|| snapshot.StateType == "elite"
+			|| snapshot.StateType == "boss"
+			|| snapshot.StateType == "hand_select";
 	}
 
 	private static async Task<byte[]> ProcessProtoImportStateAsync(
@@ -1204,6 +1189,11 @@ internal static partial class Program
 			"save_state" => new Dictionary<string, object?>
 			{
 				["state_id"] = service.SaveState(),
+				["cache_size"] = service.StateCacheCount
+			},
+			"save_search_state" => new Dictionary<string, object?>
+			{
+				["state_id"] = service.SaveSearchState(GetOptionalBoolean(paramsElement, "include_full_fallback")),
 				["cache_size"] = service.StateCacheCount
 			},
 			"export_state" => ExportState(service, paramsElement),
@@ -2072,6 +2062,18 @@ internal static partial class Program
 		throw new InvalidOperationException($"Request requires a non-empty '{propertyName}' string.");
 	}
 
+	private static bool GetOptionalBoolean(JsonElement element, string propertyName, bool defaultValue = false)
+	{
+		if (element.ValueKind == JsonValueKind.Object
+			&& element.TryGetProperty(propertyName, out JsonElement property)
+			&& (property.ValueKind == JsonValueKind.True || property.ValueKind == JsonValueKind.False))
+		{
+			return property.GetBoolean();
+		}
+
+		return defaultValue;
+	}
+
 	private static string? GetStructuredErrorCode(Exception exception)
 	{
 		if (exception is JsonException)
@@ -2132,8 +2134,6 @@ internal static partial class Program
 	{
 		public int Port { get; private set; } = 15527;
 
-		public bool UseStdio { get; private set; }
-
 		public HostProtocol Protocol { get; private set; } = HostProtocol.Json;
 
 		public TimeSpan ReadTimeout { get; private set; } = TimeSpan.FromSeconds(60);
@@ -2156,9 +2156,6 @@ internal static partial class Program
 			{
 				switch (values[i])
 				{
-					case "--stdio":
-						options.UseStdio = true;
-						break;
 					case "--port" when i + 1 < values.Length && int.TryParse(values[i + 1], out int port):
 						options.Port = port;
 						i++;

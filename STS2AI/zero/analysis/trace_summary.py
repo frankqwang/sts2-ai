@@ -200,17 +200,17 @@ def _render_eval_fight(group_key: str, events: list[dict[str, Any]], *, name_cat
             f"格挡 {float(row.get('player_block', 0.0)):.0f} 能量 {float(row.get('player_energy', 0.0)):.0f} | "
             f"敌方 {_enemy_hp_list_brief(row.get('enemy_hp') or [], row.get('enemy_block') or [])}"
         )
-        teacher_bits: list[str] = []
-        teacher_best = row.get("teacher_best_action_index")
+        search_bits: list[str] = []
+        search_best = row.get("search_best_action_index")
         action_index = row.get("action_index")
-        if teacher_best is not None and action_index is not None:
-            teacher_bits.append("teacher=一致" if int(teacher_best) == int(action_index) else "teacher=不一致")
-        teacher_topk = row.get("teacher_topk_indices") or []
-        if teacher_topk and action_index is not None:
-            teacher_bits.append("topk=命中" if int(action_index) in {int(v) for v in teacher_topk} else "topk=未命中")
+        if search_best is not None and action_index is not None:
+            search_bits.append("search=一致" if int(search_best) == int(action_index) else "search=不一致")
+        search_topk = row.get("search_topk_indices") or []
+        if search_topk and action_index is not None:
+            search_bits.append("topk=命中" if int(action_index) in {int(v) for v in search_topk} else "topk=未命中")
         line2 = (
             f"选择：{_format_action(row, name_catalog=name_catalog)}"
-            + (f" | {' '.join(teacher_bits)}" if teacher_bits else "")
+            + (f" | {' '.join(search_bits)}" if search_bits else "")
         )
         line3 = (
             f"prog={'Y' if bool(row.get('made_progress', False)) else 'N'} "
@@ -236,14 +236,14 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
     next_state = row["next_state"]
     action = row.get("action") or {}
     legal_actions = state.get("legal_actions") or []
-    teacher_bits: list[str] = []
-    teacher_best = row.get("teacher_best_action_index")
+    search_bits: list[str] = []
+    search_best = row.get("search_best_action_index")
     action_index = row.get("action_index")
-    if teacher_best is not None and action_index is not None:
-        teacher_bits.append("teacher=一致" if int(teacher_best) == int(action_index) else "teacher=不一致")
-    teacher_topk = row.get("teacher_topk_indices") or []
-    if teacher_topk and action_index is not None:
-        teacher_bits.append("topk=命中" if int(action_index) in {int(v) for v in teacher_topk} else "topk=未命中")
+    if search_best is not None and action_index is not None:
+        search_bits.append("search=一致" if int(search_best) == int(action_index) else "search=不一致")
+    search_topk = row.get("search_topk_indices") or []
+    if search_topk and action_index is not None:
+        search_bits.append("topk=命中" if int(action_index) in {int(v) for v in search_topk} else "topk=未命中")
     line1 = (
         f"[Step {int(row.get('step_idx', 0)):>3}] HP {float(state['player']['hp']):.0f}/{float(state['player']['max_hp']):.0f} "
         f"格挡 {float(state['player']['block']):.0f} 能量 {float(state['player']['energy']):.0f} | "
@@ -253,14 +253,14 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
     legal_action_lines = _legal_action_lines(legal_actions, name_catalog=name_catalog)
     line3 = (
         f"选择：{_format_action(action, name_catalog=name_catalog)}"
-        + (f" | {' '.join(teacher_bits)}" if teacher_bits else "")
+        + (f" | {' '.join(search_bits)}" if search_bits else "")
     )
-    student_topk = row.get("student_topk_indices") or []
-    teacher_topk = row.get("teacher_topk_indices") or []
-    search_trace = row.get("teacher_search_trace") or []
+    policy_topk = row.get("policy_topk_indices") or []
+    search_topk = row.get("search_topk_indices") or []
+    search_trace = row.get("search_trace") or []
     line3b = (
-        f"student_topk={_topk_actions_text(student_topk, legal_actions, name_catalog=name_catalog)} | "
-        f"teacher_topk={_topk_actions_text(teacher_topk, legal_actions, name_catalog=name_catalog)}"
+        f"policy_topk={_topk_actions_text(policy_topk, legal_actions, name_catalog=name_catalog)} | "
+        f"search_topk={_topk_actions_text(search_topk, legal_actions, name_catalog=name_catalog)}"
     )
     line4 = (
         f"结果 HP {float(next_state['player']['hp']):.0f}/{float(next_state['player']['max_hp']):.0f} "
@@ -283,7 +283,7 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
         _wrap(line5),
     ]
     if search_trace:
-        lines.append("teacher_search：")
+        lines.append("search_trace：")
         lines.extend(_search_trace_lines(search_trace, width=160))
     lines.append("")
     return lines

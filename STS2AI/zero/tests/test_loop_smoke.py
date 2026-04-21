@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import tempfile
 import unittest
@@ -47,11 +47,11 @@ class FakePolicy:
         return 0.7
 
 
-class FakeTeacher:
+class FakeSearchBackend:
     def label_request(self, request, runtime_factory=None, seed=None):
-        from zero.domain import TeacherLabel
+        from zero.domain import SearchLabel
 
-        return TeacherLabel(policy=[0.8, 0.2], topk_indices=[0], best_action_index=0, ranking_margin=0.6, teacher_value=0.9)
+        return SearchLabel(policy=[0.8, 0.2], topk_indices=[0], best_action_index=0, ranking_margin=0.6, search_value=0.9)
 
 
 class FakeEvaluator:
@@ -62,7 +62,7 @@ class FakeEvaluator:
                 fight_win_rate=0.6,
                 enemy_hp_fraction_dealt=0.8,
                 self_hp_fraction_remaining=0.5,
-                teacher_agreement_at_1=0.5,
+                search_agreement_at_1=0.5,
             )
         ]
 
@@ -80,7 +80,7 @@ class WeakEvaluator:
                     fight_win_rate=0.1,
                     enemy_hp_fraction_dealt=0.2,
                     self_hp_fraction_remaining=0.1,
-                    teacher_agreement_at_1=0.1,
+                    search_agreement_at_1=0.1,
                 )
             ]
         return [
@@ -89,7 +89,7 @@ class WeakEvaluator:
                 fight_win_rate=0.1,
                 enemy_hp_fraction_dealt=0.2,
                 self_hp_fraction_remaining=0.1,
-                teacher_agreement_at_1=0.1,
+                search_agreement_at_1=0.1,
             )
         ]
 
@@ -129,15 +129,15 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             manifest = runner.run_iteration(
                 iteration=1,
                 runtime_factory=FakeRuntime,
-                student_policy=FakePolicy(),
-                search_teacher=FakeTeacher(),
+                policy=FakePolicy(),
+                search_backend=FakeSearchBackend(),
                 baseline_eval=None,
             )
             self.assertTrue(manifest.promotion.promoted)
             self.assertEqual(manifest.collector_version, "FakePolicy")
-            self.assertEqual(manifest.sample_counts["teacher_requests"], 4)
+            self.assertEqual(manifest.sample_counts["search_requests"], 4)
             self.assertTrue((config.paths.manifests / "iter_0001.json").exists())
-            self.assertEqual(runner.checkpoint_store.read_active_version(), "student_v0001")
+            self.assertEqual(runner.checkpoint_store.read_active_version(), "policy_v0001")
 
             resumed_runner = ZeroLoopRunner(
                 config=config,
@@ -148,13 +148,13 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             manifest2 = resumed_runner.run_iteration(
                 iteration=2,
                 runtime_factory=FakeRuntime,
-                student_policy=None,
-                search_teacher=FakeTeacher(),
+                policy=None,
+                search_backend=FakeSearchBackend(),
                 baseline_eval=None,
             )
-            self.assertTrue((config.paths.checkpoints / "student_v0002.pt").exists())
+            self.assertTrue((config.paths.checkpoints / "policy_v0002.pt").exists())
             self.assertEqual(manifest2.iteration, 2)
-            self.assertEqual(manifest2.collector_version, "student_v0001")
+            self.assertEqual(manifest2.collector_version, "policy_v0001")
 
     def test_first_non_promoted_iteration_still_seeds_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -167,7 +167,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                     episodes_per_cohort=1,
                     promote_min_win_rate_gain=0.5,
                     promote_min_enemy_hp_gain=0.5,
-                    promote_min_teacher_agreement_gain=0.5,
+                    promote_min_search_agreement_gain=0.5,
                 ),
             )
             runner = ZeroLoopRunner(
@@ -179,15 +179,15 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             manifest1 = runner.run_iteration(
                 iteration=1,
                 runtime_factory=FakeRuntime,
-                student_policy=FakePolicy(),
-                search_teacher=FakeTeacher(),
+                policy=FakePolicy(),
+                search_backend=FakeSearchBackend(),
                 baseline_eval=[
                     EvalSummary(
                         cohort_name="main",
                         fight_win_rate=0.9,
                         enemy_hp_fraction_dealt=0.9,
                         self_hp_fraction_remaining=0.9,
-                        teacher_agreement_at_1=0.9,
+                        search_agreement_at_1=0.9,
                     )
                 ],
             )
@@ -197,8 +197,8 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             manifest2 = runner.run_iteration(
                 iteration=2,
                 runtime_factory=FakeRuntime,
-                student_policy=FakePolicy(),
-                search_teacher=FakeTeacher(),
+                policy=FakePolicy(),
+                search_backend=FakeSearchBackend(),
                 baseline_eval=None,
             )
             self.assertFalse(manifest2.promotion.promoted)
