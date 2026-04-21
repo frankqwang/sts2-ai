@@ -341,13 +341,23 @@ internal static partial class Program
 		};
 		if (req.Build != null)
 		{
-			SimulationBuildSpec build = new SimulationBuildSpec
+			SimulationBuildSpec build = new SimulationBuildSpec();
+			if (req.Build.HasCurrentHp)
 			{
-				CurrentHp = req.Build.CurrentHp,
-				MaxHp = req.Build.MaxHp,
-				MaxEnergy = req.Build.MaxEnergy,
-				Gold = req.Build.Gold,
-			};
+				build.CurrentHp = req.Build.CurrentHp;
+			}
+			if (req.Build.HasMaxHp)
+			{
+				build.MaxHp = req.Build.MaxHp;
+			}
+			if (req.Build.HasMaxEnergy)
+			{
+				build.MaxEnergy = req.Build.MaxEnergy;
+			}
+			if (req.Build.HasGold)
+			{
+				build.Gold = req.Build.Gold;
+			}
 			if (req.Build.Deck.Count > 0)
 			{
 				build.Deck = new List<SimulationBuildCardSpec>();
@@ -369,6 +379,23 @@ internal static partial class Program
 					if (string.IsNullOrWhiteSpace(relic.Id)) continue;
 					build.Relics.Add(new SimulationBuildRelicSpec { Id = relic.Id });
 				}
+			}
+			if (req.Build.Potions.Count > 0)
+			{
+				build.Potions = new List<SimulationBuildPotionSpec>();
+				foreach (var potion in req.Build.Potions)
+				{
+					if (string.IsNullOrWhiteSpace(potion.Id)) continue;
+					build.Potions.Add(new SimulationBuildPotionSpec
+					{
+						Id = potion.Id,
+						Slot = potion.Slot
+					});
+				}
+			}
+			if (req.Build.HasMaxPotionSlots)
+			{
+				build.MaxPotionSlots = req.Build.MaxPotionSlots;
 			}
 			request.Build = build;
 		}

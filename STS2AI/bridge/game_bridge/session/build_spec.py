@@ -82,12 +82,52 @@ class RelicSpecPy:
 
 
 @dataclass(slots=True)
+class PotionSpecPy:
+    id: str
+    slot: int | None = None
+
+    @classmethod
+    def from_value(cls, value: Any) -> "PotionSpecPy":
+        if isinstance(value, str):
+            potion_id = value.strip()
+            if not potion_id:
+                raise ValueError("build.potions contains an empty potion id")
+            return cls(id=potion_id)
+        if not isinstance(value, dict):
+            raise TypeError("build.potions entries must be strings or dicts")
+        potion_id = str(value.get("id") or value.get("potion_id") or value.get("name") or "").strip()
+        if not potion_id:
+            raise ValueError("build.potions entry is missing id")
+        slot = value.get("slot", value.get("slot_index"))
+        return cls(
+            id=potion_id,
+            slot=None if slot is None else max(0, int(slot)),
+        )
+
+    def to_sim_dict(self, fallback_slot: int) -> dict[str, Any]:
+        slot = fallback_slot if self.slot is None else max(0, int(self.slot))
+        return {
+            "id": str(self.id),
+            "slot": slot,
+        }
+
+
+def _extract_optional_int(value: dict[str, Any], *aliases: str) -> int | None:
+    for alias in aliases:
+        if alias in value and value[alias] is not None:
+            return int(value[alias])
+    return None
+
+
+@dataclass(slots=True)
 class BuildSpecPy:
     deck: list[CardSpecPy] = field(default_factory=list)
     relics: list[RelicSpecPy] = field(default_factory=list)
+    potions: list[PotionSpecPy] = field(default_factory=list)
     current_hp: int | None = None
     max_hp: int | None = None
     max_energy: int | None = None
+    max_potion_slots: int | None = None
     gold: int | None = None
 
     @classmethod
@@ -103,28 +143,19 @@ class BuildSpecPy:
         if not isinstance(relic_entries, list):
             raise TypeError("build.relics must be a list")
 
-        scalar_aliases = {
-            "current_hp": ("current_hp", "hp"),
-            "max_hp": ("max_hp",),
-            "max_energy": ("max_energy", "energy"),
-            "gold": ("gold",),
-        }
-
-        normalized: dict[str, int | None] = {}
-        for target_key, aliases in scalar_aliases.items():
-            normalized[target_key] = None
-            for alias in aliases:
-                if alias in value and value[alias] is not None:
-                    normalized[target_key] = int(value[alias])
-                    break
+        potion_entries = value.get("potions", value.get("potion_ids")) or []
+        if not isinstance(potion_entries, list):
+            raise TypeError("build.potions must be a list")
 
         return cls(
             deck=[CardSpecPy.from_value(entry) for entry in deck_entries],
             relics=[RelicSpecPy.from_value(entry) for entry in relic_entries],
-            current_hp=normalized["current_hp"],
-            max_hp=normalized["max_hp"],
-            max_energy=normalized["max_energy"],
-            gold=normalized["gold"],
+            potions=[PotionSpecPy.from_value(entry) for entry in potion_entries],
+            current_hp=_extract_optional_int(value, "current_hp", "hp"),
+            max_hp=_extract_optional_int(value, "max_hp"),
+            max_energy=_extract_optional_int(value, "max_energy", "energy"),
+            max_potion_slots=_extract_optional_int(value, "max_potion_slots", "max_potions", "potion_slot_count"),
+            gold=_extract_optional_int(value, "gold"),
         )
 
     def to_sim_dict(self) -> dict[str, Any]:
@@ -133,7 +164,18 @@ class BuildSpecPy:
             payload["deck"] = [card.to_sim_dict() for card in self.deck]
         if self.relics:
             payload["relics"] = [relic.to_sim_dict() for relic in self.relics]
-        for key in ("current_hp", "max_hp", "max_energy", "gold"):
+        if self.potions:
+            seen_slots: set[int] = set()
+            potions_payload: list[dict[str, Any]] = []
+            for fallback_slot, potion in enumerate(self.potions):
+                potion_payload = potion.to_sim_dict(fallback_slot=fallback_slot)
+                slot = potion_payload["slot"]
+                if slot in seen_slots:
+                    raise ValueError(f"build.potions contains duplicate slot {slot}")
+                seen_slots.add(slot)
+                potions_payload.append(potion_payload)
+            payload["potions"] = potions_payload
+        for key in ("current_hp", "max_hp", "max_energy", "max_potion_slots", "gold"):
             value = getattr(self, key)
             if value is not None:
                 payload[key] = int(value)
@@ -155,6 +197,7 @@ def normalize_build_spec(build: BuildSpecPy | dict[str, Any] | None) -> dict[str
 __all__ = [
     "BuildSpecPy",
     "CardSpecPy",
+    "PotionSpecPy",
     "RelicSpecPy",
     "normalize_build_spec",
 ]

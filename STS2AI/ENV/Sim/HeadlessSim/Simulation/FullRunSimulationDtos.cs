@@ -30,6 +30,9 @@ public sealed class SimulationBuildSpec
 	[JsonPropertyName("relics")]
 	public List<SimulationBuildRelicSpec>? Relics { get; set; }
 
+	[JsonPropertyName("potions")]
+	public List<SimulationBuildPotionSpec>? Potions { get; set; }
+
 	[JsonPropertyName("current_hp")]
 	public int? CurrentHp { get; set; }
 
@@ -38,6 +41,9 @@ public sealed class SimulationBuildSpec
 
 	[JsonPropertyName("max_energy")]
 	public int? MaxEnergy { get; set; }
+
+	[JsonPropertyName("max_potion_slots")]
+	public int? MaxPotionSlots { get; set; }
 
 	[JsonPropertyName("gold")]
 	public int? Gold { get; set; }
@@ -65,6 +71,18 @@ public sealed class SimulationBuildRelicSpec
 
 	[JsonPropertyName("floor_added_to_deck")]
 	public int? FloorAddedToDeck { get; set; }
+}
+
+public sealed class SimulationBuildPotionSpec
+{
+	[JsonPropertyName("id")]
+	public string? Id { get; set; }
+
+	[JsonPropertyName("slot")]
+	public int? Slot { get; set; }
+
+	[JsonPropertyName("slot_index")]
+	public int? SlotIndex { get; set; }
 }
 
 public sealed class FullRunSimulationActionRequest
