@@ -5,6 +5,7 @@ from .runtime import (
     CheckpointStore,
     Evaluator,
     Policy,
+    SearchTeacher,
     TeacherOracle,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "CheckpointStore",
     "Evaluator",
     "Policy",
+    "SearchTeacher",
     "TeacherOracle",
 ]

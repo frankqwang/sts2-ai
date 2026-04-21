@@ -223,13 +223,24 @@ class ModelPolicyAdapter(Policy):
     def infer(self, state: BattleState) -> dict[str, Any]:
         if self._cached_state_ref is state and self._cached_inference is not None:
             return self._cached_inference
+        result = self.evaluate_state(state, list(self._history))
+        self._cached_state_ref = state
+        self._cached_inference = result
+        return result
+
+    def evaluate_state(self, state: BattleState, history: list[HistoryStep]) -> dict[str, Any]:
         if not state.legal_actions:
-            result = {"scores": [], "action_index": 0, "uncertainty": 0.0}
-            self._cached_state_ref = state
-            self._cached_inference = result
+            result = {
+                "scores": [],
+                "action_index": 0,
+                "uncertainty": 0.0,
+                "fight_win_prob": 0.0,
+                "enemy_hp_fraction_dealt": 0.0,
+                "self_hp_fraction_remaining": 0.0,
+            }
             return result
         self._model.eval()
-        batch = self._collator.collate_inference(state, list(self._history), state.legal_actions).to(self._device)
+        batch = self._collator.collate_inference(state, history, state.legal_actions).to(self._device)
         with torch.no_grad():
             output = self._model(batch)
         logits = output.policy_logits[0]
@@ -237,13 +248,17 @@ class ModelPolicyAdapter(Policy):
         scores = logits[:valid].tolist()
         action_index = max(range(len(scores)), key=lambda index: scores[index]) if scores else 0
         uncertainty = float(torch.sigmoid(output.uncertainty)[0].item())
+        fight_win_prob = float(torch.sigmoid(output.fight_win)[0].item())
+        enemy_hp_fraction_dealt = float(output.enemy_hp_fraction_dealt[0].clamp(0.0, 1.0).item())
+        self_hp_fraction_remaining = float(output.self_hp_fraction_remaining[0].clamp(0.0, 1.0).item())
         result = {
             "scores": scores,
             "action_index": action_index,
             "uncertainty": uncertainty,
+            "fight_win_prob": fight_win_prob,
+            "enemy_hp_fraction_dealt": enemy_hp_fraction_dealt,
+            "self_hp_fraction_remaining": self_hp_fraction_remaining,
         }
-        self._cached_state_ref = state
-        self._cached_inference = result
         return result
 
     def select_action(self, state: BattleState) -> int:

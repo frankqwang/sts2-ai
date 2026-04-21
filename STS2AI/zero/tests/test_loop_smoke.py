@@ -116,7 +116,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             root = Path(temp_dir)
             config = ZeroConfig(
                 paths=ZeroPaths(root=root),
-                collect=CollectConfig(episodes_per_iteration=2, max_steps_per_episode=2),
+                collect=CollectConfig(episodes_per_iteration=2, max_steps_per_episode=2, mode="policy_only_collect"),
                 train=TrainConfig(batch_size=2, steps_per_iteration=1),
                 evaluation=EvalConfig(episodes_per_cohort=2, promote_min_win_rate_gain=-1.0),
             )
@@ -130,7 +130,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=1,
                 runtime_factory=FakeRuntime,
                 student_policy=FakePolicy(),
-                teacher_oracle=FakeTeacher(),
+                search_teacher=FakeTeacher(),
                 baseline_eval=None,
             )
             self.assertTrue(manifest.promotion.promoted)
@@ -149,7 +149,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=2,
                 runtime_factory=FakeRuntime,
                 student_policy=None,
-                teacher_oracle=FakeTeacher(),
+                search_teacher=FakeTeacher(),
                 baseline_eval=None,
             )
             self.assertTrue((config.paths.checkpoints / "student_v0002.pt").exists())
@@ -161,7 +161,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             root = Path(temp_dir)
             config = ZeroConfig(
                 paths=ZeroPaths(root=root),
-                collect=CollectConfig(episodes_per_iteration=1, max_steps_per_episode=2),
+                collect=CollectConfig(episodes_per_iteration=1, max_steps_per_episode=2, mode="policy_only_collect"),
                 train=TrainConfig(batch_size=2, steps_per_iteration=1),
                 evaluation=EvalConfig(
                     episodes_per_cohort=1,
@@ -180,7 +180,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=1,
                 runtime_factory=FakeRuntime,
                 student_policy=FakePolicy(),
-                teacher_oracle=FakeTeacher(),
+                search_teacher=FakeTeacher(),
                 baseline_eval=[
                     EvalSummary(
                         cohort_name="main",
@@ -198,7 +198,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=2,
                 runtime_factory=FakeRuntime,
                 student_policy=FakePolicy(),
-                teacher_oracle=FakeTeacher(),
+                search_teacher=FakeTeacher(),
                 baseline_eval=None,
             )
             self.assertFalse(manifest2.promotion.promoted)

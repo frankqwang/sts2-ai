@@ -202,6 +202,19 @@ class GameBridgeCombatRuntime:
             raise RuntimeError("必须先 reset 再 step")
         raw_action = self._latest_state.raw.get("legal_actions")
         action_rows = raw_action if isinstance(raw_action, list) else []
+        legal_actions = self._latest_state.legal_actions
+        if action_index < 0 or action_index >= len(action_rows):
+            if action_index < 0 or action_index >= len(legal_actions):
+                raise IndexError(
+                    f"action_index 越界: index={action_index} raw={len(action_rows)} legal={len(legal_actions)}"
+                )
+            resolved_index = _resolve_raw_action_index(legal_actions[action_index], action_rows)
+            if resolved_index is None:
+                raise IndexError(
+                    f"无法把 legal action 映射回 raw action: index={action_index} "
+                    f"action_id={legal_actions[action_index].action_id} raw={len(action_rows)} legal={len(legal_actions)}"
+                )
+            action_index = resolved_index
         action = action_rows[action_index]
         next_raw, _, _, _ = self._session.step(action)
         self._latest_state = convert_game_bridge_state(
@@ -211,6 +224,24 @@ class GameBridgeCombatRuntime:
             fallback_encounter_class=self._encounter_class,
         )
         return self._latest_state
+
+    def save_state(self) -> str:
+        return str(self._session.save_state())
+
+    def load_state(self, state_id: str) -> BattleState:
+        raw = self._session.load_state(state_id)
+        self._latest_state = convert_game_bridge_state(
+            raw,
+            fallback_encounter_id=self._encounter_id,
+            fallback_seed=self._seed,
+            fallback_encounter_class=self._encounter_class,
+        )
+        return self._latest_state
+
+    def delete_state(self, state_id: str) -> None:
+        delete_hook = getattr(self._session, "delete_state", None)
+        if callable(delete_hook):
+            delete_hook(state_id)
 
     def close(self) -> None:
         self._session.close()
@@ -359,6 +390,24 @@ def _build_action_instance_id(raw: dict[str, Any]) -> str:
             str(_pick(raw, "slot", default="")),
         ]
     )
+
+
+def _resolve_raw_action_index(action: LegalAction, raw_actions: list[dict[str, Any]]) -> int | None:
+    for index, raw_action in enumerate(raw_actions):
+        if _build_action_instance_id(raw_action) == action.action_id:
+            return index
+    for index, raw_action in enumerate(raw_actions):
+        raw_type = str(_pick(raw_action, "action", "type", default=""))
+        raw_card_id = str(_pick(raw_action, "card_id", default="") or _pick(raw_action, "label", default=""))
+        raw_target_id = str(_pick(raw_action, "target_id", default="") or "")
+        if raw_type == action.action_type and raw_card_id == action.card_id and raw_target_id == action.target_id:
+            return index
+    for index, raw_action in enumerate(raw_actions):
+        raw_type = str(_pick(raw_action, "action", "type", default=""))
+        raw_card_id = str(_pick(raw_action, "card_id", default="") or _pick(raw_action, "label", default=""))
+        if raw_type == action.action_type and raw_card_id == action.card_id:
+            return index
+    return None
 
 
 def _resolve_encounter_class(encounter_id: str) -> str:

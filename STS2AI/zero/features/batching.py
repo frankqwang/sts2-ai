@@ -38,6 +38,8 @@ class TensorBatch:
     delta_targets: torch.Tensor
     uncertainty_target: torch.Tensor
     sample_weight: torch.Tensor
+    fight_quality_score: torch.Tensor
+    behavior_ce_scale: torch.Tensor
 
     def to(self, device: torch.device | str) -> "TensorBatch":
         return TensorBatch(**{field: getattr(self, field).to(device) for field in self.__dataclass_fields__})
@@ -112,6 +114,8 @@ class BatchCollator:
             delta_targets=_to_tensor_2d([item.delta_targets for item in encoded]),
             uncertainty_target=torch.tensor([item.uncertainty_target for item in encoded], dtype=torch.float32),
             sample_weight=torch.tensor([item.sample_weight for item in encoded], dtype=torch.float32),
+            fight_quality_score=torch.tensor([item.fight_quality_score for item in encoded], dtype=torch.float32),
+            behavior_ce_scale=torch.tensor([item.behavior_ce_scale for item in encoded], dtype=torch.float32),
         )
 
 

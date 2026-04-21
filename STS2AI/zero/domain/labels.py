@@ -48,4 +48,5 @@ class TeacherLabel:
     best_action_index: int = -1
     ranking_margin: float = 0.0
     teacher_value: float = 0.0
+    search_trace: list[dict[str, float | int | str | bool]] = field(default_factory=list)
     metadata: dict[str, float | int | str] = field(default_factory=dict)

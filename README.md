@@ -102,6 +102,8 @@ python -m zero.replay.smoke `
 用途：
 - 当前正式训练入口
 - 支持随机多 case，也支持同一条 run 的 ordered-run curriculum
+- 支持 `search_root_sweep` 搜索模式；当前主线默认直接按搜索分布自博弈
+- 支持按 `encounter / case` 做 targeted 训练
 
 ordered-run 示例：
 
@@ -116,16 +118,80 @@ python -m zero.replay.train `
   --iterations 10 `
   --train-steps 512 `
   --eval-episodes 1 `
-  --collect-epsilon-greedy 0.05 `
+  --teacher-mode search_root_sweep `
+  --collect-mode search_only_collect `
   --collect-temperature 0.20
+```
+
+更偏 AlphaZero 风格的 root MCTS 自博弈示例：
+
+```powershell
+cd C:\dev\sts2-ai\STS2AI
+python -m zero.replay.train `
+  --run-id 1312734 `
+  --ordered-run `
+  --max-run-combats 10 `
+  --parallel-envs 4 `
+  --collect-episodes 400 `
+  --iterations 4 `
+  --train-steps 256 `
+  --eval-episodes 1 `
+  --teacher-mode search_root_sweep `
+  --teacher-max-root-actions 4 `
+  --teacher-rollouts-per-action 8 `
+  --teacher-max-branch-steps 16 `
+  --collect-mode search_only_collect `
+  --collect-temperature 0.20
+```
+
+按 bottleneck encounter 做 targeted 训练的示例：
+
+```powershell
+cd C:\dev\sts2-ai\STS2AI
+python -m zero.replay.train `
+  --run-id 1312734 `
+  --ordered-run `
+  --target-encounter NIBBITS_WEAK `
+  --teacher-mode search_root_sweep `
+  --collect-mode search_only_collect `
+  --collect-episodes 200 `
+  --iterations 3 `
+  --train-steps 192 `
+  --eval-episodes 1
+```
+
+按单 case 做 targeted 训练的示例：
+
+```powershell
+cd C:\dev\sts2-ai\STS2AI
+python -m zero.replay.train `
+  --target-case-id run_1312734_floor_2_shrinker_beetle_weak `
+  --teacher-mode search_root_sweep `
+  --collect-mode search_only_collect `
+  --collect-episodes 128 `
+  --iterations 2 `
+  --train-steps 96 `
+  --eval-episodes 1
 ```
 
 几个关键参数的实际语义：
 - `--collect-episodes`：每轮 collect 多少场 combat，不是完整 run 次数
 - `--iterations`：多少轮 `collect -> teacher -> train -> eval -> promote`
 - `--parallel-envs`：只并发 collect rollout，不并发 trainer / eval
-- `--collect-epsilon-greedy`：collect 时小概率随机探索
-- `--collect-temperature`：collect 时按 softmax 温度采样；`0` 表示关闭
+- `--collect-epsilon-greedy`：仅在搜索分布上额外加少量随机探索
+- `--collect-temperature`：collect 时按搜索分布温度采样；`0` 表示直接取搜索 top-1
+- `--collect-mode`：
+  - `search_only_collect`：每步都跑搜索，动作直接来自搜索分布
+  - `policy_only_collect`：纯 student rollout
+  - `search_guided_collect`：只在高优先级状态上让搜索接管动作
+- `--teacher-mode`：
+  - `search_root_sweep`：same-seed root MCTS / root sweep 搜索
+- `--teacher-max-root-actions`：搜索时最多保留多少个根动作分支
+- `--teacher-rollouts-per-action`：每个根动作分支分到多少次搜索模拟
+- `--teacher-max-branch-steps`：每条分支最多往前 rollout 多少步
+- `--target-encounter`：只训练指定 encounter 的 case
+- `--target-case-id`：只训练指定 case
+- `--target-source`：预留给后续更细粒度 targeted 来源筛选；当前优先用 `target-encounter / target-case-id`
 
 ### 4. 轨迹中文摘要
 
@@ -166,17 +232,17 @@ python -m zero.analysis.rollout_benchmark `
 
 1. 从 `cases.jsonl` 选择训练 / 评估 case
 2. collect rollout 采样轨迹
-3. `SampleBuilder` 生成训练样本
-4. teacher 给关键状态补标签
+3. 搜索直接产出根动作分布与执行动作
+4. `SampleBuilder` 把搜索分布写成训练目标
 5. 样本进入 online / teacher / rare 池
-6. trainer 从样本池混采训练
+6. trainer 以搜索策略分布为主监督训练
 7. evaluator 在固定 cohort 上评估
 8. promotion judge 决定是否晋级 active model
 
-当前主线不是 RL policy gradient，仍然是：
-- teacher 蒸馏
-- 行为克隆
-- value / ranking / delta / uncertainty 辅助头
+当前主线更接近 AlphaZero 风格的“搜索改进 + 监督回归”：
+- collect 时每步搜索
+- 策略头主要学搜索分布
+- value / ranking / delta / uncertainty 仍保留辅助监督
 
 ## 输出目录怎么看
 
@@ -197,6 +263,23 @@ python -m zero.analysis.rollout_benchmark `
 - `raw_runs/iter_xxxx.jsonl`
 - `eval/iter_xxxx_candidate_eval.jsonl`
 - `analysis/`
+
+`analysis/` 下面当前重点看这些：
+
+- `encounter_coverage.csv`
+  - 每轮每个 encounter 的 collect 覆盖：episode 数、transition 数、timeout / no-progress
+- `encounter_pool_stats.csv`
+  - 每轮每个 encounter 在样本池里的保留情况：平均 `sample_weight / keep_score`
+- `encounter_teacher_stats.csv`
+  - 每轮每个 encounter 进入 teacher queue 的次数、平均 teacher priority
+- `encounter_coverage.png`
+  - 覆盖和 timeout/no-progress 的图形透视
+- `trace_summaries/`
+  - 中文轨迹摘要；当前支持 raw 和 eval 两类摘要
+  - 如果是 search teacher，会额外显示：
+    - student top-k
+    - teacher top-k
+    - root action sweep 的搜索分数摘要
 
 ## 注释与维护约定
 

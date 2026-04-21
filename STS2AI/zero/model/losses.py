@@ -26,7 +26,7 @@ def compute_losses(output: ZeroNetOutput, batch, weights: LossWeights) -> LossBr
     如果后续调整任一分支语义，要在同一次改动里同步更新下面辅助函数的注释，
     保证训练意图能直接从代码里读出来。
     """
-    policy_loss = _compute_policy_loss(output, batch)
+    policy_loss = _compute_policy_loss(output, batch, weights)
     value_loss = _compute_value_loss(output, batch)
     ranking_loss = _compute_ranking_loss(output, batch)
     delta_loss = F.mse_loss(output.delta_pred, batch.delta_targets)
@@ -51,12 +51,14 @@ def compute_losses(output: ZeroNetOutput, batch, weights: LossWeights) -> LossBr
     )
 
 
-def _compute_policy_loss(output: ZeroNetOutput, batch) -> torch.Tensor:
+def _compute_policy_loss(output: ZeroNetOutput, batch, weights: LossWeights) -> torch.Tensor:
     """按 teacher / non-teacher 显式分流策略监督。
 
     当前约定：
     - teacher 样本：只通过 KL 拟合归一化后的 teacher policy
     - non-teacher 样本：只通过加权 CE 拟合行为动作
+    - 低质量 rollout：额外乘上 `policy_bad_rollout_ce_scale`，避免“拖回合坏行为”
+      长时间继续以行为克隆的方式主导训练。
 
     这是刻意做的监督分流；如果后续调整路由、正则或权重，
     必须同步更新这里的注释。
@@ -71,10 +73,11 @@ def _compute_policy_loss(output: ZeroNetOutput, batch) -> torch.Tensor:
         teacher_log_probs = F.log_softmax(safe_logits, dim=-1)
         teacher_policy = batch.teacher_policy[teacher_mask] * valid_mask.to(batch.teacher_policy.dtype)
         teacher_policy = teacher_policy / teacher_policy.sum(dim=-1, keepdim=True).clamp_min(1e-6)
-        losses.append(F.kl_div(teacher_log_probs, teacher_policy, reduction="batchmean"))
+        if weights.policy_teacher_kl_weight > 0.0:
+            losses.append(weights.policy_teacher_kl_weight * F.kl_div(teacher_log_probs, teacher_policy, reduction="batchmean"))
 
     non_teacher_mask = ~teacher_mask
-    if non_teacher_mask.any():
+    if non_teacher_mask.any() and weights.policy_behavior_ce_weight > 0.0:
         # 在线 / 未打 teacher 标签的样本继续走行为克隆；
         # sample_weight 决定这些样本在混池训练中的实际影响力。
         imitation_loss = F.cross_entropy(
@@ -82,11 +85,20 @@ def _compute_policy_loss(output: ZeroNetOutput, batch) -> torch.Tensor:
             batch.behavior_action_index[non_teacher_mask],
             reduction="none",
         )
-        weighted = (imitation_loss * batch.sample_weight[non_teacher_mask]).mean()
-        losses.append(weighted)
+        ce_scale = batch.behavior_ce_scale[non_teacher_mask]
+        bad_rollout_mask = batch.fight_quality_score[non_teacher_mask] < 0.55
+        if bad_rollout_mask.any():
+            ce_scale = torch.where(
+                bad_rollout_mask,
+                ce_scale * weights.policy_bad_rollout_ce_scale,
+                ce_scale,
+            )
+        if torch.any(ce_scale > 0.0):
+            weighted = (imitation_loss * batch.sample_weight[non_teacher_mask] * ce_scale).mean()
+            losses.append(weights.policy_behavior_ce_weight * weighted)
     if not losses:
         return torch.zeros((), device=output.policy_logits.device)
-    return sum(losses) / len(losses)
+    return sum(losses)
 
 
 def _compute_value_loss(output: ZeroNetOutput, batch) -> torch.Tensor:

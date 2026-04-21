@@ -593,9 +593,11 @@ class MultiCaseAggregateTeacher:
     """
 
     def __init__(self, cases: Iterable[SkadaCombatCase]):
-        teacher_map = {case.case_id: AggregateCardUsageTeacher(case) for case in cases}
+        case_list = list(cases)
+        teacher_map = {case.case_id: AggregateCardUsageTeacher(case) for case in case_list}
         if not teacher_map:
             raise ValueError("MultiCaseAggregateTeacher 需要至少一个 case。")
+        self._cases = case_list
         self._teachers = teacher_map
 
     def label_request(self, request: TeacherRequest, runtime_factory=None, seed: str | None = None) -> TeacherLabel:
@@ -609,6 +611,9 @@ class MultiCaseAggregateTeacher:
             label.metadata = metadata
             return label
         return teacher.label_request(request, runtime_factory=runtime_factory, seed=seed)
+
+    def clone_for_port(self, port: int) -> "MultiCaseAggregateTeacher":
+        return MultiCaseAggregateTeacher(self._cases)
 
 
 class SkadaReplayRuntime:
@@ -658,6 +663,17 @@ class SkadaReplayRuntime:
 
     def step(self, action_index: int):
         return self._decorate_state(self._runtime.step(action_index))
+
+    def save_state(self) -> str:
+        return self._runtime.save_state()
+
+    def load_state(self, state_id: str):
+        return self._decorate_state(self._runtime.load_state(state_id))
+
+    def delete_state(self, state_id: str) -> None:
+        delete_hook = getattr(self._runtime, "delete_state", None)
+        if callable(delete_hook):
+            delete_hook(state_id)
 
     def close(self) -> None:
         # 训练/评估会频繁创建轻量 runtime wrapper，这里保留底层 session，
@@ -953,9 +969,18 @@ def _rollout_case_episode(
         for _ in range(200):
             if state.terminal or not state.legal_actions:
                 break
-            select_started_at = time.perf_counter()
-            action_index = policy.select_action(state)
-            policy_select_duration_s += time.perf_counter() - select_started_at
+            infer_hook = getattr(policy, "infer", None)
+            infer_started_at = time.perf_counter()
+            inference = infer_hook(state) if callable(infer_hook) else None
+            if isinstance(inference, dict):
+                action_index = int(inference.get("action_index", 0) or 0)
+                student_scores = list(inference.get("scores", []) or [])
+                student_uncertainty = float(inference.get("uncertainty", 0.0) or 0.0)
+            else:
+                action_index = policy.select_action(state)
+                student_scores = []
+                student_uncertainty = float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0)
+            policy_select_duration_s += time.perf_counter() - infer_started_at
             teacher_label = _teacher_label_for_actions(teacher, state.legal_actions)
             if teacher_label.best_action_index >= 0:
                 agreement_steps += 1
@@ -1015,11 +1040,16 @@ def _rollout_case_episode(
                     "action_id": chosen_action.action_id if chosen_action is not None else "",
                     "card_id": chosen_action.card_id if chosen_action is not None else "",
                     "target_id": chosen_action.target_id if chosen_action is not None else "",
+                    "student_scores": student_scores,
+                    "student_uncertainty": student_uncertainty,
+                    "student_topk_indices": _topk_indices_from_scores(student_scores, topk=4),
                     "state": serialized_transition["state"],
                     "action": serialized_transition["action"],
                     "next_state": serialized_transition["next_state"],
                     "teacher_best_action_index": teacher_label.best_action_index,
                     "teacher_topk_indices": teacher_label.topk_indices,
+                    "teacher_policy": teacher_label.policy,
+                    "teacher_search_trace": teacher_label.search_trace,
                     "made_progress": bool(progress.made_progress),
                     "enemy_hp_delta": float(progress.enemy_hp_delta),
                     "enemy_count_delta": int(progress.enemy_count_delta),
@@ -1046,6 +1076,7 @@ def _rollout_case_episode(
         )
         overhead_duration_s = max(0.0, duration_s - accounted_duration_s)
         metrics = {
+            "step_count": step_count,
             "truncated": truncated,
             "progress_steps": progress_steps,
             "no_progress_steps": no_progress_steps,
@@ -1237,3 +1268,9 @@ def _teacher_label_for_actions(teacher: AggregateCardUsageTeacher, legal_actions
         ranking_margin=0.0,
         teacher_value=0.0,
     )
+
+
+def _topk_indices_from_scores(scores: list[float], *, topk: int) -> list[int]:
+    if not scores:
+        return []
+    return sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[: min(topk, len(scores))]

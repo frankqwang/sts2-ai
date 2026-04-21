@@ -255,6 +255,13 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
         f"选择：{_format_action(action, name_catalog=name_catalog)}"
         + (f" | {' '.join(teacher_bits)}" if teacher_bits else "")
     )
+    student_topk = row.get("student_topk_indices") or []
+    teacher_topk = row.get("teacher_topk_indices") or []
+    search_trace = row.get("teacher_search_trace") or []
+    line3b = (
+        f"student_topk={_topk_actions_text(student_topk, legal_actions, name_catalog=name_catalog)} | "
+        f"teacher_topk={_topk_actions_text(teacher_topk, legal_actions, name_catalog=name_catalog)}"
+    )
     line4 = (
         f"结果 HP {float(next_state['player']['hp']):.0f}/{float(next_state['player']['max_hp']):.0f} "
         f"格挡 {float(next_state['player']['block']):.0f} 能量 {float(next_state['player']['energy']):.0f} | "
@@ -265,16 +272,21 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
         f"enemy_hp_delta={float(row.get('enemy_hp_delta', 0.0) or 0.0):.1f} "
         f"enemy_count_delta={int(row.get('enemy_count_delta', 0) or 0)}"
     )
-    return [
+    lines = [
         _wrap(line1),
         _wrap(line2),
         f"合法动作（{len(legal_actions)} 个）：",
         *legal_action_lines,
         _wrap(line3),
+        _wrap(line3b),
         _wrap(line4),
         _wrap(line5),
-        "",
     ]
+    if search_trace:
+        lines.append("teacher_search：")
+        lines.extend(_search_trace_lines(search_trace, width=160))
+    lines.append("")
+    return lines
 
 
 def _enemy_brief(enemies: list[dict[str, Any]], *, name_catalog: dict[str, str]) -> str:
@@ -405,6 +417,40 @@ def _load_name_catalog() -> dict[str, str]:
         except sqlite3.DatabaseError:
             pass
     return catalog
+
+
+def _topk_actions_text(indices: list[Any], legal_actions: list[dict[str, Any]], *, name_catalog: dict[str, str]) -> str:
+    if not indices:
+        return "无"
+    parts: list[str] = []
+    for raw_index in indices[:4]:
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= index < len(legal_actions):
+            parts.append(f"{index}:{_format_action(legal_actions[index], name_catalog=name_catalog)}")
+    return " | ".join(parts) if parts else "无"
+
+
+def _search_trace_lines(search_trace: list[dict[str, Any]], *, width: int) -> list[str]:
+    lines: list[str] = []
+    for item in search_trace[:4]:
+        lines.append(
+            _wrap(
+                "  - "
+                f"a{int(item.get('action_index', -1) or -1)} "
+                f"{item.get('card_id', '') or item.get('action_id', '')} "
+                f"visits={int(item.get('visits', 0) or 0)} "
+                f"avg={float(item.get('score_avg', 0.0) or 0.0):.3f} "
+                f"best={float(item.get('score_best', 0.0) or 0.0):.3f} "
+                f"hpq={float(item.get('hp_quality_avg', 0.0) or 0.0):.3f} "
+                f"spd={float(item.get('speed_quality_avg', 0.0) or 0.0):.3f} "
+                f"out={item.get('outcome_mode', '')}",
+                width=width,
+            )
+        )
+    return lines or ["  - 无"]
 
 
 def _wrap(text: str, width: int = 180) -> str:

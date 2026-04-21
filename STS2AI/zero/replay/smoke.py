@@ -192,7 +192,7 @@ def main() -> None:
             iteration=1,
             runtime_factory=runtime_factory,
             student_policy=RandomPolicy(),
-            teacher_oracle=teacher,
+            search_teacher=teacher,
             baseline_eval=baseline,
         )
 

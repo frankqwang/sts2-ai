@@ -40,6 +40,11 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     sampling_df = _build_sampling_dataframe(manifests)
     rollout_df = _build_rollout_dataframe(run_root / "raw_runs")
     episode_df = _build_episode_event_dataframe(run_root / "logs")
+    encounter_coverage_df = _build_encounter_coverage_dataframe(run_root)
+    encounter_teacher_df = _build_encounter_teacher_dataframe(run_root)
+    encounter_pool_df = _build_encounter_pool_dataframe(run_root)
+    search_teacher_df = _build_search_teacher_diagnostics_dataframe(run_root)
+    search_guidance_df = _build_search_guidance_dataframe(run_root)
 
     summary = {
         "iterations": len(manifests),
@@ -57,6 +62,11 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     _write_dataframe(sampling_df, analysis_dir / "sampling_metrics.csv")
     _write_dataframe(rollout_df, analysis_dir / "rollout_metrics.csv")
     _write_dataframe(episode_df, analysis_dir / "episode_metrics.csv")
+    _write_dataframe(encounter_coverage_df, analysis_dir / "encounter_coverage.csv")
+    _write_dataframe(encounter_teacher_df, analysis_dir / "encounter_teacher_stats.csv")
+    _write_dataframe(encounter_pool_df, analysis_dir / "encounter_pool_stats.csv")
+    _write_dataframe(search_teacher_df, analysis_dir / "search_teacher_diagnostics.csv")
+    _write_dataframe(search_guidance_df, analysis_dir / "search_guidance_diagnostics.csv")
 
     _plot_training_metrics(training_df, analysis_dir / "training_metrics.png")
     _plot_sampling_metrics(sampling_df, episode_df, analysis_dir / "sampling_metrics.png")
@@ -64,6 +74,8 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     _plot_eval_metrics(eval_df, analysis_dir / "evaluation_metrics.png")
     _plot_rollout_behavior(rollout_df, analysis_dir / "rollout_behavior.png")
     _plot_cohort_heatmap(eval_df, analysis_dir / "cohort_overview.png")
+    _plot_encounter_coverage(encounter_coverage_df, analysis_dir / "encounter_coverage.png")
+    _plot_search_guidance(search_guidance_df, analysis_dir / "search_guidance.png")
     return analysis_dir
 
 
@@ -210,6 +222,250 @@ def _build_episode_event_dataframe(logs_dir: Path) -> pd.DataFrame:
                 "timeouts": int((df.get("truncated", False) == True).sum()) if "truncated" in df else 0,
             }
         )
+    return pd.DataFrame(rows)
+
+
+def _build_encounter_coverage_dataframe(run_root: Path) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    raw_root = run_root / "raw_runs"
+    if not raw_root.exists():
+        return pd.DataFrame()
+    for path in sorted(raw_root.glob("iter_*.jsonl")):
+        iteration = _extract_iteration(path.name)
+        grouped: dict[tuple[str, int, str], dict[str, Any]] = {}
+        fight_seen: set[tuple[str, str, int, str]] = set()
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            state = row.get("state") or {}
+            context = state.get("context") or {}
+            metadata = row.get("metadata") or {}
+            encounter_id = str(context.get("encounter_id") or "unknown")
+            floor = int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0)
+            encounter_class = str(context.get("encounter_class") or "default")
+            key = (encounter_id, floor, encounter_class)
+            item = grouped.setdefault(
+                key,
+                {
+                    "iteration": iteration,
+                    "encounter_id": encounter_id,
+                    "floor": floor,
+                    "encounter_class": encounter_class,
+                    "collect_episodes": 0,
+                    "transition_count": 0,
+                    "progress_steps": 0,
+                    "no_progress_steps": 0,
+                    "victory_rows": 0,
+                    "timeout_rows": 0,
+                },
+            )
+            fight_key = (row.get("fight_id", ""), encounter_id, floor, encounter_class)
+            if fight_key not in fight_seen:
+                fight_seen.add(fight_key)
+                item["collect_episodes"] += 1
+            item["transition_count"] += 1
+            item["progress_steps"] += 1 if bool(metadata.get("made_progress", False)) else 0
+            item["no_progress_steps"] += 0 if bool(metadata.get("made_progress", False)) else 1
+            outcome = str(row.get("fight_outcome") or "")
+            if outcome.lower() in {"victory", "win"}:
+                item["victory_rows"] += 1
+            if outcome.lower() == "timeout":
+                item["timeout_rows"] += 1
+        for item in grouped.values():
+            total = max(int(item["transition_count"]), 1)
+            item["avg_no_progress_ratio"] = float(item["no_progress_steps"]) / total
+            item["progress_ratio"] = float(item["progress_steps"]) / total
+            rows.append(item)
+    return pd.DataFrame(rows)
+
+
+def _build_encounter_teacher_dataframe(run_root: Path) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    labels_root = run_root / "teacher_labels"
+    if not labels_root.exists():
+        return pd.DataFrame()
+    for path in sorted(labels_root.glob("iter_*.jsonl")):
+        iteration = _extract_iteration(path.name)
+        grouped: dict[tuple[str, int, str], dict[str, Any]] = {}
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            sample = (row.get("sample") or {})
+            state = sample.get("state") or {}
+            context = state.get("context") or {}
+            metadata = sample.get("metadata") or {}
+            encounter_id = str(context.get("encounter_id") or "unknown")
+            floor = int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0)
+            encounter_class = str(context.get("encounter_class") or "default")
+            key = (encounter_id, floor, encounter_class)
+            item = grouped.setdefault(
+                key,
+                {
+                    "iteration": iteration,
+                    "encounter_id": encounter_id,
+                    "floor": floor,
+                    "encounter_class": encounter_class,
+                    "teacher_requests": 0,
+                    "avg_teacher_priority": 0.0,
+                    "avg_fight_score": 0.0,
+                    "avg_hp_quality_score": 0.0,
+                },
+            )
+            item["teacher_requests"] += 1
+            item["avg_teacher_priority"] += float(row.get("priority") or 0.0)
+            item["avg_fight_score"] += float(metadata.get("fight_score", 0.0) or 0.0)
+            item["avg_hp_quality_score"] += float(metadata.get("hp_quality_score", 0.0) or 0.0)
+        for item in grouped.values():
+            denom = max(int(item["teacher_requests"]), 1)
+            item["avg_teacher_priority"] /= denom
+            item["avg_fight_score"] /= denom
+            item["avg_hp_quality_score"] /= denom
+            rows.append(item)
+    return pd.DataFrame(rows)
+
+
+def _build_encounter_pool_dataframe(run_root: Path) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    shard_root = run_root / "dataset_shards"
+    if not shard_root.exists():
+        return pd.DataFrame()
+    for path in sorted(shard_root.glob("iter_*.jsonl")):
+        iteration = _extract_iteration(path.name)
+        grouped: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            state = row.get("state") or {}
+            context = state.get("context") or {}
+            metadata = row.get("metadata") or {}
+            encounter_id = str(context.get("encounter_id") or "unknown")
+            floor = int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0)
+            encounter_class = str(context.get("encounter_class") or "default")
+            pool_name = str(row.get("pool_name") or "unknown")
+            key = (encounter_id, floor, encounter_class, pool_name)
+            item = grouped.setdefault(
+                key,
+                {
+                    "iteration": iteration,
+                    "encounter_id": encounter_id,
+                    "floor": floor,
+                    "encounter_class": encounter_class,
+                    "pool_name": pool_name,
+                    "pool_entries": 0,
+                    "avg_sample_weight": 0.0,
+                    "avg_keep_score": 0.0,
+                },
+            )
+            item["pool_entries"] += 1
+            item["avg_sample_weight"] += float(row.get("sample_weight") or metadata.get("sample_weight") or 0.0)
+            item["avg_keep_score"] += float(row.get("keep_score") or 0.0)
+        for item in grouped.values():
+            denom = max(int(item["pool_entries"]), 1)
+            item["avg_sample_weight"] /= denom
+            item["avg_keep_score"] /= denom
+            rows.append(item)
+    return pd.DataFrame(rows)
+
+
+def _build_search_teacher_diagnostics_dataframe(run_root: Path) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    labels_root = run_root / "dataset_shards"
+    if not labels_root.exists():
+        return pd.DataFrame()
+    for path in sorted(labels_root.glob("iter_*.jsonl")):
+        iteration = _extract_iteration(path.name)
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            teacher_label = row.get("teacher_label") or {}
+            search_trace = teacher_label.get("search_trace") or []
+            if not search_trace:
+                continue
+            state = row.get("state") or {}
+            context = state.get("context") or {}
+            for item in search_trace:
+                rows.append(
+                    {
+                        "iteration": iteration,
+                        "sample_id": row.get("sample_id", ""),
+                        "encounter_id": context.get("encounter_id", ""),
+                        "floor": int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0),
+                        "action_index": int(item.get("action_index", -1) or -1),
+                        "action_id": item.get("action_id", ""),
+                        "card_id": item.get("card_id", ""),
+                        "visits": int(item.get("visits", 0) or 0),
+                        "score_avg": float(item.get("score_avg", 0.0) or 0.0),
+                        "score_best": float(item.get("score_best", 0.0) or 0.0),
+                        "hp_quality_avg": float(item.get("hp_quality_avg", 0.0) or 0.0),
+                        "speed_quality_avg": float(item.get("speed_quality_avg", 0.0) or 0.0),
+                        "outcome_mode": item.get("outcome_mode", ""),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _build_search_guidance_dataframe(run_root: Path) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    raw_root = run_root / "raw_runs"
+    if not raw_root.exists():
+        return pd.DataFrame()
+    for path in sorted(raw_root.glob("iter_*.jsonl")):
+        iteration = _extract_iteration(path.name)
+        grouped: dict[tuple[str, int, str], dict[str, Any]] = {}
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            state = row.get("state") or {}
+            context = state.get("context") or {}
+            metadata = row.get("metadata") or {}
+            encounter_id = str(context.get("encounter_id") or "unknown")
+            floor = int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0)
+            encounter_class = str(context.get("encounter_class") or "default")
+            key = (encounter_id, floor, encounter_class)
+            item = grouped.setdefault(
+                key,
+                {
+                    "iteration": iteration,
+                    "encounter_id": encounter_id,
+                    "floor": floor,
+                    "encounter_class": encounter_class,
+                    "transition_rows": 0,
+                    "guided_steps": 0,
+                    "guided_progress_steps": 0,
+                    "guided_teacher_value_sum": 0.0,
+                    "guided_priority_sum": 0.0,
+                },
+            )
+            item["transition_rows"] += 1
+            if bool(metadata.get("search_guided", False)):
+                item["guided_steps"] += 1
+                item["guided_progress_steps"] += 1 if bool(metadata.get("made_progress", False)) else 0
+                item["guided_teacher_value_sum"] += float(metadata.get("search_teacher_value", 0.0) or 0.0)
+                item["guided_priority_sum"] += float(metadata.get("search_guidance_priority", 0.0) or 0.0)
+        for item in grouped.values():
+            total_steps = max(int(item["transition_rows"]), 1)
+            guided_steps = max(int(item["guided_steps"]), 1)
+            item["guided_step_ratio"] = float(item["guided_steps"]) / total_steps
+            item["guided_progress_ratio"] = (
+                float(item["guided_progress_steps"]) / guided_steps if item["guided_steps"] > 0 else 0.0
+            )
+            item["avg_guidance_priority"] = (
+                float(item["guided_priority_sum"]) / guided_steps if item["guided_steps"] > 0 else 0.0
+            )
+            item["avg_teacher_value"] = (
+                float(item["guided_teacher_value_sum"]) / guided_steps if item["guided_steps"] > 0 else 0.0
+            )
+            rows.append(item)
     return pd.DataFrame(rows)
 
 
@@ -411,6 +667,70 @@ def _plot_cohort_heatmap(eval_df: pd.DataFrame, output_path: Path) -> None:
         axis.set_yticks(range(len(pivot.index)))
         axis.set_yticklabels(list(pivot.index), fontsize=8)
         fig.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_encounter_coverage(df: pd.DataFrame, output_path: Path) -> None:
+    if df.empty:
+        return
+    grouped = (
+        df.groupby(["iteration", "encounter_id"], as_index=False)
+        .agg(
+            collect_episodes=("collect_episodes", "sum"),
+            transition_count=("transition_count", "sum"),
+            avg_no_progress_ratio=("avg_no_progress_ratio", "mean"),
+        )
+    )
+    top_encounters = (
+        grouped.groupby("encounter_id")["collect_episodes"].sum().sort_values(ascending=False).head(8).index.tolist()
+    )
+    plotted = grouped[grouped["encounter_id"].isin(top_encounters)]
+    if plotted.empty:
+        return
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8))
+    for encounter_id, frame in plotted.groupby("encounter_id"):
+        axes[0].plot(frame["iteration"], frame["collect_episodes"], marker="o", label=encounter_id)
+        axes[1].plot(frame["iteration"], frame["avg_no_progress_ratio"], marker="o", label=encounter_id)
+    axes[0].set_title("Per-Encounter Collect Episodes")
+    axes[0].legend(fontsize=8)
+    axes[1].set_title("Per-Encounter Avg No-Progress Ratio")
+    axes[1].legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_search_guidance(df: pd.DataFrame, output_path: Path) -> None:
+    if df.empty:
+        return
+    grouped = (
+        df.groupby("iteration", as_index=False)
+        .agg(
+            guided_steps=("guided_steps", "sum"),
+            transition_rows=("transition_rows", "sum"),
+            guided_progress_ratio=("guided_progress_ratio", "mean"),
+            avg_guidance_priority=("avg_guidance_priority", "mean"),
+            avg_teacher_value=("avg_teacher_value", "mean"),
+        )
+    )
+    if grouped.empty:
+        return
+    grouped["guided_step_ratio"] = grouped["guided_steps"] / grouped["transition_rows"].clip(lower=1)
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8))
+    x = grouped["iteration"]
+    axes[0].plot(x, grouped["guided_step_ratio"], marker="o", label="guided_step_ratio")
+    axes[0].plot(x, grouped["guided_progress_ratio"], marker="o", label="guided_progress_ratio")
+    axes[0].set_title("Search Guidance Coverage")
+    axes[0].legend(fontsize=8)
+
+    axes[1].plot(x, grouped["avg_guidance_priority"], marker="o", label="avg_guidance_priority")
+    axes[1].plot(x, grouped["avg_teacher_value"], marker="o", label="avg_teacher_value")
+    axes[1].set_title("Search Guidance Quality")
+    axes[1].legend(fontsize=8)
+
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
     plt.close(fig)

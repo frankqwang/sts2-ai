@@ -31,6 +31,11 @@ class CollectConfig:
     max_steps_per_episode: int = 200
     epsilon_greedy: float = 0.0
     temperature: float = 0.0
+    mode: str = "search_only_collect"
+    search_guidance_priority_threshold: float = 1.2
+    search_guidance_max_steps_per_episode: int = 8
+    search_guidance_target_encounters: tuple[str, ...] = ()
+    search_guidance_port_offset: int = 100
 
 
 @dataclass(slots=True)
@@ -54,6 +59,9 @@ class LossWeights:
     ranking: float = 0.5
     delta: float = 0.2
     uncertainty: float = 0.1
+    policy_teacher_kl_weight: float = 1.25
+    policy_behavior_ce_weight: float = 0.75
+    policy_bad_rollout_ce_scale: float = 0.35
 
 
 @dataclass(slots=True)
@@ -79,10 +87,22 @@ class PoolConfig:
 
 @dataclass(slots=True)
 class TeacherConfig:
+    mode: str = "weak"
     top2_gap_threshold: float = 0.05
     uncertainty_threshold: float = 0.55
     near_lethal_hp_ratio: float = 0.25
     max_requests_per_iteration: int = 512
+    max_root_actions: int = 8
+    rollouts_per_action: int = 2
+    max_branch_steps: int = 24
+    allow_branching: bool = False
+    rollout_policy: str = "aggregate_teacher"
+    rollout_scorer: str = "fight_quality"
+    trace_topk: int = 4
+    enable_snapshot_restore: bool = True
+    leaf_eval_horizon: int = 3
+    leaf_value_weight: float = 0.75
+    root_cache_size: int = 128
 
 
 @dataclass(slots=True)

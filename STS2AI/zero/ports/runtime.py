@@ -19,13 +19,18 @@ class Policy(Protocol):
     def estimate_uncertainty(self, state: BattleState) -> float: ...
 
 
-class TeacherOracle(Protocol):
+class SearchTeacher(Protocol):
     def label_request(
         self,
         request: TeacherRequest,
         runtime_factory: Callable[[], BattleRuntime] | None = None,
         seed: str | None = None,
+        policy: Policy | None = None,
     ) -> TeacherLabel: ...
+
+
+# 兼容旧命名，后续外部调用逐步切到 SearchTeacher。
+TeacherOracle = SearchTeacher
 
 
 class Evaluator(Protocol):

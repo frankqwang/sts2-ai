@@ -33,6 +33,8 @@ class EncodedSample:
     delta_targets: list[float]
     uncertainty_target: float
     sample_weight: float
+    fight_quality_score: float
+    behavior_ce_scale: float
 
 
 class FeatureExtractor:
@@ -66,6 +68,8 @@ class FeatureExtractor:
             delta_targets=self._encode_delta(sample.delta),
             uncertainty_target=float(sample.metadata.get("uncertainty_target", 0.0) or 0.0),
             sample_weight=max(0.1, float(sample.sample_weight)),
+            fight_quality_score=float(sample.fight_score),
+            behavior_ce_scale=float(sample.metadata.get("behavior_ce_scale", 1.0) or 1.0),
         )
 
     def encode_inference(self, state: BattleState, history: list[HistoryStep], legal_actions: list[LegalAction]) -> EncodedSample:
@@ -91,6 +95,8 @@ class FeatureExtractor:
             delta_targets=[0.0] * (3 + self._config.max_enemies * 2 + 3),
             uncertainty_target=0.0,
             sample_weight=1.0,
+            fight_quality_score=0.0,
+            behavior_ce_scale=1.0,
         )
 
     def _encode_player(self, state: BattleState) -> list[float]:

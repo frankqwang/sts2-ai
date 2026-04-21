@@ -37,13 +37,14 @@ from contextlib import ExitStack
 from zero import ZeroConfig, ZeroLoopRunner
 from zero.analysis import generate_training_analysis
 from zero.buffers import ArtifactStore
-from zero.config import CollectConfig, EvalConfig, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
+from zero.config import CollectConfig, EvalConfig, LossWeights, TeacherConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
 from zero.orchestration import ParallelTrajectoryCollector
 from zero.orchestration.trainer import LocalCheckpointStore
 from zero.paths import STS2AI_ROOT, ZeroPaths
 from zero.replay import (
     FixedSkadaCaseEvaluator,
     MultiCaseAggregateTeacher,
+    MultiCaseSearchTeacher,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaReplayRuntime,
@@ -83,11 +84,40 @@ def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> E
 
     if strict_promotion:
         return EvalConfig(episodes_per_cohort=episodes_per_cohort)
-        return EvalConfig(
-            episodes_per_cohort=episodes_per_cohort,
-            promote_min_win_rate_gain=-1.0,
-            allow_hp_quality_drop=1.0,
-        )
+    return EvalConfig(
+        episodes_per_cohort=episodes_per_cohort,
+        promote_min_win_rate_gain=-1.0,
+        allow_hp_quality_drop=1.0,
+    )
+
+
+def config_losses_for_teacher_mode(teacher_mode: str) -> LossWeights:
+    """按 teacher 强度给一版保守但可用的损失权重。"""
+    weights = LossWeights()
+    if teacher_mode == "weak":
+        return weights
+    weights.ranking = 0.9
+    weights.delta = 0.08
+    weights.uncertainty = 0.04
+    weights.policy_teacher_kl_weight = 1.8
+    weights.policy_behavior_ce_weight = 0.0
+    weights.policy_bad_rollout_ce_scale = 0.0
+    return weights
+
+
+def _apply_target_filters(cases, *, target_encounter: str, target_case_id: str):
+    if target_case_id:
+        filtered = [case for case in cases if str(case.case_id) == str(target_case_id)]
+        if not filtered:
+            raise ValueError(f"未找到 target_case_id={target_case_id}")
+        return filtered
+    if target_encounter:
+        normalized = target_encounter.strip().upper()
+        filtered = [case for case in cases if str(case.encounter_id).upper() == normalized]
+        if not filtered:
+            raise ValueError(f"未找到 target_encounter={target_encounter}")
+        return filtered
+    return list(cases)
 
 
 def main() -> None:
@@ -104,8 +134,21 @@ def main() -> None:
     parser.add_argument("--run-id", type=int, default=0)
     parser.add_argument("--ordered-run", action="store_true")
     parser.add_argument("--max-run-combats", type=int, default=0)
+    parser.add_argument("--target-encounter", type=str, default="")
+    parser.add_argument("--target-case-id", type=str, default="")
+    parser.add_argument(
+        "--target-source",
+        choices=["", "encounter", "case", "run-segment"],
+        default="",
+    )
     parser.add_argument("--collect-episodes", type=int, default=8)
     parser.add_argument("--parallel-envs", type=int, default=1)
+    parser.add_argument(
+        "--collect-mode",
+        choices=["search_only_collect", "policy_only_collect", "search_guided_collect"],
+        default="search_only_collect",
+        help="collect 动作来源；默认直接按搜索分布自博弈。",
+    )
     parser.add_argument(
         "--collect-epsilon-greedy",
         type=float,
@@ -118,9 +161,20 @@ def main() -> None:
         default=0.0,
         help="仅作用于 collect rollout 的 softmax 温度；0 表示关闭温度采样。",
     )
+    parser.add_argument("--search-guidance-priority-threshold", type=float, default=1.2)
+    parser.add_argument("--search-guidance-max-steps-per-episode", type=int, default=8)
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=2)
     parser.add_argument("--train-steps", type=int, default=40)
+    parser.add_argument(
+        "--teacher-mode",
+        choices=["weak", "search_root_sweep", "search_branching", "oracle_root_sweep", "oracle_branching"],
+        default="weak",
+    )
+    parser.add_argument("--teacher-max-root-actions", type=int, default=8)
+    parser.add_argument("--teacher-rollouts-per-action", type=int, default=2)
+    parser.add_argument("--teacher-max-branch-steps", type=int, default=24)
+    parser.add_argument("--teacher-rollout-policy", choices=["aggregate_teacher"], default="aggregate_teacher")
     parser.add_argument(
         "--host-path",
         type=Path,
@@ -138,6 +192,10 @@ def main() -> None:
         default=STS2AI_ROOT / "Artifacts" / "zero",
     )
     args = parser.parse_args()
+    if args.teacher_mode == "oracle_root_sweep":
+        args.teacher_mode = "search_root_sweep"
+    elif args.teacher_mode == "oracle_branching":
+        args.teacher_mode = "search_branching"
 
     random.seed(args.seed)
     cases = load_case_index(args.case_index)
@@ -153,13 +211,25 @@ def main() -> None:
         if not run_cases:
             raise ValueError(f"case index 中未找到 run_id={args.run_id}")
         ordered_cases = sorted(run_cases, key=lambda case: (int(case.floor), str(case.encounter_id)))
+        ordered_cases = _apply_target_filters(
+            ordered_cases,
+            target_encounter=args.target_encounter,
+            target_case_id=args.target_case_id,
+        )
         if args.max_run_combats > 0:
             ordered_cases = ordered_cases[: args.max_run_combats]
         train_cases = ordered_cases
         eval_cases = ordered_cases
         curriculum_mode = "ordered_run" if args.ordered_run or args.run_id else "single_run"
+        if args.target_source == "run-segment" and not args.ordered_run:
+            curriculum_mode = "targeted_run_segment"
     else:
-        shuffled = list(cases)
+        filtered_cases = _apply_target_filters(
+            cases,
+            target_encounter=args.target_encounter,
+            target_case_id=args.target_case_id,
+        )
+        shuffled = list(filtered_cases)
         random.Random(args.seed).shuffle(shuffled)
         eval_cases = shuffled[: max(1, min(args.eval_case_limit, len(shuffled)))]
         remaining = shuffled[len(eval_cases) :]
@@ -167,6 +237,8 @@ def main() -> None:
         train_cases = train_pool[: max(1, min(args.train_case_limit, len(train_pool)))]
         if args.ordered_run:
             curriculum_mode = "ordered_cases"
+        elif args.target_encounter or args.target_case_id:
+            curriculum_mode = "targeted_cases"
 
     # 产物目录结构：
     # STS2AI/Artifacts/zero/MM-DD-HH-MM-skada-replay-train/<run_name>
@@ -184,6 +256,12 @@ def main() -> None:
             episodes_per_iteration=args.collect_episodes,
             epsilon_greedy=args.collect_epsilon_greedy,
             temperature=args.collect_temperature,
+            mode=args.collect_mode,
+            search_guidance_priority_threshold=args.search_guidance_priority_threshold,
+            search_guidance_max_steps_per_episode=args.search_guidance_max_steps_per_episode,
+            search_guidance_target_encounters=tuple(
+                value for value in [args.target_encounter.strip().upper()] if value
+            ),
         ),
         teacher=TeacherConfig(
             top2_gap_threshold=1.0,
@@ -198,11 +276,18 @@ def main() -> None:
             weight_decay=1e-4,
             grad_clip_norm=1.0,
         ),
+        losses=config_losses_for_teacher_mode(args.teacher_mode),
         evaluation=_build_eval_config(
             episodes_per_cohort=args.eval_episodes,
             strict_promotion=args.strict_promotion,
         ),
     )
+    config.teacher.mode = args.teacher_mode
+    config.teacher.max_root_actions = args.teacher_max_root_actions
+    config.teacher.rollouts_per_action = args.teacher_rollouts_per_action
+    config.teacher.max_branch_steps = args.teacher_max_branch_steps
+    config.teacher.allow_branching = args.teacher_mode == "search_branching"
+    config.teacher.rollout_policy = args.teacher_rollout_policy
 
     artifact_store = ArtifactStore(config.paths)
     checkpoint_store = LocalCheckpointStore(config.paths.checkpoints)
@@ -211,6 +296,9 @@ def main() -> None:
             launch_shared_proto_sim(port=args.port, connect_timeout_s=45.0, host_path=args.host_path)
         )
         collect_ports = [args.port]
+        guidance_ports = []
+        if args.collect_mode in {"search_guided_collect", "search_only_collect"}:
+            guidance_ports.append(args.port + config.collect.search_guidance_port_offset)
         if args.parallel_envs > 1:
             if curriculum_mode != "ordered_run":
                 raise ValueError("并发 collect 目前仅支持 ordered_run 模式。")
@@ -223,6 +311,16 @@ def main() -> None:
                         host_path=args.host_path,
                     )
                 )
+            if args.collect_mode in {"search_guided_collect", "search_only_collect"}:
+                guidance_ports = [port + config.collect.search_guidance_port_offset for port in collect_ports]
+        for guidance_port in guidance_ports:
+            stack.enter_context(
+                launch_shared_proto_sim(
+                    port=guidance_port,
+                    connect_timeout_s=45.0,
+                    host_path=args.host_path,
+                )
+            )
 
         try:
             if curriculum_mode == "ordered_run":
@@ -275,7 +373,17 @@ def main() -> None:
                     parallel_envs=args.parallel_envs,
                     ports=collect_ports,
                 )
-            teacher = MultiCaseAggregateTeacher(train_cases)
+            teacher = (
+                MultiCaseAggregateTeacher(train_cases)
+                if args.teacher_mode == "weak"
+                else MultiCaseSearchTeacher(
+                    train_cases,
+                    config=config.teacher,
+                    port=args.port,
+                    auto_launch=False,
+                    connect_timeout_s=45.0,
+                )
+            )
 
             baseline_policy = RandomPolicy()
             set_trace_context = getattr(evaluator, "set_trace_context", None)
@@ -289,7 +397,7 @@ def main() -> None:
                     iteration=iteration,
                     runtime_factory=runtime_factory,
                     student_policy=student_policy,
-                    teacher_oracle=teacher,
+                    search_teacher=teacher,
                     baseline_eval=baseline if iteration == 1 else None,
                 )
                 manifests.append(manifest.to_dict())
@@ -302,6 +410,9 @@ def main() -> None:
         "curriculum_mode": curriculum_mode,
         "shared_sim": sim_info,
         "run_id": args.run_id or None,
+        "target_encounter": args.target_encounter or None,
+        "target_case_id": args.target_case_id or None,
+        "teacher_mode": args.teacher_mode,
         "train_cases": [case.to_dict() for case in train_cases],
         "eval_cases": [case.to_dict() for case in eval_cases],
         "baseline": [asdict(item) for item in baseline],

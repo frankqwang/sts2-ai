@@ -232,6 +232,44 @@ class SampleBuilderTests(unittest.TestCase):
         )
         self.assertEqual(samples, [])
 
+    def test_search_collected_transition_builds_teacher_label_and_disables_behavior_ce(self) -> None:
+        builder = SampleBuilder(EncoderConfig(history_steps=4))
+        state0 = make_state(hp=80.0, enemy_hp=40.0, step=0)
+        state1 = make_state(hp=78.0, enemy_hp=28.0, step=1, terminal=True, outcome="victory")
+        samples = builder.build(
+            [
+                RawTransition(
+                    run_id="run1",
+                    fight_id="fight1",
+                    step_idx=0,
+                    seed="seed",
+                    action_index=0,
+                    state=state0,
+                    action=state0.legal_actions[0],
+                    next_state=state1,
+                    done=True,
+                    fight_outcome="victory",
+                    run_outcome="victory",
+                    metadata={
+                        "top2_gap": 0.1,
+                        "made_progress": True,
+                        "search_collected": True,
+                        "search_source": "search_self_play",
+                        "search_policy": [0.2, 0.8],
+                        "search_teacher_topk": [1, 0],
+                        "search_teacher_best_action_index": 1,
+                        "search_teacher_ranking_margin": 0.35,
+                        "search_teacher_value": 0.91,
+                        "search_teacher_trace": [{"action_index": 1, "visits": 8}],
+                    },
+                )
+            ]
+        )
+        self.assertEqual(len(samples), 1)
+        self.assertIsNotNone(samples[0].teacher_label)
+        self.assertEqual(samples[0].teacher_label.best_action_index, 1)
+        self.assertEqual(samples[0].metadata["behavior_ce_scale"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,7 +44,7 @@
    - top1/top2 很接近
    - rare cohort
    
-   然后 `TeacherQueueProcessor` 调 `teacher.label_request(...)` 真正产出 `TeacherLabel`，见 [teacher.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/teacher.py:69)。现在 teacher 是可插拔端口，正式 same-seed oracle 以后就接这里。
+   然后 `TeacherQueueProcessor` 调 `teacher.label_request(...)` 真正产出 `TeacherLabel`，见 [teacher.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/teacher.py:69)。现在 teacher 是可插拔端口，正式 same-seed search teacher 就接这里。
 
 6. `池内保留 + 混采 batch`
    `SamplePoolSet` 管 5 个池：`recent_online / teacher / rare / reanalyse / legacy`，见 [pools.py](/C:/dev/sts2-ai/STS2AI/zero/buffers/pools.py:77)。
@@ -104,5 +104,5 @@
 -> `loop` 评估、晋级，并把晋级模型变成下一轮 collector
 
 现在这条链路已经能跑通，但还缺两块“正式版能力”：
-- 真正的 same-seed oracle teacher
+- 真正的 same-seed search teacher
 - 真正固定且够大的 evaluator cohort

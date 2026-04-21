@@ -19,6 +19,7 @@ from ..domain import (
     FightLabel,
     HistoryStep,
     RawTransition,
+    TeacherLabel,
     TrainingSample,
     compute_episode_score_proxy,
     compute_fight_score,
@@ -73,6 +74,7 @@ class SampleBuilder:
 
         samples: list[TrainingSample] = []
         history_window: deque[HistoryStep] = deque(maxlen=self._history_steps)
+        prefix_action_indices: list[int] = []
         for transition in transitions:
             delta = compute_transition_delta(transition.state, transition.next_state)
             behavior_action_index = _resolve_behavior_index(transition)
@@ -97,6 +99,7 @@ class SampleBuilder:
                 behavior_action_id=transition.action.action_id,
                 delta=delta,
                 fight_label=fight_label,
+                teacher_label=_build_search_teacher_label(transition),
                 bucket_key=_build_bucket_key(transition),
                 pool_name=_default_pool_name(transition),
                 main_card_id=transition.action.card_id,
@@ -131,6 +134,7 @@ class SampleBuilder:
                     "fight_max_no_progress_streak": int(fight_stats["max_no_progress_streak"]),
                     "fight_progress_steps": int(fight_stats["progress_steps"]),
                     "fight_no_progress_steps": int(fight_stats["no_progress_steps"]),
+                    "prefix_action_indices": list(prefix_action_indices),
                 },
             )
             samples.append(sample)
@@ -146,6 +150,7 @@ class SampleBuilder:
                     ),
                 )
             )
+            prefix_action_indices.append(behavior_action_index)
         _assign_sample_weights(
             samples,
             fight_timeout=bool(fight_stats["truncated"]),
@@ -342,8 +347,44 @@ def _assign_sample_weights(
             score_band = "downweight"
             band_multiplier = 0.35
         sample.sample_weight = max(0.1, min(2.5, base_weight * band_multiplier))
+        behavior_ce_scale = 1.0
+        if bool(sample.metadata.get("search_collected", False)):
+            behavior_ce_scale = 0.0
+        if fight_timeout:
+            behavior_ce_scale *= 0.5
+        if no_progress_ratio >= 0.70:
+            behavior_ce_scale *= 0.7
+        if sample.fight_score < 0.55:
+            behavior_ce_scale *= 0.7
+        if score_band == "downweight":
+            behavior_ce_scale *= 0.75
+        sample.metadata["behavior_ce_scale"] = max(0.0, min(1.5, behavior_ce_scale))
         sample.metadata["sample_weight"] = sample.sample_weight
         sample.metadata["score_band"] = score_band
+
+
+def _build_search_teacher_label(transition: RawTransition) -> TeacherLabel | None:
+    policy = transition.metadata.get("search_policy")
+    if not isinstance(policy, list) or not policy:
+        return None
+    teacher_policy = [float(value) for value in policy]
+    return TeacherLabel(
+        policy=teacher_policy,
+        topk_indices=[
+            int(value)
+            for value in list(transition.metadata.get("search_teacher_topk", []))
+            if isinstance(value, (int, float))
+        ],
+        best_action_index=int(transition.metadata.get("search_teacher_best_action_index", -1) or -1),
+        ranking_margin=max(0.05, float(transition.metadata.get("search_teacher_ranking_margin", 0.05) or 0.05)),
+        teacher_value=float(transition.metadata.get("search_teacher_value", 0.0) or 0.0),
+        search_trace=list(transition.metadata.get("search_teacher_trace", []))
+        if isinstance(transition.metadata.get("search_teacher_trace"), list)
+        else [],
+        metadata={
+            "teacher": str(transition.metadata.get("search_source", "search_collect") or "search_collect"),
+        },
+    )
 
 
 def _base_sample_weight(

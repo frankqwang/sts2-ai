@@ -16,9 +16,9 @@ from ..config import ZeroConfig
 from ..domain import IterationManifest
 from ..features import BatchCollator
 from ..model import ZeroNet
-from ..ports import BattleRuntime, CheckpointStore, Evaluator, Policy, TeacherOracle
+from ..ports import BattleRuntime, CheckpointStore, Evaluator, Policy, SearchTeacher
 from .admission import SampleAdmissionPlanner
-from .collector import TrajectoryCollector
+from .collector import SearchGuidedActionSelector, SearchSelfPlaySelector, TrajectoryCollector
 from .promotion import PromotionJudge
 from .sample_builder import SampleBuilder
 from .teacher import TeacherQueueBuilder, TeacherQueueProcessor
@@ -85,7 +85,7 @@ class ZeroLoopRunner:
         iteration: int,
         runtime_factory: Callable[[], BattleRuntime],
         student_policy: Policy | None = None,
-        teacher_oracle: TeacherOracle,
+        search_teacher: SearchTeacher,
         baseline_eval: list | None = None,
     ) -> IterationManifest:
         self.artifact_store.reset_iteration_outputs(iteration)
@@ -102,15 +102,23 @@ class ZeroLoopRunner:
             phase="iteration",
             status="started",
             collector_version=collector_version,
-            teacher_version=type(teacher_oracle).__name__,
+            teacher_version=type(search_teacher).__name__,
         )
         self._write_status(
             iteration,
             phase="started",
             collector_version=collector_version,
-            teacher_version=type(teacher_oracle).__name__,
+            teacher_version=type(search_teacher).__name__,
         )
         collect_started_at = time.perf_counter()
+        search_guidance_factory = None
+        search_self_play_factory = None
+        if self.config.collect.mode == "search_guided_collect":
+            base_port = getattr(runtime_factory, "_port", None)
+            search_guidance_factory = self._build_search_guidance_factory(search_teacher, collector_policy, base_port=base_port)
+        elif self.config.collect.mode == "search_only_collect":
+            base_port = getattr(runtime_factory, "_port", None)
+            search_self_play_factory = self._build_search_self_play_factory(search_teacher, collector_policy, base_port=base_port)
         transitions = self._collector.collect(
             runtime_factory=runtime_factory,
             policy=collector_policy,
@@ -119,6 +127,8 @@ class ZeroLoopRunner:
             epsilon_greedy=self.config.collect.epsilon_greedy,
             temperature=self.config.collect.temperature,
             seed=self.config.seed + iteration,
+            search_guidance_factory=search_guidance_factory,
+            search_self_play_factory=search_self_play_factory,
             on_episode_start=lambda event: self._write_progress(iteration, phase="collect_episode", status="started", **event),
             on_transition=lambda transition: self.artifact_store.append_raw_run_row(iteration, transition.to_dict()),
             on_episode_end=lambda event: self._handle_collect_episode_end(
@@ -156,11 +166,22 @@ class ZeroLoopRunner:
 
         admission_started_at = time.perf_counter()
         online_entries = self._admission.build_online_entries(samples)
-        teacher_requests = self._teacher_queue.select(samples)
+        if self.config.collect.mode == "search_only_collect":
+            teacher_requests = []
+        else:
+            teacher_requests = self._teacher_queue.select(samples)
         pre_teacher_duration_s = time.perf_counter() - admission_started_at
 
         teacher_started_at = time.perf_counter()
-        labeled_samples = self._teacher_processor.label(teacher_requests, teacher_oracle, runtime_factory=runtime_factory)
+        if teacher_requests:
+            labeled_samples = self._teacher_processor.label(
+                teacher_requests,
+                search_teacher,
+                runtime_factory=runtime_factory,
+                policy=collector_policy,
+            )
+        else:
+            labeled_samples = []
         teacher_duration_s = time.perf_counter() - teacher_started_at
         self._write_progress(
             iteration,
@@ -172,7 +193,10 @@ class ZeroLoopRunner:
         )
 
         teacher_entry_started_at = time.perf_counter()
-        teacher_entries = self._admission.build_teacher_entries(labeled_samples)
+        if self.config.collect.mode == "search_only_collect":
+            teacher_entries = self._admission.build_teacher_entries([sample for sample in samples if sample.teacher_label is not None])
+        else:
+            teacher_entries = self._admission.build_teacher_entries(labeled_samples)
         self._pools.add_many(online_entries)
         self._pools.add_many(teacher_entries)
         pool_admission_duration_s = time.perf_counter() - teacher_entry_started_at
@@ -288,7 +312,7 @@ class ZeroLoopRunner:
         manifest = IterationManifest(
             iteration=iteration,
             collector_version=collector_version,
-            teacher_version=type(teacher_oracle).__name__,
+            teacher_version=type(search_teacher).__name__,
             sample_counts={
                 "transitions": len(transitions),
                 "samples": len(samples),
@@ -343,6 +367,54 @@ class ZeroLoopRunner:
         elif self._active_training_state is not None:
             trainer.load_state_dict(self._active_training_state)
         return trainer
+
+    def _build_search_guidance_factory(self, search_teacher: SearchTeacher, collector_policy: Policy, *, base_port: int | None):
+        target_encounters = tuple(
+            value.strip().upper()
+            for value in self.config.collect.search_guidance_target_encounters
+            if value and value.strip()
+        )
+        port_offset = int(self.config.collect.search_guidance_port_offset)
+
+        def factory(port: int | None):
+            teacher = search_teacher
+            guidance_port = None
+            if port is not None:
+                guidance_port = port + port_offset
+            elif base_port is not None:
+                guidance_port = int(base_port) + port_offset
+            if guidance_port is not None:
+                clone_hook = getattr(search_teacher, "clone_for_port", None)
+                if callable(clone_hook):
+                    teacher = clone_hook(guidance_port)
+            return SearchGuidedActionSelector(
+                search_teacher=teacher,
+                queue_builder=self._teacher_queue,
+                policy=collector_policy,
+                priority_threshold=self.config.collect.search_guidance_priority_threshold,
+                max_guided_steps_per_episode=self.config.collect.search_guidance_max_steps_per_episode,
+                target_encounters=target_encounters,
+            )
+
+        return factory
+
+    def _build_search_self_play_factory(self, search_teacher: SearchTeacher, collector_policy: Policy, *, base_port: int | None):
+        port_offset = int(self.config.collect.search_guidance_port_offset)
+
+        def factory(port: int | None):
+            teacher = search_teacher
+            search_port = None
+            if port is not None:
+                search_port = port + port_offset
+            elif base_port is not None:
+                search_port = int(base_port) + port_offset
+            if search_port is not None:
+                clone_hook = getattr(search_teacher, "clone_for_port", None)
+                if callable(clone_hook):
+                    teacher = clone_hook(search_port)
+            return SearchSelfPlaySelector(search_teacher=teacher, policy=collector_policy)
+
+        return factory
 
     def _try_resume(self) -> None:
         read_active = getattr(self.checkpoint_store, "read_active_version", None)

@@ -7,17 +7,21 @@ from collections import defaultdict, deque
 
 from ..config import TeacherConfig
 from ..domain import TeacherRequest, TrainingSample
-from ..ports import TeacherOracle
+from ..ports import SearchTeacher
 
 
 class TeacherQueueBuilder:
     def __init__(self, config: TeacherConfig):
         self._config = config
 
+    def score_sample(self, sample: TrainingSample) -> tuple[float, list[str]]:
+        """对单个样本计算 teacher 介入优先级。"""
+        return self._priority(sample)
+
     def select(self, samples: list[TrainingSample]) -> list[TeacherRequest]:
         bucketed: dict[str, list[tuple[float, int, TeacherRequest]]] = defaultdict(list)
         for index, sample in enumerate(samples):
-            score, tags = self._priority(sample)
+            score, tags = self.score_sample(sample)
             if score <= 0:
                 continue
             request = TeacherRequest(
@@ -95,23 +99,32 @@ class TeacherQueueBuilder:
 
 
 class TeacherQueueProcessor:
-    def label(self, requests: list[TeacherRequest], teacher: TeacherOracle, runtime_factory=None) -> list[TrainingSample]:
+    def label(self, requests: list[TeacherRequest], teacher: SearchTeacher, runtime_factory=None, policy=None) -> list[TrainingSample]:
         if not requests:
             return []
 
         labels = None
         batch_hook = getattr(teacher, "label_requests", None)
         if callable(batch_hook):
-            labels = batch_hook(
-                requests,
-                runtime_factory=runtime_factory,
-            )
+            try:
+                labels = batch_hook(
+                    requests,
+                    runtime_factory=runtime_factory,
+                    policy=policy,
+                )
+            except TypeError:
+                labels = batch_hook(
+                    requests,
+                    runtime_factory=runtime_factory,
+                )
         if labels is None:
             labels = [
-                teacher.label_request(
+                _label_with_optional_policy(
+                    teacher,
                     request,
                     runtime_factory=runtime_factory,
                     seed=str(request.sample.state.context.metadata.get("seed", "")),
+                    policy=policy,
                 )
                 for request in requests
             ]
@@ -146,3 +159,25 @@ class TeacherQueueProcessor:
                     f"teacher topk index 越界: sample={request.sample.sample_id} "
                     f"index={index} legal={legal_action_count}"
                 )
+
+
+def _label_with_optional_policy(teacher: SearchTeacher, request: TeacherRequest, *, runtime_factory=None, seed: str, policy=None):
+    if policy is None:
+        return teacher.label_request(
+            request,
+            runtime_factory=runtime_factory,
+            seed=seed,
+        )
+    try:
+        return teacher.label_request(
+            request,
+            runtime_factory=runtime_factory,
+            seed=seed,
+            policy=policy,
+        )
+    except TypeError:
+        return teacher.label_request(
+            request,
+            runtime_factory=runtime_factory,
+            seed=seed,
+        )
