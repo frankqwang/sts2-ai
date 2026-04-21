@@ -390,6 +390,8 @@ pure sim 下如果 `ActionExecutor` 正在等一个“本该由 UI 触发的选�
 因此当前对“一致性”的准确说法应该是：
 
 - 静态结构与本地 smoke 已经过
+- `python STS2AI/Python/scripts/game_bridge_smoke.py --mode combat_build_api`
+  现在会专门校验 combat proto API 在 `combat_reset(build=...)` 后是否完整返回 `player/battle.player` 的 `deck/relics/powers`
 - 已经补了 step-by-step parity harness
 - 但 live parity 仍需要真实端在线后继续对拍
 

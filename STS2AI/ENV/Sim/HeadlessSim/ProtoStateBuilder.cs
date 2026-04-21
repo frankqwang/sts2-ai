@@ -31,11 +31,9 @@ namespace HeadlessSim;
 ///
 /// 职责：从 <see cref="FullRunSimulationStateSnapshot"/> 等游戏对象中提取数据，
 /// 填充 protoc 自动生成的 <see cref="GameState"/> proto message，再序列化为 bytes。
-/// 等价于 <see cref="BinaryProtocol"/>.BuildStatePayload() 的 protobuf 版本。
 ///
 /// 帧格式不变: [4字节长度][status][opcode][payload]
-/// 差异: state payload 用 protobuf 序列化，不再需要符号表和静态缓存。
-/// 请求解析复用 BinaryProtocol（请求格式完全一致）。
+/// 差异: state payload 用 protobuf 序列化；请求解析继续复用共享 pipe reader。
 /// </summary>
 internal static class ProtoStateBuilder
 {
@@ -67,7 +65,7 @@ internal static class ProtoStateBuilder
 
 	public static byte[] BuildStateResponse(BinaryOpcode opcode, FullRunSimulationStateSnapshot snapshot)
 	{
-		byte[] statePayload = BuildProtoStatePayload(snapshot);
+		byte[] statePayload = BuildStatePayload(snapshot);
 		using MemoryStream stream = new();
 		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
 		writer.Write((byte)BinaryStatus.Ok);
@@ -80,7 +78,7 @@ internal static class ProtoStateBuilder
 	public static byte[] BuildStepResponse(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot)
 	{
 		BinaryStatus status = result.Accepted ? BinaryStatus.Ok : BinaryStatus.RejectedAction;
-		byte[] statePayload = BuildProtoStatePayload(snapshot);
+		byte[] statePayload = BuildStatePayload(snapshot);
 		using MemoryStream stream = new();
 		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
 		writer.Write((byte)status);
@@ -95,7 +93,7 @@ internal static class ProtoStateBuilder
 	public static byte[] BuildBatchStepResponse(FullRunSimulationBatchStepResult result, FullRunSimulationStateSnapshot snapshot)
 	{
 		BinaryStatus status = result.Accepted ? BinaryStatus.Ok : BinaryStatus.RejectedAction;
-		byte[] statePayload = BuildProtoStatePayload(snapshot);
+		byte[] statePayload = BuildStatePayload(snapshot);
 		using MemoryStream stream = new();
 		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
 		writer.Write((byte)status);
@@ -201,6 +199,11 @@ internal static class ProtoStateBuilder
 		writer.Write(statePayload);
 		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", statePayload.Length);
 		return stream.ToArray();
+	}
+
+	public static byte[] BuildStatePayload(FullRunSimulationStateSnapshot snapshot)
+	{
+		return BuildProtoStatePayload(snapshot);
 	}
 
 	private static byte[] BuildCombatGameStatePayload(CombatTrainingStateSnapshot snapshot)

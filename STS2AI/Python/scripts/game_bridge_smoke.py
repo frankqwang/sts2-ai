@@ -13,7 +13,7 @@ PYTHON_ROOT = THIS_FILE.parents[1]
 if str(PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_ROOT))
 
-from game_bridge import SpectatorController, create_full_run_session
+from game_bridge import SpectatorController, create_combat_session, create_full_run_session
 from game_bridge.sim import DEFAULT_HOST_PATH, launch_headless_sim
 from game_bridge.spectate import NullPolicy, OverlayWriter, ReplayPolicy
 
@@ -163,6 +163,66 @@ def run_full_run_reset_check(*, port: int) -> int:
     return 0
 
 
+def run_combat_build_api_check(*, port: int) -> int:
+    session = create_combat_session(
+        port=port,
+        auto_launch=True,
+    )
+    build = {
+        "deck": [
+            {"id": "STRIKE_IRONCLAD"},
+            {"id": "STRIKE_IRONCLAD"},
+            {"id": "STRIKE_IRONCLAD"},
+            {"id": "DEFEND_IRONCLAD"},
+            {"id": "DEFEND_IRONCLAD"},
+            {"id": "DEFEND_IRONCLAD"},
+            {"id": "BASH"},
+            {"id": "POMMEL_STRIKE", "upgrade_level": 1},
+            {"id": "SETUP_STRIKE", "upgrade_level": 1},
+            {"id": "FORGOTTEN_RITUAL"},
+            {"id": "BLUDGEON", "upgrade_level": 1},
+            {"id": "CINDER", "upgrade_level": 1},
+        ],
+        "relics": [
+            {"id": "BURNING_BLOOD"},
+            {"id": "HAND_DRILL"},
+            {"id": "MINIATURE_CANNON"},
+            {"id": "SILVER_CRUCIBLE"},
+        ],
+        "current_hp": 80,
+        "max_hp": 80,
+        "max_energy": 3,
+        "gold": 99,
+    }
+    try:
+        state = session.reset(character_id="IRONCLAD", encounter_id="CHOMPERS_NORMAL", build=build)
+        top_player = state.get("player") or {}
+        battle_player = ((state.get("battle") or {}).get("player")) or {}
+        result = {
+            "mode": "combat_build_api",
+            "state_type": state.get("state_type"),
+            "top_deck_count": len(top_player.get("deck") or []),
+            "battle_deck_count": len(battle_player.get("deck") or []),
+            "top_relic_count": len(top_player.get("relics") or []),
+            "battle_relic_count": len(battle_player.get("relics") or []),
+            "top_powers_count": len(top_player.get("powers") or []),
+            "battle_powers_count": len(battle_player.get("powers") or []),
+            "requested_deck_count": len(build["deck"]),
+            "requested_relic_count": len(build["relics"]),
+        }
+        ok = (
+            result["top_deck_count"] == result["requested_deck_count"]
+            and result["battle_deck_count"] == result["requested_deck_count"]
+            and result["top_relic_count"] == result["requested_relic_count"]
+            and result["battle_relic_count"] == result["requested_relic_count"]
+        )
+        result["ok"] = ok
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if ok else 3
+    finally:
+        session.close()
+
+
 def run_real_spectate_null(*, output_dir: Path, port: int) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     overlay_path = output_dir / "real_overlay.json"
@@ -200,7 +260,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke tests for game_bridge.")
     parser.add_argument(
         "--mode",
-        choices=("fake_spectate", "sim_launch", "full_run_state", "full_run_reset", "real_spectate_null"),
+        choices=("fake_spectate", "sim_launch", "full_run_state", "full_run_reset", "combat_build_api", "real_spectate_null"),
         default="fake_spectate",
     )
     parser.add_argument(
@@ -233,6 +293,8 @@ def main() -> int:
         return run_full_run_state_check(port=args.port)
     if args.mode == "full_run_reset":
         return run_full_run_reset_check(port=args.port)
+    if args.mode == "combat_build_api":
+        return run_combat_build_api_check(port=args.port)
     return run_real_spectate_null(output_dir=args.output_dir, port=args.port)
 
 
