@@ -6,7 +6,7 @@ set -u
 REPO_ROOT="C:/dev/sts2-ai"
 GODOT_EXE="C:/dev/game/Godot_v4.5.1-stable_mono_win64/Godot_v4.5.1-stable_mono_win64_console.exe"
 SIM_EXE="$REPO_ROOT/STS2AI/ENV/Sim/HeadlessSim/bin/Debug/net9.0/HeadlessSim.exe"
-MOD_SRC="$REPO_ROOT/STS2AI/ENV/Spectator/SpectatorBridgeMod/bin/Debug/net9.0/sts2_mcp_spectator.dll"
+MOD_SRC="$REPO_ROOT/STS2AI/ENV/SpectatorBridgeMod/bin/Debug/net9.0/sts2_mcp_spectator.dll"
 # Real mod path: next to Godot exe, NOT repo mods/
 MOD_DEST="C:/dev/game/Godot_v4.5.1-stable_mono_win64/mods/sts2_mcp_spectator"
 # Use port 15600 for Sim to avoid conflict with Godot's internal sim hosts
@@ -39,14 +39,14 @@ cd "$REPO_ROOT"
 ERRORS=0
 dotnet build sts2.csproj -v q 2>&1 | tail -1
 dotnet build STS2AI/ENV/Sim/HeadlessSim/HeadlessSim.csproj -v q 2>&1 | tail -1
-dotnet build STS2AI/ENV/Spectator/SpectatorBridgeMod/sts2_mcp_spectator.csproj -v q \
+dotnet build STS2AI/ENV/SpectatorBridgeMod/sts2_mcp_spectator.csproj -v q \
     -p:STS2AssemblyDir="$REPO_ROOT/.godot/mono/temp/bin/Debug" 2>&1 | tail -1
 
 # 4. Deploy mod to real path (next to Godot exe)
 echo "[4/7] Deploy mod..."
 mkdir -p "$MOD_DEST"
 cp "$MOD_SRC" "$MOD_DEST/"
-cp "$REPO_ROOT/STS2AI/ENV/Spectator/SpectatorBridgeMod/sts2_mcp_spectator.json" "$MOD_DEST/" 2>/dev/null || true
+cp "$REPO_ROOT/STS2AI/ENV/SpectatorBridgeMod/sts2_mcp_spectator.json" "$MOD_DEST/" 2>/dev/null || true
 
 # 5. Verify
 echo "[5/7] Verify..."

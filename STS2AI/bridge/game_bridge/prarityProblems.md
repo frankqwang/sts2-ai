@@ -22,7 +22,7 @@
 - 根因：
   Godot 运行时实际加载的是：
   `D:\dev\Godot_v4.5.1-stable_mono_win64\mods\sts2_mcp_spectator\sts2_mcp_spectator.dll`
-  而不是工作区 `STS2AI/ENV/Spectator/SpectatorBridgeMod/bin/Debug/net9.0/` 下的新 DLL。
+  而不是工作区 `STS2AI/ENV/SpectatorBridgeMod/bin/Debug/net9.0/` 下的新 DLL。
 - 修复：
   每次 spectator 改动后，都要：
   1. 停掉 `Godot*`
@@ -45,9 +45,9 @@
   1. spectator `event` 的 `in_dialogue` 改成按 `!is_finished && options.Count == 0` 判定
   2. spectator 的 `reset/step` 等待链路统一收口到 DTO wait，并对纯对白 `event` 内部自动执行 `advance_dialogue`
 - 代码：
-  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:748)
-  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/ModFullRunEnv.cs:241)
-  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/ModFullRunEnv.cs:347)
+  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:748)
+  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/ModFullRunEnv.cs:241)
+  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/ModFullRunEnv.cs:347)
 - 验证：
   `123456` 下 reset 后首屏已经对齐成 3 个 `choose_event_option`，见：
   [parity_20260420_180545.json](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Artifacts/parity/game_bridge/parity_20260420_180545.json:1)
@@ -61,7 +61,7 @@
 - 修复：
   spectator `game_over` 时不再暴露顶层 `player`。
 - 代码：
-  [SpectatorApiStateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/Bridge/SpectatorApiStateBuilder.cs:35)
+  [SpectatorApiStateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/Bridge/SpectatorApiStateBuilder.cs:35)
 - 验证：
   `123456` 终局 diff 已清零，见：
   [parity_20260420_180545.json](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Artifacts/parity/game_bridge/parity_20260420_180545.json:1)
@@ -84,8 +84,8 @@
      - `SimpleSelect`
   2. spectator `select_card` 动作补 `card_index`
 - 代码：
-  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:1568)
-  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/ModFullRunEnv.cs:837)
+  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:1568)
+  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/ModFullRunEnv.cs:837)
 - 验证：
   `223344` 的 `step_index=1` 已对齐，见：
   [parity_20260420_181229.json](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Artifacts/parity/game_bridge/parity_20260420_181229.json:1)
@@ -170,8 +170,8 @@
      - `NRewardsScreen -> combat_rewards`
 - 代码：
   [NEventRoom.cs](/C:/Users/Administrator/Desktop/sts2Raw2/src/Core/Nodes/Rooms/NEventRoom.cs:191)
-  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:176)
-  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:690)
+  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:176)
+  [McpMod.StateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/Bridge/McpMod.StateBuilder.cs:690)
 - 验证：
   修复后，同样的 `556677` / `choose_event_option index=0`，真实端不再返回错误的 `event + choose_event_option 1/2`，而是返回：
   - `state_type = combat_rewards`
@@ -229,7 +229,7 @@
 
   这样 `/reset` 就变成幂等入口，适合持续 parity sweep。
 - 代码：
-  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Spectator/SpectatorBridgeMod/ModFullRunEnv.cs:56)
+  [ModFullRunEnv.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/SpectatorBridgeMod/ModFullRunEnv.cs:56)
 - 验证：
   修复后，真实端可以在已有 run 的情况下直接再次 `reset` 成功，不再报 `Run already in progress`。
 
