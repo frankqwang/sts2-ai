@@ -8,6 +8,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Events;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Runs;
@@ -63,9 +66,18 @@ public static partial class McpMod
         try
         {
             Dictionary<string, JsonElement> parsed = NormalizeFullRunEnvPayload(ParseFullRunEnvRequestObject(request, allowEmptyBody: true));
+            Dictionary<string, object?> initialState = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
+            if (GetStateType(initialState) != "menu")
+            {
+                RunOnMainThread(async () =>
+                {
+                    await NGame.Instance.ReturnToMainMenuAfterRun();
+                    return 0;
+                }).GetAwaiter().GetResult();
+            }
             // Wait for menu readiness using legacy dict builder (complex UI state detection)
             WaitForFullRunEnvState(
-                predicate: static current => IsMenuReadyForFullRunReset(current) || GetStateType(current) != "menu",
+                predicate: static current => IsMenuReadyForFullRunReset(current),
                 timeoutMs: GetOptionalInt(parsed, "timeout_ms", 20000),
                 pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 50));
             Dictionary<string, object?> startResult = RunOnMainThread(() => ExecuteStartRun(parsed)).GetAwaiter().GetResult();
@@ -80,8 +92,10 @@ public static partial class McpMod
                     && IsActionableOrTerminalFullRunState(current),
                 timeoutMs: GetOptionalInt(parsed, "timeout_ms", 20000),
                 pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 50));
-            // Return DTO-based state for consistent output
-            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+            FullRunApiState state = WaitForApiState(
+                predicate: static current => IsResetStateReady(current),
+                timeoutMs: GetOptionalInt(parsed, "timeout_ms", 20000),
+                pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 50));
             SendApiJson(response, state);
         }
         catch (JsonException ex)
@@ -150,6 +164,27 @@ public static partial class McpMod
                     {
                         state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
                         stepInfoCode = "state_change_timeout";
+                    }
+
+                    if (string.Equals(action, "choose_event_option", StringComparison.OrdinalIgnoreCase)
+                        && HasTransientChosenEventOption(state))
+                    {
+                        try
+                        {
+                            state = WaitForApiState(
+                                predicate: static current =>
+                                    !HasTransientChosenEventOption(current)
+                                    && IsStepStateSettled(current)
+                                    && (current.terminal
+                                        || (current.legal_actions?.Count ?? 0) > 0
+                                        || current.@event?.is_finished == true),
+                                timeoutMs: GetOptionalInt(parsed, "timeout_ms", 2000),
+                                pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 25));
+                        }
+                        catch (TimeoutException)
+                        {
+                            stepInfoCode ??= "event_settle_timeout";
+                        }
                     }
                 }
                 else
@@ -236,6 +271,45 @@ public static partial class McpMod
 
     // ── DTO-based helpers for v2 API ──────────────────────────
 
+    private static FullRunApiState WaitForApiState(
+        Func<FullRunApiState, bool> predicate,
+        int timeoutMs,
+        int pollDelayMs)
+    {
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(100, timeoutMs));
+        int delay = Math.Max(10, pollDelayMs);
+        FullRunApiState? lastState = null;
+
+        while (DateTime.UtcNow <= deadline)
+        {
+            bool busy = RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult();
+            if (busy)
+            {
+                Thread.Sleep(delay);
+                continue;
+            }
+
+            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+            lastState = state;
+            if (IsEventDialogueOnly(state))
+            {
+                AdvanceDialogueIfNeeded();
+                Thread.Sleep(delay);
+                continue;
+            }
+
+            if (predicate(state))
+                return state;
+
+            Thread.Sleep(delay);
+        }
+
+        if (lastState != null)
+            return lastState;
+
+        throw new TimeoutException("Timed out waiting for API state.");
+    }
+
     private static FullRunApiState WaitForChangedApiState(
         FullRunApiState previousState,
         int timeoutMs,
@@ -266,6 +340,18 @@ public static partial class McpMod
             {
                 lastChangedState = state;
 
+                if (IsEventDialogueOnly(state))
+                {
+                    AdvanceDialogueIfNeeded();
+                    Thread.Sleep(delay);
+                    continue;
+                }
+                if (HasTransientChosenEventOption(state))
+                {
+                    Thread.Sleep(delay);
+                    continue;
+                }
+
                 if (string.Equals(signature, lastChangedSignature, StringComparison.Ordinal))
                     stablePolls++;
                 else
@@ -283,7 +369,7 @@ public static partial class McpMod
                     && state.state_type != "loading";
                 bool actionable = state.terminal || (state.legal_actions?.Count ?? 0) > 0;
 
-                if (settled && actionable && stablePolls >= 2)
+                if (settled && actionable && stablePolls >= 2 && !IsEventDialogueOnly(state))
                     return state;
             }
 
@@ -296,15 +382,50 @@ public static partial class McpMod
         throw new TimeoutException("Timed out waiting for changed API state.");
     }
 
+    private static void AdvanceDialogueIfNeeded()
+    {
+        Dictionary<string, object?> result = RunOnMainThread(
+            () => ExecuteAction("advance_dialogue", new Dictionary<string, JsonElement>()))
+            .GetAwaiter()
+            .GetResult();
+
+        if (IsErrorResult(result, out string? error))
+            throw new InvalidOperationException(error ?? "Failed to auto-advance event dialogue.");
+    }
+
     private static bool IsStepStateSettled(FullRunApiState state)
     {
         if (IsActionExecutorBusy())
+            return false;
+
+        if (IsEventDialogueOnly(state))
+            return false;
+        if (HasTransientChosenEventOption(state))
             return false;
 
         if (!IsCombatLike(state.state_type))
             return true;
 
         return !IsCombatPresentationBusy();
+    }
+
+    private static bool IsResetStateReady(FullRunApiState state)
+    {
+        if (state.terminal)
+            return true;
+
+        if (string.IsNullOrEmpty(state.state_type)
+            || state.state_type == "unknown"
+            || state.state_type == "menu"
+            || state.state_type == "loading")
+        {
+            return false;
+        }
+
+        if ((state.legal_actions?.Count ?? 0) == 0)
+            return false;
+
+        return IsStepStateSettled(state);
     }
 
     private static bool IsCombatReadyForPlayerInput()
@@ -360,6 +481,31 @@ public static partial class McpMod
     private static bool IsCombatLike(string? stateType)
     {
         return stateType is "monster" or "elite" or "boss" or "hand_select";
+    }
+
+    private static bool IsEventDialogueOnly(FullRunApiState state)
+    {
+        if (!string.Equals(state.state_type, "event", StringComparison.Ordinal))
+            return false;
+
+        if (state.@event?.in_dialogue != true)
+            return false;
+
+        if (state.legal_actions == null || state.legal_actions.Count != 1)
+            return false;
+
+        return string.Equals(state.legal_actions[0].action, "advance_dialogue", StringComparison.Ordinal);
+    }
+
+    private static bool HasTransientChosenEventOption(FullRunApiState state)
+    {
+        if (!string.Equals(state.state_type, "event", StringComparison.Ordinal))
+            return false;
+
+        if (state.@event == null || state.@event.is_finished)
+            return false;
+
+        return state.@event.options?.Any(static option => option.is_chosen) == true;
     }
 
     private static object ShapeApiStepResult(FullRunApiState state, bool accepted, string? error, string? stepInfoCode)
@@ -671,6 +817,27 @@ public static partial class McpMod
             return;
         }
 
+        List<NEventOptionButton>? visibleButtons = NEventRoom.Instance?.Layout?.OptionButtons?.ToList();
+        if (visibleButtons is { Count: > 0 })
+        {
+            foreach (NEventOptionButton button in visibleButtons)
+            {
+                EventOption option = button.Option;
+                if (option.IsLocked)
+                    continue;
+                if (option.WasChosen)
+                    continue;
+
+                bool isProceed = option.IsProceed;
+                actions.Add(new Dictionary<string, object?>
+                {
+                    ["action"] = isProceed ? "proceed" : "choose_event_option",
+                    ["index"] = isProceed ? null : (object?)GetEventOptionIndex(button, option)
+                });
+            }
+            return;
+        }
+
         foreach (Dictionary<string, object?> option in EnumerateDictionaries(eventState.TryGetValue("options", out object? rawOptions) ? rawOptions : null))
         {
             if (GetBool(option, "is_locked"))
@@ -687,6 +854,15 @@ public static partial class McpMod
                 ["index"] = isProceed ? null : (object?)GetInt(option, "index", -1)
             });
         }
+    }
+
+    private static int GetEventOptionIndex(NEventOptionButton button, EventOption option)
+    {
+        int visibleIndex = button.GetIndex();
+        if (visibleIndex >= 0)
+            return visibleIndex;
+
+        return NEventRoom.Instance?.Layout?.OptionButtons?.ToList().FindIndex(candidate => ReferenceEquals(candidate, button) || ReferenceEquals(candidate.Option, option)) ?? -1;
     }
 
     private static void AppendShopLegalActions(List<Dictionary<string, object?>> actions, Dictionary<string, object?> state)
@@ -738,7 +914,8 @@ public static partial class McpMod
                 actions.Add(new Dictionary<string, object?>
                 {
                     ["action"] = "select_card",
-                    ["index"] = cardIndex
+                    ["index"] = cardIndex,
+                    ["card_index"] = cardIndex
                 });
             }
         }
@@ -959,7 +1136,8 @@ public static partial class McpMod
     private static bool IsSettledFullRunState(Dictionary<string, object?> state)
     {
         string stateType = GetStateType(state);
-        return stateType is not "" and not "unknown" and not "menu" and not "loading";
+        return stateType is not "" and not "unknown" and not "menu" and not "loading"
+            && !IsDialogueOnlyEventState(state);
     }
 
     private static bool IsMenuReadyForFullRunReset(Dictionary<string, object?> state)
@@ -994,6 +1172,9 @@ public static partial class McpMod
         if (IsFullRunTerminalState(state, ExtractFullRunOutcome(state)))
             return true;
 
+        if (IsDialogueOnlyEventState(state))
+            return false;
+
         if (!state.TryGetValue("legal_actions", out object? rawActions) || rawActions is not IEnumerable enumerable || rawActions is string)
             return false;
 
@@ -1004,6 +1185,25 @@ public static partial class McpMod
         }
 
         return false;
+    }
+
+    private static bool IsDialogueOnlyEventState(Dictionary<string, object?> state)
+    {
+        if (!string.Equals(GetStateType(state), "event", StringComparison.Ordinal))
+            return false;
+
+        if (!TryGetDict(state, "event", out Dictionary<string, object?> eventState))
+            return false;
+
+        if (!GetBool(eventState, "in_dialogue"))
+            return false;
+
+        if (!state.TryGetValue("legal_actions", out object? rawActions) || rawActions is not IEnumerable enumerable || rawActions is string)
+            return false;
+
+        List<Dictionary<string, object?>> actions = EnumerateDictionaries(rawActions).ToList();
+        return actions.Count == 1
+            && string.Equals(GetString(actions[0], "action"), "advance_dialogue", StringComparison.Ordinal);
     }
 
     private static string GetFullRunStateSignature(Dictionary<string, object?> state)

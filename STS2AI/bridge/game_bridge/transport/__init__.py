@@ -24,11 +24,7 @@ from game_bridge.transport.pipe_transport import (
     TransportClosedError,
     TransportTimeoutError,
 )
-from game_bridge.transport.codec import (
-    BinaryOpcodeCodec,
-    JsonCodec,
-    ProtocolCodec,
-)
+from game_bridge.transport.codec import JsonCodec, ProtocolCodec
 from game_bridge.transport.connection import (
     PipeConnection,
     PipeConnectionConfig,
@@ -47,6 +43,5 @@ __all__ = [
     "TransportTimeoutError",
     "ProtocolCodec",
     "JsonCodec",
-    "BinaryOpcodeCodec",
     "ProtoCodec",
 ]

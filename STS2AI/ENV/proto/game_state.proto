@@ -346,3 +346,233 @@ message CombatResetRequest {
 message CombatStepRequest {
   LegalAction action = 1;
 }
+
+// --- Proto pipe envelope ---
+
+enum PipeMethod {
+  HANDSHAKE = 0;
+  RESET = 1;
+  STATE = 2;
+  STEP = 3;
+  BATCH_STEP = 4;
+  SAVE_STATE = 5;
+  LOAD_STATE = 6;
+  DELETE_STATE = 7;
+  PERF_STATS = 8;
+  RESET_PERF_STATS = 9;
+  STEP_LOCAL_POLICY = 10;
+  LOAD_ORT_MODEL = 11;
+  RUN_COMBAT_LOCAL = 12;
+  EXPORT_STATE = 13;
+  IMPORT_STATE = 14;
+  SKIP_COMBAT = 15;
+  SEARCH_COMBAT_MCTS = 16;
+  COMBAT_RESET = 17;
+  COMBAT_STEP = 18;
+  COMBAT_STATE = 19;
+}
+
+enum PipeStatus {
+  OK = 0;
+  REJECTED_ACTION = 1;
+  SIMULATOR_ERROR = 2;
+  PROTOCOL_ERROR = 3;
+}
+
+message PipeHandshake {
+  uint32 protocol_version = 1;
+  string build_git_sha = 2;
+  string schema_id = 3;
+}
+
+message PipeResetPayload {
+  string character_id = 1;
+  string seed = 2;
+  int32 ascension_level = 3;
+  string build_json = 4;
+}
+
+message PipeActionPayload {
+  LegalAction action = 1;
+}
+
+message PipeBatchActionPayload {
+  repeated LegalAction actions = 1;
+}
+
+message PipeStateIdRequest {
+  string state_id = 1;
+}
+
+message PipePathRequest {
+  string path = 1;
+}
+
+message PipeExportStateRequest {
+  string path = 1;
+  string state_id = 2;
+}
+
+message PipeDeleteStateRequest {
+  bool clear_all = 1;
+  string state_id = 2;
+}
+
+message PipeLoadOrtModelRequest {
+  string path = 1;
+}
+
+message PipeRunCombatLocalRequest {
+  int32 max_steps = 1;
+}
+
+message PipeSearchCombatMctsRequest {
+  int32 num_simulations = 1;
+  float c_puct = 2;
+  float dirichlet_alpha = 3;
+  float dirichlet_fraction = 4;
+  int32 max_step_budget = 5;
+  string final_action_mode = 6;
+  int32 final_action_top_k = 7;
+  float final_action_q_weight = 8;
+  bool use_continuation_value = 9;
+  bool enable_debug_trace = 10;
+}
+
+message PipeRequestEnvelope {
+  PipeMethod method = 1;
+  oneof payload {
+    PipeResetPayload reset = 2;
+    PipeActionPayload step = 3;
+    PipeBatchActionPayload batch_step = 4;
+    PipeExportStateRequest export_state = 5;
+    PipeStateIdRequest load_state = 6;
+    PipePathRequest import_state = 7;
+    PipeDeleteStateRequest delete_state = 8;
+    PipeLoadOrtModelRequest load_ort_model = 9;
+    PipeRunCombatLocalRequest run_combat_local = 10;
+    PipeSearchCombatMctsRequest search_combat_mcts = 11;
+    CombatResetRequest combat_reset = 12;
+    CombatStepRequest combat_step = 13;
+  }
+}
+
+message PipeError {
+  string error_code = 1;
+  string error_message = 2;
+}
+
+message PipeStatePayload {
+  GameState state = 1;
+}
+
+message PipeStepPayload {
+  bool accepted = 1;
+  string error = 2;
+  GameState state = 3;
+}
+
+message PipeBatchStepPayload {
+  bool accepted = 1;
+  int32 steps_executed = 2;
+  string error = 3;
+  GameState state = 4;
+}
+
+message PipeSaveStateResult {
+  string state_id = 1;
+  int32 cache_size = 2;
+}
+
+message PipeExportStateResult {
+  string path = 1;
+  int32 cache_size = 2;
+}
+
+message PipeDeleteStateResult {
+  bool deleted = 1;
+  int32 cache_size = 2;
+}
+
+message PipePerfStatsResult {
+  string json_payload = 1;
+}
+
+message PipeResetPerfStatsResult {
+  bool reset = 1;
+}
+
+message PipeLoadOrtModelResult {
+  bool loaded = 1;
+  bool has_value_output = 2;
+  bool has_deck_inputs = 3;
+  bool has_continuation_output = 4;
+  bool has_extra_scalars_input = 5;
+  string execution_provider_name = 6;
+  string requested_device = 7;
+  bool fell_back_to_cpu = 8;
+}
+
+message PipeRunCombatLocalResult {
+  int32 combat_steps = 1;
+  float elapsed_ms = 2;
+  float get_snapshot_ms = 3;
+  float ort_ms = 4;
+  float step_async_ms = 5;
+  float wait_async_ms = 6;
+  float max_step_ms = 7;
+  float max_wait_ms = 8;
+  GameState state = 9;
+}
+
+message PipeSearchCombatMctsResult {
+  int32 action_index = 1;
+  repeated int32 visit_counts = 2;
+  repeated float visit_probs = 3;
+  repeated float q_values = 4;
+  repeated float priors = 5;
+  float root_value = 6;
+  float search_ms = 7;
+  bool restored_ok = 8;
+  int32 snapshot_count = 9;
+  int32 simulation_count = 10;
+  int32 save_state_count = 11;
+  int32 load_state_count = 12;
+  int32 delete_state_count = 13;
+  int32 step_count = 14;
+  int32 advance_state_count = 15;
+  int32 eval_call_count = 16;
+  int32 eval_batch_count = 17;
+  int32 eval_state_count = 18;
+  int32 select_child_count = 19;
+  int32 backprop_count = 20;
+  float save_state_ms = 21;
+  float load_state_ms = 22;
+  float delete_state_ms = 23;
+  float step_ms = 24;
+  float advance_state_ms = 25;
+  float eval_ms = 26;
+  float selection_ms = 27;
+  float backprop_ms = 28;
+  string debug_trace_json = 29;
+}
+
+message PipeResponseEnvelope {
+  PipeMethod method = 1;
+  PipeStatus status = 2;
+  oneof payload {
+    PipeHandshake handshake = 3;
+    PipeStatePayload state = 4;
+    PipeStepPayload step = 5;
+    PipeBatchStepPayload batch_step = 6;
+    PipeSaveStateResult save_state = 7;
+    PipeExportStateResult export_state = 8;
+    PipeDeleteStateResult delete_state = 9;
+    PipePerfStatsResult perf_stats = 10;
+    PipeResetPerfStatsResult reset_perf_stats = 11;
+    PipeLoadOrtModelResult load_ort_model = 12;
+    PipeRunCombatLocalResult run_combat_local = 13;
+    PipeSearchCombatMctsResult search_combat_mcts = 14;
+    PipeError error = 15;
+  }
+}

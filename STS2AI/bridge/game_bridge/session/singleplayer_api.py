@@ -7,7 +7,13 @@ import http.client
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
+
+from game_bridge.session.state_semantics import (
+    is_actionable_combat_state,
+    is_post_action_combat_settled,
+    should_wait_for_post_action_combat_settle,
+)
 
 
 class SingleplayerAutomationError(RuntimeError):
@@ -24,13 +30,6 @@ class SingleplayerApiError(SingleplayerAutomationError):
 
 class SingleplayerTimeoutError(SingleplayerAutomationError):
     pass
-
-
-COMBAT_STATE_TYPES = {"monster", "elite", "boss", "hand_select"}
-
-
-def _lower(value: Any) -> str:
-    return str(value or "").lower()
 
 
 @dataclass(slots=True)
@@ -50,9 +49,9 @@ class SingleplayerClient:
         # Follow the action with a fresh GET so callers always receive a state snapshot.
         self._request_json("POST", "/api/v1/singleplayer", payload)
         state = self.get_state()
-        if self._should_wait_for_post_action_combat_settle(state):
+        if should_wait_for_post_action_combat_settle(state):
             state = self.wait_until(
-                lambda current: self._is_post_action_combat_settled(current),
+                lambda current: is_post_action_combat_settled(current),
                 timeout_s=self.ready_timeout_s,
                 initial_state=state,
             )
@@ -98,19 +97,13 @@ class SingleplayerClient:
         initial_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self.wait_until(
-            lambda current: self._is_actionable_combat_state(current),
+            lambda current: is_actionable_combat_state(current),
             timeout_s=timeout_s,
             initial_state=initial_state,
         )
 
     def close(self) -> None:
         return None
-
-    def _should_wait_for_post_action_combat_settle(self, state: dict[str, Any]) -> bool:
-        return self._is_combat_state(state) and not self._is_actionable_combat_state(state)
-
-    def _is_post_action_combat_settled(self, state: dict[str, Any]) -> bool:
-        return not self._is_combat_state(state) or self._is_actionable_combat_state(state)
 
     def _request_json(
         self,
@@ -171,34 +164,3 @@ class SingleplayerClient:
         if not isinstance(parsed, dict):
             raise SingleplayerApiError(f"Expected JSON object from {url}, got {type(parsed).__name__}")
         return parsed
-
-    @staticmethod
-    def _is_actionable_combat_state(state: dict[str, Any]) -> bool:
-        state_type = _lower(state.get("state_type"))
-        if state_type not in COMBAT_STATE_TYPES:
-            return False
-        if state_type == "hand_select":
-            return True
-        if isinstance(state.get("card_selection"), dict):
-            return True
-        battle = state.get("battle") or {}
-        if not (bool(battle.get("is_play_phase")) and _lower(battle.get("turn")) == "player"):
-            return False
-
-        player = battle.get("player") or state.get("player") or {}
-        hand = list(player.get("hand") or [])
-        if not hand:
-            return True
-
-        if any(bool(card.get("can_play")) for card in hand):
-            return True
-
-        reasons = {_lower(card.get("unplayable_reason")) for card in hand if card.get("unplayable_reason") is not None}
-        if reasons and reasons.issubset({"playeractionsdisabled", "disabled", "none"}):
-            return False
-
-        return True
-
-    @staticmethod
-    def _is_combat_state(state: dict[str, Any]) -> bool:
-        return _lower(state.get("state_type")) in COMBAT_STATE_TYPES

@@ -146,10 +146,8 @@ def _kill_stale_headless_processes(*, port: int, host_path: Path) -> None:
 
 
 def _normalize_protocol(protocol: str) -> str:
-    """统一的 protocol 名归一化：支持 json / bin / proto 三种。"""
+    """统一的 protocol 名归一化：只支持 json / proto。"""
     p = str(protocol).strip().lower()
-    if p in {"bin", "binary"}:
-        return "bin"
     if p in {"proto", "protobuf"}:
         return "proto"
     return "json"
@@ -165,9 +163,7 @@ def _build_launch_command(host_path: Path, protocol: str, port: int) -> list[str
 
 def _pipe_name_for_port(*, port: int, protocol: str) -> str:
     normalized_protocol = _normalize_protocol(protocol)
-    if normalized_protocol == "bin":
-        pipe_suffix = f"sts2_mcts_bin_{port}"
-    elif normalized_protocol == "proto":
+    if normalized_protocol == "proto":
         pipe_suffix = f"sts2_mcts_proto_{port}"
     else:
         pipe_suffix = f"sts2_mcts_{port}"
@@ -309,7 +305,7 @@ def main() -> int:
     parser.add_argument("--host-path", type=Path, default=DEFAULT_HOST_PATH)
     parser.add_argument("--dll-path", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--ready-timeout", type=float, default=15.0)
-    parser.add_argument("--protocol", choices=["json", "bin", "proto"], default="json")
+    parser.add_argument("--protocol", choices=["json", "proto"], default="json")
     args = parser.parse_args()
 
     proc = start_headless_sim(

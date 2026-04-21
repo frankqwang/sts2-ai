@@ -242,6 +242,17 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			case "elite":
 			case "boss":
 				return BuildCombatLegalActions(localPlayer, snapshot);
+			case "game_over":
+				return new List<FullRunSimulationLegalAction>
+				{
+					new FullRunSimulationLegalAction
+					{
+						Action = "overlay_press",
+						Index = 0,
+						Label = "Continue",
+						IsSupported = true
+					}
+				};
 			default:
 				return new List<FullRunSimulationLegalAction>();
 		}
@@ -462,16 +473,28 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 		{
 			return actions;
 		}
-		foreach (CombatTrainingSelectableCardSnapshot card in selection.SelectableCards)
+		int maxSelect = selection.MaxSelect;
+		int selectedCount = selection.SelectedCards.Count;
+		bool selectionQuotaReached = maxSelect > 0 && selectedCount >= maxSelect;
+		bool previewShowing = selectionQuotaReached && selection.CanConfirm;
+		bool canCancel = selection.Cancelable;
+		if (!canCancel && previewShowing && selectedCount > 0)
 		{
-			actions.Add(new FullRunSimulationLegalAction
+			canCancel = true;
+		}
+		if (!previewShowing)
+		{
+			foreach (CombatTrainingSelectableCardSnapshot card in selection.SelectableCards)
 			{
-				Action = "select_card",
-				Index = card.ChoiceIndex,
-				CardIndex = card.ChoiceIndex,
-				Label = card.Title,
-				IsSupported = true
-			});
+				actions.Add(new FullRunSimulationLegalAction
+				{
+					Action = "select_card",
+					Index = card.ChoiceIndex,
+					CardIndex = card.ChoiceIndex,
+					Label = card.Title,
+					IsSupported = true
+				});
+			}
 		}
 		if (selection.CanConfirm)
 		{
@@ -482,7 +505,7 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 				IsSupported = true
 			});
 		}
-		if (selection.Cancelable)
+		if (canCancel)
 		{
 			actions.Add(new FullRunSimulationLegalAction
 			{

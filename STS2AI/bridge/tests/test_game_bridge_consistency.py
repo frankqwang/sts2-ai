@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_python_root = Path(__file__).resolve().parents[1]
+if str(_python_root) not in sys.path:
+    sys.path.insert(0, str(_python_root))
+
+from game_bridge.session.build_spec import BuildSpecPy, normalize_build_spec
+from game_bridge.session.state_semantics import (
+    is_failure_outcome,
+    is_actionable_combat_state,
+    is_victory_outcome,
+    is_menu_ready_for_v2_reset,
+    normalize_run_outcome,
+)
+from game_bridge.sim.consistency import build_consistency_report
+
+
+def test_normalize_run_outcome_uses_shared_vocab():
+    assert normalize_run_outcome("Win") == "victory"
+    assert normalize_run_outcome("death") == "defeat"
+    assert normalize_run_outcome("") is None
+    assert is_victory_outcome("won") is True
+    assert is_failure_outcome("loss") is True
+
+
+def test_build_spec_normalization_accepts_aliases():
+    normalized = normalize_build_spec(
+        {
+            "cards": [
+                "Strike_R",
+                {"card_id": "Bash", "upgrades": 1, "props": {"ethereal": False}},
+            ],
+            "relic_ids": ["BurningBlood"],
+            "hp": 55,
+            "max_hp": 80,
+            "energy": 4,
+            "gold": 99,
+        }
+    )
+
+    assert normalized == {
+        "deck": [
+            {"id": "Strike_R", "upgrade_level": 0},
+            {"id": "Bash", "upgrade_level": 1, "props": {"ethereal": False}},
+        ],
+        "relics": [{"id": "BurningBlood"}],
+        "current_hp": 55,
+        "max_hp": 80,
+        "max_energy": 4,
+        "gold": 99,
+    }
+
+    typed = BuildSpecPy.from_dict({"deck": ["Strike_R"], "relics": ["BurningBlood"]})
+    assert normalize_build_spec(typed) == {
+        "deck": [{"id": "Strike_R", "upgrade_level": 0}],
+        "relics": [{"id": "BurningBlood"}],
+    }
+
+
+def test_state_semantics_detects_actionable_combat_and_menu_readiness():
+    actionable_state = {
+        "state_type": "monster",
+        "battle": {
+            "turn": "player",
+            "is_play_phase": True,
+            "player": {
+                "hand": [
+                    {"id": "Strike_R", "can_play": True},
+                ]
+            },
+        },
+    }
+    assert is_actionable_combat_state(actionable_state) is True
+    assert is_menu_ready_for_v2_reset({"state_type": "menu", "menu": {"is_main_menu_visible": True}}) is True
+    assert is_menu_ready_for_v2_reset({"state_type": "menu", "menu": {"is_main_menu_visible": False}}) is False
+
+
+def test_consistency_report_includes_missing_catalog_opcode_gap():
+    report = build_consistency_report(
+        state={
+            "state_type": "monster",
+            "legal_actions": [],
+            "battle": {"enemies": [], "hand": []},
+        }
+    )
+
+    checks = {item["area"]: item for item in report["checks"]}
+    assert checks["catalog/proto_pipe"]["status"] == "missing"
+    assert report["state_check"]["ok"] is False
+    assert any("非可行动" in issue for issue in report["state_check"]["issues"])

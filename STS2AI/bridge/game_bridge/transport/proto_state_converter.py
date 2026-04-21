@@ -1,7 +1,6 @@
 """GameState protobuf message → 训练端兼容 dict 转换。
 
-输出格式是 V2 训练的规范 state dict(历史上和已废弃的 `binary_pipe_client`
-保持过一致,现在 binary wire 已删除,只剩 proto)。上层 normalize / 网络输入 /
+输出格式是 V2 训练的规范 state dict。上层 normalize / 网络输入 /
 action 选择直接消费 dict。
 
 用法::
@@ -18,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from game_bridge.generated import game_state_pb2 as pb
-from game_bridge.sim.constants import COMBAT_STATE_TYPES
+from game_bridge.session.state_semantics import COMBAT_STATE_TYPES, normalize_run_outcome
 
 
 # ===================================================================
@@ -28,9 +27,7 @@ from game_bridge.sim.constants import COMBAT_STATE_TYPES
 def game_state_to_dict(gs: pb.GameState) -> dict[str, Any]:
     """顶层转换：GameState proto → 兼容 dict。"""
     state_type = gs.state_type or "other"
-    run_outcome = gs.run_outcome or None
-    if run_outcome == "":
-        run_outcome = None
+    run_outcome = normalize_run_outcome(gs.run_outcome)
 
     player = _convert_player(gs.player)
     legal_actions = [_convert_legal_action(a) for a in gs.legal_actions]
@@ -44,8 +41,9 @@ def game_state_to_dict(gs: pb.GameState) -> dict[str, Any]:
             "floor": gs.run.floor if gs.HasField("run") else 0,
         },
         "legal_actions": legal_actions,
-        "player": player,
     }
+    if state_type != "game_over":
+        state["player"] = player
 
     if state_type == "map" and gs.HasField("map"):
         state["map"] = _convert_map(gs.map, player)
@@ -71,6 +69,9 @@ def game_state_to_dict(gs: pb.GameState) -> dict[str, Any]:
     elif state_type in COMBAT_STATE_TYPES and gs.HasField("battle"):
         battle = _convert_battle(gs.battle, player)
         state["battle"] = battle
+        # combat 场景下，上游通常直接读顶层 player。这里同步 battle.player
+        # 的合并结果，确保 deck/relics/powers 等字段口径一致。
+        state["player"] = battle.get("player", player)
         state["enemies"] = battle.get("enemies", [])
         state["round_number_raw"] = battle.get("round_number_raw")
 
@@ -83,7 +84,7 @@ def game_state_to_dict(gs: pb.GameState) -> dict[str, Any]:
 # ===================================================================
 
 def _convert_player(p: pb.PlayerState) -> dict[str, Any]:
-    """PlayerState proto → 兼容 dict（顶层 player，不含 powers/hand）。"""
+    """PlayerState proto → 兼容 dict。"""
     hp = p.hp
     deck = []
     for i, c in enumerate(p.deck):
@@ -110,6 +111,8 @@ def _convert_player(p: pb.PlayerState) -> dict[str, Any]:
               for i, r in enumerate(p.relics)]
     potions = [{"index": i, "id": pt.id, "name": pt.id}
                for i, pt in enumerate(p.potions)]
+    powers = [{"id": pw.id, "amount": pw.amount}
+              for pw in p.powers if pw.amount]
 
     return {
         "hp": hp,
@@ -128,6 +131,7 @@ def _convert_player(p: pb.PlayerState) -> dict[str, Any]:
         "relics": relics,
         "potions": potions,
         "max_potions": p.max_potions,
+        "powers": powers,
     }
 
 
@@ -406,8 +410,8 @@ def _convert_combat_rewards(cr: pb.CombatRewardsState, player: dict[str, Any]) -
         items.append({
             "index": i,
             "type": item.type or "unknown",
-            "label": item.label or item.id or item.type or "unknown",
-            "id": item.id or "",
+            "label": item.label or item.type or "unknown",
+            "id": None,
             "reward_key": None,
             "reward_source": None,
             "claimable": item.claimable,

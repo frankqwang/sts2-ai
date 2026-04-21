@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from game_bridge.session.state_semantics import normalize_run_outcome
 
 
 @dataclass(slots=True)
@@ -38,7 +39,7 @@ class StateView:
 
     @property
     def run_outcome(self) -> str:
-        return str(self.raw.get("run_outcome") or "")
+        return str(normalize_run_outcome(self.raw.get("run_outcome")) or "")
 
 
 @dataclass(slots=True)

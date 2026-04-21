@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
@@ -243,7 +244,7 @@ public static partial class McpMod
 
         // Bypass NGame.StartNewSingleplayerRun so spectator can force a fully
         // unlocked run while still using the shared singleplayer launch flow.
-        var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false)
+        var acts = ActModel.GetRandomList(new MegaCrit.Sts2.Core.Random.Rng((uint)StringHelper.GetDeterministicHashCode(seed)), UnlockState.all, isMultiplayer: false)
             .Select(static act => act.ToMutable())
             .ToList();
         Player player = Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId);
@@ -251,6 +252,7 @@ public static partial class McpMod
             new List<Player> { player },
             acts,
             Array.Empty<ModifierModel>(),
+            GameMode.Standard,
             ascension,
             seed);
         RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: true, dailyTime: null);
@@ -921,6 +923,7 @@ public static partial class McpMod
 
             var holder = holders[index];
             string cardName = SafeGetText(() => holder.CardModel?.Title) ?? "unknown";
+            WaitForChooseCardScreenReady(chooseScreen);
             var grid = FindFirst<NCardGrid>(chooseScreen);
             if (grid != null)
                 grid.EmitSignal(NCardGrid.SignalName.HolderPressed, holder);
@@ -1144,6 +1147,7 @@ public static partial class McpMod
 
             var chooseHolder = chooseHolders[chooseIndex];
             string chooseCardName = SafeGetText(() => chooseHolder.CardModel?.Title) ?? "unknown";
+            WaitForChooseCardScreenReady(chooseScreen);
             var chooseGrid = FindFirst<NCardGrid>(chooseScreen);
             if (chooseGrid != null)
                 chooseGrid.EmitSignal(NCardGrid.SignalName.HolderPressed, chooseHolder);
@@ -1157,6 +1161,26 @@ public static partial class McpMod
         }
 
         return Error("No in-combat card selection is active (neither hand-select nor card grid overlay)");
+    }
+
+    private static void WaitForChooseCardScreenReady(NChooseACardSelectionScreen screen)
+    {
+        FieldInfo? field = typeof(NChooseACardSelectionScreen).GetField(
+            "_openedTicks",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        if (field?.GetValue(screen) is not ulong openedTicks || openedTicks == 0)
+            return;
+
+        const ulong minOpenDelayMsec = 360;
+        ulong now = Godot.Time.GetTicksMsec();
+        if (now <= openedTicks)
+            return;
+
+        ulong elapsed = now - openedTicks;
+        if (elapsed >= minOpenDelayMsec)
+            return;
+
+        Thread.Sleep((int)(minOpenDelayMsec - elapsed));
     }
 
     private static Dictionary<string, object?> ExecuteCombatConfirmSelection()

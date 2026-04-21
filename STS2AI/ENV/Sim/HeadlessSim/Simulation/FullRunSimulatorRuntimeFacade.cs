@@ -291,6 +291,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		TestSupport.TestMode.IsOn = true;
 		_runtimeScope = new SimulationRuntimeScope();
 		_selectorScope = CardSelectCmd.UseSelector(FullRunSimulationChoiceBridge.Instance);
+		RewardsSet.testSelector = SelectRewardsSetViaBridgeAsync;
 		FullRunSimulationChoiceBridge.Instance.Reset();
 		_forceMapView = false;
 		_rewardsTriggered = false;
@@ -304,6 +305,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		CharacterModel character = CombatTrainingMode.ResolveCharacter(request?.Character ?? request?.CharacterId);
 		string seed = CombatTrainingMode.ResolveEpisodeSeed(request?.Seed);
 		int ascensionLevel = CombatTrainingMode.ResolveAscensionLevel(request?.Ascension ?? request?.AscensionLevel);
+		PrimeMockProgressForStableFullRunReset(character);
 		// Standalone pure-sim runs against mock saves in TestMode. Use a stable
 		// fully-unlocked, non-first-run unlock state so tutorial/first-run
 		// branches match the mature simulator backend instead of empty test saves.
@@ -343,6 +345,35 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		FullRunSimulationStateSnapshot state = await WaitForStateChangeAsync(previousState: null);
 		FullRunSimulationTrace.Write($"headless_reset.done state_type={state.StateType} floor={state.TotalFloor} terminal={state.IsTerminal}");
 		return state;
+	}
+
+	private static void PrimeMockProgressForStableFullRunReset(CharacterModel character)
+	{
+		if (SaveManager.Instance == null)
+		{
+			return;
+		}
+		SerializableProgress progress = new SerializableProgress
+		{
+			EnableFtues = false,
+			DiscoveredActs = ActModel.GetDefaultList()
+				.Select(static act => act.Id)
+				.Append(new ModelId(ModelId.SlugifyCategory<ActModel>(), "UNDERDOCKS"))
+				.ToList(),
+			CharStats = new List<CharacterStats>
+			{
+				new CharacterStats
+				{
+					Id = character.Id,
+					TotalWins = 1,
+					BestWinStreak = 1,
+					CurrentWinStreak = 1
+				}
+			}
+		};
+		SaveManager.Instance.Progress = ProgressState.FromSerializable(
+			progress,
+			new MegaCrit.Sts2.Core.Saves.Validation.DeserializationContext());
 	}
 
 	public FullRunSimulationStateSnapshot GetState()
@@ -484,25 +515,38 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 					return BuildRejected("choose_event_option requires an index.", "full_run_action_required");
 				}
 				{
+					string previousSignature = BuildStateChangeSignature(state);
+					if (!await TryChooseEventOptionAsync(action.Index.Value))
+					{
+						return BuildRejected("Could not resolve requested event option.", "full_run_event_option_not_found");
+					}
+
+					ObservedState immediateObserved = ObserveState();
+					if (immediateObserved.Signature != previousSignature
+						&& IsReadySnapshot(immediateObserved.Snapshot))
+					{
+						return new FullRunSimulationStepResult
+						{
+							Accepted = true,
+							State = immediateObserved.Snapshot
+						};
+					}
+
 					// Event options are a mix of:
 					// 1. Synchronous state transitions (REST -> FIGHT, proceed, etc.)
 					// 2. Actions that open a selector and intentionally block until player input
 					//    (upgrade/remove/transform events).
-					// Start the event task, give it a moment to either finish or register a
-					// pending selection, then return whichever state is now actionable.
-					Task<bool> eventTask = TryChooseEventOptionAsync(action.Index.Value);
+					// Trigger the choice, then give it a moment to either finish or register a
+					// pending selection, and return whichever state is now actionable.
 					await CombatSimulationRuntime.Clock.YieldAsync();
-
-					if (eventTask.IsCompleted)
+					ObservedState earlyObserved = ObserveState();
+					if (earlyObserved.Signature != previousSignature
+						&& IsReadySnapshot(earlyObserved.Snapshot))
 					{
-						if (!await eventTask)
-						{
-							return BuildRejected("Could not resolve requested event option.", "full_run_event_option_not_found");
-						}
 						return new FullRunSimulationStepResult
 						{
 							Accepted = true,
-							State = await WaitForStateChangeAsync(state)
+							State = earlyObserved.Snapshot
 						};
 					}
 
@@ -511,29 +555,25 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 					for (int waitIter = 0; waitIter < eventWaitMax; waitIter++)
 					{
 						await CombatSimulationRuntime.Clock.YieldAsync();
-						if (FullRunSimulationChoiceBridge.Instance.IsSelectionActive || eventTask.IsCompleted)
+						ObservedState observed = ObserveState();
+						if (observed.Signature != previousSignature
+							&& IsReadySnapshot(observed.Snapshot))
+						{
+							return new FullRunSimulationStepResult
+							{
+								Accepted = true,
+								State = observed.Snapshot
+							};
+						}
+						if (FullRunSimulationChoiceBridge.Instance.IsSelectionActive)
 						{
 							break;
 						}
 					}
-
-					if (eventTask.IsCompleted)
-					{
-						if (!await eventTask)
-						{
-							return BuildRejected("Could not resolve requested event option.", "full_run_event_option_not_found");
-						}
-						return new FullRunSimulationStepResult
-						{
-							Accepted = true,
-							State = await WaitForStateChangeAsync(state)
-						};
-					}
-
 					return new FullRunSimulationStepResult
 					{
 						Accepted = true,
-						State = GetState()
+						State = await WaitForStateChangeAsync(state)
 					};
 				}
 			case "advance_dialogue":
@@ -2421,39 +2461,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		RewardsSet rewardsSet = BuildRewardsSetForRoomEnd(player, room);
 		List<Reward> rewards = await rewardsSet.GenerateWithoutOffering();
 		await Hook.BeforeRewardsOffered(player.RunState, player, rewards);
-		if (!LocalContext.IsMe(player))
-		{
-			return;
-		}
-
-		foreach (Reward reward in rewards)
-		{
-			reward.MarkContentAsSeen();
-		}
-
-		while (true)
-		{
-			Reward? selectedReward = await FullRunSimulationChoiceBridge.Instance.GetSelectedRewardAsync(rewards, canProceed: true);
-			if (selectedReward == null)
-			{
-				foreach (Reward reward in rewards.ToList())
-				{
-					reward.OnSkipped();
-				}
-				return;
-			}
-
-			bool removeReward = selectedReward switch
-			{
-				CardReward cardReward => await ResolveCardRewardAsync(cardReward),
-				_ => await selectedReward.OnSelectWrapper()
-			};
-
-			if (removeReward)
-			{
-				rewards.Remove(selectedReward);
-			}
-		}
+		await OfferRewardsViaBridgeAsync(player, rewards, canProceed: true);
 	}
 
 	private static RewardsSet BuildRewardsSetForRoomEnd(Player player, CombatRoom room)
@@ -2510,6 +2518,51 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 
 		reward.OnSkipped();
 		return true;
+	}
+
+	private async Task SelectRewardsSetViaBridgeAsync(RewardsSet rewardsSet)
+	{
+		await OfferRewardsViaBridgeAsync(
+			rewardsSet.Player,
+			rewardsSet.Rewards,
+			canProceed: !rewardsSet.DisallowSkipping);
+	}
+
+	private async Task OfferRewardsViaBridgeAsync(Player player, List<Reward> rewards, bool canProceed)
+	{
+		if (!LocalContext.IsMe(player))
+		{
+			return;
+		}
+
+		foreach (Reward reward in rewards)
+		{
+			reward.MarkContentAsSeen();
+		}
+
+		while (true)
+		{
+			Reward? selectedReward = await FullRunSimulationChoiceBridge.Instance.GetSelectedRewardAsync(rewards, canProceed);
+			if (selectedReward == null)
+			{
+				foreach (Reward reward in rewards.ToList())
+				{
+					reward.OnSkipped();
+				}
+				return;
+			}
+
+			bool removeReward = selectedReward switch
+			{
+				CardReward cardReward => await ResolveCardRewardAsync(cardReward),
+				_ => await selectedReward.OnSelectWrapper()
+			};
+
+			if (removeReward)
+			{
+				rewards.Remove(selectedReward);
+			}
+		}
 	}
 
 	private static bool MatchesLoadedTargetState(FullRunSimulationStateSnapshot state, string expectedStateType)
@@ -2627,6 +2680,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		_forceMapView = false;
 		_lastObservedState = null;
 		_suppressTerminalRewardsTransitionOnce = false;
+		RewardsSet.testSelector = null;
 		FullRunSimulationChoiceBridge.Instance.Reset();
 		if (RunManager.Instance.IsInProgress)
 		{
@@ -2722,6 +2776,7 @@ public sealed class FullRunSimulatorRuntimeFacade : IFullRunRuntimeFacade, IDisp
 		{
 			return false;
 		}
+
 		EventModel localEvent = eventRoom.LocalMutableEvent;
 		if (localEvent.IsFinished || index < 0 || index >= localEvent.CurrentOptions.Count)
 		{

@@ -534,6 +534,8 @@ public sealed class FullRunApiState
 
 	public FullRunApiRun run { get; set; } = new FullRunApiRun();
 
+	public FullRunApiPlayerState? player { get; set; }
+
 	public List<FullRunApiAction> legal_actions { get; set; } = new List<FullRunApiAction>();
 
 	public FullRunApiBattleState? battle { get; set; }

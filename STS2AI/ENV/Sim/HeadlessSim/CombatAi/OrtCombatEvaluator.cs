@@ -673,10 +673,8 @@ internal sealed class OrtActorPolicy : IDisposable
 
 	public (int ActionIndex, float[] Logits) SelectAction(
 		FullRunSimulationStateSnapshot snapshot,
-		BinarySessionState? session,
 		Random rng)
 	{
-		_ = session;
 		CombatEvaluationResult result = _evaluator.Evaluate(snapshot, snapshot.LegalActions, useContinuationValue: false);
 		int legalCount = Math.Min(snapshot.LegalActions.Count, result.PolicyLogits.Length);
 		int actionIndex = _argmax || rng == null

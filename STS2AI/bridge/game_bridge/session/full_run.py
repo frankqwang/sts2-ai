@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from game_bridge.session.base import PipeSnapshotMixin
+from game_bridge.session.build_spec import normalize_build_spec
+from game_bridge.session.state_semantics import (
+    is_menu_ready_for_v2_reset,
+    looks_like_missing_endpoint,
+    state_type,
+)
 from game_bridge.session.singleplayer_api import (
     SingleplayerApiError,
     SingleplayerClient,
@@ -45,129 +51,6 @@ def _unwrap_envelope(result: Any) -> Any:
             and "opcode" in result):
         return result["payload"]
     return result
-
-
-def _state_type(state: dict[str, Any] | None) -> str:
-    return str((state or {}).get("state_type") or "").lower()
-
-
-def _extract_run_outcome(state: dict[str, Any]) -> str | None:
-    for key in ("run_outcome", "outcome"):
-        value = state.get(key)
-        if value is not None:
-            text = str(value).strip().lower()
-            if text:
-                return text
-
-    game_over = state.get("game_over")
-    if isinstance(game_over, dict):
-        for key in ("run_outcome", "outcome", "result"):
-            value = game_over.get(key)
-            if value is None:
-                continue
-            text = str(value).strip().lower()
-            if text:
-                return text
-    return None
-
-
-def _is_menu_ready_for_v2_reset(state: dict[str, Any]) -> bool:
-    if _state_type(state) != "menu":
-        return True
-    menu = state.get("menu")
-    if not isinstance(menu, dict):
-        return True
-    return bool(menu.get("is_main_menu_visible"))
-
-
-def _looks_like_missing_endpoint(exc: Exception) -> bool:
-    text = str(exc).strip().lower()
-    return any(
-        marker in text
-        for marker in (
-            "http 404",
-            "not found",
-            "unsupported full run env",
-            "unknown api",
-        )
-    )
-
-def _normalize_build_spec(build: dict[str, Any] | None) -> dict[str, Any] | None:
-    if build is None:
-        return None
-    if not isinstance(build, dict):
-        raise TypeError("build must be a dict when provided")
-
-    def _normalize_card_entry(entry: Any) -> dict[str, Any]:
-        if isinstance(entry, str):
-            card_id = entry.strip()
-            if not card_id:
-                raise ValueError("build.deck contains an empty card id")
-            return {"id": card_id}
-        if not isinstance(entry, dict):
-            raise TypeError("build.deck entries must be strings or dicts")
-        card_id = str(entry.get("id") or entry.get("card_id") or entry.get("name") or "").strip()
-        if not card_id:
-            raise ValueError("build.deck entry is missing id")
-        normalized: dict[str, Any] = {"id": card_id}
-        upgrade_level = entry.get("upgrade_level", entry.get("upgrades", entry.get("current_upgrade_level")))
-        if upgrade_level is None and bool(entry.get("is_upgraded")):
-            upgrade_level = 1
-        if upgrade_level is not None:
-            normalized["upgrade_level"] = max(0, int(upgrade_level))
-        floor_added = entry.get("floor_added_to_deck")
-        if floor_added is not None:
-            normalized["floor_added_to_deck"] = int(floor_added)
-        props = entry.get("props")
-        if props is not None:
-            if not isinstance(props, dict):
-                raise TypeError("build.deck entry props must be a dict")
-            normalized["props"] = props
-        return normalized
-
-    def _normalize_relic_entry(entry: Any) -> dict[str, Any]:
-        if isinstance(entry, str):
-            relic_id = entry.strip()
-            if not relic_id:
-                raise ValueError("build.relics contains an empty relic id")
-            return {"id": relic_id}
-        if not isinstance(entry, dict):
-            raise TypeError("build.relics entries must be strings or dicts")
-        relic_id = str(entry.get("id") or entry.get("relic_id") or entry.get("name") or "").strip()
-        if not relic_id:
-            raise ValueError("build.relics entry is missing id")
-        normalized: dict[str, Any] = {"id": relic_id}
-        floor_added = entry.get("floor_added_to_deck")
-        if floor_added is not None:
-            normalized["floor_added_to_deck"] = int(floor_added)
-        return normalized
-
-    normalized_build: dict[str, Any] = {}
-    deck_entries = build.get("deck", build.get("cards"))
-    if deck_entries is not None:
-        if not isinstance(deck_entries, list):
-            raise TypeError("build.deck must be a list")
-        normalized_build["deck"] = [_normalize_card_entry(entry) for entry in deck_entries]
-
-    relic_entries = build.get("relics", build.get("relic_ids"))
-    if relic_entries is not None:
-        if not isinstance(relic_entries, list):
-            raise TypeError("build.relics must be a list")
-        normalized_build["relics"] = [_normalize_relic_entry(entry) for entry in relic_entries]
-
-    scalar_aliases = {
-        "current_hp": ("current_hp", "hp"),
-        "max_hp": ("max_hp",),
-        "max_energy": ("max_energy", "energy"),
-        "gold": ("gold",),
-    }
-    for target_key, aliases in scalar_aliases.items():
-        for alias in aliases:
-            if alias in build and build[alias] is not None:
-                normalized_build[target_key] = int(build[alias])
-                break
-
-    return normalized_build or None
 
 
 @dataclass(slots=True)
@@ -241,7 +124,7 @@ class ApiBackedFullRunClient:
         build: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
-        normalized_build = _normalize_build_spec(build)
+        normalized_build = normalize_build_spec(build)
         if self._should_use_v2():
             payload: dict[str, Any] = {
                 "character_id": str(character_id),
@@ -253,9 +136,9 @@ class ApiBackedFullRunClient:
                 payload["build"] = normalized_build
             wait_timeout = self.ready_timeout_s if timeout_s is None else float(timeout_s)
             initial_state = self._request_v2_state()
-            if not _is_menu_ready_for_v2_reset(initial_state):
+            if not is_menu_ready_for_v2_reset(initial_state):
                 initial_state = self.wait_until(
-                    _is_menu_ready_for_v2_reset,
+                    is_menu_ready_for_v2_reset,
                     timeout_s=wait_timeout,
                     initial_state=initial_state,
                 )
@@ -280,7 +163,7 @@ class ApiBackedFullRunClient:
             state = self._singleplayer.act({"action": "start_run"})
         wait_timeout = self.ready_timeout_s if timeout_s is None else float(timeout_s)
         return self.wait_until(
-            lambda current: _state_type(current) != "menu",
+            lambda current: state_type(current) != "menu",
             timeout_s=wait_timeout,
             initial_state=state,
         )
@@ -409,7 +292,7 @@ class ApiBackedFullRunClient:
             self._request_v2_state()
             self._use_v2 = True
         except SingleplayerApiError as exc:
-            if _looks_like_missing_endpoint(exc):
+            if looks_like_missing_endpoint(exc):
                 self._use_v2 = False
             else:
                 raise
@@ -766,7 +649,7 @@ class PipeBackedFullRunClient(PipeSnapshotMixin):
         build: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
-        normalized_build = _normalize_build_spec(build)
+        normalized_build = normalize_build_spec(build)
         params: dict[str, Any] = {
             "character_id": str(character_id),
             "ascension_level": int(ascension_level),

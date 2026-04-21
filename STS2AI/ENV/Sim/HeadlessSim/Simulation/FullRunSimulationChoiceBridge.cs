@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Rewards;
@@ -123,14 +124,17 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 
 		public bool IsHandSelection { get; }
 
+		public bool AutoCompleteOnSelect { get; }
+
 		public TaskCompletionSource<IEnumerable<CardModel>> CompletionSource { get; } = new TaskCompletionSource<IEnumerable<CardModel>>();
 
-		public PendingCardSelection(IReadOnlyList<CardModel> options, CardSelectorPrefs prefs, string mode, bool isHandSelection)
+		public PendingCardSelection(IReadOnlyList<CardModel> options, CardSelectorPrefs prefs, string mode, bool isHandSelection, bool autoCompleteOnSelect = false)
 		{
 			Options = options;
 			Prefs = prefs;
 			Mode = mode;
 			IsHandSelection = isHandSelection;
+			AutoCompleteOnSelect = autoCompleteOnSelect;
 		}
 
 		public IReadOnlyList<CardModel> SelectedCards => _selectedCards;
@@ -139,7 +143,15 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 
 		public IEnumerable<(int ChoiceIndex, CardModel Card)> SelectableChoices => Options.Select((CardModel card, int index) => (ChoiceIndex: index, Card: card)).Where((valueTuple) => !_selectedCards.Contains(valueTuple.Card));
 
-		public bool CanConfirm => _selectedCards.Count >= Prefs.MinSelect && _selectedCards.Count <= Prefs.MaxSelect;
+		// Match visible-game card selection UX: manual confirmation is only enabled
+		// after at least one choice has been made, even when MinSelect == 0
+		// (for example Skill Potion's choose-one prompt).
+		public bool CanConfirm => _selectedCards.Count >= Math.Max(1, Prefs.MinSelect) && _selectedCards.Count <= Prefs.MaxSelect;
+
+		// Full-run spectator parity expects deck/non-combat card selection to remain
+		// on the selection screen until an explicit confirm action. Keep auto-complete
+		// disabled here so the simulator matches the visible game's step semantics.
+		public bool ShouldAutoComplete => AutoCompleteOnSelect && _selectedCards.Count >= Prefs.MaxSelect;
 
 		public void Select(CardModel card)
 		{
@@ -258,7 +270,12 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 
 	public void RegisterCardSelection(IEnumerable<CardModel> options, CardSelectorPrefs prefs, string mode)
 	{
-		_pendingCardSelection = new PendingCardSelection(options.ToList(), prefs, mode, isHandSelection: false);
+		_pendingCardSelection = new PendingCardSelection(
+			options.ToList(),
+			prefs,
+			mode,
+			isHandSelection: false,
+			autoCompleteOnSelect: ShouldAutoCompleteOnSelect(mode, prefs));
 	}
 
 	public CombatTrainingHandSelectionSnapshot? BuildHandSelectionSnapshot(CombatState? combatState)
@@ -279,8 +296,8 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 			MaxSelect = selection.Prefs.MaxSelect,
 			CanConfirm = selection.CanConfirm,
 			Cancelable = selection.Prefs.Cancelable,
-			SelectableCards = selection.SelectableCards.Select((CardModel card) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState)).ToList(),
-			SelectedCards = selection.SelectedCards.Select((CardModel card) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState)).ToList()
+			SelectableCards = selection.SelectableCards.Select((CardModel card, int index) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState, explicitHandIndex: index)).ToList(),
+			SelectedCards = selection.SelectedCards.Select((CardModel card, int index) => CombatTrainingChoiceSnapshotBuilder.BuildHandCardSnapshot(card, combatState, explicitHandIndex: index)).ToList()
 		};
 	}
 
@@ -467,7 +484,7 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 			error = "Hand card selection is not active.";
 			return false;
 		}
-		CardModel? card = selection.SelectableCards.FirstOrDefault((CardModel candidate) => CombatTrainingChoiceSnapshotBuilder.GetHandIndex(candidate) == handIndex);
+		CardModel? card = handIndex >= 0 ? selection.SelectableCards.Skip(handIndex).FirstOrDefault() : null;
 		if (card == null)
 		{
 			error = $"Hand index {handIndex} is not selectable in the current hand selection prompt.";
@@ -493,6 +510,7 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 			return false;
 		}
 		selection.Select(choice.Card);
+		CompleteSelectionIfReady(selection);
 		return true;
 	}
 
@@ -513,6 +531,19 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		selection.CompletionSource.TrySetResult(selection.SelectedCards.ToList());
 		_pendingCardSelection = null;
 		return true;
+	}
+
+	private void CompleteSelectionIfReady(PendingCardSelection selection)
+	{
+		if (!selection.ShouldAutoComplete)
+		{
+			return;
+		}
+		selection.CompletionSource.TrySetResult(selection.SelectedCards.ToList());
+		if (ReferenceEquals(_pendingCardSelection, selection))
+		{
+			_pendingCardSelection = null;
+		}
 	}
 
 	public bool TryCancelSelection(out string error)
@@ -653,7 +684,12 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 
 	public async Task<IEnumerable<CardModel>> GetSelectedCards(IEnumerable<CardModel> options, int minSelect, int maxSelect)
 	{
-		PendingCardSelection selection = _pendingCardSelection ?? new PendingCardSelection(options.ToList(), new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, minSelect, maxSelect), "SimpleSelect", isHandSelection: false);
+		PendingCardSelection selection = _pendingCardSelection ?? new PendingCardSelection(
+			options.ToList(),
+			new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, minSelect, maxSelect),
+			"ChooseCard",
+			isHandSelection: false,
+			autoCompleteOnSelect: true);
 		_pendingCardSelection ??= selection;
 		try
 		{
@@ -666,6 +702,11 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 				_pendingCardSelection = null;
 			}
 		}
+	}
+
+	private static bool ShouldAutoCompleteOnSelect(string? mode, CardSelectorPrefs prefs)
+	{
+		return string.Equals(mode, "ChooseCard", StringComparison.Ordinal) && prefs.MaxSelect == 1;
 	}
 
 	public CardModel? GetSelectedCardReward(IReadOnlyList<CardCreationResult> options, IReadOnlyList<CardRewardAlternative> alternatives)
@@ -826,10 +867,12 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		Dictionary<int, CardModel> cardsByHandIndex = currentHand
 			.Select((card, index) => (Card: card, HandIndex: index))
 			.ToDictionary(static entry => entry.HandIndex, static entry => entry.Card);
+		Dictionary<uint, CardModel> cardsByCombatCardIndex = currentHand
+			.ToDictionary(static card => NetCombatCard.FromModel(card).CombatCardIndex, static card => card);
 		List<CardModel> options = snapshot.SelectableCards
 			.Concat(snapshot.SelectedCards)
 			.OrderBy(static card => card.HandIndex)
-			.Select((card) => ResolveHandCard(card, cardsByHandIndex))
+			.Select((card) => ResolveHandCard(card, cardsByCombatCardIndex, cardsByHandIndex))
 			.ToList();
 		PendingCardSelection selection = new PendingCardSelection(
 			options,
@@ -838,7 +881,7 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 			isHandSelection: true);
 		foreach (CombatTrainingHandCardSnapshot selected in snapshot.SelectedCards.OrderBy(static card => card.HandIndex))
 		{
-			selection.Select(ResolveHandCard(selected, cardsByHandIndex));
+			selection.Select(ResolveHandCard(selected, cardsByCombatCardIndex, cardsByHandIndex));
 		}
 
 		return selection;
@@ -896,11 +939,20 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		return prefs;
 	}
 
-	private static CardModel ResolveHandCard(CombatTrainingHandCardSnapshot snapshot, IReadOnlyDictionary<int, CardModel> cardsByHandIndex)
+	private static CardModel ResolveHandCard(
+		CombatTrainingHandCardSnapshot snapshot,
+		IReadOnlyDictionary<uint, CardModel> cardsByCombatCardIndex,
+		IReadOnlyDictionary<int, CardModel> cardsByHandIndex)
 	{
+		if (cardsByCombatCardIndex.TryGetValue(snapshot.CombatCardIndex, out CardModel? combatCard))
+		{
+			return combatCard;
+		}
+
 		if (!cardsByHandIndex.TryGetValue(snapshot.HandIndex, out CardModel? card))
 		{
-			throw new InvalidOperationException($"Could not restore hand selection card at hand index {snapshot.HandIndex}.");
+			throw new InvalidOperationException(
+				$"Could not restore hand selection card at combat index {snapshot.CombatCardIndex} or hand index {snapshot.HandIndex}.");
 		}
 
 		return card;

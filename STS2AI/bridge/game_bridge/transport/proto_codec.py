@@ -1,526 +1,73 @@
-"""ProtoCodec — protobuf pipe protocol codec for PipeConnection.
-
-把 `proto_pipe_client.py` 的 encode_request / decode_payload / handshake
-逻辑迁到独立 codec,让 PipeConnection + ProtoCodec 替代 ProtoPipeClient。
-
-Wire 格式 (和 `proto_pipe_client` 一致):
-  request:   [u8 opcode][方法特定参数 bytes]
-  response:  [u8 status][u8 opcode][payload bytes]
-  handshake: [u8 0][u8 OP_HANDSHAKE][u16 version][string sha][string schema_id]
-
-状态 payload (opcode in OP_RESET/STATE/STEP 等) 用 protobuf `GameState` 编码。
-新增 combat opcode (OP_COMBAT_RESET/STEP/STATE) 也走 GameState protobuf,
-调用方的 combat_reset / combat_step 参数分别为 CombatResetRequest /
-CombatStepRequest protobuf 字节。
-"""
+"""ProtoCodec — 纯 protobuf envelope 的 pipe codec."""
 from __future__ import annotations
 
 import json
-import struct
 from typing import Any
 
-from game_bridge.transport.codec import ProtocolCodec
-
 from game_bridge.generated import game_state_pb2 as pb
+from game_bridge.session.state_semantics import is_failure_outcome, is_victory_outcome
+from game_bridge.transport.codec import ProtocolCodec
 from game_bridge.transport.proto_state_converter import game_state_to_dict
-from game_bridge.sim.constants import (
-    ACTION_CODES,
-    OP_BATCH_STEP,
-    OP_COMBAT_RESET,
-    OP_COMBAT_STATE,
-    OP_COMBAT_STEP,
-    OP_DELETE_STATE,
-    OP_EXPORT_STATE,
-    OP_HANDSHAKE,
-    OP_IMPORT_STATE,
-    OP_LOAD_ORT_MODEL,
-    OP_LOAD_STATE,
-    OP_PERF_STATS,
-    OP_RESET,
-    OP_RESET_PERF_STATS,
-    OP_RUN_COMBAT_LOCAL,
-    OP_SAVE_STATE,
-    OP_SEARCH_COMBAT_MCTS,
-    OP_SKIP_COMBAT,
-    OP_STATE,
-    OP_STEP,
-    OP_STEP_LOCAL_POLICY,
-    PROTO_PROTOCOL_VERSION,
-    PROTO_SCHEMA_ID,
-    STATUS_OK,
-    STATUS_PROTOCOL_ERROR,
-    STATUS_SIMULATOR_ERROR,
-)
 
 
-# ---------------------------------------------------------------------------
-# 二进制读/写 (和 proto_pipe_client 保持一致)
-# ---------------------------------------------------------------------------
-
-def _read_string(data: bytes, off: int) -> tuple[str, int]:
-    length = struct.unpack_from("<H", data, off)[0]
-    off += 2
-    value = data[off:off + length].decode("utf-8")
-    return value, off + length
-
-
-def _read_optional_string(data: bytes, off: int) -> tuple[str | None, int]:
-    if data[off]:
-        off += 1
-        return _read_string(data, off)
-    return None, off + 1
-
-
-def _write_string(body: bytearray, value: str) -> None:
-    encoded = value.encode("utf-8")
-    body.extend(struct.pack("<H", len(encoded)))
-    body.extend(encoded)
-
-
-def _write_optional_string(body: bytearray, value: Any) -> None:
-    if value is None or str(value).strip() == "":
-        body.append(0)
-        return
-    body.append(1)
-    _write_string(body, str(value))
-
-
-def _optional_short(value: Any) -> int:
-    if value is None:
-        return -1
-    return max(min(int(value), 32767), -32768)
-
-
-def _optional_sbyte(value: Any) -> int:
-    if value is None:
-        return -1
-    return max(min(int(value), 127), -128)
-
-
-def _write_action(body: bytearray, action: dict[str, Any]) -> None:
-    action_name = str(action.get("action") or action.get("type") or "other").strip().lower()
-    body.append(ACTION_CODES.get(action_name, 255))
-    body.extend(struct.pack("<h", _optional_short(action.get("index"))))
-    body.extend(struct.pack("<h", _optional_short(action.get("card_index"))))
-    body.extend(struct.pack("<h", _optional_short(action.get("target_id"))))
-    body.extend(struct.pack("<b", _optional_sbyte(action.get("col"))))
-    body.extend(struct.pack("<b", _optional_sbyte(action.get("row"))))
-    body.extend(struct.pack("<b", _optional_sbyte(action.get("slot"))))
-
-
-def _parse_proto_state(data: bytes) -> dict[str, Any]:
-    gs = pb.GameState()
-    gs.ParseFromString(data)
-    result = game_state_to_dict(gs)
-    gs.Clear()
+def _parse_proto_state(state: "pb.GameState") -> dict[str, Any]:
+    result = game_state_to_dict(state)
     return result
 
 
 def _terminal_reward(state: dict[str, Any]) -> float:
     if not bool(state.get("terminal")):
         return 0.0
-    outcome = str(state.get("run_outcome") or "").strip().lower()
-    if outcome in {"victory", "win"}:
+    outcome = state.get("run_outcome")
+    if is_victory_outcome(outcome):
         return 1.0
-    if outcome in {"defeat", "loss", "death"}:
+    if is_failure_outcome(outcome):
         return -1.0
     return 0.0
 
 
-def _decode_mcts_payload(data: bytes) -> dict[str, Any]:
-    off = 0
-    action_index = struct.unpack_from("<h", data, off)[0]; off += 2
-    count = struct.unpack_from("<H", data, off)[0]; off += 2
-    visit_counts = []
-    for _ in range(count):
-        visit_counts.append(struct.unpack_from("<i", data, off)[0]); off += 4
-    visit_probs = []
-    for _ in range(count):
-        visit_probs.append(struct.unpack_from("<f", data, off)[0]); off += 4
-    q_values = []
-    for _ in range(count):
-        q_values.append(struct.unpack_from("<f", data, off)[0]); off += 4
-    priors = []
-    for _ in range(count):
-        priors.append(struct.unpack_from("<f", data, off)[0]); off += 4
-    payload: dict[str, Any] = {
-        "action_index": action_index,
-        "visit_counts": visit_counts,
-        "visit_probs": visit_probs,
-        "q_values": q_values,
-        "priors": priors,
-        "root_value": struct.unpack_from("<f", data, off)[0],
-        "search_ms": struct.unpack_from("<f", data, off + 4)[0],
-        "restored_ok": bool(data[off + 8]),
-        "snapshot_count": struct.unpack_from("<i", data, off + 9)[0],
+def _decode_search_mcts_payload(payload: "pb.PipeSearchCombatMctsResult") -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "action_index": int(payload.action_index),
+        "visit_counts": [int(v) for v in payload.visit_counts],
+        "visit_probs": [float(v) for v in payload.visit_probs],
+        "q_values": [float(v) for v in payload.q_values],
+        "priors": [float(v) for v in payload.priors],
+        "root_value": float(payload.root_value),
+        "search_ms": float(payload.search_ms),
+        "restored_ok": bool(payload.restored_ok),
+        "snapshot_count": int(payload.snapshot_count),
+        "breakdown": {
+            "simulation_count": int(payload.simulation_count),
+            "save_state_count": int(payload.save_state_count),
+            "load_state_count": int(payload.load_state_count),
+            "delete_state_count": int(payload.delete_state_count),
+            "step_count": int(payload.step_count),
+            "advance_state_count": int(payload.advance_state_count),
+            "eval_call_count": int(payload.eval_call_count),
+            "eval_batch_count": int(payload.eval_batch_count),
+            "eval_state_count": int(payload.eval_state_count),
+            "select_child_count": int(payload.select_child_count),
+            "backprop_count": int(payload.backprop_count),
+            "save_state_ms": float(payload.save_state_ms),
+            "load_state_ms": float(payload.load_state_ms),
+            "delete_state_ms": float(payload.delete_state_ms),
+            "step_ms": float(payload.step_ms),
+            "advance_state_ms": float(payload.advance_state_ms),
+            "eval_ms": float(payload.eval_ms),
+            "selection_ms": float(payload.selection_ms),
+            "backprop_ms": float(payload.backprop_ms),
+        },
     }
-    off += 13
-    if off + (11 * 4) + (8 * 4) <= len(data):
-        payload["breakdown"] = {
-            "simulation_count": struct.unpack_from("<i", data, off)[0],
-            "save_state_count": struct.unpack_from("<i", data, off + 4)[0],
-            "load_state_count": struct.unpack_from("<i", data, off + 8)[0],
-            "delete_state_count": struct.unpack_from("<i", data, off + 12)[0],
-            "step_count": struct.unpack_from("<i", data, off + 16)[0],
-            "advance_state_count": struct.unpack_from("<i", data, off + 20)[0],
-            "eval_call_count": struct.unpack_from("<i", data, off + 24)[0],
-            "eval_batch_count": struct.unpack_from("<i", data, off + 28)[0],
-            "eval_state_count": struct.unpack_from("<i", data, off + 32)[0],
-            "select_child_count": struct.unpack_from("<i", data, off + 36)[0],
-            "backprop_count": struct.unpack_from("<i", data, off + 40)[0],
-            "save_state_ms": struct.unpack_from("<f", data, off + 44)[0],
-            "load_state_ms": struct.unpack_from("<f", data, off + 48)[0],
-            "delete_state_ms": struct.unpack_from("<f", data, off + 52)[0],
-            "step_ms": struct.unpack_from("<f", data, off + 56)[0],
-            "advance_state_ms": struct.unpack_from("<f", data, off + 60)[0],
-            "eval_ms": struct.unpack_from("<f", data, off + 64)[0],
-            "selection_ms": struct.unpack_from("<f", data, off + 68)[0],
-            "backprop_ms": struct.unpack_from("<f", data, off + 72)[0],
-        }
-        off += 76
-    if off < len(data):
-        has_trace = data[off]; off += 1
-        if has_trace:
-            trace_len = struct.unpack_from("<H", data, off)[0]; off += 2
-            trace_json = data[off:off + trace_len].decode("utf-8")
-            try:
-                payload["debug_trace"] = json.loads(trace_json)
-            except Exception:
-                payload["debug_trace_json"] = trace_json
-    return payload
-
-
-# ---------------------------------------------------------------------------
-# ProtoCodec
-# ---------------------------------------------------------------------------
-
-class ProtoCodec(ProtocolCodec):
-    """Protobuf pipe codec — PipeConnection 用它说 proto wire。
-
-    和 ProtoPipeClient 字节行为一致;PipeConnection(codec=ProtoCodec()) 是
-    新代码的推荐入口,ProtoPipeClient 已降级为此 codec 的薄包装。
-    """
-
-    name = "proto"
-
-    def encode_request(self, method: str, params: dict[str, Any] | None) -> bytes:
-        method = str(method).strip().lower()
-        params = params or {}
-        body = bytearray()
-
-        if method == "reset":
-            body.append(OP_RESET)
-            _write_optional_string(body, params.get("character_id") or params.get("character"))
-            _write_optional_string(body, params.get("seed"))
-            body.extend(struct.pack(
-                "<i",
-                int(params.get("ascension_level", params.get("ascension", 0)) or 0),
-            ))
-            build = params.get("build")
-            build_json = None if build is None else json.dumps(
-                build, ensure_ascii=False, separators=(",", ":"),
-            )
-            _write_optional_string(body, build_json)
-            return bytes(body)
-
-        if method in {"state", "get_state", "legal_actions"}:
-            return bytes([OP_STATE])
-
-        if method == "step":
-            body.append(OP_STEP)
-            _write_action(body, params)
-            return bytes(body)
-
-        if method == "batch_step":
-            actions = list(params.get("actions") or [])
-            body.append(OP_BATCH_STEP)
-            body.extend(struct.pack("<H", len(actions)))
-            for action in actions:
-                _write_action(body, action or {})
-            return bytes(body)
-
-        if method == "save_state":
-            return bytes([OP_SAVE_STATE])
-
-        if method == "export_state":
-            body.append(OP_EXPORT_STATE)
-            _write_string(body, str(params["path"]))
-            _write_optional_string(body, params.get("state_id"))
-            return bytes(body)
-
-        if method == "import_state":
-            body.append(OP_IMPORT_STATE)
-            _write_string(body, str(params["path"]))
-            return bytes(body)
-
-        if method == "load_state":
-            body.append(OP_LOAD_STATE)
-            _write_string(body, str(params["state_id"]))
-            return bytes(body)
-
-        if method in {"delete_state", "clear_state_cache"}:
-            clear_all = bool(params.get("clear_all")) or method == "clear_state_cache"
-            body.append(OP_DELETE_STATE)
-            body.append(1 if clear_all else 0)
-            if not clear_all:
-                _write_string(body, str(params["state_id"]))
-            return bytes(body)
-
-        if method == "perf_stats":
-            return bytes([OP_PERF_STATS])
-
-        if method == "reset_perf_stats":
-            return bytes([OP_RESET_PERF_STATS])
-
-        if method == "step_local_policy":
-            return bytes([OP_STEP_LOCAL_POLICY])
-
-        if method == "skip_combat":
-            return bytes([OP_SKIP_COMBAT])
-
-        if method == "run_combat_local":
-            body.append(OP_RUN_COMBAT_LOCAL)
-            body.extend(struct.pack("<H", int(params.get("max_steps", 600))))
-            return bytes(body)
-
-        if method == "load_ort_model":
-            body.append(OP_LOAD_ORT_MODEL)
-            path_bytes = str(params.get("path", "")).encode("utf-8")
-            body.extend(struct.pack("<H", len(path_bytes)))
-            body.extend(path_bytes)
-            return bytes(body)
-
-        if method == "search_combat_mcts":
-            body.append(OP_SEARCH_COMBAT_MCTS)
-            body.extend(struct.pack("<H", int(params.get("num_simulations", 0))))
-            body.extend(struct.pack("<f", float(params.get("c_puct", 1.5))))
-            body.extend(struct.pack("<f", float(params.get("dirichlet_alpha", 0.0))))
-            body.extend(struct.pack("<f", float(params.get("dirichlet_fraction", 0.0))))
-            body.extend(struct.pack("<H", int(params.get("max_step_budget", 200))))
-            mode = str(params.get("final_action_mode", "visit")).strip().lower()
-            body.append(1 if mode == "visit_q_blend" else 0)
-            body.extend(struct.pack("<H", int(params.get("final_action_top_k", 3))))
-            body.extend(struct.pack("<f", float(params.get("final_action_q_weight", 0.35))))
-            body.append(1 if bool(params.get("use_continuation_value", False)) else 0)
-            body.append(1 if bool(params.get("debug_trace", False)) else 0)
-            return bytes(body)
-
-        # --- combat training opcodes (proto schema) ---
-        if method == "combat_reset":
-            body.append(OP_COMBAT_RESET)
-            req = pb.CombatResetRequest(
-                character_id=str(params.get("character_id") or params.get("character") or ""),
-                encounter_id=str(params.get("encounter_id") or ""),
-                ascension_level=int(params.get("ascension_level") or params.get("ascension") or 0),
-                seed=str(params.get("seed") or ""),
-            )
-            build = params.get("build")
-            if isinstance(build, dict):
-                req.build.current_hp = int(build.get("current_hp") or 0)
-                req.build.max_hp = int(build.get("max_hp") or 0)
-                req.build.max_energy = int(build.get("max_energy") or 3)
-                req.build.gold = int(build.get("gold") or 0)
-                for card in build.get("deck") or []:
-                    if isinstance(card, dict):
-                        req.build.deck.add(
-                            id=str(card.get("id") or "").upper(),
-                            upgrade_level=int(card.get("upgrade_level") or 0),
-                        )
-                    elif isinstance(card, str):
-                        req.build.deck.add(id=card.upper(), upgrade_level=0)
-                for relic in build.get("relics") or []:
-                    if isinstance(relic, dict):
-                        req.build.relics.add(id=str(relic.get("id") or "").upper())
-                    elif isinstance(relic, str):
-                        req.build.relics.add(id=relic.upper())
-            elif build is not None:
-                raise TypeError("combat_reset build must be a dict or None")
-            body.extend(req.SerializeToString())
-            return bytes(body)
-
-        if method == "combat_step":
-            body.append(OP_COMBAT_STEP)
-            req = pb.CombatStepRequest()
-            _apply_legal_action_to_proto(req.action, params)
-            body.extend(req.SerializeToString())
-            return bytes(body)
-
-        if method == "combat_state":
-            return bytes([OP_COMBAT_STATE])
-
-        raise ValueError(f"Unsupported proto pipe method: {method}")
-
-    def decode_response(self, payload: bytes) -> dict[str, Any]:
-        if len(payload) < 2:
-            return {"error": f"proto response too short: {len(payload)} bytes"}
-        status = payload[0]
-        opcode = payload[1]
-        data = bytes(payload[2:])
-        if status in {STATUS_PROTOCOL_ERROR, STATUS_SIMULATOR_ERROR}:
-            off = 0
-            error_code, off = _read_string(data, off)
-            error_msg, off = _read_string(data, off)
-            return {
-                "status": status,
-                "opcode": opcode,
-                "error_code": error_code,
-                "error": error_msg,
-            }
-        inner = _decode_payload_by_opcode(opcode, data)
-        if isinstance(inner, dict):
-            return inner
-        return {"status": status, "opcode": opcode, "payload": inner}
-
-    def read_handshake(self, payload: bytes) -> dict[str, Any]:
-        if len(payload) < 2:
-            return {"error": f"proto handshake too short: {len(payload)} bytes"}
-        status = payload[0]
-        opcode = payload[1]
-        data = bytes(payload[2:])
-        if status != STATUS_OK or opcode != OP_HANDSHAKE:
-            off = 0
-            try:
-                error_code, off = _read_string(data, off)
-                error_msg, _ = _read_string(data, off)
-            except Exception:
-                error_code, error_msg = "", "malformed handshake"
-            return {"error": error_msg or "handshake failed", "error_code": error_code}
-        # [u16 version][string sha][string schema_id]
-        version = struct.unpack_from("<H", data, 0)[0]
-        off = 2
-        sha, off = _read_string(data, off)
-        schema_id, _ = _read_string(data, off)
-        if version != PROTO_PROTOCOL_VERSION:
-            return {"error": f"proto protocol version mismatch: expected "
-                             f"{PROTO_PROTOCOL_VERSION}, got {version}"}
-        if schema_id != PROTO_SCHEMA_ID:
-            return {"error": f"proto schema mismatch: expected {PROTO_SCHEMA_ID}, "
-                             f"got {schema_id or '<missing>'}"}
-        return {
-            "version": version,
-            "build_git_sha": sha,
-            "schema_id": schema_id,
-        }
-
-
-# ---------------------------------------------------------------------------
-# opcode payload 分派(和 proto_pipe_client._decode_payload 逻辑一致)
-# ---------------------------------------------------------------------------
-
-def _decode_payload_by_opcode(opcode: int, data: bytes) -> dict[str, Any]:
-    if opcode in {OP_RESET, OP_STATE, OP_LOAD_STATE, OP_IMPORT_STATE,
-                  OP_COMBAT_RESET, OP_COMBAT_STATE}:
-        return _parse_proto_state(data)
-
-    if opcode in {OP_STEP, OP_COMBAT_STEP}:
-        accepted = bool(data[0])
-        off = 1
-        error, off = _read_optional_string(data, off)
-        state = _parse_proto_state(data[off:])
-        return {
-            "accepted": accepted,
-            "error": error,
-            "state": state,
-            "reward": _terminal_reward(state),
-            "done": bool(state.get("terminal")),
-            "info": {
-                "state_type": state.get("state_type"),
-                "run_outcome": state.get("run_outcome"),
-            },
-        }
-
-    if opcode == OP_BATCH_STEP:
-        accepted = bool(data[0])
-        steps_executed = struct.unpack_from("<H", data, 1)[0]
-        off = 3
-        error, off = _read_optional_string(data, off)
-        state = _parse_proto_state(data[off:])
-        return {
-            "accepted": accepted,
-            "steps_executed": steps_executed,
-            "error": error,
-            "state": state,
-        }
-
-    if opcode == OP_SAVE_STATE:
-        off = 0
-        state_id, off = _read_string(data, off)
-        cache_size = struct.unpack_from("<i", data, off)[0]
-        return {"state_id": state_id, "cache_size": cache_size}
-
-    if opcode == OP_EXPORT_STATE:
-        off = 0
-        path, off = _read_string(data, off)
-        cache_size = struct.unpack_from("<i", data, off)[0]
-        return {"path": path, "cache_size": cache_size}
-
-    if opcode == OP_DELETE_STATE:
-        return {
-            "deleted": bool(data[0]),
-            "cache_size": struct.unpack_from("<i", data, 1)[0],
-        }
-
-    if opcode == OP_PERF_STATS:
-        off = 0
-        json_str, _ = _read_string(data, off)
-        return json.loads(json_str or "{}")
-
-    if opcode == OP_RESET_PERF_STATS:
-        return {"reset": bool(data[0])}
-
-    if opcode == OP_LOAD_ORT_MODEL:
-        payload: dict[str, Any] = {"loaded": bool(data[0])}
-        off = 1
-        if off + 4 <= len(data):
-            payload["has_value"] = bool(data[off]); off += 1
-            payload["has_deck_inputs"] = bool(data[off]); off += 1
-            payload["has_continuation_output"] = bool(data[off]); off += 1
-            payload["has_extra_scalars_input"] = bool(data[off]); off += 1
-        if off < len(data):
-            payload["execution_provider"], off = _read_string(data, off)
-        if off < len(data):
-            payload["requested_device"], off = _read_string(data, off)
-        if off < len(data):
-            payload["fell_back_to_cpu"] = bool(data[off])
-        return payload
-
-    if opcode == OP_SKIP_COMBAT:
-        accepted = bool(data[0])
-        off = 1
-        error, off = _read_optional_string(data, off)
-        state = _parse_proto_state(data[off:])
-        return {"accepted": accepted, "error": error, "state": state, "skipped": True}
-
-    if opcode == OP_RUN_COMBAT_LOCAL:
-        combat_steps = struct.unpack_from("<H", data, 0)[0]
-        elapsed_ms = struct.unpack_from("<f", data, 2)[0]
-        off = 6
-        timing: dict[str, float] = {}
+    if payload.debug_trace_json:
         try:
-            timing["get_snapshot_ms"] = struct.unpack_from("<f", data, off)[0]; off += 4
-            timing["ort_ms"] = struct.unpack_from("<f", data, off)[0]; off += 4
-            timing["step_async_ms"] = struct.unpack_from("<f", data, off)[0]; off += 4
-            timing["wait_async_ms"] = struct.unpack_from("<f", data, off)[0]; off += 4
-            timing["max_step_ms"] = struct.unpack_from("<f", data, off)[0]; off += 4
-            timing["max_wait_ms"] = struct.unpack_from("<f", data, off)[0]; off += 4
+            result["debug_trace"] = json.loads(payload.debug_trace_json)
         except Exception:
-            pass
-        state = _parse_proto_state(data[off:])
-        return {
-            "combat_steps": combat_steps,
-            "elapsed_ms": elapsed_ms,
-            "timing": timing,
-            "state": state,
-        }
-
-    if opcode == OP_SEARCH_COMBAT_MCTS:
-        return _decode_mcts_payload(data)
-
-    raise RuntimeError(f"Unsupported proto response opcode: {opcode}")
+            result["debug_trace_json"] = payload.debug_trace_json
+    return result
 
 
 def _apply_legal_action_to_proto(target: "pb.LegalAction", action: dict[str, Any]) -> None:
-    """把 dict/proto action 填到 pb.LegalAction。"""
     if isinstance(action, pb.LegalAction):
         target.CopyFrom(action)
         return
@@ -543,6 +90,275 @@ def _apply_legal_action_to_proto(target: "pb.LegalAction", action: dict[str, Any
         target.label = str(action["label"])
     if action.get("card_id") is not None:
         target.card_id = str(action["card_id"])
+
+
+class ProtoCodec(ProtocolCodec):
+    """Protobuf envelope codec for PipeConnection."""
+
+    name = "proto"
+
+    def encode_request(self, method: str, params: dict[str, Any] | None) -> bytes:
+        method = str(method).strip().lower()
+        params = params or {}
+        req = pb.PipeRequestEnvelope()
+
+        if method == "reset":
+            req.method = pb.RESET
+            req.reset.character_id = str(params.get("character_id") or params.get("character") or "")
+            req.reset.seed = str(params.get("seed") or "")
+            req.reset.ascension_level = int(params.get("ascension_level", params.get("ascension", 0)) or 0)
+            build = params.get("build")
+            if build is not None:
+                req.reset.build_json = json.dumps(build, ensure_ascii=False, separators=(",", ":"))
+            return req.SerializeToString()
+
+        if method in {"state", "get_state", "legal_actions"}:
+            req.method = pb.STATE
+            return req.SerializeToString()
+
+        if method == "step":
+            req.method = pb.STEP
+            _apply_legal_action_to_proto(req.step.action, params)
+            return req.SerializeToString()
+
+        if method == "batch_step":
+            req.method = pb.BATCH_STEP
+            for action in list(params.get("actions") or []):
+                _apply_legal_action_to_proto(req.batch_step.actions.add(), action or {})
+            return req.SerializeToString()
+
+        if method == "save_state":
+            req.method = pb.SAVE_STATE
+            return req.SerializeToString()
+
+        if method == "export_state":
+            req.method = pb.EXPORT_STATE
+            req.export_state.path = str(params["path"])
+            if params.get("state_id") is not None:
+                req.export_state.state_id = str(params["state_id"])
+            return req.SerializeToString()
+
+        if method == "import_state":
+            req.method = pb.IMPORT_STATE
+            req.import_state.path = str(params["path"])
+            return req.SerializeToString()
+
+        if method == "load_state":
+            req.method = pb.LOAD_STATE
+            req.load_state.state_id = str(params["state_id"])
+            return req.SerializeToString()
+
+        if method in {"delete_state", "clear_state_cache"}:
+            clear_all = bool(params.get("clear_all")) or method == "clear_state_cache"
+            req.method = pb.DELETE_STATE
+            req.delete_state.clear_all = clear_all
+            if not clear_all:
+                req.delete_state.state_id = str(params["state_id"])
+            return req.SerializeToString()
+
+        if method == "perf_stats":
+            req.method = pb.PERF_STATS
+            return req.SerializeToString()
+
+        if method == "reset_perf_stats":
+            req.method = pb.RESET_PERF_STATS
+            return req.SerializeToString()
+
+        if method == "step_local_policy":
+            req.method = pb.STEP_LOCAL_POLICY
+            return req.SerializeToString()
+
+        if method == "skip_combat":
+            req.method = pb.SKIP_COMBAT
+            return req.SerializeToString()
+
+        if method == "run_combat_local":
+            req.method = pb.RUN_COMBAT_LOCAL
+            req.run_combat_local.max_steps = int(params.get("max_steps", 600))
+            return req.SerializeToString()
+
+        if method == "load_ort_model":
+            req.method = pb.LOAD_ORT_MODEL
+            req.load_ort_model.path = str(params.get("path", ""))
+            return req.SerializeToString()
+
+        if method == "search_combat_mcts":
+            req.method = pb.SEARCH_COMBAT_MCTS
+            req.search_combat_mcts.num_simulations = int(params.get("num_simulations", 0))
+            req.search_combat_mcts.c_puct = float(params.get("c_puct", 1.5))
+            req.search_combat_mcts.dirichlet_alpha = float(params.get("dirichlet_alpha", 0.0))
+            req.search_combat_mcts.dirichlet_fraction = float(params.get("dirichlet_fraction", 0.0))
+            req.search_combat_mcts.max_step_budget = int(params.get("max_step_budget", 200))
+            req.search_combat_mcts.final_action_mode = str(params.get("final_action_mode", "visit")).strip().lower()
+            req.search_combat_mcts.final_action_top_k = int(params.get("final_action_top_k", 3))
+            req.search_combat_mcts.final_action_q_weight = float(params.get("final_action_q_weight", 0.35))
+            req.search_combat_mcts.use_continuation_value = bool(params.get("use_continuation_value", False))
+            req.search_combat_mcts.enable_debug_trace = bool(params.get("debug_trace", False))
+            return req.SerializeToString()
+
+        if method == "combat_reset":
+            req.method = pb.COMBAT_RESET
+            payload = req.combat_reset
+            payload.character_id = str(params.get("character_id") or params.get("character") or "")
+            payload.encounter_id = str(params.get("encounter_id") or "")
+            payload.ascension_level = int(params.get("ascension_level") or params.get("ascension") or 0)
+            payload.seed = str(params.get("seed") or "")
+            build = params.get("build")
+            if isinstance(build, dict):
+                payload.build.current_hp = int(build.get("current_hp") or 0)
+                payload.build.max_hp = int(build.get("max_hp") or 0)
+                payload.build.max_energy = int(build.get("max_energy") or 3)
+                payload.build.gold = int(build.get("gold") or 0)
+                for card in build.get("deck") or []:
+                    if isinstance(card, dict):
+                        payload.build.deck.add(
+                            id=str(card.get("id") or "").upper(),
+                            upgrade_level=int(card.get("upgrade_level") or 0),
+                        )
+                    elif isinstance(card, str):
+                        payload.build.deck.add(id=card.upper(), upgrade_level=0)
+                for relic in build.get("relics") or []:
+                    if isinstance(relic, dict):
+                        payload.build.relics.add(id=str(relic.get("id") or "").upper())
+                    elif isinstance(relic, str):
+                        payload.build.relics.add(id=relic.upper())
+            elif build is not None:
+                raise TypeError("combat_reset build must be a dict or None")
+            return req.SerializeToString()
+
+        if method == "combat_step":
+            req.method = pb.COMBAT_STEP
+            _apply_legal_action_to_proto(req.combat_step.action, params)
+            return req.SerializeToString()
+
+        if method == "combat_state":
+            req.method = pb.COMBAT_STATE
+            return req.SerializeToString()
+
+        raise ValueError(f"Unsupported proto pipe method: {method}")
+
+    def decode_response(self, payload: bytes) -> dict[str, Any]:
+        resp = pb.PipeResponseEnvelope()
+        resp.ParseFromString(payload)
+
+        if resp.status != pb.OK:
+            error_code = resp.error.error_code if resp.HasField("error") else None
+            error_message = resp.error.error_message if resp.HasField("error") else f"proto request failed: status={resp.status}"
+            return {
+                "status": int(resp.status),
+                "method": int(resp.method),
+                "error_code": error_code,
+                "error": error_message,
+            }
+
+        if resp.method in {pb.RESET, pb.STATE, pb.LOAD_STATE, pb.IMPORT_STATE, pb.COMBAT_RESET, pb.COMBAT_STATE}:
+            return _parse_proto_state(resp.state.state)
+
+        if resp.method in {pb.STEP, pb.STEP_LOCAL_POLICY, pb.SKIP_COMBAT, pb.COMBAT_STEP}:
+            state = _parse_proto_state(resp.step.state)
+            result = {
+                "accepted": bool(resp.step.accepted),
+                "error": str(resp.step.error or "") or None,
+                "state": state,
+                "reward": _terminal_reward(state),
+                "done": bool(state.get("terminal")),
+                "info": {
+                    "state_type": state.get("state_type"),
+                    "run_outcome": state.get("run_outcome"),
+                },
+            }
+            if resp.method == pb.SKIP_COMBAT:
+                result["skipped"] = True
+            return result
+
+        if resp.method == pb.BATCH_STEP:
+            state = _parse_proto_state(resp.batch_step.state)
+            return {
+                "accepted": bool(resp.batch_step.accepted),
+                "steps_executed": int(resp.batch_step.steps_executed),
+                "error": str(resp.batch_step.error or "") or None,
+                "state": state,
+            }
+
+        if resp.method == pb.SAVE_STATE:
+            return {
+                "state_id": resp.save_state.state_id,
+                "cache_size": int(resp.save_state.cache_size),
+            }
+
+        if resp.method == pb.EXPORT_STATE:
+            return {
+                "path": resp.export_state.path,
+                "cache_size": int(resp.export_state.cache_size),
+            }
+
+        if resp.method == pb.DELETE_STATE:
+            return {
+                "deleted": bool(resp.delete_state.deleted),
+                "cache_size": int(resp.delete_state.cache_size),
+            }
+
+        if resp.method == pb.PERF_STATS:
+            return json.loads(resp.perf_stats.json_payload or "{}")
+
+        if resp.method == pb.RESET_PERF_STATS:
+            return {"reset": bool(resp.reset_perf_stats.reset)}
+
+        if resp.method == pb.LOAD_ORT_MODEL:
+            return {
+                "loaded": bool(resp.load_ort_model.loaded),
+                "has_value": bool(resp.load_ort_model.has_value_output),
+                "has_deck_inputs": bool(resp.load_ort_model.has_deck_inputs),
+                "has_continuation_output": bool(resp.load_ort_model.has_continuation_output),
+                "has_extra_scalars_input": bool(resp.load_ort_model.has_extra_scalars_input),
+                "execution_provider": resp.load_ort_model.execution_provider_name,
+                "requested_device": resp.load_ort_model.requested_device,
+                "fell_back_to_cpu": bool(resp.load_ort_model.fell_back_to_cpu),
+            }
+
+        if resp.method == pb.RUN_COMBAT_LOCAL:
+            state = _parse_proto_state(resp.run_combat_local.state)
+            return {
+                "combat_steps": int(resp.run_combat_local.combat_steps),
+                "elapsed_ms": float(resp.run_combat_local.elapsed_ms),
+                "timing": {
+                    "get_snapshot_ms": float(resp.run_combat_local.get_snapshot_ms),
+                    "ort_ms": float(resp.run_combat_local.ort_ms),
+                    "step_async_ms": float(resp.run_combat_local.step_async_ms),
+                    "wait_async_ms": float(resp.run_combat_local.wait_async_ms),
+                    "max_step_ms": float(resp.run_combat_local.max_step_ms),
+                    "max_wait_ms": float(resp.run_combat_local.max_wait_ms),
+                },
+                "state": state,
+            }
+
+        if resp.method == pb.SEARCH_COMBAT_MCTS:
+            return _decode_search_mcts_payload(resp.search_combat_mcts)
+
+        raise RuntimeError(f"Unsupported proto response method: {resp.method}")
+
+    def read_handshake(self, payload: bytes) -> dict[str, Any]:
+        resp = pb.PipeResponseEnvelope()
+        resp.ParseFromString(payload)
+        if resp.status != pb.OK or resp.method != pb.HANDSHAKE or not resp.HasField("handshake"):
+            if resp.HasField("error"):
+                return {
+                    "error": resp.error.error_message or "handshake failed",
+                    "error_code": resp.error.error_code or None,
+                }
+            return {"error": "malformed handshake"}
+
+        version = int(resp.handshake.protocol_version)
+        schema_id = resp.handshake.schema_id
+        if version != 1:
+            return {"error": f"proto protocol version mismatch: expected 1, got {version}"}
+        if schema_id != "sts2-proto-v1":
+            return {"error": f"proto schema mismatch: expected sts2-proto-v1, got {schema_id or '<missing>'}"}
+        return {
+            "version": version,
+            "build_git_sha": resp.handshake.build_git_sha,
+            "schema_id": schema_id,
+        }
 
 
 __all__ = ["ProtoCodec"]
