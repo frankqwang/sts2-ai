@@ -136,7 +136,7 @@ class SearchGuidedCollectTests(unittest.TestCase):
     def test_targeted_search_guidance_overrides_policy_greedy_action(self):
         selector = SearchGuidedActionSelector(
             search_backend=_SearchBackend(),
-            queue_builder=SearchQueueBuilder(SearchConfig()),
+            queue_builder=SearchQueueBuilder(SearchConfig(max_requests_per_iteration=8)),
             priority_threshold=99.0,
             max_guided_steps_per_episode=2,
             target_encounters=("TEST_ENCOUNTER",),

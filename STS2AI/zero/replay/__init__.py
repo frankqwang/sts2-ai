@@ -1,5 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+from .noop_search import NoopSearchBackend
 from .search_backend import CombatSearchBackend, MultiCaseSearchBackend
 from .skada import (
     AggregateCardUsageSearchBackend,
@@ -29,6 +30,7 @@ __all__ = [
     "FixedSkadaCaseEvaluator",
     "MultiCaseAggregateSearchBackend",
     "MultiCaseSearchBackend",
+    "NoopSearchBackend",
     "OrderedRunCaseEvaluator",
     "OrderedRunRuntimeFactory",
     "SkadaBuild",

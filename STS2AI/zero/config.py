@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 
@@ -31,7 +31,9 @@ class CollectConfig:
     max_steps_per_episode: int = 200
     epsilon_greedy: float = 0.0
     temperature: float = 0.0
-    mode: str = "search_only_collect"
+    # 当前主线先做 RL，默认只用策略自身采样，不在 collect 阶段接搜索。
+    # search_guided_collect / search_only_collect 仅保留为显式实验模式。
+    mode: str = "policy_only_collect"
     search_guidance_priority_threshold: float = 1.2
     search_guidance_max_steps_per_episode: int = 8
     search_guidance_target_encounters: tuple[str, ...] = ()
@@ -87,11 +89,12 @@ class PoolConfig:
 
 @dataclass(slots=True)
 class SearchConfig:
-    mode: str = "weak"
+    # 当前主线默认关闭搜索/MCTS；相关链路仅作为后续实验能力保留。
+    mode: str = "disabled"
     top2_gap_threshold: float = 0.05
     uncertainty_threshold: float = 0.55
     near_lethal_hp_ratio: float = 0.25
-    max_requests_per_iteration: int = 512
+    max_requests_per_iteration: int = 0
     max_root_actions: int = 8
     rollouts_per_action: int = 2
     max_branch_steps: int = 24

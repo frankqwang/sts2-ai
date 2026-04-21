@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """Top-level iterative loop for collect -> label -> train -> evaluate -> promote."""
 
@@ -495,6 +495,8 @@ class ZeroLoopRunner:
 
 def _public_search_backend_name(search_backend: SearchBackend) -> str:
     raw_name = type(search_backend).__name__
+    if raw_name == "NoopSearchBackend":
+        return "SearchDisabled"
     if raw_name == "MultiCaseSearchBackend":
         return "MultiCaseMctsSearcher"
     if raw_name == "MultiCaseAggregateSearchBackend":

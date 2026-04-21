@@ -1,4 +1,11 @@
-﻿现在这条 `zero` 链路，可以理解成 8 步：
+现在这条 `zero` 链路，可以理解成 8 步：
+
+先说当前主线决策：
+
+- 默认主线是 `policy_only_collect`，先做不带搜索的 RL 闭环
+- `search / MCTS` 相关链路先保留代码，但降级为显式实验能力
+- 主训练入口如果收到非 `disabled` 的 `search_mode`，会直接报错退出
+- 也就是说，下面第 5 步在默认配置下通常不会执行
 
 1. `sim state -> BattleState`
    入口是 [game_bridge.py](/C:/dev/sts2-ai/STS2AI/zero/adapters/game_bridge.py:19)。它把 bridge 返回的原始 combat payload 归一成 zero 自己的领域对象：
@@ -36,7 +43,7 @@
    
    这样避免了“同一个 sample 对象多池共享、后续再被改坏”的问题。
 
-5. `search_queue -> 搜索打标`
+5. `search_queue -> 搜索打标（实验链路，默认关闭）`
    `SearchQueueBuilder` 先从在线样本里挑“值得搜索介入”的状态，规则在 [search.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/search.py:12)：
    - elite / boss
    - near-lethal
@@ -44,7 +51,12 @@
    - top1/top2 很接近
    - rare cohort
    
-   然后 `SearchQueueProcessor` 调 `search_backend.label_request(...)` 真正产出 `SearchLabel`，见 [search.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/search.py:69)。现在 search backend 是可插拔端口，正式 same-seed search 就接这里。
+   然后 `SearchQueueProcessor` 调 `search_backend.label_request(...)` 真正产出 `SearchLabel`，见 [search.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/search.py:69)。
+   
+   但当前主线默认不做这一步：
+   - `search_mode = disabled`
+   - `SearchConfig.max_requests_per_iteration = 0`
+   - 只有显式打开实验搜索时，才会真正进入 search backend
 
 6. `池内保留 + 混采 batch`
    `SamplePoolSet` 管 5 个池：`recent_online / search / rare / reanalyse / legacy`，见 [pools.py](/C:/dev/sts2-ai/STS2AI/zero/buffers/pools.py:77)。
@@ -97,11 +109,14 @@
 `bridge/sim` 提供战斗状态和合法动作  
 -> `collector` 采当前 policy 轨迹  
 -> `sample_builder` 变训练样本  
--> `search` 给关键状态补强标签  
 -> `pools` 做样本保留和混采  
 -> `trainer` 训练新 policy  
 -> `loop` 评估、晋级，并把晋级模型变成下一轮 collector
 
-现在这条链路已经能跑通，但还缺两块“正式版能力”：
-- 真正的 same-seed search backend
-- 真正固定且够大的 evaluator cohort
+如果显式打开搜索实验，才会在 `sample_builder` 和 `pools` 之间插入一层 `search label`。
+
+现在主线先聚焦 RL，本阶段最关心的是：
+- 不带搜索时，策略和 value 能不能稳定学起来
+- evaluator cohort 是否足够稳定
+
+搜索/MCTS 相关能力暂时不作为主线目标。

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """基于 skada replay case 索引跑多 case combat 训练。
 
@@ -11,12 +11,13 @@
 - 读取已经清洗好的 `cases.jsonl`
 - 选择训练 / 评估用的 case 集合
 - 启动 shared sim
-- 驱动 `ZeroLoopRunner` 完成 collect -> search -> train -> eval -> promote
+- 驱动 `ZeroLoopRunner` 完成 collect -> train -> eval -> promote
 - 把 run_metrics / analysis / checkpoints 落到本次产物目录
 
 注意：
 - 这里默认依赖已经清洗好的 replay case 索引，不直接读取 `runs_full_detail`
 - 想重建索引，请用 `zero.replay.build_case_index`
+- 当前主线默认关闭 search / MCTS，先聚焦 policy-only 的 RL 闭环
 - collect 支持探索；eval 始终保持贪心，便于稳定比较版本差异
 """
 
@@ -45,8 +46,7 @@ from zero.orchestration.trainer import LocalCheckpointStore
 from zero.paths import STS2AI_ROOT, ZeroPaths
 from zero.replay import (
     FixedSkadaCaseEvaluator,
-    MultiCaseAggregateSearchBackend,
-    MultiCaseSearchBackend,
+    NoopSearchBackend,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaReplayRuntime,
@@ -104,6 +104,9 @@ def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> E
 def config_losses_for_search_mode(search_mode: str) -> LossWeights:
     """按 search 强度给一版保守但可用的损失权重。"""
     weights = LossWeights()
+    if search_mode == "disabled":
+        weights.policy_search_kl_weight = 0.0
+        return weights
     if search_mode == "weak":
         return weights
     weights.ranking = 0.9
@@ -130,14 +133,11 @@ def build_search_backend(
     connect_timeout_s: float,
 ):
     normalized_mode = normalize_search_mode(search_mode)
-    if normalized_mode == "weak":
-        return MultiCaseAggregateSearchBackend(cases)
-    return MultiCaseSearchBackend(
-        cases,
-        config=config,
-        port=port,
-        auto_launch=auto_launch,
-        connect_timeout_s=connect_timeout_s,
+    if normalized_mode == "disabled":
+        return NoopSearchBackend()
+    raise ValueError(
+        "当前主线已明确关闭搜索/MCTS，`build_search_backend(...)` 只允许 "
+        "`search_mode=disabled`。如需继续做搜索实验，请走单独实验脚本，不要复用主训练入口。"
     )
 
 
@@ -167,8 +167,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--collect-mode",
         choices=["search_only_collect", "policy_only_collect", "search_guided_collect"],
-        default="search_only_collect",
-        help="collect 动作来源；默认直接按搜索分布自博弈。",
+        default="policy_only_collect",
+        help="collect 动作来源；当前主线默认只跑 policy/RL，不默认接搜索。",
     )
     parser.add_argument(
         "--collect-epsilon-greedy",
@@ -190,9 +190,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--search-mode",
         dest="search_mode",
-        choices=["weak", "search_root_sweep", "search_branching"],
-        default="search_root_sweep",
-        help="搜索后端模式；默认走 root MCTS 自博弈。",
+        choices=["disabled", "weak", "search_root_sweep", "search_branching"],
+        default="disabled",
+        help="搜索后端模式；当前主线只允许 disabled，传其它值会直接报错。",
     )
     parser.add_argument("--search-max-root-actions", type=int, default=8)
     parser.add_argument("--search-rollouts-per-action", type=int, default=2)
@@ -277,6 +277,15 @@ def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
     args.search_mode = normalize_search_mode(args.search_mode)
+    if args.search_mode != "disabled":
+        raise ValueError(
+            "当前主线已明确关闭搜索/MCTS。请使用 `--search-mode disabled`；"
+            "如需继续做搜索实验，请走单独实验脚本，不要复用主训练入口。"
+        )
+    if args.collect_mode in {"search_guided_collect", "search_only_collect"}:
+        raise ValueError(
+            "当前主线已明确关闭搜索 collect。请使用 `--collect-mode policy_only_collect`。"
+        )
 
     random.seed(args.seed)
     cases = load_case_index(args.case_index)
@@ -350,10 +359,11 @@ def main() -> None:
             ),
         ),
         search=SearchConfig(
+            mode=args.search_mode,
             top2_gap_threshold=1.0,
             uncertainty_threshold=0.0,
             near_lethal_hp_ratio=1.0,
-            max_requests_per_iteration=4096,
+            max_requests_per_iteration=0,
         ),
         train=TrainConfig(
             batch_size=16,
@@ -368,7 +378,6 @@ def main() -> None:
             strict_promotion=args.strict_promotion,
         ),
     )
-    config.search.mode = args.search_mode
     config.search.max_root_actions = args.search_max_root_actions
     config.search.rollouts_per_action = args.search_rollouts_per_action
     config.search.max_branch_steps = args.search_max_branch_steps
@@ -383,8 +392,6 @@ def main() -> None:
         )
         collect_ports = [args.port]
         guidance_ports = []
-        if args.collect_mode in {"search_guided_collect", "search_only_collect"}:
-            guidance_ports.append(args.port + config.collect.search_guidance_port_offset)
         if args.parallel_envs > 1:
             if curriculum_mode != "ordered_run":
                 raise ValueError("并发 collect 目前仅支持 ordered_run 模式。")
@@ -397,8 +404,6 @@ def main() -> None:
                         host_path=args.host_path,
                     )
                 )
-            if args.collect_mode in {"search_guided_collect", "search_only_collect"}:
-                guidance_ports = [port + config.collect.search_guidance_port_offset for port in collect_ports]
         for guidance_port in guidance_ports:
             stack.enter_context(
                 launch_shared_proto_sim(

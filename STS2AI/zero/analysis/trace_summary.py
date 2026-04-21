@@ -157,6 +157,7 @@ def _render_raw_fight(
         meta = row.get("metadata", {})
         legal_actions = state.get("legal_actions") or []
         hand = state.get("hand") or []
+        search_meta = _extract_search_meta(meta)
         line1 = (
             f"[Step {row.get('step_idx', 0):>3}] HP {state['player']['hp']:.0f}/{state['player']['max_hp']:.0f} "
             f"格挡 {state['player']['block']:.0f} 能量 {state['player']['energy']:.0f} | "
@@ -176,7 +177,23 @@ def _render_raw_fight(
             f"格挡 {next_state['player']['block']:.0f} 能量 {next_state['player']['energy']:.0f} | "
             f"敌方 {_enemy_brief(next_state.get('enemies') or [], name_catalog=name_catalog)}"
         )
-        lines.extend([_wrap(line1), _wrap(line2), f"合法动作（{len(legal_actions)} 个）：", *legal_action_lines, _wrap(line3), _wrap(line4), ""])
+        lines.extend([_wrap(line1), _wrap(line2), f"合法动作（{len(legal_actions)} 个）：", *legal_action_lines, _wrap(line3)])
+        if search_meta["present"]:
+            line3b = (
+                f"search src={search_meta['source']} sims={search_meta['simulations']} "
+                f"cache={'Y' if search_meta['cache_hit'] else 'N'} "
+                f"dur={float(search_meta['duration_s']):.3f}s "
+                f"value={float(search_meta['value']):.3f} "
+                f"best={_best_action_text(search_meta['best_action_index'], legal_actions, name_catalog=name_catalog)}"
+            )
+            line3c = (
+                f"search_topk={_topk_actions_text(search_meta['topk'], legal_actions, name_catalog=name_catalog)}"
+            )
+            lines.extend([_wrap(line3b), _wrap(line3c)])
+            if search_meta["trace"]:
+                lines.append("search_trace：")
+                lines.extend(_search_trace_lines(search_meta["trace"], width=160))
+        lines.extend([_wrap(line4), ""])
     last = transitions[-1]
     lines.append(_wrap(f"--- fight 结束标记：done={last.get('done')} outcome={last.get('run_outcome')} ---"))
     return lines
@@ -433,14 +450,67 @@ def _topk_actions_text(indices: list[Any], legal_actions: list[dict[str, Any]], 
     return " | ".join(parts) if parts else "无"
 
 
+def _best_action_text(index: Any, legal_actions: list[dict[str, Any]], *, name_catalog: dict[str, str]) -> str:
+    try:
+        parsed = int(index)
+    except (TypeError, ValueError):
+        return "无"
+    if 0 <= parsed < len(legal_actions):
+        return f"{parsed}:{_format_action(legal_actions[parsed], name_catalog=name_catalog)}"
+    return "无"
+
+
+def _extract_search_meta(metadata: dict[str, Any]) -> dict[str, Any]:
+    search_trace = metadata.get("search_trace")
+    if not isinstance(search_trace, list) or not search_trace:
+        legacy_trace = metadata.get("search_teacher_trace")
+        search_trace = legacy_trace if isinstance(legacy_trace, list) else []
+    topk = metadata.get("search_topk")
+    if not isinstance(topk, list) or not topk:
+        legacy_topk = metadata.get("search_teacher_topk")
+        topk = legacy_topk if isinstance(legacy_topk, list) else []
+    best_action_index = metadata.get("search_best_action_index")
+    if best_action_index in (None, ""):
+        best_action_index = metadata.get("search_teacher_best_action_index")
+    value = metadata.get("search_value")
+    if value in (None, ""):
+        value = metadata.get("search_teacher_value")
+    source = str(metadata.get("search_source") or "")
+    present = bool(
+        search_trace
+        or topk
+        or source
+        or metadata.get("search_guided")
+        or metadata.get("search_collected")
+        or best_action_index not in (None, "", -1)
+    )
+    return {
+        "present": present,
+        "trace": search_trace,
+        "topk": topk,
+        "best_action_index": best_action_index,
+        "value": float(value or 0.0),
+        "source": source or ("search_collect" if metadata.get("search_collected") else "search_guided" if metadata.get("search_guided") else ""),
+        "simulations": int(metadata.get("search_simulations", 0) or 0),
+        "cache_hit": bool(metadata.get("search_cache_hit", False)),
+        "duration_s": float(metadata.get("search_duration_s", 0.0) or 0.0),
+    }
+
+
 def _search_trace_lines(search_trace: list[dict[str, Any]], *, width: int) -> list[str]:
     lines: list[str] = []
     for item in search_trace[:4]:
+        action_index = item.get("action_index", -1)
+        try:
+            parsed_action_index = int(action_index)
+        except (TypeError, ValueError):
+            parsed_action_index = -1
         lines.append(
             _wrap(
                 "  - "
-                f"a{int(item.get('action_index', -1) or -1)} "
+                f"a{parsed_action_index} "
                 f"{item.get('card_id', '') or item.get('action_id', '')} "
+                f"prior={float(item.get('prior', 0.0) or 0.0):.3f} "
                 f"visits={int(item.get('visits', 0) or 0)} "
                 f"avg={float(item.get('score_avg', 0.0) or 0.0):.3f} "
                 f"best={float(item.get('score_best', 0.0) or 0.0):.3f} "
