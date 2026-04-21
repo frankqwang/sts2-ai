@@ -14,7 +14,7 @@ public static class CombatTrainingMode
 	static CombatTrainingMode()
 	{
 		Func<bool> existingCheck = NonInteractiveMode.AutoSlayerCheck;
-		NonInteractiveMode.AutoSlayerCheck = () => existingCheck() || IsActive || CombatSimulationMode.IsAnyActive || FullRunSimulationMode.IsAnyActive;
+		NonInteractiveMode.AutoSlayerCheck = () => existingCheck() || IsActive || FullRunSimulationMode.IsAnyActive;
 	}
 
 	public static bool IsActive => CommandLineHelper.HasArg("combat-trainer");

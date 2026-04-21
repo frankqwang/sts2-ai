@@ -30,7 +30,7 @@ public sealed class CombatTrainingEnvService
 	private static readonly List<string> EmptyStringList = new List<string>();
 	private static readonly List<CombatTrainingIntentSnapshot> EmptyIntentList = new List<CombatTrainingIntentSnapshot>();
 
-	private static bool UseTrainerBackend => CombatTrainingMode.IsActive && !CombatSimulationMode.IsServerActive;
+	private static bool UseTrainerBackend => CombatTrainingMode.IsActive;
 
 	private CombatTrainingEnvService()
 	{
