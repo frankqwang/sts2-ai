@@ -1,7 +1,6 @@
 """GameState protobuf message → 训练端兼容 dict 转换。
 
-输出格式是 V2 训练的规范 state dict(历史上和已废弃的 `binary_pipe_client`
-保持过一致,现在 binary wire 已删除,只剩 proto)。上层 normalize / 网络输入 /
+输出格式是 V2 训练的规范 state dict。上层 normalize / 网络输入 /
 action 选择直接消费 dict。
 
 用法::
@@ -18,8 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from game_bridge.generated import game_state_pb2 as pb
-from game_bridge.sim.constants import COMBAT_STATE_TYPES
-from game_bridge.session.state_semantics import normalize_run_outcome
+from game_bridge.session.state_semantics import COMBAT_STATE_TYPES, normalize_run_outcome
 
 
 # ===================================================================

@@ -5,7 +5,7 @@
   - Thread safety: 内置 RLock,所有 call 串行化(安全让多 thread 共享一个 conn)
   - 自动重连: call 遇 ConnectionError/TimeoutError → 重连 + fallback 重启 sim
   - 错误分类: ConnectionError / TransportTimeoutError / SimulatorApiError
-  - 协议编码: 4 字节长度前缀 + JSON payload (proto wire 以后再切,接口保持不变)
+  - 协议编码: 4 字节长度前缀 + JSON / protobuf envelope payload
 
 禁止任何上层模块自己重写连接/重连/锁/heartbeat 逻辑。heartbeat 走
 `transport.heartbeat.HealthMonitor`(用独立 PipeConnection 保活,不和业务共享)。
@@ -40,7 +40,7 @@ class PipeConnectionConfig:
     """连接参数。"""
     port: int
     pipe_name_prefix: str = "sts2_mcts"     # 最终 pipe 名 = prefix_{port}
-    protocol: str = "json"                  # "json" / "bin" / "proto"
+    protocol: str = "json"                  # "json" / "proto"
     connect_timeout_s: float = 10.0
     default_call_timeout_s: float = 30.0
     write_timeout_ms: int = 10000
@@ -50,15 +50,13 @@ class PipeConnectionConfig:
     sim_launcher: Callable[[int], Any] | None = None  # 返回 sim 进程句柄;用于 auto_launch
     sim_stopper: Callable[[Any], None] | None = None  # 停 sim 进程(reconnect 失败时重启 sim)
     # 协议 codec:控制 encode_request / decode_response / handshake 字节语义。
-    # 留 None 时,按 `protocol` 字段自动选:json→JsonCodec,bin/proto→需调用方显式传。
+    # 留 None 时,按 `protocol` 字段自动选:json→JsonCodec,proto→需调用方显式传。
     codec: ProtocolCodec | None = None
 
     @property
     def pipe_name(self) -> str:
         # combat_training_env 以前用 sts2_mcts_{port} (JSON);保持兼容
         p = self.protocol.lower()
-        if p == "bin":
-            return f"sts2_mcts_bin_{self.port}"
         if p == "proto":
             return f"sts2_mcts_proto_{self.port}"
         return f"{self.pipe_name_prefix}_{self.port}"
@@ -216,8 +214,8 @@ class PipeConnection:
     def _handshake(self) -> None:
         """读 server 欢迎帧(可能为空或含版本信息)。
 
-        握手字节语义由 codec 决定:JsonCodec 期望 {"ok": true},proto/bin
-        codec 期望 opcode=0x00 payload。任意错误在 codec 侧以 dict['error']
+        握手字节语义由 codec 决定:JsonCodec 期望 {"ok": true},ProtoCodec
+        期望 protobuf handshake envelope。任意错误在 codec 侧以 dict['error']
         上报,此处转换为 SimulatorApiError。
         """
         try:

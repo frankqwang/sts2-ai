@@ -138,7 +138,7 @@ python -m game_bridge.sim.cli report
 
 - `catalog` 不在 proto 主协议里，意味着训练主路径和静态查询仍然不是一条完全统一的桥
 - `BinaryBackedFullRunClient` 名称仍保留兼容语义，容易让人误解它还在走旧 binary wire
-- `transport/codec.py` 里的 `BinaryOpcodeCodec` 仍是兼容骨架，不是当前主路径能力
+- `transport/codec.py` 里曾保留过旧 binary 兼容骨架；现主路径只保留 `JsonCodec / ProtoCodec`
 
 ## 6. 建议的后续迭代顺序
 
@@ -156,7 +156,6 @@ python -m game_bridge.sim.cli report
 
 4. 再决定是否继续清理兼容外壳
    - `BinaryBackedFullRunClient`
-   - `BinaryOpcodeCodec`
    - 旧 `_pipe.call` 兼容路径
 
 这几项里，真正影响 sim 和原游戏一致性的优先级是 1 和 2，名称兼容和历史骨架清理放后面。

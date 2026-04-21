@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using Google.Protobuf;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -24,8 +25,15 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.TestSupport;
 using MegaCrit.Sts2.Core.Training;
+using STS2AI.Bridge;
 
 namespace HeadlessSim;
+
+internal enum HostProtocol
+{
+	Json,
+	Proto,
+}
 
 internal static partial class Program
 {
@@ -235,9 +243,9 @@ internal static partial class Program
 				{
 					await WritePipeMessageAsync(
 						pipe,
-						BinaryProtocol.BuildErrorResponse(
-							BinaryOpcode.Handshake,
-							BinaryStatus.ProtocolError,
+						ProtoStateBuilder.BuildErrorResponse(
+							PipeMethod.Handshake,
+							PipeStatus.ProtocolError,
 							"simulator_busy",
 							"The simulator runtime is already owned by another active pipe session."),
 						cancellationToken);
@@ -285,18 +293,18 @@ internal static partial class Program
 						}
 						catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 						{
-							responseBytes = BinaryProtocol.BuildErrorResponse(
-								BinaryProtocol.ParseOpcode(requestBytes),
-								BinaryStatus.ProtocolError,
+							responseBytes = ProtoStateBuilder.BuildErrorResponse(
+								SafeParseMethod(requestBytes),
+								PipeStatus.ProtocolError,
 								"request_timeout",
 								$"Request processing timed out after {options.RequestTimeout.TotalSeconds:F0}s");
 						}
 						catch (Exception ex)
 						{
-							Console.Error.WriteLine($"HeadlessSim: proto request error opcode={SafeParseOpcode(requestBytes)}: {ex}");
-							responseBytes = BinaryProtocol.BuildErrorResponse(
-								SafeParseOpcode(requestBytes),
-								GetBinaryErrorStatus(ex),
+							Console.Error.WriteLine($"HeadlessSim: proto request error method={SafeParseMethod(requestBytes)}: {ex}");
+							responseBytes = ProtoStateBuilder.BuildErrorResponse(
+								SafeParseMethod(requestBytes),
+								GetProtoPipeErrorStatus(ex),
 								GetStructuredErrorCode(ex) ?? "internal_error",
 								ex.Message);
 						}
@@ -427,8 +435,7 @@ internal static partial class Program
 	}
 
 	// ================================================================
-	// Proto protocol request router — reuses Binary request parsing,
-	// returns proto-serialized state payloads.
+	// Proto protocol request router — 全部走 protobuf envelope。
 	// ================================================================
 
 	private static async Task<byte[]> ProcessProtoRequestAsync(
@@ -436,52 +443,58 @@ internal static partial class Program
 		byte[] requestBytes)
 	{
 		long requestStart = Stopwatch.GetTimestamp();
-		BinaryOpcode opcode = BinaryProtocol.ParseOpcode(requestBytes);
+		PipeRequestEnvelope request = PipeRequestEnvelope.Parser.ParseFrom(requestBytes);
+		if (request.Method == PipeMethod.Handshake)
+		{
+			throw new InvalidOperationException("Handshake is server-initiated and must not be sent as a request.");
+		}
+		PipeMethod method = request.Method;
 		RequestStateCache cache = new RequestStateCache();
 		try
 		{
-			return opcode switch
+			return method switch
 			{
-				BinaryOpcode.Reset => await ProcessProtoResetAsync(service, requestBytes, cache),
-				BinaryOpcode.State => ProcessProtoState(service, cache),
-				BinaryOpcode.Step => await ProcessProtoStepAsync(service, requestBytes, cache),
-				BinaryOpcode.BatchStep => await ProcessProtoBatchStepAsync(service, requestBytes, cache),
-				// Non-state responses: identical format, delegate to Binary/Proto builders
-				BinaryOpcode.SaveState => ProtoStateBuilder.BuildSaveStateResponse(
+				PipeMethod.Reset => await ProcessProtoResetAsync(service, request, cache),
+				PipeMethod.State => ProcessProtoState(service, cache),
+				PipeMethod.Step => await ProcessProtoStepAsync(service, request, cache),
+				PipeMethod.BatchStep => await ProcessProtoBatchStepAsync(service, request, cache),
+				PipeMethod.SaveState => ProtoStateBuilder.BuildSaveStateResponse(
 					service.SaveState(), service.StateCacheCount),
-				BinaryOpcode.ExportState => ProcessProtoExportState(service, requestBytes),
-				BinaryOpcode.LoadState => await ProcessProtoLoadStateAsync(service, requestBytes, cache),
-				BinaryOpcode.ImportState => await ProcessProtoImportStateAsync(service, requestBytes, cache),
-				BinaryOpcode.DeleteState => ProcessProtoDeleteState(service, requestBytes),
-				BinaryOpcode.PerfStats => ProtoStateBuilder.BuildPerfStatsResponse(FullRunSimulationDiagnostics.Snapshot()),
-				BinaryOpcode.ResetPerfStats => ProcessProtoResetPerfStats(),
-				BinaryOpcode.StepLocalPolicy => await ProcessProtoStepLocalPolicyAsync(service, cache),
-				BinaryOpcode.LoadOrtModel => BuildLoadOrtModelResponse(requestBytes),
-				BinaryOpcode.RunCombatLocal => await ProcessProtoRunCombatLocalAsync(service, requestBytes, cache),
-				BinaryOpcode.SkipCombat => await ProcessProtoSkipCombatAsync(service, cache),
-				BinaryOpcode.SearchCombatMcts => await ProcessSearchCombatMctsAsync(service, requestBytes, cache),
-				// 2026-04-18: combat-only proto opcodes。payload 用 CombatResetRequest/
-				// CombatStepRequest proto;响应是含 legal_actions 的 GameState proto。
-				BinaryOpcode.CombatReset => await ProcessProtoCombatResetAsync(requestBytes),
-				BinaryOpcode.CombatStep => await ProcessProtoCombatStepAsync(requestBytes),
-				BinaryOpcode.CombatState => ProcessProtoCombatState(),
-				_ => ProtoStateBuilder.BuildErrorResponse(opcode, BinaryStatus.ProtocolError, "unknown_method", $"Unknown opcode: {(byte)opcode}")
+				PipeMethod.ExportState => ProcessProtoExportState(service, request),
+				PipeMethod.LoadState => await ProcessProtoLoadStateAsync(service, request, cache),
+				PipeMethod.ImportState => await ProcessProtoImportStateAsync(service, request, cache),
+				PipeMethod.DeleteState => ProcessProtoDeleteState(service, request),
+				PipeMethod.PerfStats => ProtoStateBuilder.BuildPerfStatsResponse(FullRunSimulationDiagnostics.Snapshot()),
+				PipeMethod.ResetPerfStats => ProcessProtoResetPerfStats(),
+				PipeMethod.StepLocalPolicy => await ProcessProtoStepLocalPolicyAsync(service, cache),
+				PipeMethod.LoadOrtModel => BuildLoadOrtModelResponse(request),
+				PipeMethod.RunCombatLocal => await ProcessProtoRunCombatLocalAsync(service, request, cache),
+				PipeMethod.SkipCombat => await ProcessProtoSkipCombatAsync(service, cache),
+				PipeMethod.SearchCombatMcts => await ProcessSearchCombatMctsAsync(service, request, cache),
+				PipeMethod.CombatReset => await ProcessProtoCombatResetAsync(request),
+				PipeMethod.CombatStep => await ProcessProtoCombatStepAsync(request),
+				PipeMethod.CombatState => ProcessProtoCombatState(),
+				_ => ProtoStateBuilder.BuildErrorResponse(method, PipeStatus.ProtocolError, "unknown_method", $"Unknown method: {method}")
 			};
 		}
 		finally
 		{
 			double elapsedMs = (Stopwatch.GetTimestamp() - requestStart) * 1000.0 / Stopwatch.Frequency;
-			FullRunSimulationDiagnostics.RecordTiming($"request.{opcode.ToString().ToLowerInvariant()}.total_ms", elapsedMs);
+			FullRunSimulationDiagnostics.RecordTiming($"request.{method.ToString().ToLowerInvariant()}.total_ms", elapsedMs);
 			FullRunSimulationDiagnostics.RecordTiming("request.proto_total_ms", elapsedMs);
-			FullRunSimulationDiagnostics.Increment($"request.{opcode.ToString().ToLowerInvariant()}.count");
+			FullRunSimulationDiagnostics.Increment($"request.{method.ToString().ToLowerInvariant()}.count");
 			FullRunSimulationDiagnostics.Increment("request.proto.count");
 		}
 	}
 
 	private static async Task<byte[]> ProcessProtoResetAsync(
-		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		FullRunSimulationResetRequest request = BinaryProtocol.ParseResetRequest(requestBytes);
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.Reset)
+		{
+			throw new InvalidOperationException("reset request missing payload.");
+		}
+		FullRunSimulationResetRequest request = BuildProtoResetRequest(requestEnvelope.Reset);
 		FullRunSimulationStateSnapshot snapshot;
 		using (FullRunSimulationDiagnostics.Measure("request.reset.runtime_ms"))
 		{
@@ -489,7 +502,7 @@ internal static partial class Program
 		}
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.Reset, snapshot);
+			return ProtoStateBuilder.BuildStateResponse(PipeMethod.Reset, snapshot);
 		}
 	}
 
@@ -502,26 +515,36 @@ internal static partial class Program
 		}
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.State, snapshot);
+			return ProtoStateBuilder.BuildStateResponse(PipeMethod.State, snapshot);
 		}
 	}
 
 	private static async Task<byte[]> ProcessProtoStepAsync(
-		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		FullRunSimulationActionRequest action = BinaryProtocol.ParseActionRequest(requestBytes);
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.Step)
+		{
+			throw new InvalidOperationException("step request missing payload.");
+		}
+		FullRunSimulationActionRequest action = BuildFullRunSimulationActionRequest(requestEnvelope.Step.Action);
 		(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot) =
 			await ExecuteFullRunStepAsync(service, cache, action, autoAdvanceToDecisionState: true);
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildStepResponse(result, snapshot);
+			return ProtoStateBuilder.BuildStepResponse(PipeMethod.Step, result, snapshot);
 		}
 	}
 
 	private static async Task<byte[]> ProcessProtoBatchStepAsync(
-		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		List<FullRunSimulationActionRequest> actions = BinaryProtocol.ParseBatchActionRequest(requestBytes);
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.BatchStep)
+		{
+			throw new InvalidOperationException("batch_step request missing payload.");
+		}
+		List<FullRunSimulationActionRequest> actions = requestEnvelope.BatchStep.Actions
+			.Select(BuildFullRunSimulationActionRequest)
+			.ToList();
 		FullRunSimulationBatchStepResult result;
 		using (FullRunSimulationDiagnostics.Measure("request.batch_step.runtime_ms"))
 		{
@@ -534,42 +557,60 @@ internal static partial class Program
 		}
 	}
 
-	private static byte[] ProcessProtoExportState(FullRunTrainingEnvService service, byte[] requestBytes)
+	private static byte[] ProcessProtoExportState(FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope)
 	{
-		(string path, string? stateId) = BinaryProtocol.ParseExportStateRequest(requestBytes);
-		string writtenPath = service.ExportStateToFile(path, stateId);
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.ExportState)
+		{
+			throw new InvalidOperationException("export_state request missing payload.");
+		}
+		string writtenPath = service.ExportStateToFile(
+			requestEnvelope.ExportState.Path,
+			string.IsNullOrWhiteSpace(requestEnvelope.ExportState.StateId) ? null : requestEnvelope.ExportState.StateId);
 		return ProtoStateBuilder.BuildExportStateResponse(writtenPath, service.StateCacheCount);
 	}
 
 	private static async Task<byte[]> ProcessProtoLoadStateAsync(
-		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		string stateId = BinaryProtocol.ParseStateIdRequest(BinaryOpcode.LoadState, requestBytes);
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.LoadState)
+		{
+			throw new InvalidOperationException("load_state request missing payload.");
+		}
+		string stateId = requestEnvelope.LoadState.StateId;
 		FullRunSimulationStateSnapshot snapshot;
 		using (FullRunSimulationDiagnostics.Measure("request.load_state.runtime_ms"))
 		{
 			snapshot = await service.LoadState(stateId);
 		}
 		cache.Snapshot = snapshot;
-		return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.LoadState, snapshot);
+		return ProtoStateBuilder.BuildStateResponse(PipeMethod.LoadState, snapshot);
 	}
 
 	private static async Task<byte[]> ProcessProtoImportStateAsync(
-		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		string path = BinaryProtocol.ParsePathRequest(BinaryOpcode.ImportState, requestBytes);
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.ImportState)
+		{
+			throw new InvalidOperationException("import_state request missing payload.");
+		}
+		string path = requestEnvelope.ImportState.Path;
 		FullRunSimulationStateSnapshot snapshot;
 		using (FullRunSimulationDiagnostics.Measure("request.import_state.runtime_ms"))
 		{
 			snapshot = await service.LoadStateFromFile(path);
 		}
 		cache.Snapshot = snapshot;
-		return ProtoStateBuilder.BuildStateResponse(BinaryOpcode.ImportState, snapshot);
+		return ProtoStateBuilder.BuildStateResponse(PipeMethod.ImportState, snapshot);
 	}
 
-	private static byte[] ProcessProtoDeleteState(FullRunTrainingEnvService service, byte[] requestBytes)
+	private static byte[] ProcessProtoDeleteState(FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope)
 	{
-		bool clearAll = BinaryProtocol.ParseDeleteClearAll(requestBytes, out string? stateId);
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.DeleteState)
+		{
+			throw new InvalidOperationException("delete_state request missing payload.");
+		}
+		bool clearAll = requestEnvelope.DeleteState.ClearAll;
+		string? stateId = clearAll ? null : requestEnvelope.DeleteState.StateId;
 		bool deleted;
 		if (clearAll) { service.ClearStateCache(); deleted = true; }
 		else if (stateId != null) { deleted = service.DeleteState(stateId); }
@@ -589,37 +630,24 @@ internal static partial class Program
 		FullRunSimulationStepResult skipResult = await service.StepAsync(
 			new FullRunSimulationActionRequest { Action = "skip_combat" });
 		FullRunSimulationStateSnapshot snapshot = skipResult.State ?? GetSnapshot(service, cache);
-		return ProtoStateBuilder.BuildStepResponse(skipResult, snapshot);
+		return ProtoStateBuilder.BuildStepResponse(PipeMethod.SkipCombat, skipResult, snapshot);
 	}
 
 	// ================================================================
 	// Proto combat-only opcodes (2026-04-18)
 	//
-	// 请求 payload:
-	//   CombatReset  : [u8 opcode][CombatResetRequest proto bytes]
-	//   CombatStep   : [u8 opcode][CombatStepRequest proto bytes]
-	//   CombatState  : [u8 opcode]
-	// 响应 payload:
-	//   CombatReset  : [u8 status][u8 opcode][GameState proto bytes]
-	//   CombatStep   : [u8 status][u8 opcode][u8 accepted][opt string error][GameState proto]
-	//   CombatState  : [u8 status][u8 opcode][GameState proto bytes]
+	// 请求/响应全部走 PipeRequestEnvelope / PipeResponseEnvelope。
 	//
 	// sim 直接 populate GameState.legal_actions,Python 端不再自己推断。
 	// ================================================================
 
-	private static async Task<byte[]> ProcessProtoCombatResetAsync(byte[] requestBytes)
+	private static async Task<byte[]> ProcessProtoCombatResetAsync(PipeRequestEnvelope requestEnvelope)
 	{
-		STS2AI.Bridge.CombatResetRequest req;
-		try
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.CombatReset)
 		{
-			req = ProtoStateBuilder.ParseCombatResetRequest(requestBytes);
+			throw new InvalidOperationException("combat_reset request missing payload.");
 		}
-		catch (Exception exc)
-		{
-			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.CombatReset, BinaryStatus.ProtocolError,
-				"proto_parse_error", $"CombatResetRequest parse failed: {exc.Message}");
-		}
+		STS2AI.Bridge.CombatResetRequest req = requestEnvelope.CombatReset;
 		CombatTrainingResetRequest request = BuildCombatTrainingResetRequest(req);
 		CombatTrainingStateSnapshot snapshot;
 		try
@@ -630,25 +658,19 @@ internal static partial class Program
 		catch (Exception exc)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.CombatReset, BinaryStatus.SimulatorError,
+				PipeMethod.CombatReset, PipeStatus.SimulatorError,
 				"combat_reset_error", exc.Message);
 		}
-		return ProtoStateBuilder.BuildCombatStateResponse(BinaryOpcode.CombatReset, snapshot);
+		return ProtoStateBuilder.BuildCombatStateResponse(PipeMethod.CombatReset, snapshot);
 	}
 
-	private static async Task<byte[]> ProcessProtoCombatStepAsync(byte[] requestBytes)
+	private static async Task<byte[]> ProcessProtoCombatStepAsync(PipeRequestEnvelope requestEnvelope)
 	{
-		STS2AI.Bridge.CombatStepRequest req;
-		try
+		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.CombatStep)
 		{
-			req = ProtoStateBuilder.ParseCombatStepRequest(requestBytes);
+			throw new InvalidOperationException("combat_step request missing payload.");
 		}
-		catch (Exception exc)
-		{
-			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.CombatStep, BinaryStatus.ProtocolError,
-				"proto_parse_error", $"CombatStepRequest parse failed: {exc.Message}");
-		}
+		STS2AI.Bridge.CombatStepRequest req = requestEnvelope.CombatStep;
 		CombatTrainingActionRequest action;
 		try
 		{
@@ -657,7 +679,7 @@ internal static partial class Program
 		catch (Exception exc)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.CombatStep, BinaryStatus.ProtocolError,
+				PipeMethod.CombatStep, PipeStatus.ProtocolError,
 				"action_decode_error", exc.Message);
 		}
 		CombatTrainingStepResult result;
@@ -672,7 +694,41 @@ internal static partial class Program
 	private static byte[] ProcessProtoCombatState()
 	{
 		CombatTrainingStateSnapshot snapshot = CombatTrainingEnvService.Instance.GetState();
-		return ProtoStateBuilder.BuildCombatStateResponse(BinaryOpcode.CombatState, snapshot);
+		return ProtoStateBuilder.BuildCombatStateResponse(PipeMethod.CombatState, snapshot);
+	}
+
+	private static FullRunSimulationResetRequest BuildProtoResetRequest(PipeResetPayload payload)
+	{
+		return new FullRunSimulationResetRequest
+		{
+			CharacterId = string.IsNullOrWhiteSpace(payload.CharacterId) ? null : payload.CharacterId,
+			Seed = string.IsNullOrWhiteSpace(payload.Seed) ? null : payload.Seed,
+			AscensionLevel = payload.AscensionLevel,
+			Build = SimulationBuildSupport.ParseJson(
+				string.IsNullOrWhiteSpace(payload.BuildJson) ? null : payload.BuildJson),
+		};
+	}
+
+	private static FullRunSimulationActionRequest BuildFullRunSimulationActionRequest(
+		STS2AI.Bridge.LegalAction? action)
+	{
+		if (action == null)
+		{
+			throw new InvalidOperationException("step request action is missing.");
+		}
+
+		return new FullRunSimulationActionRequest
+		{
+			Action = string.IsNullOrWhiteSpace(action.Action) ? "other" : action.Action,
+			Type = string.IsNullOrWhiteSpace(action.Action) ? "other" : action.Action,
+			Index = action.Index >= 0 ? action.Index : null,
+			CardIndex = action.CardIndex >= 0 ? action.CardIndex : null,
+			TargetId = action.TargetId >= 0 ? (uint?)action.TargetId : null,
+			Col = action.Col >= 0 ? action.Col : null,
+			Row = action.Row >= 0 ? action.Row : null,
+			Slot = action.Slot >= 0 ? action.Slot : null,
+			Value = string.IsNullOrWhiteSpace(action.Label) ? null : action.Label,
+		};
 	}
 
 	private static CombatTrainingResetRequest BuildCombatTrainingResetRequest(
@@ -762,7 +818,7 @@ internal static partial class Program
 		if (_ortPolicy == null)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.StepLocalPolicy, BinaryStatus.SimulatorError,
+				PipeMethod.StepLocalPolicy, PipeStatus.SimulatorError,
 				"no_ort_model", "No ORT model loaded. Call load_ort_model first.");
 		}
 		FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
@@ -771,7 +827,7 @@ internal static partial class Program
 		if (actionIndex < 0 || actionIndex >= snapshot.LegalActions.Count)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.StepLocalPolicy, BinaryStatus.SimulatorError,
+				PipeMethod.StepLocalPolicy, PipeStatus.SimulatorError,
 				"invalid_action_index", $"ORT policy returned invalid action index: {actionIndex}");
 		}
 		var la = snapshot.LegalActions[actionIndex];
@@ -789,17 +845,17 @@ internal static partial class Program
 		};
 		FullRunSimulationStepResult result = await service.StepAsync(action);
 		FullRunSimulationStateSnapshot nextSnapshot = result.State ?? GetSnapshot(service, cache);
-		return ProtoStateBuilder.BuildStepResponse(result, nextSnapshot);
+		return ProtoStateBuilder.BuildStepResponse(PipeMethod.StepLocalPolicy, result, nextSnapshot);
 	}
 
 	private static async Task<byte[]> ProcessProtoRunCombatLocalAsync(
-		FullRunTrainingEnvService service, byte[] requestBytes, RequestStateCache cache)
+		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
 		if (_ortPolicy == null)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.RunCombatLocal,
-				BinaryStatus.SimulatorError,
+				PipeMethod.RunCombatLocal,
+				PipeStatus.SimulatorError,
 				"ort_not_loaded",
 				"ORT model not loaded. Call load_ort_model first.");
 		}
@@ -807,27 +863,17 @@ internal static partial class Program
 		try
 		{
 			int maxCombatSteps = 600;
-			if (requestBytes.Length >= 3)
+			if (requestEnvelope.PayloadCase == PipeRequestEnvelope.PayloadOneofCase.RunCombatLocal)
 			{
-				using BinaryReader reqReader = new(new MemoryStream(requestBytes));
-				reqReader.ReadByte();
-				maxCombatSteps = reqReader.ReadUInt16();
+				maxCombatSteps = Math.Max(1, requestEnvelope.RunCombatLocal.MaxSteps);
 			}
 
 			FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
 			bool isCombat = snapshot.StateType is "monster" or "elite" or "boss" or "combat";
 			if (!isCombat)
 			{
-				return BuildRunCombatLocalResponse(
-					combatSteps: 0,
-					elapsedMs: 0f,
-					getSnapshotMs: 0f,
-					ortMs: 0f,
-					stepAsyncMs: 0f,
-					waitAsyncMs: 0f,
-					maxStepMs: 0f,
-					maxWaitMs: 0f,
-					finalSnapshot: snapshot);
+			return ProtoStateBuilder.BuildRunCombatLocalResponse(
+				0, 0f, 0f, 0f, 0f, 0f, 0f, 0f, snapshot);
 			}
 
 			int combatSteps = 0;
@@ -963,7 +1009,7 @@ internal static partial class Program
 			}
 
 			FullRunSimulationStateSnapshot finalSnapshot = GetSnapshot(service, cache);
-			return BuildRunCombatLocalResponse(
+			return ProtoStateBuilder.BuildRunCombatLocalResponse(
 				combatSteps,
 				(float)stopwatch.Elapsed.TotalMilliseconds,
 				getSnapshotMs,
@@ -978,39 +1024,11 @@ internal static partial class Program
 		{
 			Console.Error.WriteLine($"[ORT] RunCombatLocal error: {ex.Message}");
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.RunCombatLocal,
-				BinaryStatus.SimulatorError,
+				PipeMethod.RunCombatLocal,
+				PipeStatus.SimulatorError,
 				"ort_combat_error",
 				ex.Message);
 		}
-	}
-
-	private static byte[] BuildRunCombatLocalResponse(
-		int combatSteps,
-		float elapsedMs,
-		float getSnapshotMs,
-		float ortMs,
-		float stepAsyncMs,
-		float waitAsyncMs,
-		float maxStepMs,
-		float maxWaitMs,
-		FullRunSimulationStateSnapshot finalSnapshot)
-	{
-		byte[] statePayload = ProtoStateBuilder.BuildStatePayload(finalSnapshot);
-		using MemoryStream ms = new();
-		using BinaryWriter writer = new(ms);
-		writer.Write((byte)BinaryStatus.Ok);
-		writer.Write((byte)BinaryOpcode.RunCombatLocal);
-		writer.Write((ushort)combatSteps);
-		writer.Write(elapsedMs);
-		writer.Write(getSnapshotMs);
-		writer.Write(ortMs);
-		writer.Write(stepAsyncMs);
-		writer.Write(waitAsyncMs);
-		writer.Write(maxStepMs);
-		writer.Write(maxWaitMs);
-		writer.Write(statePayload);
-		return ms.ToArray();
 	}
 
 	// --- Local ORT actor policy ---
@@ -1018,14 +1036,15 @@ internal static partial class Program
 	private static readonly Random _ortRng = new(42);
 	private static readonly Random _mctsRng = new(1234);
 
-	private static byte[] BuildLoadOrtModelResponse(byte[] requestBytes)
+	private static byte[] BuildLoadOrtModelResponse(PipeRequestEnvelope requestEnvelope)
 	{
 		try
 		{
-			using BinaryReader reader = new(new MemoryStream(requestBytes));
-			reader.ReadByte();
-			int pathLen = reader.ReadUInt16();
-			string onnxPath = Encoding.UTF8.GetString(reader.ReadBytes(pathLen));
+			if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.LoadOrtModel)
+			{
+				throw new InvalidOperationException("load_ort_model request missing payload.");
+			}
+			string onnxPath = requestEnvelope.LoadOrtModel.Path;
 
 			_ortPolicy?.Dispose();
 			string? vocabPath = Path.Combine(Path.GetDirectoryName(onnxPath) ?? string.Empty, "vocab_mapping.json");
@@ -1037,27 +1056,22 @@ internal static partial class Program
 			_ortPolicy = new OrtActorPolicy(onnxPath, argmax: false, vocabPath: vocabPath);
 			Console.Error.WriteLine(
 				$"[ORT] Loaded model from {onnxPath} (vocab={vocabPath != null}, provider={_ortPolicy.ExecutionProviderName}, requested={_ortPolicy.RequestedDevice}, fallback={_ortPolicy.FellBackToCpu})");
-
-			using MemoryStream ms = new();
-			using BinaryWriter writer = new(ms);
-			writer.Write((byte)BinaryStatus.Ok);
-			writer.Write((byte)BinaryOpcode.LoadOrtModel);
-			writer.Write((byte)1);
-			writer.Write((byte)(_ortPolicy.Metadata.HasValueOutput ? 1 : 0));
-			writer.Write((byte)(_ortPolicy.Metadata.HasDeckInputs ? 1 : 0));
-			writer.Write((byte)(_ortPolicy.Metadata.HasContinuationOutput ? 1 : 0));
-			writer.Write((byte)(_ortPolicy.Metadata.HasExtraScalarsInput ? 1 : 0));
-			BinaryProtocol.WriteString(writer, _ortPolicy.ExecutionProviderName);
-			BinaryProtocol.WriteString(writer, _ortPolicy.RequestedDevice);
-			writer.Write((byte)(_ortPolicy.FellBackToCpu ? 1 : 0));
-			return ms.ToArray();
+			return ProtoStateBuilder.BuildLoadOrtModelResponse(
+				loaded: true,
+				hasValueOutput: _ortPolicy.Metadata.HasValueOutput,
+				hasDeckInputs: _ortPolicy.Metadata.HasDeckInputs,
+				hasContinuationOutput: _ortPolicy.Metadata.HasContinuationOutput,
+				hasExtraScalarsInput: _ortPolicy.Metadata.HasExtraScalarsInput,
+				executionProviderName: _ortPolicy.ExecutionProviderName,
+				requestedDevice: _ortPolicy.RequestedDevice,
+				fellBackToCpu: _ortPolicy.FellBackToCpu);
 		}
 		catch (Exception ex)
 		{
 			Console.Error.WriteLine($"[ORT] Load failed: {ex.Message}");
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.LoadOrtModel,
-				BinaryStatus.SimulatorError,
+				PipeMethod.LoadOrtModel,
+				PipeStatus.SimulatorError,
 				"ort_load_error",
 				ex.Message);
 		}
@@ -1065,28 +1079,32 @@ internal static partial class Program
 
 	private static async Task<byte[]> ProcessSearchCombatMctsAsync(
 		FullRunTrainingEnvService service,
-		byte[] requestBytes,
+		PipeRequestEnvelope requestEnvelope,
 		RequestStateCache cache)
 	{
 		if (_ortPolicy == null)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.SearchCombatMcts,
-				BinaryStatus.SimulatorError,
+				PipeMethod.SearchCombatMcts,
+				PipeStatus.SimulatorError,
 				"ort_not_loaded",
 				"ORT model not loaded. Call load_ort_model first.");
 		}
 
 		try
 		{
-			BinarySearchCombatMctsRequest request = BinaryProtocol.ParseSearchCombatMctsRequest(requestBytes);
+			if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.SearchCombatMcts)
+			{
+				throw new InvalidOperationException("search_combat_mcts request missing payload.");
+			}
+			PipeSearchCombatMctsRequest request = requestEnvelope.SearchCombatMcts;
 			FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
 			bool isCombat = snapshot.StateType is "monster" or "elite" or "boss" or "combat" or "hand_select" or "card_select" or "combat_pending" or "combat_start_pending";
 			if (!isCombat)
 			{
 				return ProtoStateBuilder.BuildErrorResponse(
-					BinaryOpcode.SearchCombatMcts,
-					BinaryStatus.ProtocolError,
+					PipeMethod.SearchCombatMcts,
+					PipeStatus.ProtocolError,
 					"not_in_combat",
 					$"search_combat_mcts requires a combat state, got '{snapshot.StateType}'.");
 			}
@@ -1109,40 +1127,41 @@ internal static partial class Program
 				});
 			cache.Snapshot = service.GetState();
 			cache.ApiState = null;
-			return BinaryProtocol.BuildSearchCombatMctsResponse(result);
+			return ProtoStateBuilder.BuildSearchCombatMctsResponse(result);
 		}
 		catch (Exception ex)
 		{
 			Console.Error.WriteLine($"[MCTS] SearchCombatMcts error: {ex}");
 			return ProtoStateBuilder.BuildErrorResponse(
-				BinaryOpcode.SearchCombatMcts,
-				BinaryStatus.SimulatorError,
+				PipeMethod.SearchCombatMcts,
+				PipeStatus.SimulatorError,
 				"combat_mcts_error",
 				ex.Message);
 		}
 	}
 
-	private static BinaryOpcode SafeParseOpcode(byte[] requestBytes)
+	private static PipeMethod SafeParseMethod(byte[] requestBytes)
 	{
 		try
 		{
-			return BinaryProtocol.ParseOpcode(requestBytes);
+			return PipeRequestEnvelope.Parser.ParseFrom(requestBytes).Method;
 		}
 		catch
 		{
-			return BinaryOpcode.State;
+			return PipeMethod.State;
 		}
 	}
 
-	private static BinaryStatus GetBinaryErrorStatus(Exception exception)
+	private static PipeStatus GetProtoPipeErrorStatus(Exception exception)
 	{
 		return exception switch
 		{
-			InvalidOperationException => BinaryStatus.ProtocolError,
-			JsonException => BinaryStatus.ProtocolError,
-			EndOfStreamException => BinaryStatus.ProtocolError,
-			TimeoutException => BinaryStatus.ProtocolError,
-			_ => BinaryStatus.SimulatorError
+			InvalidOperationException => PipeStatus.ProtocolError,
+			JsonException => PipeStatus.ProtocolError,
+			EndOfStreamException => PipeStatus.ProtocolError,
+			InvalidProtocolBufferException => PipeStatus.ProtocolError,
+			TimeoutException => PipeStatus.ProtocolError,
+			_ => PipeStatus.SimulatorError
 		};
 	}
 
@@ -2125,7 +2144,9 @@ internal static partial class Program
 
 		public IReadOnlyList<string> ExportLocales { get; private set; } = new[] { "eng", "zhs" };
 
-		public string PipeName => BinaryProtocol.PipeName(Port, Protocol);
+		public string PipeName => Protocol == HostProtocol.Proto
+			? $"sts2_mcts_proto_{Port}"
+			: $"sts2_mcts_{Port}";
 
 		public static HostOptions Parse(IEnumerable<string> args)
 		{

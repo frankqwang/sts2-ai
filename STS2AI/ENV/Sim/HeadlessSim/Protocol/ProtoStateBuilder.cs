@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
 using Google.Protobuf;
 using MegaCrit.Sts2.Core.CardSelection;
@@ -30,14 +28,14 @@ namespace HeadlessSim;
 /// 游戏运行时对象 → Protobuf GameState 消息的映射层。
 ///
 /// 职责：从 <see cref="FullRunSimulationStateSnapshot"/> 等游戏对象中提取数据，
-/// 填充 protoc 自动生成的 <see cref="GameState"/> proto message，再序列化为 bytes。
+/// 填充 protoc 自动生成的 <see cref="GameState"/> / pipe envelope message。
 ///
-/// 帧格式不变: [4字节长度][status][opcode][payload]
-/// 差异: state payload 用 protobuf 序列化；请求解析继续复用共享 pipe reader。
+/// 2026-04-21 起，proto pipe 外层也统一使用 protobuf envelope，
+/// 不再手写 `[status][opcode][payload]`。
 /// </summary>
 internal static class ProtoStateBuilder
 {
-	private const ushort ProtocolVersion = 1;
+	private const uint ProtocolVersion = 1;
 	internal const string ProtoSchemaId = "sts2-proto-v1";
 	private const int MaxPileCards = 50;
 
@@ -49,122 +47,193 @@ internal static class ProtoStateBuilder
 
 	public static byte[] BuildHandshakeResponse()
 	{
-		using MemoryStream stream = new();
-		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
-		writer.Write((byte)BinaryStatus.Ok);
-		writer.Write((byte)BinaryOpcode.Handshake);
-		writer.Write(ProtocolVersion);
-		BinaryProtocol.WriteString(writer, BuildGitSha);
-		BinaryProtocol.WriteString(writer, ProtoSchemaId);
-		return stream.ToArray();
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.Handshake,
+			Status = PipeStatus.Ok,
+			Handshake = new PipeHandshake
+			{
+				ProtocolVersion = ProtocolVersion,
+				BuildGitSha = BuildGitSha,
+				SchemaId = ProtoSchemaId,
+			},
+		}.ToByteArray();
 	}
 
 	// ================================================================
-	// State responses — payload = protobuf GameState bytes
+	// State / result responses
 	// ================================================================
 
-	public static byte[] BuildStateResponse(BinaryOpcode opcode, FullRunSimulationStateSnapshot snapshot)
+	public static byte[] BuildStateResponse(PipeMethod method, FullRunSimulationStateSnapshot snapshot)
 	{
-		byte[] statePayload = BuildStatePayload(snapshot);
-		using MemoryStream stream = new();
-		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
-		writer.Write((byte)BinaryStatus.Ok);
-		writer.Write((byte)opcode);
-		writer.Write(statePayload);
-		FullRunSimulationDiagnostics.Increment("proto.state_bytes", statePayload.Length);
-		return stream.ToArray();
+		GameState state = BuildStateMessage(snapshot);
+		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
+		return new PipeResponseEnvelope
+		{
+			Method = method,
+			Status = PipeStatus.Ok,
+			State = new PipeStatePayload { State = state },
+		}.ToByteArray();
 	}
 
-	public static byte[] BuildStepResponse(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot)
+	public static byte[] BuildStepResponse(PipeMethod method, FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot)
 	{
-		BinaryStatus status = result.Accepted ? BinaryStatus.Ok : BinaryStatus.RejectedAction;
-		byte[] statePayload = BuildStatePayload(snapshot);
-		using MemoryStream stream = new();
-		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
-		writer.Write((byte)status);
-		writer.Write((byte)BinaryOpcode.Step);
-		writer.Write((byte)(result.Accepted ? 1 : 0));
-		BinaryProtocol.WriteOptionalString(writer, result.Error);
-		writer.Write(statePayload);
-		FullRunSimulationDiagnostics.Increment("proto.state_bytes", statePayload.Length);
-		return stream.ToArray();
+		GameState state = BuildStateMessage(snapshot);
+		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
+		return new PipeResponseEnvelope
+		{
+			Method = method,
+			Status = result.Accepted ? PipeStatus.Ok : PipeStatus.RejectedAction,
+			Step = new PipeStepPayload
+			{
+				Accepted = result.Accepted,
+				Error = result.Error ?? "",
+				State = state,
+			},
+		}.ToByteArray();
 	}
 
 	public static byte[] BuildBatchStepResponse(FullRunSimulationBatchStepResult result, FullRunSimulationStateSnapshot snapshot)
 	{
-		BinaryStatus status = result.Accepted ? BinaryStatus.Ok : BinaryStatus.RejectedAction;
-		byte[] statePayload = BuildStatePayload(snapshot);
-		using MemoryStream stream = new();
-		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
-		writer.Write((byte)status);
-		writer.Write((byte)BinaryOpcode.BatchStep);
-		writer.Write((byte)(result.Accepted ? 1 : 0));
-		writer.Write((ushort)Math.Max(0, result.StepsExecuted));
-		BinaryProtocol.WriteOptionalString(writer, result.Error);
-		writer.Write(statePayload);
-		FullRunSimulationDiagnostics.Increment("proto.state_bytes", statePayload.Length);
-		return stream.ToArray();
+		GameState state = BuildStateMessage(snapshot);
+		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.BatchStep,
+			Status = result.Accepted ? PipeStatus.Ok : PipeStatus.RejectedAction,
+			BatchStep = new PipeBatchStepPayload
+			{
+				Accepted = result.Accepted,
+				StepsExecuted = Math.Max(0, result.StepsExecuted),
+				Error = result.Error ?? "",
+				State = state,
+			},
+		}.ToByteArray();
 	}
 
 	// ================================================================
-	// Non-state responses — 格式和 BinaryProtocol 完全一致，直接委托
+	// Auxiliary responses
 	// ================================================================
 
-	public static byte[] BuildErrorResponse(BinaryOpcode opcode, BinaryStatus status, string errorCode, string error)
-		=> BinaryProtocol.BuildErrorResponse(opcode, status, errorCode, error);
+	public static byte[] BuildErrorResponse(PipeMethod method, PipeStatus status, string errorCode, string error)
+	{
+		return new PipeResponseEnvelope
+		{
+			Method = method,
+			Status = status,
+			Error = new PipeError
+			{
+				ErrorCode = errorCode ?? "",
+				ErrorMessage = error ?? "",
+			},
+		}.ToByteArray();
+	}
 
 	public static byte[] BuildSaveStateResponse(string stateId, int cacheSize)
-		=> BinaryProtocol.BuildSaveStateResponse(stateId, cacheSize);
-
-	public static byte[] BuildExportStateResponse(string path, int cacheSize)
-		=> BinaryProtocol.BuildExportStateResponse(path, cacheSize);
-
-	public static byte[] BuildDeleteStateResponse(bool deleted, int cacheSize)
-		=> BinaryProtocol.BuildDeleteStateResponse(deleted, cacheSize);
-
-	public static byte[] BuildPerfStatsResponse(Dictionary<string, object?> payload)
-		=> BinaryProtocol.BuildPerfStatsResponse(payload);
-
-	public static byte[] BuildResetPerfStatsResponse()
-		=> BinaryProtocol.BuildResetPerfStatsResponse();
-
-	public static byte[] BuildSearchCombatMctsResponse(CombatMctsResult result)
-		=> BinaryProtocol.BuildSearchCombatMctsResponse(result);
-
-	// ================================================================
-	// Proto combat request parsers (2026-04-18)
-	//
-	// 把 Python 发来的 CombatReset/CombatStep 请求 bytes 反序列化成 proto
-	// message。opcode 字节是 payload[0],剩余是 proto-serialized message。
-	// 统一走 protobuf,禁止再用手写二进制 reader。
-	// ================================================================
-
-	public static STS2AI.Bridge.CombatResetRequest ParseCombatResetRequest(ReadOnlySpan<byte> request)
 	{
-		if (request.Length < 1)
+		return new PipeResponseEnvelope
 		{
-			throw new InvalidOperationException("CombatReset request body is empty.");
-		}
-		if (request[0] != (byte)BinaryOpcode.CombatReset)
-		{
-			throw new InvalidOperationException(
-				$"CombatReset opcode mismatch. Expected {(byte)BinaryOpcode.CombatReset}, got {request[0]}.");
-		}
-		return STS2AI.Bridge.CombatResetRequest.Parser.ParseFrom(request.Slice(1).ToArray());
+			Method = PipeMethod.SaveState,
+			Status = PipeStatus.Ok,
+			SaveState = new PipeSaveStateResult
+			{
+				StateId = stateId ?? "",
+				CacheSize = cacheSize,
+			},
+		}.ToByteArray();
 	}
 
-	public static STS2AI.Bridge.CombatStepRequest ParseCombatStepRequest(ReadOnlySpan<byte> request)
+	public static byte[] BuildExportStateResponse(string path, int cacheSize)
 	{
-		if (request.Length < 1)
+		return new PipeResponseEnvelope
 		{
-			throw new InvalidOperationException("CombatStep request body is empty.");
-		}
-		if (request[0] != (byte)BinaryOpcode.CombatStep)
+			Method = PipeMethod.ExportState,
+			Status = PipeStatus.Ok,
+			ExportState = new PipeExportStateResult
+			{
+				Path = path ?? "",
+				CacheSize = cacheSize,
+			},
+		}.ToByteArray();
+	}
+
+	public static byte[] BuildDeleteStateResponse(bool deleted, int cacheSize)
+	{
+		return new PipeResponseEnvelope
 		{
-			throw new InvalidOperationException(
-				$"CombatStep opcode mismatch. Expected {(byte)BinaryOpcode.CombatStep}, got {request[0]}.");
-		}
-		return STS2AI.Bridge.CombatStepRequest.Parser.ParseFrom(request.Slice(1).ToArray());
+			Method = PipeMethod.DeleteState,
+			Status = PipeStatus.Ok,
+			DeleteState = new PipeDeleteStateResult
+			{
+				Deleted = deleted,
+				CacheSize = cacheSize,
+			},
+		}.ToByteArray();
+	}
+
+	public static byte[] BuildPerfStatsResponse(Dictionary<string, object?> payload)
+	{
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.PerfStats,
+			Status = PipeStatus.Ok,
+			PerfStats = new PipePerfStatsResult
+			{
+				JsonPayload = JsonSerializer.Serialize(payload),
+			},
+		}.ToByteArray();
+	}
+
+	public static byte[] BuildResetPerfStatsResponse()
+	{
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.ResetPerfStats,
+			Status = PipeStatus.Ok,
+			ResetPerfStats = new PipeResetPerfStatsResult { Reset = true },
+		}.ToByteArray();
+	}
+
+	public static byte[] BuildSearchCombatMctsResponse(CombatMctsResult result)
+	{
+		PipeSearchCombatMctsResult payload = new PipeSearchCombatMctsResult
+		{
+			ActionIndex = result.ActionIndex,
+			RootValue = result.RootValue,
+			SearchMs = result.SearchMs,
+			RestoredOk = result.RestoredOk,
+			SnapshotCount = result.SnapshotCount,
+			SimulationCount = result.Breakdown.SimulationCount,
+			SaveStateCount = result.Breakdown.SaveStateCount,
+			LoadStateCount = result.Breakdown.LoadStateCount,
+			DeleteStateCount = result.Breakdown.DeleteStateCount,
+			StepCount = result.Breakdown.StepCount,
+			AdvanceStateCount = result.Breakdown.AdvanceStateCount,
+			EvalCallCount = result.Breakdown.EvalCallCount,
+			EvalBatchCount = result.Breakdown.EvalBatchCount,
+			EvalStateCount = result.Breakdown.EvalStateCount,
+			SelectChildCount = result.Breakdown.SelectChildCount,
+			BackpropCount = result.Breakdown.BackpropCount,
+			SaveStateMs = result.Breakdown.SaveStateMs,
+			LoadStateMs = result.Breakdown.LoadStateMs,
+			DeleteStateMs = result.Breakdown.DeleteStateMs,
+			StepMs = result.Breakdown.StepMs,
+			AdvanceStateMs = result.Breakdown.AdvanceStateMs,
+			EvalMs = result.Breakdown.EvalMs,
+			SelectionMs = result.Breakdown.SelectionMs,
+			BackpropMs = result.Breakdown.BackpropMs,
+			DebugTraceJson = result.DebugTraceJson ?? "",
+		};
+		payload.VisitCounts.Add(result.VisitCounts);
+		payload.VisitProbs.Add(result.VisitProbs);
+		payload.QValues.Add(result.QValues);
+		payload.Priors.Add(result.Priors);
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.SearchCombatMcts,
+			Status = PipeStatus.Ok,
+			SearchCombatMcts = payload,
+		}.ToByteArray();
 	}
 
 	// ================================================================
@@ -174,39 +243,105 @@ internal static class ProtoStateBuilder
 	// Python 侧不再自己推断 legal actions,直接消费 sim 的权威字段。
 	// ================================================================
 
-	public static byte[] BuildCombatStateResponse(BinaryOpcode opcode, CombatTrainingStateSnapshot snapshot)
+	public static byte[] BuildCombatStateResponse(PipeMethod method, CombatTrainingStateSnapshot snapshot)
 	{
-		byte[] statePayload = BuildCombatGameStatePayload(snapshot);
-		using MemoryStream stream = new();
-		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
-		writer.Write((byte)BinaryStatus.Ok);
-		writer.Write((byte)opcode);
-		writer.Write(statePayload);
-		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", statePayload.Length);
-		return stream.ToArray();
+		GameState state = BuildCombatGameStateMessage(snapshot);
+		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", state.CalculateSize());
+		return new PipeResponseEnvelope
+		{
+			Method = method,
+			Status = PipeStatus.Ok,
+			State = new PipeStatePayload { State = state },
+		}.ToByteArray();
 	}
 
 	public static byte[] BuildCombatStepResponse(CombatTrainingStepResult result, CombatTrainingStateSnapshot snapshot)
 	{
-		BinaryStatus status = result.Accepted ? BinaryStatus.Ok : BinaryStatus.RejectedAction;
-		byte[] statePayload = BuildCombatGameStatePayload(snapshot);
-		using MemoryStream stream = new();
-		using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
-		writer.Write((byte)status);
-		writer.Write((byte)BinaryOpcode.CombatStep);
-		writer.Write((byte)(result.Accepted ? 1 : 0));
-		BinaryProtocol.WriteOptionalString(writer, result.Error);
-		writer.Write(statePayload);
-		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", statePayload.Length);
-		return stream.ToArray();
+		GameState state = BuildCombatGameStateMessage(snapshot);
+		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", state.CalculateSize());
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.CombatStep,
+			Status = result.Accepted ? PipeStatus.Ok : PipeStatus.RejectedAction,
+			Step = new PipeStepPayload
+			{
+				Accepted = result.Accepted,
+				Error = result.Error ?? "",
+				State = state,
+			},
+		}.ToByteArray();
 	}
 
 	public static byte[] BuildStatePayload(FullRunSimulationStateSnapshot snapshot)
 	{
-		return BuildProtoStatePayload(snapshot);
+		return BuildStateMessage(snapshot).ToByteArray();
 	}
 
-	private static byte[] BuildCombatGameStatePayload(CombatTrainingStateSnapshot snapshot)
+	public static byte[] BuildLoadOrtModelResponse(
+		bool loaded,
+		bool hasValueOutput,
+		bool hasDeckInputs,
+		bool hasContinuationOutput,
+		bool hasExtraScalarsInput,
+		string executionProviderName,
+		string requestedDevice,
+		bool fellBackToCpu)
+	{
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.LoadOrtModel,
+			Status = PipeStatus.Ok,
+			LoadOrtModel = new PipeLoadOrtModelResult
+			{
+				Loaded = loaded,
+				HasValueOutput = hasValueOutput,
+				HasDeckInputs = hasDeckInputs,
+				HasContinuationOutput = hasContinuationOutput,
+				HasExtraScalarsInput = hasExtraScalarsInput,
+				ExecutionProviderName = executionProviderName ?? "",
+				RequestedDevice = requestedDevice ?? "",
+				FellBackToCpu = fellBackToCpu,
+			},
+		}.ToByteArray();
+	}
+
+	public static byte[] BuildRunCombatLocalResponse(
+		int combatSteps,
+		float elapsedMs,
+		float getSnapshotMs,
+		float ortMs,
+		float stepAsyncMs,
+		float waitAsyncMs,
+		float maxStepMs,
+		float maxWaitMs,
+		FullRunSimulationStateSnapshot finalSnapshot)
+	{
+		GameState state = BuildStateMessage(finalSnapshot);
+		return new PipeResponseEnvelope
+		{
+			Method = PipeMethod.RunCombatLocal,
+			Status = PipeStatus.Ok,
+			RunCombatLocal = new PipeRunCombatLocalResult
+			{
+				CombatSteps = combatSteps,
+				ElapsedMs = elapsedMs,
+				GetSnapshotMs = getSnapshotMs,
+				OrtMs = ortMs,
+				StepAsyncMs = stepAsyncMs,
+				WaitAsyncMs = waitAsyncMs,
+				MaxStepMs = maxStepMs,
+				MaxWaitMs = maxWaitMs,
+				State = state,
+			},
+		}.ToByteArray();
+	}
+
+	public static GameState BuildStateMessage(FullRunSimulationStateSnapshot snapshot)
+	{
+		return BuildProtoStateMessage(snapshot);
+	}
+
+	private static GameState BuildCombatGameStateMessage(CombatTrainingStateSnapshot snapshot)
 	{
 		Player? runtimePlayer = TryResolveActiveCombatPlayer();
 		GameState gs = new GameState
@@ -229,7 +364,7 @@ internal static class ProtoStateBuilder
 
 		gs.Battle = BuildBattleState(snapshot, runtimePlayer);
 		PopulateCombatLegalActions(gs, snapshot);
-		return gs.ToByteArray();
+		return gs;
 	}
 
 	private static Player? TryResolveActiveCombatPlayer()
@@ -411,7 +546,7 @@ internal static class ProtoStateBuilder
 	// Core: snapshot → protobuf GameState → byte[]
 	// ================================================================
 
-	internal static byte[] BuildProtoStatePayload(FullRunSimulationStateSnapshot snapshot)
+	internal static GameState BuildProtoStateMessage(FullRunSimulationStateSnapshot snapshot)
 	{
 		GameState gs = new GameState();
 		RunState? runState = RunManager.Instance.DebugOnlyGetState();
@@ -479,7 +614,7 @@ internal static class ProtoStateBuilder
 				break;
 		}
 
-		return gs.ToByteArray();
+		return gs;
 	}
 
 	// ================================================================

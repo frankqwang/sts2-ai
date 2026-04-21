@@ -135,19 +135,12 @@
     <Compile Include="..\SrcCompat\Source01032\Core\Saves\Runs\SerializablePlayerCombatState.cs" Link="Saves\SerializablePlayerCombatState.cs" />
     <Compile Include="..\SrcCompat\Source01032\Core\Saves\Runs\SerializableCreatureState.cs" Link="Saves\SerializableCreatureState.cs" />
 
-    <Compile Include="BinaryProtocol.cs" Link="HeadlessSim\BinaryProtocol.cs" />
-    <Compile Include="GeneratedStubs.cs" Link="HeadlessSim\GeneratedStubs.cs" />
-    <Compile Include="ManualDebugAndPoolStubs.cs" Link="HeadlessSim\ManualDebugAndPoolStubs.cs" />
-    <Compile Include="ManualNodeAugments.cs" Link="HeadlessSim\ManualNodeAugments.cs" />
-    <Compile Include="ManualPlatformStubs.cs" Link="HeadlessSim\ManualPlatformStubs.cs" />
-    <Compile Include="MigrationsCompat.cs" Link="HeadlessSim\MigrationsCompat.cs" />
-    <Compile Include="CombatFeatureEncoder.cs" Link="HeadlessSim\CombatFeatureEncoder.cs" />
-    <Compile Include="CombatMcts.cs" Link="HeadlessSim\CombatMcts.cs" />
-    <Compile Include="OrtCombatEvaluator.cs" Link="HeadlessSim\OrtCombatEvaluator.cs" />
+    <Compile Include="Protocol\*.cs" Link="HeadlessSim\Protocol\%(Filename)%(Extension)" />
+    <Compile Include="Compat\*.cs" Link="HeadlessSim\Compat\%(Filename)%(Extension)" />
+    <Compile Include="CombatAi\*.cs" Link="HeadlessSim\CombatAi\%(Filename)%(Extension)" />
     <Protobuf Include="..\..\proto\game_state.proto" GrpcServices="None" />
-    <Compile Include="ProtoStateBuilder.cs" Link="HeadlessSim\ProtoStateBuilder.cs" />
     <Compile Include="Program.cs" Link="HeadlessSim\Program.cs" />
-    <Compile Include="ProgramStepSupport.cs" Link="HeadlessSim\ProgramStepSupport.cs" />
+    <Compile Include="Program.StepSupport.cs" Link="HeadlessSim\Program.StepSupport.cs" />
     <Compile Include="..\GodotSharpStub\src\**\*.cs" Link="GodotSharpStub\%(RecursiveDir)%(Filename)%(Extension)" />
 
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
