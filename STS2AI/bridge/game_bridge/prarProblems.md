@@ -2,7 +2,7 @@
 
 更新时间：2026-04-20
 
-本文记录 `STS2AI/Python/game_bridge/parity.py` 这条 live parity 链路里，已经定位并修复过的问题。只记录“已解决”或“已明确定位”的问题，避免后续重复踩坑。
+本文记录 `STS2AI/bridge/game_bridge/parity.py` 这条 live parity 链路里，已经定位并修复过的问题。只记录“已解决”或“已明确定位”的问题，避免后续重复踩坑。
 
 ## 1. parity 产物目录落错到 `Python/Artifacts`
 
@@ -13,7 +13,7 @@
 - 修复：
   默认输出目录改到 `STS2AI/Artifacts/parity/game_bridge`。
 - 代码：
-  [parity.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Python/game_bridge/parity.py:450)
+  [parity.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/bridge/game_bridge/parity.py:450)
 
 ## 2. spectator 实际加载的不是工作区 `bin/Debug` DLL
 
@@ -278,7 +278,7 @@
 - 代码：
   [ProtoStateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/ProtoStateBuilder.cs:198)
   [ProtoStateBuilder.cs](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/ENV/Sim/HeadlessSim/ProtoStateBuilder.cs:537)
-  [proto_state_converter.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/Python/game_bridge/transport/proto_state_converter.py:65)
+  [proto_state_converter.py](/C:/Users/Administrator/Desktop/sts2Raw2/STS2AI/bridge/game_bridge/transport/proto_state_converter.py:65)
 - 验证：
   修复后，同样的 build 复现已变成：
   - `top_relic_count = 4`
