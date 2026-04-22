@@ -16,6 +16,7 @@ from __future__ import annotations
 这四块结构稳定，方便跨 run 对比。
 """
 
+import argparse
 import json
 from collections import Counter
 from pathlib import Path
@@ -25,6 +26,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
+
+ENGINE_CARDS = {"FEEL_NO_PAIN", "DARK_EMBRACE"}
+PAYOFF_CARDS = {"PACTS_END", "TRUE_GRIT", "PURITY", "PYRE", "SECOND_WIND"}
+SUBMENU_ACTION_TYPES = {"select_hand_card", "select_card_option", "confirm_selection", "cancel_selection"}
 
 
 def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Path:
@@ -42,6 +47,10 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     episode_df = _build_episode_event_dataframe(run_root / "logs")
     encounter_coverage_df = _build_encounter_coverage_dataframe(run_root)
     encounter_pool_df = _build_encounter_pool_dataframe(run_root)
+    turn_order_df, turn_metrics_df = _build_turn_order_dashboard_dataframes(
+        raw_runs_dir=run_root / "raw_runs",
+        logs_dir=run_root / "logs",
+    )
 
     summary = {
         "iterations": len(manifests),
@@ -61,6 +70,8 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     _write_dataframe(episode_df, analysis_dir / "episode_metrics.csv")
     _write_dataframe(encounter_coverage_df, analysis_dir / "encounter_coverage.csv")
     _write_dataframe(encounter_pool_df, analysis_dir / "encounter_pool_stats.csv")
+    _write_dataframe(turn_order_df, analysis_dir / "turn_order_dashboard.csv")
+    _write_dataframe(turn_metrics_df, analysis_dir / "turn_metrics.csv")
 
     _plot_training_metrics(training_df, analysis_dir / "training_metrics.png")
     _plot_sampling_metrics(sampling_df, episode_df, analysis_dir / "sampling_metrics.png")
@@ -69,6 +80,8 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     _plot_rollout_behavior(rollout_df, analysis_dir / "rollout_behavior.png")
     _plot_cohort_heatmap(eval_df, analysis_dir / "cohort_overview.png")
     _plot_encounter_coverage(encounter_coverage_df, analysis_dir / "encounter_coverage.png")
+    _plot_turn_order_dashboard(turn_order_df, analysis_dir / "turn_order_dashboard.png")
+    _write_turn_order_markdown(turn_order_df, analysis_dir / "turn_order_dashboard.md")
     return analysis_dir
 
 
@@ -317,6 +330,267 @@ def _build_encounter_pool_dataframe(run_root: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _build_turn_order_dashboard_dataframes(*, raw_runs_dir: Path, logs_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not raw_runs_dir.exists():
+        return pd.DataFrame(), pd.DataFrame()
+
+    episode_events = _load_episode_events_by_iteration_and_run(logs_dir)
+    dashboard_rows: list[dict[str, Any]] = []
+    turn_rows: list[dict[str, Any]] = []
+
+    for path in sorted(raw_runs_dir.glob("iter_*.jsonl")):
+        iteration = _extract_iteration(path.name)
+        fights: dict[str, list[dict[str, Any]]] = {}
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            row = json.loads(text)
+            run_id = str(row.get("run_id") or "")
+            fights.setdefault(run_id, []).append(row)
+
+        if not fights:
+            continue
+
+        wins = 0
+        hp_loss_on_win: list[float] = []
+        damage_taken_all: list[float] = []
+        victory_end_hp: list[float] = []
+        turn_steps: list[int] = []
+        submenu_turns = 0
+        no_progress_turns = 0
+        end_turn_with_options_turns = 0
+        long_turns = 0
+        threat_damage_total = 0.0
+        threat_damage_to_attack = 0.0
+        attack_focus_checks = 0
+        attack_focus_hits = 0
+        lethal_checks = 0
+        lethal_hits = 0
+        engine_checks = 0
+        engine_hits = 0
+        quota_checks = 0
+        quota_hits = 0
+        submenu_sequences = 0
+        submenu_overruns = 0
+        submenu_latencies: list[int] = []
+        max_no_progress_streak_values: list[float] = []
+
+        for run_id, rows in fights.items():
+            rows.sort(key=lambda item: int(item.get("step_idx") or 0))
+            event = episode_events.get(iteration, {}).get(run_id)
+            if isinstance(event, dict) and str(event.get("outcome") or "") == "victory":
+                wins += 1
+
+            first = rows[0]
+            last = rows[-1]
+            start_hp = float(
+                ((first.get("state") or {}).get("context") or {}).get("metadata", {}).get(
+                    "combat_start_hp",
+                    ((first.get("state") or {}).get("player") or {}).get("hp", 0.0),
+                )
+                or 0.0
+            )
+            terminal_hp_obs = float((((last.get("next_state") or {}).get("player") or {}).get("hp") or 0.0))
+            relics = set(((first.get("state") or {}).get("context") or {}).get("relics") or [])
+            heal_after_victory = 6.0 if isinstance(event, dict) and str(event.get("outcome") or "") == "victory" and "BURNING_BLOOD" in relics else 0.0
+            est_end_hp = terminal_hp_obs - heal_after_victory
+            est_damage_taken = start_hp - est_end_hp
+            damage_taken_all.append(est_damage_taken)
+            if isinstance(event, dict):
+                max_no_progress_streak_values.append(float(event.get("max_no_progress_streak") or 0.0))
+                if str(event.get("outcome") or "") == "victory":
+                    hp_loss_on_win.append(est_damage_taken)
+                    victory_end_hp.append(est_end_hp)
+
+            turns: dict[int, list[dict[str, Any]]] = {}
+            for row in rows:
+                state = row.get("state") or {}
+                turn = ((state.get("context") or {}).get("metadata") or {}).get("round_number_raw")
+                if isinstance(turn, int):
+                    turns.setdefault(turn, []).append(row)
+
+            for turn, turn_entries in turns.items():
+                turn_entries.sort(key=lambda item: int(item.get("step_idx") or 0))
+                turn_step_count = len(turn_entries)
+                turn_steps.append(turn_step_count)
+                if turn_step_count >= 8:
+                    long_turns += 1
+
+                has_submenu = False
+                any_progress = False
+                repeat_streak_max = 0
+                repeat_last_action_id = ""
+                repeat_count = 0
+                first_targeted_attack_checked = False
+                engine_order: list[str] = []
+                quota_reached = False
+                submenu_latency = 0
+
+                for row in turn_entries:
+                    state = row.get("state") or {}
+                    next_state = row.get("next_state") or {}
+                    legal_actions = state.get("legal_actions") or []
+                    legal_action_types = {str(item.get("action_type") or "") for item in legal_actions}
+                    if ((state.get("context") or {}).get("metadata") or {}).get("state_type") in {"hand_select", "card_select"} or (legal_action_types & SUBMENU_ACTION_TYPES):
+                        has_submenu = True
+
+                    metadata = row.get("metadata") or {}
+                    if bool(metadata.get("made_progress")) or float(metadata.get("enemy_hp_delta") or 0.0) > 0 or float(metadata.get("enemy_count_delta") or 0.0) > 0:
+                        any_progress = True
+
+                    action = row.get("action") or {}
+                    action_type = str(action.get("action_type") or "")
+                    action_id = str(action.get("action_id") or "")
+                    if action_id == repeat_last_action_id:
+                        repeat_count += 1
+                    else:
+                        repeat_last_action_id = action_id
+                        repeat_count = 1
+                    repeat_streak_max = max(repeat_streak_max, repeat_count)
+
+                    enemies = (state.get("enemies") or [])
+                    alive_enemies = [(str(index + 1), enemy) for index, enemy in enumerate(enemies) if bool(enemy.get("alive", True))]
+                    attack_enemy_ids = [enemy_id for enemy_id, enemy in alive_enemies if str(enemy.get("intent_id") or "") == "Attack"]
+                    mixed_intent = bool(attack_enemy_ids) and any(str(enemy.get("intent_id") or "") != "Attack" for _, enemy in alive_enemies)
+                    if mixed_intent and action_type == "play_card" and action.get("target_id"):
+                        damage_delta = max(0.0, float(metadata.get("enemy_hp_delta") or 0.0))
+                        threat_damage_total += damage_delta
+                        if str(action.get("target_id")) in attack_enemy_ids:
+                            threat_damage_to_attack += damage_delta
+                        if not first_targeted_attack_checked:
+                            attack_focus_checks += 1
+                            if str(action.get("target_id")) in attack_enemy_ids:
+                                attack_focus_hits += 1
+                            first_targeted_attack_checked = True
+
+                    lethal_target_ids: set[str] = set()
+                    for legal_action in legal_actions:
+                        if str(legal_action.get("action_type") or "") != "play_card":
+                            continue
+                        target_id = str(legal_action.get("target_id") or "")
+                        if not target_id:
+                            continue
+                        try:
+                            enemy_index = int(target_id) - 1
+                        except ValueError:
+                            continue
+                        if enemy_index < 0 or enemy_index >= len(enemies):
+                            continue
+                        enemy = enemies[enemy_index]
+                        if not bool(enemy.get("alive", True)):
+                            continue
+                        hp_plus_block = float(enemy.get("hp") or 0.0) + float(enemy.get("block") or 0.0)
+                        if float(legal_action.get("damage_now") or 0.0) >= hp_plus_block and hp_plus_block > 0:
+                            lethal_target_ids.add(target_id)
+                    if lethal_target_ids:
+                        lethal_checks += 1
+                        alive_before = sum(1 for enemy in enemies if bool(enemy.get("alive", True)))
+                        alive_after = sum(1 for enemy in ((next_state.get("enemies") or [])) if bool(enemy.get("alive", True)))
+                        if action_type == "play_card" and str(action.get("target_id") or "") in lethal_target_ids and alive_after < alive_before:
+                            lethal_hits += 1
+
+                    if action_type == "play_card":
+                        card_id = str(action.get("card_id") or "")
+                        if card_id in ENGINE_CARDS:
+                            engine_order.append("engine")
+                        elif card_id in PAYOFF_CARDS:
+                            engine_order.append("payoff")
+
+                    if action_type in {"select_hand_card", "select_card_option"}:
+                        next_action_types = [str(item.get("action_type") or "") for item in (next_state.get("legal_actions") or [])]
+                        has_confirm = "confirm_selection" in next_action_types
+                        has_more_select = bool({"select_hand_card", "select_card_option"} & set(next_action_types))
+                        if has_confirm and not has_more_select and not quota_reached:
+                            submenu_sequences += 1
+                            quota_reached = True
+                            submenu_latency = 0
+                            continue
+                    if quota_reached:
+                        if action_type == "confirm_selection":
+                            submenu_latencies.append(submenu_latency)
+                            quota_checks += 1
+                            quota_hits += 1
+                            if submenu_latency > 0:
+                                submenu_overruns += 1
+                            quota_reached = False
+                            submenu_latency = 0
+                        elif ((state.get("context") or {}).get("metadata") or {}).get("state_type") in {"hand_select", "card_select"} or (legal_action_types & SUBMENU_ACTION_TYPES):
+                            submenu_latency += 1
+                        else:
+                            submenu_latencies.append(submenu_latency)
+                            quota_checks += 1
+                            if submenu_latency > 0:
+                                submenu_overruns += 1
+                            quota_reached = False
+                            submenu_latency = 0
+
+                if has_submenu:
+                    submenu_turns += 1
+                if not any_progress:
+                    no_progress_turns += 1
+                if engine_order.count("engine") > 0 and engine_order.count("payoff") > 0:
+                    engine_checks += 1
+                    if engine_order.index("engine") < engine_order.index("payoff"):
+                        engine_hits += 1
+
+                last_row = turn_entries[-1]
+                last_legal_action_types = {
+                    str(item.get("action_type") or "")
+                    for item in (((last_row.get("state") or {}).get("legal_actions") or []))
+                }
+                ended_with_options = False
+                if str((last_row.get("action") or {}).get("action_type") or "") == "end_turn":
+                    meaningful_options = last_legal_action_types - {"end_turn", "confirm_selection", "cancel_selection"}
+                    ended_with_options = bool(meaningful_options)
+                    if ended_with_options:
+                        end_turn_with_options_turns += 1
+
+                turn_rows.append(
+                    {
+                        "iteration": iteration,
+                        "run_id": run_id,
+                        "fight_id": str(turn_entries[0].get("fight_id") or ""),
+                        "turn": turn,
+                        "turn_ref": f"{path.name} | run={run_id} | fight={turn_entries[0].get('fight_id', '')} | turn={turn}",
+                        "turn_steps": turn_step_count,
+                        "has_submenu": int(has_submenu),
+                        "no_progress_turn": int(not any_progress),
+                        "ended_with_options": int(ended_with_options),
+                        "repeat_streak_max": repeat_streak_max,
+                        "source_file": path.name,
+                    }
+                )
+
+        total_turns = len(turn_steps)
+        dashboard_rows.append(
+            {
+                "iteration": iteration,
+                "episodes": len(fights),
+                "win_rate": wins / max(len(fights), 1),
+                "avg_hp_loss_on_win": _safe_mean(hp_loss_on_win),
+                "avg_est_damage_taken": _safe_mean(damage_taken_all),
+                "avg_victory_est_end_hp": _safe_mean(victory_end_hp),
+                "mean_turn_steps": _safe_mean(turn_steps),
+                "p95_turn_steps": _percentile(turn_steps, 0.95),
+                "max_turn_steps": max(turn_steps) if turn_steps else 0,
+                "submenu_turn_rate": submenu_turns / max(total_turns, 1),
+                "submenu_overrun_rate": submenu_overruns / max(submenu_sequences, 1) if submenu_sequences else 0.0,
+                "submenu_confirm_latency": _safe_mean(submenu_latencies),
+                "no_progress_turn_rate": no_progress_turns / max(total_turns, 1),
+                "end_turn_with_options_rate": end_turn_with_options_turns / max(total_turns, 1),
+                "threat_damage_share": threat_damage_to_attack / max(threat_damage_total, 1e-9) if threat_damage_total > 0 else 0.0,
+                "lethal_conversion_rate": lethal_hits / max(lethal_checks, 1) if lethal_checks else 0.0,
+                "attack_focus_rate": attack_focus_hits / max(attack_focus_checks, 1) if attack_focus_checks else 0.0,
+                "engine_before_payoff_rate": engine_hits / max(engine_checks, 1) if engine_checks else 0.0,
+                "quota_confirm_rate": quota_hits / max(quota_checks, 1) if quota_checks else 0.0,
+                "p95_max_no_progress_streak": _percentile(max_no_progress_streak_values, 0.95),
+            }
+        )
+
+    return pd.DataFrame(dashboard_rows), pd.DataFrame(turn_rows)
+
+
 def _plot_training_metrics(df: pd.DataFrame, output_path: Path) -> None:
     if df.empty:
         return
@@ -548,10 +822,135 @@ def _plot_encounter_coverage(df: pd.DataFrame, output_path: Path) -> None:
     plt.close(fig)
 
 
+def _plot_turn_order_dashboard(df: pd.DataFrame, output_path: Path) -> None:
+    if df.empty:
+        return
+
+    df = df.sort_values("iteration")
+    x = df["iteration"]
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    axes[0, 0].plot(x, df["win_rate"], marker="o", label="win_rate")
+    if "avg_hp_loss_on_win" in df:
+        axes[0, 0].plot(x, df["avg_hp_loss_on_win"], marker="o", label="avg_hp_loss_on_win")
+    axes[0, 0].set_title("Outcome")
+    axes[0, 0].legend(fontsize=8)
+
+    axes[0, 1].plot(x, df["mean_turn_steps"], marker="o", label="mean_turn_steps")
+    axes[0, 1].plot(x, df["p95_turn_steps"], marker="o", label="p95_turn_steps")
+    axes[0, 1].plot(x, df["p95_max_no_progress_streak"], marker="o", label="p95_no_progress_streak")
+    axes[0, 1].set_title("Turn Flow")
+    axes[0, 1].legend(fontsize=8)
+
+    axes[1, 0].plot(x, df["submenu_turn_rate"], marker="o", label="submenu_turn_rate")
+    axes[1, 0].plot(x, df["submenu_overrun_rate"], marker="o", label="submenu_overrun_rate")
+    axes[1, 0].plot(x, df["quota_confirm_rate"], marker="o", label="quota_confirm_rate")
+    axes[1, 0].set_title("Submenu")
+    axes[1, 0].legend(fontsize=8)
+
+    axes[1, 1].plot(x, df["threat_damage_share"], marker="o", label="threat_damage_share")
+    axes[1, 1].plot(x, df["lethal_conversion_rate"], marker="o", label="lethal_conversion_rate")
+    axes[1, 1].plot(x, df["engine_before_payoff_rate"], marker="o", label="engine_before_payoff_rate")
+    axes[1, 1].set_title("Decision Quality")
+    axes[1, 1].legend(fontsize=8)
+
+    for axis in axes.flat:
+        axis.set_xlabel("iteration")
+        axis.grid(alpha=0.25)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def _write_turn_order_markdown(df: pd.DataFrame, output_path: Path) -> None:
+    if df.empty:
+        return
+    df = df.sort_values("iteration").copy()
+    latest = df.iloc[-1]
+    lines = [
+        "# Turn Order Dashboard",
+        "",
+        "这份摘要面向单个训练 run，不依赖 old/new 对比。",
+        "",
+        "## 指标怎么理解",
+        "",
+        "- `mean_turn_steps / p95_turn_steps / max_turn_steps`：看每回合决策长度有没有收敛。",
+        "- `submenu_turn_rate / submenu_overrun_rate / quota_confirm_rate`：看 submenu 是否还在犹豫、改选、拖步数。",
+        "- `no_progress_turn_rate / end_turn_with_options_rate / p95_max_no_progress_streak`：看是否经常空转或过早结束回合。",
+        "- `threat_damage_share / lethal_conversion_rate / attack_focus_rate`：看是否会处理当前威胁、抓斩杀窗口。",
+        "- `engine_before_payoff_rate`：看是否学会先铺引擎、再兑现。",
+        "",
+        "## 末轮快照",
+        "",
+        f"- `iteration={int(latest['iteration'])}`",
+        f"- `win_rate={_fmt_metric(latest.get('win_rate'))}`",
+        f"- `avg_hp_loss_on_win={_fmt_metric(latest.get('avg_hp_loss_on_win'))}`",
+        f"- `mean_turn_steps={_fmt_metric(latest.get('mean_turn_steps'))}`",
+        f"- `p95_turn_steps={_fmt_metric(latest.get('p95_turn_steps'))}`",
+        f"- `submenu_overrun_rate={_fmt_metric(latest.get('submenu_overrun_rate'))}`",
+        f"- `quota_confirm_rate={_fmt_metric(latest.get('quota_confirm_rate'))}`",
+        f"- `no_progress_turn_rate={_fmt_metric(latest.get('no_progress_turn_rate'))}`",
+        f"- `end_turn_with_options_rate={_fmt_metric(latest.get('end_turn_with_options_rate'))}`",
+        f"- `threat_damage_share={_fmt_metric(latest.get('threat_damage_share'))}`",
+        f"- `lethal_conversion_rate={_fmt_metric(latest.get('lethal_conversion_rate'))}`",
+        f"- `engine_before_payoff_rate={_fmt_metric(latest.get('engine_before_payoff_rate'))}`",
+        "",
+        "## 文件",
+        "",
+        "- `turn_order_dashboard.csv`：iter 级主表",
+        "- `turn_order_dashboard.png`：iter 趋势图",
+        "- `turn_metrics.csv`：turn 级附录，必要时回原始轨迹定位",
+    ]
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def _write_dataframe(df: pd.DataFrame, path: Path) -> None:
     if df.empty:
         return
     df.to_csv(path, index=False, encoding="utf-8")
+
+
+def _load_episode_events_by_iteration_and_run(logs_dir: Path) -> dict[int, dict[str, dict[str, Any]]]:
+    result: dict[int, dict[str, dict[str, Any]]] = {}
+    if not logs_dir.exists():
+        return result
+    for path in sorted(logs_dir.glob("iter_*.events.jsonl")):
+        iteration = _extract_iteration(path.name)
+        items: dict[str, dict[str, Any]] = {}
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            event = json.loads(text)
+            if event.get("phase") != "collect_episode" or event.get("status") != "completed":
+                continue
+            run_id = str(event.get("run_id") or "")
+            if run_id:
+                items[run_id] = event
+        if items:
+            result[iteration] = items
+    return result
+
+
+def _safe_mean(values: list[Any]) -> float:
+    if not values:
+        return 0.0
+    return float(pd.Series(values, dtype=float).mean())
+
+
+def _percentile(values: list[Any], quantile: float) -> float:
+    if not values:
+        return 0.0
+    return float(pd.Series(values, dtype=float).quantile(quantile))
+
+
+def _fmt_metric(value: Any) -> str:
+    try:
+        return f"{float(value):.4f}"
+    except (TypeError, ValueError):
+        return "0.0000"
 
 
 def _extract_iteration(name: str) -> int:
@@ -569,3 +968,23 @@ def _extract_manifests(metrics: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(manifest, dict):
         return [manifest]
     return []
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Regenerate single-run training analysis.")
+    parser.add_argument("--run-root", required=True, help="Path to one training run directory that contains run_metrics.json")
+    parser.add_argument(
+        "--run-metrics-path",
+        default="",
+        help="Optional explicit path to run_metrics.json; defaults to <run-root>/run_metrics.json",
+    )
+    args = parser.parse_args()
+
+    run_root = Path(args.run_root).resolve()
+    run_metrics_path = Path(args.run_metrics_path).resolve() if args.run_metrics_path else (run_root / "run_metrics.json")
+    analysis_dir = generate_training_analysis(run_root=run_root, run_metrics_path=run_metrics_path)
+    print(json.dumps({"analysis_dir": str(analysis_dir)}, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

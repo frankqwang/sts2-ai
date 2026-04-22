@@ -246,7 +246,7 @@ python -m zero.analysis.rollout_benchmark `
 
 ## 输出目录怎么看
 
-`STS2AI/Artifacts/zero` 下的直接子目录统一用：
+`STS2AI/Artifacts` 下的直接子目录统一用：
 
 - `MM-DD-HH-MM-name`
 
