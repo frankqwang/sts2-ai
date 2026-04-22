@@ -284,6 +284,41 @@ def _coerce_dict(value: object) -> dict[str, Any]:
 
 _default_starter_template = default_starter_build
 
+_ENGINE_POWER_IDS = {
+    "BARRICADE",
+    "CORRUPTION",
+    "DARK_EMBRACE",
+    "DEMON_FORM",
+    "EVOLVE",
+    "FEEL_NO_PAIN",
+    "INFLAME",
+    "METALLICIZE",
+    "PYRE",
+    "RUPTURE",
+}
+_EXHAUST_ENABLER_IDS = {
+    "BURNING_PACT",
+    "FIEND_FIRE",
+    "PURITY",
+    "SECOND_WIND",
+    "SEVER_SOUL",
+    "TRUE_GRIT",
+}
+_EXHAUST_PAYOFF_IDS = {
+    "DARK_EMBRACE",
+    "FEEL_NO_PAIN",
+    "PACTS_END",
+    "PYRE",
+}
+_RESOURCE_CARD_IDS = {
+    "BLOODLETTING",
+    "BURNING_PACT",
+    "INFERNAL_BLADE",
+    "OFFERING",
+    "POMMEL_STRIKE",
+    "SHRUG_IT_OFF",
+}
+
 
 def _default_game_wiki_db_path() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "game_wiki" / "game_catalog.sqlite"
@@ -682,6 +717,9 @@ class SkadaReplayRuntime:
 
     def _decorate_state(self, state):
         metadata = dict(state.context.metadata)
+        build_counts = _build_semantic_counts(self._case.build)
+        combat_start_hp = int(self._case.build.current_hp or 0)
+        combat_target_hp_after = int((self._case.floor_state or {}).get("hp_after") or 0)
         metadata.update(
             {
                 "skada_case_id": self._case.case_id,
@@ -689,6 +727,14 @@ class SkadaReplayRuntime:
                 "skada_floor": self._case.floor,
                 "skada_source_line": self._case.source_line,
                 "skada_source_path": self._case.source_path,
+                "combat_start_hp": combat_start_hp,
+                "combat_target_hp_after": combat_target_hp_after,
+                "combat_target_hp_loss_ratio": _safe_ratio(combat_start_hp - combat_target_hp_after, combat_start_hp),
+                "build_engine_count": float(build_counts["engine"]),
+                "build_enabler_count": float(build_counts["enabler"]),
+                "build_payoff_count": float(build_counts["payoff"]),
+                "build_resource_count": float(build_counts["resource"]),
+                "build_card_count": float(build_counts["total_cards"]),
             }
         )
         state.context.metadata = metadata
@@ -699,6 +745,38 @@ def close_shared_replay_runtimes() -> None:
     for runtime in list(_SHARED_REPLAY_RUNTIMES.values()):
         runtime.close()
     _SHARED_REPLAY_RUNTIMES.clear()
+
+
+def _normalize_card_id(value: str) -> str:
+    return str(value or "").upper().replace("+", "").strip()
+
+
+def _build_semantic_counts(build: SkadaBuild) -> dict[str, float]:
+    counts = {
+        "engine": 0.0,
+        "enabler": 0.0,
+        "payoff": 0.0,
+        "resource": 0.0,
+        "total_cards": float(len(build.deck)),
+    }
+    for card in build.deck:
+        card_id = _normalize_card_id(str(card.get("id") or ""))
+        if card_id in _ENGINE_POWER_IDS:
+            counts["engine"] += 1.0
+        if card_id in _EXHAUST_ENABLER_IDS:
+            counts["enabler"] += 1.0
+        if card_id in _EXHAUST_PAYOFF_IDS:
+            counts["payoff"] += 1.0
+        if card_id in _RESOURCE_CARD_IDS:
+            counts["resource"] += 1.0
+    return counts
+
+
+def _safe_ratio(value: float, total: float) -> float:
+    total = float(total or 0.0)
+    if total <= 0.0:
+        return 0.0
+    return float(value) / total
 
 
 class OrderedRunRuntimeFactory:

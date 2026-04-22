@@ -23,6 +23,7 @@ class GameBridgeAdapterTests(unittest.TestCase):
                 "discard_pile_count": 2,
                 "exhaust_pile_count": 1,
                 "open_potion_slots": 2,
+                "deck": [{"id": "BASH", "upgrades": 1}, {"id": "STRIKE_IRONCLAD"}],
                 "relics": [{"id": "burning_blood"}],
                 "potions": [{"id": "weak_potion"}],
             },
@@ -88,6 +89,10 @@ class GameBridgeAdapterTests(unittest.TestCase):
         self.assertEqual(len(state.hand), 1)
         self.assertEqual(state.hand[0].card_id, "STRIKE_IRONCLAD")
         self.assertEqual(state.piles.draw_pile_size, 4)
+        self.assertEqual(state.piles.draw_cards, ["a", "b", "c", "d"])
+        self.assertEqual(state.piles.discard_cards, ["x", "y"])
+        self.assertEqual(state.piles.exhaust_cards, ["z"])
+        self.assertEqual(state.context.deck_cards, ["BASH+1", "STRIKE_IRONCLAD"])
         self.assertEqual(state.player.buffs["StrengthPower"], 2.0)
         self.assertEqual(state.legal_actions[0].card_id, "STRIKE_IRONCLAD")
         self.assertIn("0", state.legal_actions[0].action_id)

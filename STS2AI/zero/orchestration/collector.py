@@ -322,7 +322,7 @@ class TrajectoryCollector:
                     if search_self_play is not None:
                         action_index = search_decision.action_index if search_decision is not None else greedy_action
                     else:
-                        sampled_action_index = _sample_action(
+                        sampled_action_index, sampled_logprob = _sample_action(
                             scores=scores,
                             greedy_action=greedy_action,
                             epsilon_greedy=epsilon_greedy,
@@ -343,6 +343,7 @@ class TrajectoryCollector:
                     env_step_duration_s += time.perf_counter() - env_step_started_at
                     action = state.legal_actions[action_index]
                     progress = assess_transition_progress(state, next_state)
+                    reward = _compute_reward(state, action, next_state)
                     if progress.made_progress:
                         progress_steps += 1
                         current_no_progress_streak = 0
@@ -362,9 +363,17 @@ class TrajectoryCollector:
                         done=next_state.terminal,
                         fight_outcome=next_state.run_outcome,
                         run_outcome=next_state.run_outcome,
+                        reward=float(reward),
                         metadata={
                             "action_id": action.action_id,
                             "uncertainty": float(uncertainty),
+                            "old_logprob": float(
+                                _action_logprob(scores, action_index)
+                                if search_decision is not None
+                                else sampled_logprob
+                            ),
+                            "value_pred": float(inference.get("ppo_value", 0.0) or 0.0),
+                            "reward": float(reward),
                             "top2_gap": _top2_gap(scores),
                             "made_progress": bool(progress.made_progress),
                             "enemy_hp_delta": float(progress.enemy_hp_delta),
@@ -468,6 +477,7 @@ class TrajectoryCollector:
                 "fight_win_prob": float(result.get("fight_win_prob", 0.0) or 0.0),
                 "enemy_hp_fraction_dealt": float(result.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
                 "self_hp_fraction_remaining": float(result.get("self_hp_fraction_remaining", 0.0) or 0.0),
+                "ppo_value": float(result.get("ppo_value", 0.0) or 0.0),
             }
         scores = policy.score_actions(state)
         return {
@@ -477,6 +487,7 @@ class TrajectoryCollector:
             "fight_win_prob": 0.0,
             "enemy_hp_fraction_dealt": 0.0,
             "self_hp_fraction_remaining": 0.0,
+            "ppo_value": 0.0,
         }
 
 
@@ -487,6 +498,70 @@ def _top2_gap(scores: list[float]) -> float:
     return float(ordered[0] - ordered[1])
 
 
+def _action_logprob(scores: list[float], action_index: int) -> float:
+    if not scores:
+        return 0.0
+    action_index = min(max(int(action_index), 0), len(scores) - 1)
+    max_score = max(scores)
+    shifted = [score - max_score for score in scores]
+    exp_values = [math.exp(min(50.0, value)) for value in shifted]
+    total = sum(exp_values)
+    if total <= 0.0:
+        return 0.0
+    prob = max(exp_values[action_index] / total, 1e-8)
+    return float(math.log(prob))
+
+
+def _compute_reward(state, action, next_state) -> float:
+    current_enemy_hp = sum(float(enemy.hp) for enemy in state.enemies if enemy.alive)
+    next_enemy_hp = sum(float(enemy.hp) for enemy in next_state.enemies if enemy.alive)
+    current_enemy_max_hp = max(1.0, sum(float(enemy.max_hp) for enemy in state.enemies))
+    combat_start_hp = max(
+        1.0,
+        float(state.context.metadata.get("combat_start_hp") or 0.0)
+        or float(state.player.max_hp)
+        or float(state.player.hp)
+        or 1.0,
+    )
+    enemy_progress = max(0.0, current_enemy_hp - next_enemy_hp) / current_enemy_max_hp
+    self_loss = max(0.0, float(state.player.hp) - float(next_state.player.hp)) / combat_start_hp
+    engine_gain = max(0.0, _engine_buff_total(next_state.player.buffs) - _engine_buff_total(state.player.buffs))
+    exhaust_delta = max(0.0, float(next_state.piles.exhaust_pile_size) - float(state.piles.exhaust_pile_size))
+    engine_active = max(_engine_buff_total(state.player.buffs), _engine_buff_total(next_state.player.buffs))
+
+    reward = 0.15 * enemy_progress - 0.45 * self_loss - 0.003
+    reward += 0.06 * engine_gain
+    if exhaust_delta > 0.0:
+        if engine_active > 0.0:
+            reward += 0.04 * exhaust_delta * min(engine_active, 2.0)
+        else:
+            reward -= 0.01 * exhaust_delta
+    if getattr(action, "action_type", "") == "end_turn":
+        if any(legal.can_execute and legal.action_type != "end_turn" for legal in state.legal_actions):
+            reward -= 0.02 * max(0.0, float(state.player.energy))
+        if enemy_progress <= 0.0 and self_loss <= 0.0:
+            reward -= 0.03
+    outcome = str(next_state.run_outcome or "").strip().lower()
+    if next_state.terminal:
+        target_hp_after = max(0.0, float(state.context.metadata.get("combat_target_hp_after") or 0.0))
+        hp_target_gap_ratio = min(1.0, abs(max(0.0, float(next_state.player.hp)) - target_hp_after) / combat_start_hp)
+        if outcome in {"victory", "win"}:
+            reward += 2.0 + max(0.0, float(next_state.player.hp)) / combat_start_hp
+            reward += 0.5 * (1.0 - hp_target_gap_ratio)
+        else:
+            reward -= 2.0
+            reward -= 0.25 * hp_target_gap_ratio
+    return float(reward)
+
+
+def _engine_buff_total(buffs: dict[str, float]) -> float:
+    return (
+        float(buffs.get("FEEL_NO_PAIN_POWER", 0.0) or 0.0)
+        + float(buffs.get("DARK_EMBRACE_POWER", 0.0) or 0.0)
+        + float(buffs.get("PYRE_POWER", 0.0) or 0.0)
+    )
+
+
 def _sample_action(
     *,
     scores: list[float],
@@ -494,20 +569,34 @@ def _sample_action(
     epsilon_greedy: float,
     temperature: float,
     rng: random.Random,
-) -> int:
+) -> tuple[int, float]:
     if not scores:
-        return 0
+        return 0, 0.0
     greedy_action = min(max(greedy_action, 0), len(scores) - 1)
-    if epsilon_greedy > 0.0 and rng.random() < epsilon_greedy:
-        return rng.randrange(len(scores))
-    if temperature <= 0.0 or len(scores) == 1:
-        return greedy_action
-    max_score = max(scores)
-    logits = [(score - max_score) / max(temperature, 1e-6) for score in scores]
-    weights = [math.exp(min(50.0, value)) for value in logits]
-    if sum(weights) <= 0.0:
-        return greedy_action
-    return rng.choices(range(len(scores)), weights=weights, k=1)[0]
+    action_count = len(scores)
+    if temperature <= 0.0 or action_count == 1:
+        base_probs = [0.0 for _ in scores]
+        base_probs[greedy_action] = 1.0
+    else:
+        max_score = max(scores)
+        logits = [(score - max_score) / max(temperature, 1e-6) for score in scores]
+        weights = [math.exp(min(50.0, value)) for value in logits]
+        total = sum(weights)
+        if total <= 0.0:
+            base_probs = [0.0 for _ in scores]
+            base_probs[greedy_action] = 1.0
+        else:
+            base_probs = [weight / total for weight in weights]
+
+    epsilon = min(max(float(epsilon_greedy), 0.0), 1.0)
+    uniform_prob = 1.0 / float(action_count)
+    behavior_probs = [((1.0 - epsilon) * prob) + (epsilon * uniform_prob) for prob in base_probs]
+    total = sum(behavior_probs)
+    if total <= 0.0:
+        return greedy_action, 0.0
+    normalized = [prob / total for prob in behavior_probs]
+    action_index = int(rng.choices(range(action_count), weights=normalized, k=1)[0])
+    return action_index, float(math.log(max(normalized[action_index], 1e-8)))
 
 
 def _sample_policy_action(

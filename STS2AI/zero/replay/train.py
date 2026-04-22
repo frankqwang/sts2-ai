@@ -173,20 +173,43 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--collect-epsilon-greedy",
         type=float,
-        default=0.0,
+        default=None,
         help="仅作用于 collect rollout 的 epsilon-greedy 探索概率；评估仍保持贪心。",
     )
     parser.add_argument(
         "--collect-temperature",
         type=float,
-        default=0.0,
+        default=None,
         help="仅作用于 collect rollout 的 softmax 温度；0 表示关闭温度采样。",
     )
     parser.add_argument("--search-guidance-priority-threshold", type=float, default=1.2)
     parser.add_argument("--search-guidance-max-steps-per-episode", type=int, default=8)
     parser.add_argument("--eval-episodes", type=int, default=1)
+    parser.add_argument(
+        "--progress-only",
+        action="store_true",
+        help="只在训练 collect 的这个 case 上观察进展，不额外跑 eval/promotion。",
+    )
     parser.add_argument("--iterations", type=int, default=2)
     parser.add_argument("--train-steps", type=int, default=40)
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="显式覆盖训练学习率；未传时按算法选默认值。",
+    )
+    parser.add_argument(
+        "--train-algorithm",
+        choices=["behavior_clone", "ppo_lite"],
+        default="behavior_clone",
+        help="单 case 实验可切到 ppo_lite，按回报做 on-policy 更新。",
+    )
+    parser.add_argument(
+        "--model-variant",
+        choices=["stateless", "history_transformer", "recurrent_gru"],
+        default="history_transformer",
+        help="实验用模型结构变体；默认沿用当前 history transformer。",
+    )
     parser.add_argument(
         "--search-mode",
         dest="search_mode",
@@ -321,8 +344,12 @@ def main() -> None:
         )
         shuffled = list(filtered_cases)
         random.Random(args.seed).shuffle(shuffled)
-        eval_cases = shuffled[: max(1, min(args.eval_case_limit, len(shuffled)))]
-        remaining = shuffled[len(eval_cases) :]
+        if args.progress_only:
+            eval_cases = []
+            remaining = shuffled
+        else:
+            eval_cases = shuffled[: max(1, min(args.eval_case_limit, len(shuffled)))]
+            remaining = shuffled[len(eval_cases) :]
         train_pool = remaining if remaining else shuffled
         train_cases = train_pool[: max(1, min(args.train_case_limit, len(train_pool)))]
         if args.ordered_run:
@@ -335,7 +362,7 @@ def main() -> None:
     # - resume run: STS2AI/Artifacts/<run_name>
     # run_name 里保留课程模式、case 数、iter 数和 seed，方便之后直接比较。
     run_name = (
-        f"{curriculum_mode}_cases_{len(train_cases)}_eval_{len(eval_cases)}"
+        f"{curriculum_mode}_{args.model_variant}_cases_{len(train_cases)}_eval_{len(eval_cases)}"
         f"_iters_{args.iterations}_seed_{args.seed}"
     )
     output_root = resolve_run_output_root(
@@ -345,12 +372,28 @@ def main() -> None:
     )
     output_root.mkdir(parents=True, exist_ok=True)
 
+    collect_epsilon_greedy = (
+        float(args.collect_epsilon_greedy)
+        if args.collect_epsilon_greedy is not None
+        else (0.05 if args.train_algorithm == "ppo_lite" else 0.0)
+    )
+    collect_temperature = (
+        float(args.collect_temperature)
+        if args.collect_temperature is not None
+        else (0.8 if args.train_algorithm == "ppo_lite" else 0.0)
+    )
+    learning_rate = (
+        float(args.learning_rate)
+        if args.learning_rate is not None
+        else (1e-4 if args.train_algorithm == "ppo_lite" else 3e-4)
+    )
+
     config = ZeroConfig(
         paths=ZeroPaths(root=output_root),
         collect=CollectConfig(
             episodes_per_iteration=args.collect_episodes,
-            epsilon_greedy=args.collect_epsilon_greedy,
-            temperature=args.collect_temperature,
+            epsilon_greedy=collect_epsilon_greedy,
+            temperature=collect_temperature,
             mode=args.collect_mode,
             search_guidance_priority_threshold=args.search_guidance_priority_threshold,
             search_guidance_max_steps_per_episode=args.search_guidance_max_steps_per_episode,
@@ -366,9 +409,10 @@ def main() -> None:
             max_requests_per_iteration=0,
         ),
         train=TrainConfig(
+            algorithm=args.train_algorithm,
             batch_size=16,
             steps_per_iteration=args.train_steps,
-            learning_rate=3e-4,
+            learning_rate=learning_rate,
             weight_decay=1e-4,
             grad_clip_norm=1.0,
         ),
@@ -378,6 +422,7 @@ def main() -> None:
             strict_promotion=args.strict_promotion,
         ),
     )
+    config.encoder.model_variant = args.model_variant
     config.search.max_root_actions = args.search_max_root_actions
     config.search.rollouts_per_action = args.search_rollouts_per_action
     config.search.max_branch_steps = args.search_max_branch_steps
@@ -414,16 +459,18 @@ def main() -> None:
             )
 
         try:
+            evaluator = None
             if curriculum_mode == "ordered_run":
                 # ordered-run 评估会从第一场开始，失败后直接停止，不再继续评后续战斗。
-                evaluator = OrderedRunCaseEvaluator(
-                    eval_cases,
-                    port=args.port,
-                    auto_launch=False,
-                    connect_timeout_s=45.0,
-                    episodes_per_case=config.evaluation.episodes_per_cohort,
-                    artifact_store=artifact_store,
-                )
+                if not args.progress_only:
+                    evaluator = OrderedRunCaseEvaluator(
+                        eval_cases,
+                        port=args.port,
+                        auto_launch=False,
+                        connect_timeout_s=45.0,
+                        episodes_per_case=config.evaluation.episodes_per_cohort,
+                        artifact_store=artifact_store,
+                    )
                 runtime_factory = OrderedRunRuntimeFactory(
                     train_cases,
                     port=args.port,
@@ -431,14 +478,15 @@ def main() -> None:
                     connect_timeout_s=45.0,
                 )
             else:
-                evaluator = FixedSkadaCaseEvaluator(
-                    eval_cases,
-                    port=args.port,
-                    auto_launch=False,
-                    connect_timeout_s=45.0,
-                    episodes_per_case=config.evaluation.episodes_per_cohort,
-                    artifact_store=artifact_store,
-                )
+                if not args.progress_only:
+                    evaluator = FixedSkadaCaseEvaluator(
+                        eval_cases,
+                        port=args.port,
+                        auto_launch=False,
+                        connect_timeout_s=45.0,
+                        episodes_per_case=config.evaluation.episodes_per_cohort,
+                        artifact_store=artifact_store,
+                    )
                 train_case_cycle = list(train_cases)
                 selection_rng = random.Random(args.seed)
                 ordered_cycle = deque(train_case_cycle)
@@ -474,10 +522,12 @@ def main() -> None:
             )
 
             baseline_policy = RandomPolicy()
-            set_trace_context = getattr(evaluator, "set_trace_context", None)
-            if callable(set_trace_context):
-                set_trace_context(iteration=0, phase="baseline_eval")
-            baseline = evaluator.evaluate(baseline_policy)
+            baseline = None
+            if evaluator is not None:
+                set_trace_context = getattr(evaluator, "set_trace_context", None)
+                if callable(set_trace_context):
+                    set_trace_context(iteration=0, phase="baseline_eval")
+                baseline = evaluator.evaluate(baseline_policy)
             manifests = []
             policy = build_fresh_policy(config)
             for iteration in range(1, args.iterations + 1):
@@ -500,12 +550,15 @@ def main() -> None:
         "run_id": args.run_id or None,
         "target_encounter": args.target_encounter or None,
         "target_case_id": args.target_case_id or None,
+        "progress_only": bool(args.progress_only),
         "from_scratch": bool(args.from_scratch),
         "resolved_output_root": str(output_root),
+        "model_variant": args.model_variant,
+        "train_algorithm": args.train_algorithm,
         "search_mode": args.search_mode,
         "train_cases": [case.to_dict() for case in train_cases],
         "eval_cases": [case.to_dict() for case in eval_cases],
-        "baseline": [asdict(item) for item in baseline],
+        "baseline": [asdict(item) for item in baseline] if baseline else [],
         "manifests": manifests,
     }
     metrics_path = output_root / "run_metrics.json"

@@ -30,9 +30,11 @@ from ..features import FeatureExtractor, compute_transition_delta
 
 
 class SampleBuilder:
-    def __init__(self, config: EncoderConfig):
+    def __init__(self, config: EncoderConfig, *, ppo_gamma: float = 0.99, ppo_gae_lambda: float = 0.95):
         self._history_steps = config.history_steps
         self._history_extractor = FeatureExtractor(config)
+        self._ppo_gamma = float(ppo_gamma)
+        self._ppo_gae_lambda = float(ppo_gae_lambda)
 
     def build(self, transitions: list[RawTransition]) -> list[TrainingSample]:
         by_fight: dict[str, list[RawTransition]] = defaultdict(list)
@@ -75,6 +77,7 @@ class SampleBuilder:
         samples: list[TrainingSample] = []
         history_window: deque[HistoryStep] = deque(maxlen=self._history_steps)
         prefix_action_indices: list[int] = []
+        ppo_targets = _compute_ppo_targets(transitions, gamma=self._ppo_gamma, gae_lambda=self._ppo_gae_lambda)
         for transition in transitions:
             delta = compute_transition_delta(transition.state, transition.next_state)
             behavior_action_index = _resolve_behavior_index(transition)
@@ -120,6 +123,11 @@ class SampleBuilder:
                     fight_timeout=bool(fight_stats["truncated"]),
                     no_progress_ratio=float(fight_stats["no_progress_ratio"]),
                 ),
+                old_logprob=float((transition.metadata or {}).get("old_logprob", 0.0) or 0.0),
+                old_value=float((transition.metadata or {}).get("value_pred", 0.0) or 0.0),
+                reward=float(getattr(transition, "reward", 0.0) or 0.0),
+                ppo_return=float(ppo_targets.get(transition.step_idx, {}).get("return", 0.0)),
+                ppo_advantage=float(ppo_targets.get(transition.step_idx, {}).get("advantage", 0.0)),
                 metadata={
                     **dict(transition.metadata),
                     "behavior_action_id": transition.action.action_id,
@@ -157,6 +165,37 @@ class SampleBuilder:
             no_progress_ratio=float(fight_stats["no_progress_ratio"]),
         )
         return samples
+
+
+def _compute_ppo_targets(
+    transitions: list[RawTransition],
+    *,
+    gamma: float,
+    gae_lambda: float,
+) -> dict[int, dict[str, float]]:
+    if not transitions:
+        return {}
+    ordered = sorted(transitions, key=lambda item: item.step_idx)
+    targets: dict[int, dict[str, float]] = {}
+    gae = 0.0
+    for index in range(len(ordered) - 1, -1, -1):
+        transition = ordered[index]
+        value = float((transition.metadata or {}).get("value_pred", 0.0) or 0.0)
+        reward = float(getattr(transition, "reward", 0.0) or 0.0)
+        if transition.done:
+            next_value = 0.0
+            nonterminal = 0.0
+        else:
+            next_transition = ordered[index + 1] if index + 1 < len(ordered) else None
+            next_value = float((next_transition.metadata or {}).get("value_pred", 0.0) or 0.0) if next_transition else 0.0
+            nonterminal = 1.0
+        delta = reward + gamma * next_value * nonterminal - value
+        gae = delta + gamma * gae_lambda * nonterminal * gae
+        targets[transition.step_idx] = {
+            "advantage": float(gae),
+            "return": float(gae + value),
+        }
+    return targets
 
 
 def _build_fight_label(final_state, *, truncated: bool = False) -> FightLabel:

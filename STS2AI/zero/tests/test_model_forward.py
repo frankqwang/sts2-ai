@@ -56,18 +56,22 @@ def make_sample() -> TrainingSample:
 
 class ModelForwardTests(unittest.TestCase):
     def test_network_forward_shapes(self) -> None:
-        config = EncoderConfig()
-        collator = BatchCollator(config)
-        batch = collator.collate([make_sample(), make_sample()])
-        model = ZeroNet(config)
-        output = model(batch)
+        for variant in ("stateless", "history_transformer", "recurrent_gru"):
+            with self.subTest(variant=variant):
+                config = EncoderConfig(model_variant=variant)
+                collator = BatchCollator(config)
+                batch = collator.collate([make_sample(), make_sample()])
+                model = ZeroNet(config)
+                output = model(batch)
 
-        self.assertEqual(tuple(output.policy_logits.shape), (2, 3))
-        self.assertEqual(tuple(output.delta_pred.shape), (2, 3 + config.max_enemies * 2 + 3))
-        self.assertEqual(tuple(output.uncertainty.shape), (2,))
-        self.assertTrue(torch.isfinite(output.policy_logits).all().item())
-        self.assertTrue(torch.isfinite(output.delta_pred).all().item())
-        self.assertTrue(torch.isfinite(output.uncertainty).all().item())
+                self.assertEqual(tuple(output.policy_logits.shape), (2, 3))
+                self.assertEqual(tuple(output.ppo_value.shape), (2,))
+                self.assertEqual(tuple(output.delta_pred.shape), (2, 3 + config.max_enemies * 2 + 3))
+                self.assertEqual(tuple(output.uncertainty.shape), (2,))
+                self.assertTrue(torch.isfinite(output.policy_logits).all().item())
+                self.assertTrue(torch.isfinite(output.ppo_value).all().item())
+                self.assertTrue(torch.isfinite(output.delta_pred).all().item())
+                self.assertTrue(torch.isfinite(output.uncertainty).all().item())
 
 
 if __name__ == "__main__":

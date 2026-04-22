@@ -10,14 +10,66 @@ from ..config import EncoderConfig
 from ..domain import BattleState, HistoryStep, LegalAction, TrainingSample, TransitionDelta
 
 
+PLAYER_SEMANTIC_DIM = 4
+HAND_SEMANTIC_DIM = 8
+ACTION_SEMANTIC_DIM = 10
+PILE_SEMANTIC_DIM = 4
+HISTORY_SEMANTIC_DIM = 15
+HISTORY_TOKEN_DIM = 17 + HISTORY_SEMANTIC_DIM
+STATIC_NUMERIC_DIM = 10
+
+_ENGINE_POWER_IDS = {
+    "BARRICADE",
+    "CORRUPTION",
+    "DARK_EMBRACE",
+    "DEMON_FORM",
+    "EVOLVE",
+    "FEEL_NO_PAIN",
+    "INFLAME",
+    "METALLICIZE",
+    "PYRE",
+    "RUPTURE",
+}
+_EXHAUST_ENABLER_IDS = {
+    "BURNING_PACT",
+    "FIEND_FIRE",
+    "PURITY",
+    "SECOND_WIND",
+    "SEVER_SOUL",
+    "TRUE_GRIT",
+}
+_EXHAUST_PAYOFF_IDS = {
+    "DARK_EMBRACE",
+    "FEEL_NO_PAIN",
+    "PACTS_END",
+    "PYRE",
+}
+_RESOURCE_CARD_IDS = {
+    "BLOODLETTING",
+    "BURNING_PACT",
+    "INFERNAL_BLADE",
+    "OFFERING",
+    "POMMEL_STRIKE",
+    "SHRUG_IT_OFF",
+}
 @dataclass(slots=True)
 class EncodedSample:
     player_numeric: list[float]
     static_numeric: list[float]
     static_ids: list[int]
+    relic_ids: list[int]
+    deck_card_ids: list[int]
+    potion_ids: list[int]
+    draw_pile_ids: list[int]
+    discard_pile_ids: list[int]
+    exhaust_pile_ids: list[int]
+    player_buff_ids: list[int]
+    player_buff_values: list[float]
     enemy_numeric: list[list[float]]
     enemy_ids: list[int]
     enemy_intent_ids: list[int]
+    enemy_buff_ids: list[list[int]]
+    enemy_buff_values: list[list[float]]
     hand_numeric: list[list[float]]
     hand_card_ids: list[int]
     pile_numeric: list[float]
@@ -35,6 +87,10 @@ class EncodedSample:
     sample_weight: float
     fight_quality_score: float
     behavior_ce_scale: float
+    old_logprob: float
+    old_value: float
+    ppo_return: float
+    ppo_advantage: float
 
 
 class FeatureExtractor:
@@ -46,9 +102,19 @@ class FeatureExtractor:
             player_numeric=self._encode_player(sample.state),
             static_numeric=self._encode_static_numeric(sample.state),
             static_ids=self._encode_static_ids(sample.state),
+            relic_ids=self._encode_id_list(sample.state.context.relics),
+            deck_card_ids=self._encode_id_list(sample.state.context.deck_cards),
+            potion_ids=self._encode_id_list(sample.state.player.potions),
+            draw_pile_ids=self._encode_id_list(sample.state.piles.draw_cards),
+            discard_pile_ids=self._encode_id_list(sample.state.piles.discard_cards),
+            exhaust_pile_ids=self._encode_id_list(sample.state.piles.exhaust_cards),
+            player_buff_ids=self._encode_mapping_ids(sample.state.player.buffs),
+            player_buff_values=self._encode_mapping_values(sample.state.player.buffs),
             enemy_numeric=self._encode_enemies(sample.state),
             enemy_ids=[self._hash_id(enemy.enemy_id) for enemy in sample.state.enemies],
             enemy_intent_ids=[self._hash_id(enemy.intent_id) for enemy in sample.state.enemies],
+            enemy_buff_ids=[self._encode_mapping_ids(enemy.buffs) for enemy in sample.state.enemies],
+            enemy_buff_values=[self._encode_mapping_values(enemy.buffs) for enemy in sample.state.enemies],
             hand_numeric=self._encode_hand(sample.state),
             hand_card_ids=[self._hash_id(card.card_id) for card in sample.state.hand],
             pile_numeric=self._encode_piles(sample.state),
@@ -70,6 +136,10 @@ class FeatureExtractor:
             sample_weight=max(0.1, float(sample.sample_weight)),
             fight_quality_score=float(sample.fight_score),
             behavior_ce_scale=float(sample.metadata.get("behavior_ce_scale", 1.0) or 1.0),
+            old_logprob=float(sample.old_logprob),
+            old_value=float(sample.old_value),
+            ppo_return=float(sample.ppo_return),
+            ppo_advantage=float(sample.ppo_advantage),
         )
 
     def encode_inference(self, state: BattleState, history: list[HistoryStep], legal_actions: list[LegalAction]) -> EncodedSample:
@@ -77,9 +147,19 @@ class FeatureExtractor:
             player_numeric=self._encode_player(state),
             static_numeric=self._encode_static_numeric(state),
             static_ids=self._encode_static_ids(state),
+            relic_ids=self._encode_id_list(state.context.relics),
+            deck_card_ids=self._encode_id_list(state.context.deck_cards),
+            potion_ids=self._encode_id_list(state.player.potions),
+            draw_pile_ids=self._encode_id_list(state.piles.draw_cards),
+            discard_pile_ids=self._encode_id_list(state.piles.discard_cards),
+            exhaust_pile_ids=self._encode_id_list(state.piles.exhaust_cards),
+            player_buff_ids=self._encode_mapping_ids(state.player.buffs),
+            player_buff_values=self._encode_mapping_values(state.player.buffs),
             enemy_numeric=self._encode_enemies(state),
             enemy_ids=[self._hash_id(enemy.enemy_id) for enemy in state.enemies],
             enemy_intent_ids=[self._hash_id(enemy.intent_id) for enemy in state.enemies],
+            enemy_buff_ids=[self._encode_mapping_ids(enemy.buffs) for enemy in state.enemies],
+            enemy_buff_values=[self._encode_mapping_values(enemy.buffs) for enemy in state.enemies],
             hand_numeric=self._encode_hand(state),
             hand_card_ids=[self._hash_id(card.card_id) for card in state.hand],
             pile_numeric=self._encode_piles(state),
@@ -97,6 +177,10 @@ class FeatureExtractor:
             sample_weight=1.0,
             fight_quality_score=0.0,
             behavior_ce_scale=1.0,
+            old_logprob=0.0,
+            old_value=0.0,
+            ppo_return=0.0,
+            ppo_advantage=0.0,
         )
 
     def _encode_player(self, state: BattleState) -> list[float]:
@@ -110,16 +194,22 @@ class FeatureExtractor:
             float(len(state.player.potions)),
             *_mapping_to_slots(state.player.buffs, self._config.buff_slots),
             *_mapping_summary(state.player.resources),
+            *_player_semantic_features(state.player.buffs),
         ]
 
     def _encode_static_numeric(self, state: BattleState) -> list[float]:
+        metadata = state.context.metadata
         return [
             float(state.context.act),
             float(state.context.floor),
-            float(len(state.context.relics)),
-            float(len(state.context.fixed_powers)),
             float(len(state.living_enemies)),
             float(len(state.hand)),
+            float(metadata.get("round_number_raw", 0.0) or 0.0),
+            float(state.piles.draw_pile_size),
+            float(state.piles.discard_pile_size),
+            float(state.piles.exhaust_pile_size),
+            float(len(state.context.relics)),
+            float(len(state.player.buffs)),
         ]
 
     def _encode_static_ids(self, state: BattleState) -> list[int]:
@@ -159,9 +249,22 @@ class FeatureExtractor:
                     1.0 if card.exhaust else 0.0,
                     1.0 if card.ethereal else 0.0,
                     float(len(card.tags)),
+                    *_card_semantic_flags(card.card_id, card.tags),
                 ]
             )
         return rows
+
+    def _encode_id_list(self, values: Iterable[str]) -> list[int]:
+        return [self._hash_id(str(value)) for value in values if str(value)]
+
+    def _encode_value_list(self, values: Iterable[float]) -> list[float]:
+        return [float(value) for value in values]
+
+    def _encode_mapping_ids(self, mapping: dict[str, float]) -> list[int]:
+        return [self._hash_id(key) for key, _ in sorted(mapping.items())]
+
+    def _encode_mapping_values(self, mapping: dict[str, float]) -> list[float]:
+        return [float(value) for _, value in sorted(mapping.items())]
 
     def _encode_piles(self, state: BattleState) -> list[float]:
         return [
@@ -173,6 +276,7 @@ class FeatureExtractor:
             float(state.piles.power_count),
             float(sum(state.piles.key_card_counts.values())),
             float(sum(state.piles.archetype_stats.values())),
+            *_semantic_group_counts(state.piles.key_card_counts),
         ]
 
     def _encode_history(self, history: list[HistoryStep]) -> list[list[float]]:
@@ -185,7 +289,13 @@ class FeatureExtractor:
         if step.history_token:
             return list(step.history_token)
         if step.state is None or step.action is None:
-            return [0.0] * 17
+            return [0.0] * HISTORY_TOKEN_DIM
+        feel_no_pain = float(step.state.player.buffs.get("FEEL_NO_PAIN_POWER", 0.0) or 0.0)
+        dark_embrace = float(step.state.player.buffs.get("DARK_EMBRACE_POWER", 0.0) or 0.0)
+        pyre_power = float(step.state.player.buffs.get("PYRE_POWER", 0.0) or 0.0)
+        engine_total = feel_no_pain + dark_embrace + pyre_power
+        action_id = step.action.card_id or step.action.special_id or ""
+        action_flags = _action_semantic_flags(step.action)
         total_enemy_hp_ratio = sum(_safe_ratio(enemy.hp, enemy.max_hp) for enemy in step.state.enemies)
         return [
             _safe_ratio(step.state.player.hp, step.state.player.max_hp),
@@ -204,7 +314,13 @@ class FeatureExtractor:
             float(step.delta.draw_pile_size),
             float(step.delta.discard_pile_size),
             float(self._hash_id(step.action.action_type)) / float(self._config.id_hash_buckets),
-            float(self._hash_id(step.action.card_id or step.action.special_id)) / float(self._config.id_hash_buckets),
+            float(self._hash_id(action_id)) / float(self._config.id_hash_buckets),
+            float(step.state.piles.exhaust_pile_size),
+            float(engine_total),
+            float(feel_no_pain),
+            float(dark_embrace),
+            float(pyre_power),
+            *action_flags,
         ]
 
     def encode_history_step_token(self, state: BattleState, action: LegalAction, delta: TransitionDelta) -> list[float]:
@@ -230,6 +346,7 @@ class FeatureExtractor:
                     float(target.block if target else 0.0),
                     1.0 if (target.alive if target else False) else 0.0,
                     float(sum((target.buffs if target else {}).values())),
+                    *_action_semantic_flags(action),
                 ]
             )
         return rows
@@ -285,3 +402,87 @@ def _safe_ratio(value: float, total: float) -> float:
     if total <= 0:
         return 0.0
     return float(value) / float(total)
+
+
+def _normalize_card_id(value: str) -> str:
+    return str(value or "").upper().replace("+", "").strip()
+
+
+def _tag_set(tags: Iterable[str]) -> set[str]:
+    return {str(tag or "").strip().lower() for tag in tags if str(tag or "").strip()}
+
+
+def _card_semantic_flags(card_id: str, tags: Iterable[str]) -> list[float]:
+    normalized_id = _normalize_card_id(card_id)
+    tag_set = _tag_set(tags)
+    return [
+        1.0 if "attack" in tag_set else 0.0,
+        1.0 if "skill" in tag_set else 0.0,
+        1.0 if "power" in tag_set else 0.0,
+        1.0 if "can_play" in tag_set else 0.0,
+        1.0 if normalized_id in _ENGINE_POWER_IDS else 0.0,
+        1.0 if normalized_id in _EXHAUST_ENABLER_IDS else 0.0,
+        1.0 if normalized_id in _EXHAUST_PAYOFF_IDS else 0.0,
+        1.0 if normalized_id in _RESOURCE_CARD_IDS else 0.0,
+    ]
+
+
+def _action_semantic_flags(action: LegalAction) -> list[float]:
+    normalized_id = _normalize_card_id(action.card_id or action.special_id)
+    tag_set = _tag_set(action.tags)
+    return [
+        1.0 if action.action_type == "play_card" else 0.0,
+        1.0 if action.action_type == "end_turn" else 0.0,
+        1.0 if action.action_type.startswith("select_") or action.action_type == "confirm_selection" else 0.0,
+        1.0 if "attack" in tag_set else 0.0,
+        1.0 if "skill" in tag_set else 0.0,
+        1.0 if "power" in tag_set else 0.0,
+        1.0 if normalized_id in _ENGINE_POWER_IDS else 0.0,
+        1.0 if normalized_id in _EXHAUST_ENABLER_IDS else 0.0,
+        1.0 if normalized_id in _EXHAUST_PAYOFF_IDS else 0.0,
+        1.0 if normalized_id in _RESOURCE_CARD_IDS else 0.0,
+    ]
+
+
+def _semantic_group_counts(values: dict[str, int]) -> list[float]:
+    if not values:
+        return [0.0] * PILE_SEMANTIC_DIM
+    engine = 0.0
+    enabler = 0.0
+    payoff = 0.0
+    resource = 0.0
+    for raw_id, count in values.items():
+        normalized_id = _normalize_card_id(raw_id)
+        numeric_count = float(count or 0.0)
+        if normalized_id in _ENGINE_POWER_IDS:
+            engine += numeric_count
+        if normalized_id in _EXHAUST_ENABLER_IDS:
+            enabler += numeric_count
+        if normalized_id in _EXHAUST_PAYOFF_IDS:
+            payoff += numeric_count
+        if normalized_id in _RESOURCE_CARD_IDS:
+            resource += numeric_count
+    return [engine, enabler, payoff, resource]
+
+
+def _semantic_counts_for_cards(card_ids: Iterable[str]) -> dict[str, float]:
+    counts = {"engine": 0.0, "enabler": 0.0, "payoff": 0.0, "resource": 0.0}
+    for raw_id in card_ids:
+        normalized_id = _normalize_card_id(raw_id)
+        if normalized_id in _ENGINE_POWER_IDS:
+            counts["engine"] += 1.0
+        if normalized_id in _EXHAUST_ENABLER_IDS:
+            counts["enabler"] += 1.0
+        if normalized_id in _EXHAUST_PAYOFF_IDS:
+            counts["payoff"] += 1.0
+        if normalized_id in _RESOURCE_CARD_IDS:
+            counts["resource"] += 1.0
+    return counts
+
+
+def _player_semantic_features(buffs: dict[str, float]) -> list[float]:
+    feel_no_pain = float(buffs.get("FEEL_NO_PAIN_POWER", 0.0) or 0.0)
+    dark_embrace = float(buffs.get("DARK_EMBRACE_POWER", 0.0) or 0.0)
+    pyre_power = float(buffs.get("PYRE_POWER", 0.0) or 0.0)
+    engine_total = feel_no_pain + dark_embrace + pyre_power
+    return [engine_total, feel_no_pain, dark_embrace, pyre_power]

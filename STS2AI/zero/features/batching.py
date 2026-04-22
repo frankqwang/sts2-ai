@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 
 from ..config import EncoderConfig
-from .extractor import EncodedSample, FeatureExtractor
+from .extractor import ACTION_SEMANTIC_DIM, EncodedSample, FeatureExtractor, HAND_SEMANTIC_DIM, HISTORY_TOKEN_DIM, PILE_SEMANTIC_DIM, PLAYER_SEMANTIC_DIM
 
 
 @dataclass(slots=True)
@@ -15,9 +15,27 @@ class TensorBatch:
     player_numeric: torch.Tensor
     static_numeric: torch.Tensor
     static_ids: torch.Tensor
+    relic_ids: torch.Tensor
+    relic_mask: torch.Tensor
+    deck_card_ids: torch.Tensor
+    deck_card_mask: torch.Tensor
+    potion_ids: torch.Tensor
+    potion_mask: torch.Tensor
+    draw_pile_ids: torch.Tensor
+    draw_pile_mask: torch.Tensor
+    discard_pile_ids: torch.Tensor
+    discard_pile_mask: torch.Tensor
+    exhaust_pile_ids: torch.Tensor
+    exhaust_pile_mask: torch.Tensor
+    player_buff_ids: torch.Tensor
+    player_buff_values: torch.Tensor
+    player_buff_mask: torch.Tensor
     enemy_numeric: torch.Tensor
     enemy_ids: torch.Tensor
     enemy_intent_ids: torch.Tensor
+    enemy_buff_ids: torch.Tensor
+    enemy_buff_values: torch.Tensor
+    enemy_buff_mask: torch.Tensor
     enemy_mask: torch.Tensor
     hand_numeric: torch.Tensor
     hand_card_ids: torch.Tensor
@@ -40,6 +58,10 @@ class TensorBatch:
     sample_weight: torch.Tensor
     fight_quality_score: torch.Tensor
     behavior_ce_scale: torch.Tensor
+    old_logprob: torch.Tensor
+    old_value: torch.Tensor
+    ppo_return: torch.Tensor
+    ppo_advantage: torch.Tensor
 
     def to(self, device: torch.device | str) -> "TensorBatch":
         return TensorBatch(**{field: getattr(self, field).to(device) for field in self.__dataclass_fields__})
@@ -60,22 +82,62 @@ class BatchCollator:
 
     def _collate_encoded(self, encoded: list[EncodedSample]) -> TensorBatch:
         action_width = max(1, max(len(item.action_numeric) for item in encoded))
+        relic_width = max(1, max(len(item.relic_ids) for item in encoded))
+        deck_width = max(1, max(len(item.deck_card_ids) for item in encoded))
+        potion_width = max(1, max(len(item.potion_ids) for item in encoded))
+        pile_width = max(
+            1,
+            max(
+                max(len(item.draw_pile_ids), len(item.discard_pile_ids), len(item.exhaust_pile_ids))
+                for item in encoded
+            ),
+        )
+        player_buff_width = max(1, max(len(item.player_buff_ids) for item in encoded))
+        enemy_buff_width = max(
+            1,
+            max(
+                max((len(buff_ids) for buff_ids in item.enemy_buff_ids), default=0)
+                for item in encoded
+            ),
+        )
+        enemy_feature_dim = _infer_feature_dim([item.enemy_numeric for item in encoded], default=6 + self._config.buff_slots)
+        hand_feature_dim = _infer_feature_dim([item.hand_numeric for item in encoded], default=9 + HAND_SEMANTIC_DIM)
+        history_feature_dim = _infer_feature_dim([item.history_numeric for item in encoded], default=HISTORY_TOKEN_DIM)
+        action_feature_dim = _infer_feature_dim([item.action_numeric for item in encoded], default=13 + ACTION_SEMANTIC_DIM)
         return TensorBatch(
             player_numeric=_to_tensor_2d([item.player_numeric for item in encoded]),
             static_numeric=_to_tensor_2d([item.static_numeric for item in encoded]),
             static_ids=torch.tensor([item.static_ids for item in encoded], dtype=torch.long),
+            relic_ids=_to_tensor_2d_int([item.relic_ids for item in encoded], relic_width),
+            relic_mask=_mask_from_lengths([len(item.relic_ids) for item in encoded], relic_width),
+            deck_card_ids=_to_tensor_2d_int([item.deck_card_ids for item in encoded], deck_width),
+            deck_card_mask=_mask_from_lengths([len(item.deck_card_ids) for item in encoded], deck_width),
+            potion_ids=_to_tensor_2d_int([item.potion_ids for item in encoded], potion_width),
+            potion_mask=_mask_from_lengths([len(item.potion_ids) for item in encoded], potion_width),
+            draw_pile_ids=_to_tensor_2d_int([item.draw_pile_ids for item in encoded], pile_width),
+            draw_pile_mask=_mask_from_lengths([len(item.draw_pile_ids) for item in encoded], pile_width),
+            discard_pile_ids=_to_tensor_2d_int([item.discard_pile_ids for item in encoded], pile_width),
+            discard_pile_mask=_mask_from_lengths([len(item.discard_pile_ids) for item in encoded], pile_width),
+            exhaust_pile_ids=_to_tensor_2d_int([item.exhaust_pile_ids for item in encoded], pile_width),
+            exhaust_pile_mask=_mask_from_lengths([len(item.exhaust_pile_ids) for item in encoded], pile_width),
+            player_buff_ids=_to_tensor_2d_int([item.player_buff_ids for item in encoded], player_buff_width),
+            player_buff_values=_to_tensor_2d_float([item.player_buff_values for item in encoded], player_buff_width),
+            player_buff_mask=_mask_from_lengths([len(item.player_buff_ids) for item in encoded], player_buff_width),
             enemy_numeric=_to_tensor_3d(
                 [item.enemy_numeric for item in encoded],
                 self._config.max_enemies,
-                len(encoded[0].enemy_numeric[0]) if encoded and encoded[0].enemy_numeric else 6 + self._config.buff_slots,
+                enemy_feature_dim,
             ),
             enemy_ids=_to_tensor_2d_int([item.enemy_ids for item in encoded], self._config.max_enemies),
             enemy_intent_ids=_to_tensor_2d_int([item.enemy_intent_ids for item in encoded], self._config.max_enemies),
+            enemy_buff_ids=_to_tensor_3d_int([item.enemy_buff_ids for item in encoded], self._config.max_enemies, enemy_buff_width),
+            enemy_buff_values=_to_tensor_3d_float([item.enemy_buff_values for item in encoded], self._config.max_enemies, enemy_buff_width),
+            enemy_buff_mask=_mask_from_nested_lengths([item.enemy_buff_ids for item in encoded], self._config.max_enemies, enemy_buff_width),
             enemy_mask=_enemy_mask_from_rows([item.enemy_numeric for item in encoded], self._config.max_enemies),
             hand_numeric=_to_tensor_3d(
                 [item.hand_numeric for item in encoded],
                 self._config.max_hand_cards,
-                len(encoded[0].hand_numeric[0]) if encoded and encoded[0].hand_numeric else 9,
+                hand_feature_dim,
             ),
             hand_card_ids=_to_tensor_2d_int([item.hand_card_ids for item in encoded], self._config.max_hand_cards),
             hand_mask=_mask_from_lengths([len(item.hand_numeric) for item in encoded], self._config.max_hand_cards),
@@ -83,13 +145,13 @@ class BatchCollator:
             history_numeric=_to_tensor_3d(
                 [item.history_numeric for item in encoded],
                 self._config.history_steps,
-                len(encoded[0].history_numeric[0]) if encoded and encoded[0].history_numeric else 17,
+                history_feature_dim,
             ),
             history_mask=_mask_from_lengths([len(item.history_numeric) for item in encoded], self._config.history_steps),
             action_numeric=_to_tensor_3d(
                 [item.action_numeric for item in encoded],
                 action_width,
-                len(encoded[0].action_numeric[0]) if encoded and encoded[0].action_numeric else 13,
+                action_feature_dim,
             ),
             action_type_ids=_to_tensor_2d_int(
                 [item.action_type_ids for item in encoded],
@@ -116,6 +178,10 @@ class BatchCollator:
             sample_weight=torch.tensor([item.sample_weight for item in encoded], dtype=torch.float32),
             fight_quality_score=torch.tensor([item.fight_quality_score for item in encoded], dtype=torch.float32),
             behavior_ce_scale=torch.tensor([item.behavior_ce_scale for item in encoded], dtype=torch.float32),
+            old_logprob=torch.tensor([item.old_logprob for item in encoded], dtype=torch.float32),
+            old_value=torch.tensor([item.old_value for item in encoded], dtype=torch.float32),
+            ppo_return=torch.tensor([item.ppo_return for item in encoded], dtype=torch.float32),
+            ppo_advantage=torch.tensor([item.ppo_advantage for item in encoded], dtype=torch.float32),
         )
 
 
@@ -147,7 +213,39 @@ def _to_tensor_2d_int(rows: list[list[int]], width: int) -> torch.Tensor:
     return torch.tensor(padded, dtype=torch.long)
 
 
+def _to_tensor_2d_float(rows: list[list[float]], width: int) -> torch.Tensor:
+    padded = []
+    for row in rows:
+        values = [float(value) for value in row[:width]]
+        if len(values) < width:
+            values.extend([0.0] * (width - len(values)))
+        padded.append(values)
+    return torch.tensor(padded, dtype=torch.float32)
+
+
 def _to_tensor_3d(rows: list[list[list[float]]], width: int, feature_dim: int) -> torch.Tensor:
+    tensor = torch.zeros((len(rows), width, feature_dim), dtype=torch.float32)
+    for batch_index, row in enumerate(rows):
+        for item_index, item in enumerate(row[:width]):
+            limit = min(feature_dim, len(item))
+            if limit <= 0:
+                continue
+            tensor[batch_index, item_index, :limit] = torch.tensor(item[:limit], dtype=torch.float32)
+    return tensor
+
+
+def _to_tensor_3d_int(rows: list[list[list[int]]], width: int, feature_dim: int) -> torch.Tensor:
+    tensor = torch.zeros((len(rows), width, feature_dim), dtype=torch.long)
+    for batch_index, row in enumerate(rows):
+        for item_index, item in enumerate(row[:width]):
+            limit = min(feature_dim, len(item))
+            if limit <= 0:
+                continue
+            tensor[batch_index, item_index, :limit] = torch.tensor(item[:limit], dtype=torch.long)
+    return tensor
+
+
+def _to_tensor_3d_float(rows: list[list[list[float]]], width: int, feature_dim: int) -> torch.Tensor:
     tensor = torch.zeros((len(rows), width, feature_dim), dtype=torch.float32)
     for batch_index, row in enumerate(rows):
         for item_index, item in enumerate(row[:width]):
@@ -176,3 +274,21 @@ def _enemy_mask_from_rows(rows: list[list[list[float]]], width: int) -> torch.Te
             row.append(0.0)
         mask_rows.append(row)
     return torch.tensor(mask_rows, dtype=torch.float32)
+
+
+def _mask_from_nested_lengths(rows: list[list[list[int]]], outer_width: int, inner_width: int) -> torch.Tensor:
+    tensor = torch.zeros((len(rows), outer_width, inner_width), dtype=torch.float32)
+    for batch_index, row in enumerate(rows):
+        for item_index, item in enumerate(row[:outer_width]):
+            limit = min(inner_width, len(item))
+            if limit > 0:
+                tensor[batch_index, item_index, :limit] = 1.0
+    return tensor
+
+
+def _infer_feature_dim(rows: list[list[list[float]]], *, default: int) -> int:
+    feature_dim = 0
+    for row in rows:
+        for item in row:
+            feature_dim = max(feature_dim, len(item))
+    return feature_dim or default

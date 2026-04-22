@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import random
 import tempfile
 from collections import Counter, deque
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 
 from ..buffers import SamplePoolSet
 from ..config import LossWeights, TrainConfig
@@ -17,6 +19,45 @@ from ..domain import BattleState, HistoryStep, TrainingSummary
 from ..features import BatchCollator, FeatureExtractor, compute_transition_delta
 from ..model import ZeroNet, compute_losses
 from ..ports import Policy
+
+
+@dataclass(slots=True)
+class _PpoLiteLosses:
+    policy: torch.Tensor
+    value: torch.Tensor
+    ranking: torch.Tensor
+    delta: torch.Tensor
+    uncertainty: torch.Tensor
+    total: torch.Tensor
+
+
+def _compute_ppo_lite_losses(output, batch, config: TrainConfig) -> _PpoLiteLosses:
+    logits = output.policy_logits
+    safe_logits = logits.masked_fill(batch.action_mask <= 0, -float(torch.finfo(logits.dtype).max))
+    log_probs = F.log_softmax(safe_logits, dim=-1)
+    chosen_logprob = log_probs.gather(1, batch.behavior_action_index.unsqueeze(1)).squeeze(1)
+    ratio = torch.exp(chosen_logprob - batch.old_logprob)
+
+    advantages = batch.ppo_advantage
+    if bool(config.ppo_advantage_norm):
+        advantages = (advantages - advantages.mean()) / advantages.std(unbiased=False).clamp_min(1e-6)
+    clipped_ratio = torch.clamp(ratio, 1.0 - config.ppo_clip_ratio, 1.0 + config.ppo_clip_ratio)
+    policy = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
+
+    value = F.mse_loss(output.ppo_value, batch.ppo_return)
+    probs = torch.softmax(safe_logits, dim=-1)
+    entropy = -(probs * log_probs).sum(dim=-1).mean()
+
+    total = policy + config.ppo_value_coef * value - config.ppo_entropy_coef * entropy
+    zero = torch.zeros((), device=total.device, dtype=total.dtype)
+    return _PpoLiteLosses(
+        policy=policy,
+        value=value,
+        ranking=zero,
+        delta=zero,
+        uncertainty=entropy,
+        total=total,
+    )
 
 
 def _resolve_device(name: str) -> torch.device:
@@ -88,6 +129,8 @@ class ZeroTrainer:
         self._global_step = int(payload.get("global_step") or 0)
 
     def train_iteration(self, pools: SamplePoolSet) -> TrainingSummary:
+        if self._config.algorithm == "ppo_lite":
+            return self._train_iteration_ppo_lite(pools)
         self._model.train()
         metrics = TrainingSummary()
         prefetched = deque(self._prefetch_samples(pools))
@@ -111,7 +154,11 @@ class ZeroTrainer:
             self._optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=self._device.type, enabled=self._amp_enabled):
                 output = self._model(batch)
-                losses = compute_losses(output, batch, self._loss_weights)
+                losses = (
+                    _compute_ppo_lite_losses(output, batch, self._config)
+                    if self._config.algorithm == "ppo_lite"
+                    else compute_losses(output, batch, self._loss_weights)
+                )
 
             if not torch.isfinite(losses.total):
                 metrics.skipped_non_finite_steps += 1
@@ -165,6 +212,86 @@ class ZeroTrainer:
             metrics.zero_step = True
         return metrics
 
+    def _train_iteration_ppo_lite(self, pools: SamplePoolSet) -> TrainingSummary:
+        self._model.train()
+        metrics = TrainingSummary()
+        dataset = list(pools.pool_items("recent_online"))
+        if not dataset:
+            metrics.zero_step = True
+            return metrics
+
+        batch_size = max(1, int(self._config.batch_size))
+        max_steps = max(1, int(self._config.steps_per_iteration))
+        max_epochs = max(1, int(self._config.ppo_epochs))
+
+        for _epoch in range(max_epochs):
+            if metrics.steps >= max_steps:
+                break
+            random.shuffle(dataset)
+            for start in range(0, len(dataset), batch_size):
+                if metrics.steps >= max_steps:
+                    break
+                samples = dataset[start : start + batch_size]
+                if not samples:
+                    continue
+
+                batch = self._collator.collate(samples).to(self._device)
+                pool_counts = Counter(sample.pool_name for sample in samples)
+                self._optimizer.zero_grad(set_to_none=True)
+                with torch.autocast(device_type=self._device.type, enabled=self._amp_enabled):
+                    output = self._model(batch)
+                    losses = _compute_ppo_lite_losses(output, batch, self._config)
+
+                if not torch.isfinite(losses.total):
+                    metrics.skipped_non_finite_steps += 1
+                    continue
+
+                if self._amp_enabled:
+                    self._scaler.scale(losses.total).backward()
+                    self._scaler.unscale_(self._optimizer)
+                else:
+                    losses.total.backward()
+                grad_norm = torch.nn.utils.clip_grad_norm_(self._model.parameters(), self._config.grad_clip_norm)
+                if not math.isfinite(float(grad_norm)):
+                    metrics.skipped_non_finite_steps += 1
+                    self._optimizer.zero_grad(set_to_none=True)
+                    if self._amp_enabled:
+                        self._scaler.update()
+                    continue
+
+                if self._amp_enabled:
+                    self._scaler.step(self._optimizer)
+                    self._scaler.update()
+                else:
+                    self._optimizer.step()
+                self._scheduler.step()
+                self._global_step += 1
+
+                metrics.steps += 1
+                metrics.policy_loss += float(losses.policy.detach())
+                metrics.value_loss += float(losses.value.detach())
+                metrics.ranking_loss += float(losses.ranking.detach())
+                metrics.delta_loss += float(losses.delta.detach())
+                metrics.uncertainty_loss += float(losses.uncertainty.detach())
+                metrics.total_loss += float(losses.total.detach())
+                metrics.grad_norm += float(grad_norm)
+                metrics.learning_rate += float(self._optimizer.param_groups[0]["lr"])
+                for pool_name, count in pool_counts.items():
+                    metrics.pool_usage[pool_name] = metrics.pool_usage.get(pool_name, 0) + int(count)
+
+        if metrics.steps > 0:
+            metrics.policy_loss /= metrics.steps
+            metrics.value_loss /= metrics.steps
+            metrics.ranking_loss /= metrics.steps
+            metrics.delta_loss /= metrics.steps
+            metrics.uncertainty_loss /= metrics.steps
+            metrics.total_loss /= metrics.steps
+            metrics.grad_norm /= metrics.steps
+            metrics.learning_rate /= metrics.steps
+        else:
+            metrics.zero_step = True
+        return metrics
+
     def _sample_batch(self, pools: SamplePoolSet) -> list:
         return pools.mixed_sample(self._config.batch_size)
 
@@ -178,6 +305,8 @@ class ZeroTrainer:
         return batches
 
     def _lr_multiplier(self, step: int) -> float:
+        if self._config.algorithm == "ppo_lite":
+            return 1.0
         warmup_steps = max(0, int(self._config.warmup_steps))
         if warmup_steps > 0 and step < warmup_steps:
             return max(1e-6, float(step + 1) / float(warmup_steps))
@@ -237,6 +366,7 @@ class ModelPolicyAdapter(Policy):
                 "fight_win_prob": 0.0,
                 "enemy_hp_fraction_dealt": 0.0,
                 "self_hp_fraction_remaining": 0.0,
+                "ppo_value": 0.0,
             }
             return result
         self._model.eval()
@@ -251,6 +381,7 @@ class ModelPolicyAdapter(Policy):
         fight_win_prob = float(torch.sigmoid(output.fight_win)[0].item())
         enemy_hp_fraction_dealt = float(output.enemy_hp_fraction_dealt[0].clamp(0.0, 1.0).item())
         self_hp_fraction_remaining = float(output.self_hp_fraction_remaining[0].clamp(0.0, 1.0).item())
+        ppo_value = float(output.ppo_value[0].item())
         result = {
             "scores": scores,
             "action_index": action_index,
@@ -258,6 +389,7 @@ class ModelPolicyAdapter(Policy):
             "fight_win_prob": fight_win_prob,
             "enemy_hp_fraction_dealt": enemy_hp_fraction_dealt,
             "self_hp_fraction_remaining": self_hp_fraction_remaining,
+            "ppo_value": ppo_value,
         }
         return result
 

@@ -13,7 +13,7 @@ import torch
 
 from ..buffers import ArtifactStore, SamplePoolSet
 from ..config import ZeroConfig
-from ..domain import IterationManifest
+from ..domain import IterationManifest, PromotionDecision
 from ..features import BatchCollator
 from ..model import ZeroNet
 from ..ports import BattleRuntime, CheckpointStore, Evaluator, Policy, SearchBackend
@@ -56,13 +56,17 @@ class ZeroLoopRunner:
     config: ZeroConfig
     artifact_store: ArtifactStore
     checkpoint_store: CheckpointStore
-    evaluator: Evaluator
+    evaluator: Evaluator | None
 
     def __post_init__(self) -> None:
         self._seed_everything(self.config.seed)
         self._pools = SamplePoolSet(self.config.pools)
         self._collector = TrajectoryCollector()
-        self._sample_builder = SampleBuilder(self.config.encoder)
+        self._sample_builder = SampleBuilder(
+            self.config.encoder,
+            ppo_gamma=self.config.train.ppo_gamma,
+            ppo_gae_lambda=self.config.train.ppo_gae_lambda,
+        )
         self._admission = SampleAdmissionPlanner()
         self._search_queue = SearchQueueBuilder(self.config.search)
         self._search_processor = SearchQueueProcessor()
@@ -166,7 +170,17 @@ class ZeroLoopRunner:
         )
 
         admission_started_at = time.perf_counter()
-        online_entries = self._admission.build_online_entries(samples)
+        if self.config.train.algorithm == "ppo_lite":
+            online_entries = [
+                sample.clone_for_pool(
+                    pool_name="recent_online",
+                    keep_score=1.0,
+                    metadata={"admission_reason": "ppo_on_policy"},
+                )
+                for sample in samples
+            ]
+        else:
+            online_entries = self._admission.build_online_entries(samples)
         if self.config.collect.mode == "search_only_collect":
             search_requests = []
         else:
@@ -198,8 +212,12 @@ class ZeroLoopRunner:
             search_entries = self._admission.build_search_entries([sample for sample in samples if sample.search_label is not None])
         else:
             search_entries = self._admission.build_search_entries(labeled_search_samples)
-        self._pools.add_many(online_entries)
-        self._pools.add_many(search_entries)
+        if self.config.train.algorithm == "ppo_lite":
+            self._pools.replace_pool("recent_online", online_entries)
+            self._pools.replace_pool("search", [])
+        else:
+            self._pools.add_many(online_entries)
+            self._pools.add_many(search_entries)
         pool_admission_duration_s = time.perf_counter() - search_entry_started_at
         pool_counters_after_admission = self._pools.iteration_counters()
         pool_stats_after_admission = self._pools.describe()
@@ -269,35 +287,16 @@ class ZeroLoopRunner:
         }
         version = f"policy_v{iteration:04d}"
         candidate_path = self.checkpoint_store.save_candidate(version, candidate_payload)
-        self._set_evaluator_trace_context(iteration=iteration, phase="candidate_eval")
-        eval_started_at = time.perf_counter()
-        evaluations = self.evaluator.evaluate(candidate_policy)
-        self._write_progress(
-            iteration,
-            phase="candidate_eval",
-            status="completed",
-            duration_s=round(time.perf_counter() - eval_started_at, 6),
-            cohorts=len(evaluations),
-        )
-        self._write_status(
-            iteration,
-            phase="candidate_eval_completed",
-            cohorts=len(evaluations),
-            elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
-        )
-        baseline = baseline_eval if baseline_eval is not None else self._baseline_eval
-        promotion = self._promotion.decide(candidate_version=version, current=evaluations, baseline=baseline)
-
-        if self._baseline_eval is None:
-            # 即使首轮没有晋级，也要把第一次评估结果沉淀成后续基线，
-            # 否则下一轮会被误判成“首次评估通过”。
-            self._baseline_eval = evaluations
-            self._write_baseline_eval(evaluations)
-
-        if promotion.promoted:
+        evaluations = []
+        if self.evaluator is None:
+            promotion = PromotionDecision(
+                promoted=True,
+                reason="progress_only_no_eval",
+                new_version=version,
+            )
             promoted_payload = {
                 **candidate_payload,
-                "baseline_eval": [asdict(item) for item in evaluations],
+                "baseline_eval": [],
             }
             self.checkpoint_store.save(version, promoted_payload)
             self.checkpoint_store.write_active_version(version)
@@ -305,10 +304,47 @@ class ZeroLoopRunner:
             self._active_version = version
             self._active_policy = candidate_policy
             self._active_training_state = trainer.state_dict()
-            self._baseline_eval = evaluations
-            self._write_baseline_eval(evaluations)
-        elif not self.config.checkpoints.keep_rejected_checkpoints:
-            self.checkpoint_store.discard(candidate_path)
+        else:
+            self._set_evaluator_trace_context(iteration=iteration, phase="candidate_eval")
+            eval_started_at = time.perf_counter()
+            evaluations = self.evaluator.evaluate(candidate_policy)
+            self._write_progress(
+                iteration,
+                phase="candidate_eval",
+                status="completed",
+                duration_s=round(time.perf_counter() - eval_started_at, 6),
+                cohorts=len(evaluations),
+            )
+            self._write_status(
+                iteration,
+                phase="candidate_eval_completed",
+                cohorts=len(evaluations),
+                elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
+            )
+            baseline = baseline_eval if baseline_eval is not None else self._baseline_eval
+            promotion = self._promotion.decide(candidate_version=version, current=evaluations, baseline=baseline)
+
+            if self._baseline_eval is None:
+                # 即使首轮没有晋级，也要把第一次评估结果沉淀成后续基线，
+                # 否则下一轮会被误判成“首次评估通过”。
+                self._baseline_eval = evaluations
+                self._write_baseline_eval(evaluations)
+
+            if promotion.promoted:
+                promoted_payload = {
+                    **candidate_payload,
+                    "baseline_eval": [asdict(item) for item in evaluations],
+                }
+                self.checkpoint_store.save(version, promoted_payload)
+                self.checkpoint_store.write_active_version(version)
+                self.checkpoint_store.discard(candidate_path)
+                self._active_version = version
+                self._active_policy = candidate_policy
+                self._active_training_state = trainer.state_dict()
+                self._baseline_eval = evaluations
+                self._write_baseline_eval(evaluations)
+            elif not self.config.checkpoints.keep_rejected_checkpoints:
+                self.checkpoint_store.discard(candidate_path)
 
         manifest = IterationManifest(
             iteration=iteration,
@@ -472,6 +508,8 @@ class ZeroLoopRunner:
         )
 
     def _set_evaluator_trace_context(self, *, iteration: int, phase: str) -> None:
+        if self.evaluator is None:
+            return
         configure = getattr(self.evaluator, "set_trace_context", None)
         if callable(configure):
             configure(iteration=iteration, phase=phase)

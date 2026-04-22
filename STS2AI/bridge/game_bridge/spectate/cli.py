@@ -23,11 +23,14 @@ def main() -> None:
     parser.add_argument("--use-pipe", action="store_true")
     parser.add_argument("--transport", type=str, default="proto")
     parser.add_argument("--auto-launch", action="store_true")
+    parser.add_argument("--request-timeout-s", type=float, default=30.0)
+    parser.add_argument("--ready-timeout-s", type=float, default=60.0)
     parser.add_argument("--repo-root", type=str, default="")
     parser.add_argument("--host-path", type=str, default="")
     parser.add_argument("--dll-path", type=str, default="", help=argparse.SUPPRESS)
     parser.add_argument("--character-id", type=str, default="IRONCLAD")
     parser.add_argument("--seed", type=str, default="")
+    parser.add_argument("--build-file", type=str, default="")
     parser.add_argument("--max-steps", type=int, default=800)
     parser.add_argument("--step-delay", type=float, default=0.0)
     args = parser.parse_args()
@@ -52,11 +55,16 @@ def main() -> None:
         port=args.port,
         use_pipe=args.use_pipe,
         transport=args.transport,
+        request_timeout_s=args.request_timeout_s,
+        ready_timeout_s=args.ready_timeout_s,
         auto_launch=args.auto_launch,
         repo_root=resolved_repo_root,
         host_path=resolved_host_path,
     )
     try:
+        build_payload = None
+        if args.build_file:
+            build_payload = json.loads(Path(args.build_file).read_text(encoding="utf-8"))
         overlay_path = Path(args.overlay_file) if args.overlay_file else None
         print(
             json.dumps(
@@ -68,6 +76,7 @@ def main() -> None:
                     "repo_root": str(Path(resolved_repo_root).resolve()) if resolved_repo_root else None,
                     "host_path": str(Path(resolved_host_path).resolve()) if resolved_host_path else None,
                     "overlay_file": str(overlay_path) if overlay_path else None,
+                    "build_file": args.build_file or None,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -82,6 +91,7 @@ def main() -> None:
         result = controller.play_episode(
             character_id=args.character_id,
             seed=args.seed or None,
+            build=build_payload,
             max_steps=args.max_steps,
         )
         print(result)

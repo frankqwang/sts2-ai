@@ -135,7 +135,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             )
             self.assertTrue(manifest.promotion.promoted)
             self.assertEqual(manifest.collector_version, "FakePolicy")
-            self.assertEqual(manifest.sample_counts["search_requests"], 4)
+            self.assertEqual(manifest.sample_counts["search_requests"], 0)
             self.assertTrue((config.paths.manifests / "iter_0001.json").exists())
             self.assertEqual(runner.checkpoint_store.read_active_version(), "policy_v0001")
 

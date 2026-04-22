@@ -42,12 +42,15 @@ class CollectConfig:
 
 @dataclass(slots=True)
 class EncoderConfig:
+    model_variant: str = "history_transformer"
     hidden_dim: int = 256
     action_dim: int = 192
     history_dim: int = 256
     history_steps: int = 8
     history_layers: int = 4
     history_heads: int = 4
+    history_dropout: float = 0.1
+    history_gate_bias: float = -1.5
     max_enemies: int = 4
     max_hand_cards: int = 10
     buff_slots: int = 16
@@ -110,6 +113,7 @@ class SearchConfig:
 
 @dataclass(slots=True)
 class TrainConfig:
+    algorithm: str = "behavior_clone"
     batch_size: int = 32
     learning_rate: float = 3e-4
     weight_decay: float = 1e-4
@@ -120,6 +124,13 @@ class TrainConfig:
     device: str = "auto"
     amp_enabled: bool = True
     prefetch_batches: int = 2
+    ppo_clip_ratio: float = 0.2
+    ppo_value_coef: float = 0.5
+    ppo_entropy_coef: float = 0.01
+    ppo_advantage_norm: bool = True
+    ppo_gamma: float = 0.99
+    ppo_gae_lambda: float = 0.95
+    ppo_epochs: int = 4
 
 
 @dataclass(slots=True)

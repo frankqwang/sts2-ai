@@ -40,6 +40,7 @@ class RawTransition:
     done: bool
     fight_outcome: str
     run_outcome: str
+    reward: float = 0.0
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -89,6 +90,11 @@ class TrainingSample:
     episode_score_proxy: float = 0.0
     sample_weight: float = 1.0
     keep_score: float = 0.0
+    old_logprob: float = 0.0
+    old_value: float = 0.0
+    reward: float = 0.0
+    ppo_return: float = 0.0
+    ppo_advantage: float = 0.0
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -197,6 +203,9 @@ def compact_battle_state(state: BattleState) -> BattleState:
             draw_pile_size=state.piles.draw_pile_size,
             discard_pile_size=state.piles.discard_pile_size,
             exhaust_pile_size=state.piles.exhaust_pile_size,
+            draw_cards=list(state.piles.draw_cards),
+            discard_cards=list(state.piles.discard_cards),
+            exhaust_cards=list(state.piles.exhaust_cards),
             attack_count=state.piles.attack_count,
             skill_count=state.piles.skill_count,
             power_count=state.piles.power_count,
@@ -209,6 +218,7 @@ def compact_battle_state(state: BattleState) -> BattleState:
             floor=state.context.floor,
             encounter_class=state.context.encounter_class,
             encounter_id=state.context.encounter_id,
+            deck_cards=list(state.context.deck_cards),
             relics=list(state.context.relics),
             fixed_powers=list(state.context.fixed_powers),
             metadata=dict(state.context.metadata),
@@ -234,6 +244,7 @@ def compact_raw_transition(transition: RawTransition) -> RawTransition:
         done=transition.done,
         fight_outcome=transition.fight_outcome,
         run_outcome=transition.run_outcome,
+        reward=float(transition.reward),
         metadata=dict(transition.metadata),
     )
 

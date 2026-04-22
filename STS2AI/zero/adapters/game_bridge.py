@@ -32,6 +32,10 @@ def convert_game_bridge_state(
     enemies_raw = _as_list(raw.get("enemies")) or _as_list(battle_raw.get("enemies"))
     hand_raw = _as_list(battle_raw.get("hand")) or _as_list(raw.get("hand"))
     legal_actions_raw = _as_list(raw.get("legal_actions"))
+    draw_pile_cards = _normalize_named_items(_as_list(battle_raw.get("draw_pile_cards")))
+    discard_pile_cards = _normalize_named_items(_as_list(battle_raw.get("discard_pile_cards")))
+    exhaust_pile_cards = _normalize_named_items(_as_list(battle_raw.get("exhaust_pile_cards")))
+    deck_cards = _normalize_deck_cards(_as_list(top_player_raw.get("deck")))
 
     player_buffs = _powers_to_mapping(_as_list(battle_player_raw.get("powers")) or _as_list(top_player_raw.get("powers")))
     player = PlayerState(
@@ -80,9 +84,12 @@ def convert_game_bridge_state(
     ]
 
     piles = PileSummary(
-        draw_pile_size=int(len(_as_list(battle_raw.get("draw_pile_cards"))) or _pick(top_player_raw, "draw_pile_count", default=0)),
-        discard_pile_size=int(len(_as_list(battle_raw.get("discard_pile_cards"))) or _pick(top_player_raw, "discard_pile_count", default=0)),
-        exhaust_pile_size=int(len(_as_list(battle_raw.get("exhaust_pile_cards"))) or _pick(top_player_raw, "exhaust_pile_count", default=0)),
+        draw_pile_size=int(len(draw_pile_cards) or _pick(top_player_raw, "draw_pile_count", default=0)),
+        discard_pile_size=int(len(discard_pile_cards) or _pick(top_player_raw, "discard_pile_count", default=0)),
+        exhaust_pile_size=int(len(exhaust_pile_cards) or _pick(top_player_raw, "exhaust_pile_count", default=0)),
+        draw_cards=draw_pile_cards,
+        discard_cards=discard_pile_cards,
+        exhaust_cards=exhaust_pile_cards,
         attack_count=sum(1 for item in hand_raw if str(_pick(item, "type", "card_type", default="")).lower() == "attack"),
         skill_count=sum(1 for item in hand_raw if str(_pick(item, "type", "card_type", default="")).lower() == "skill"),
         power_count=sum(1 for item in hand_raw if str(_pick(item, "type", "card_type", default="")).lower() == "power"),
@@ -99,6 +106,7 @@ def convert_game_bridge_state(
         floor=int(_pick(run_raw, "floor", default=0)),
         encounter_class=encounter_class,
         encounter_id=encounter_id,
+        deck_cards=deck_cards,
         relics=_normalize_named_items(_as_list(top_player_raw.get("relics"))),
         fixed_powers=list(player_buffs.keys()),
         metadata={
@@ -324,6 +332,23 @@ def _normalize_named_items(items: list[Any]) -> list[str]:
         elif isinstance(item, dict):
             values.append(str(_pick(item, "id", "name", default="")))
     return [value for value in values if value]
+
+
+def _normalize_deck_cards(items: list[Any]) -> list[str]:
+    cards: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            card_id = item
+        elif isinstance(item, dict):
+            card_id = str(_pick(item, "id", "card_id", "name", default=""))
+            upgrades = int(_pick(item, "upgrade_level", "upgrades", default=0) or 0)
+            if upgrades > 0 and card_id:
+                card_id = f"{card_id}+{upgrades}"
+        else:
+            continue
+        if card_id:
+            cards.append(card_id)
+    return cards
 
 
 def _powers_to_mapping(items: list[Any]) -> dict[str, float]:

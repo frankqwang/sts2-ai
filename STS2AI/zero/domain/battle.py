@@ -55,6 +55,9 @@ class PileSummary:
     draw_pile_size: int = 0
     discard_pile_size: int = 0
     exhaust_pile_size: int = 0
+    draw_cards: list[str] = field(default_factory=list)
+    discard_cards: list[str] = field(default_factory=list)
+    exhaust_cards: list[str] = field(default_factory=list)
     attack_count: int = 0
     skill_count: int = 0
     power_count: int = 0
@@ -69,6 +72,7 @@ class StaticContext:
     floor: int = 0
     encounter_class: str = "normal"
     encounter_id: str = ""
+    deck_cards: list[str] = field(default_factory=list)
     relics: list[str] = field(default_factory=list)
     fixed_powers: list[str] = field(default_factory=list)
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)

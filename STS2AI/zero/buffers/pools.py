@@ -173,6 +173,12 @@ class BucketedSamplePool:
         if not counts:
             self._bucket_card_counts.pop(bucket, None)
 
+    def clear(self) -> None:
+        self._fifo_buckets.clear()
+        self._score_buckets.clear()
+        self._bucket_card_counts.clear()
+        self._size = 0
+
 
 class SamplePoolSet:
     def __init__(self, config: PoolConfig):
@@ -201,6 +207,23 @@ class SamplePoolSet:
     def add_many(self, samples: list[TrainingSample]) -> None:
         for sample in samples:
             self.add(sample)
+
+    def replace_pool(self, pool_name: str, samples: list[TrainingSample]) -> None:
+        pool = self._pools.get(pool_name)
+        if pool is None:
+            return
+        if samples and len(samples) > pool.bucket_capacity:
+            pool.set_bucket_capacity(len(samples))
+            self._current_capacities[pool_name] = int(len(samples))
+        pool.clear()
+        for sample in samples:
+            pool.add(sample)
+
+    def pool_items(self, pool_name: str) -> list[TrainingSample]:
+        pool = self._pools.get(pool_name)
+        if pool is None:
+            return []
+        return pool.items()
 
     def mixed_sample(self, batch_size: int) -> list[TrainingSample]:
         weighted = [
