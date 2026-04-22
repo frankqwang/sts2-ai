@@ -1623,11 +1623,13 @@ public static partial class McpMod
         // Cards in the grid (sorted by visual position — MoveToFront can reorder children)
         var cardHolders = FindAllSortedByPosition<NGridCardHolder>(screen);
         var cards = new List<Dictionary<string, object?>>();
+        var selectedCardIndices = new List<int>();
         int index = 0;
         foreach (var holder in cardHolders)
         {
             var card = holder.CardModel;
             if (card == null) continue;
+            bool isSelected = ContainsCardReference(selectedCards, card);
 
             cards.Add(new Dictionary<string, object?>
             {
@@ -1639,11 +1641,15 @@ public static partial class McpMod
                 ["description"] = SafeGetCardDescription(card, PileType.None),
                 ["rarity"] = card.Rarity.ToString(),
                 ["is_upgraded"] = card.IsUpgraded,
+                ["is_selected"] = isSelected,
                 ["keywords"] = BuildHoverTips(card.HoverTips)
             });
+            if (isSelected)
+                selectedCardIndices.Add(index);
             index++;
         }
         state["cards"] = cards;
+        state["selected_card_indices"] = selectedCardIndices;
         state["selected_cards"] = BuildCompactCardList(selectedCards);
         state["selected_count"] = selectedCards.Count;
         state["min_select"] = prefs.MinSelect;
@@ -1826,11 +1832,13 @@ public static partial class McpMod
 
         // Selectable cards (visible holders in the hand)
         var selectableCards = new List<Dictionary<string, object?>>();
+        var selectedCardIndices = new List<int>();
         int index = 0;
         foreach (var holder in hand.ActiveHolders)
         {
             var card = holder.CardModel;
             if (card == null) continue;
+            bool isSelected = ContainsCardReference(selectedCards, card);
 
             selectableCards.Add(new Dictionary<string, object?>
             {
@@ -1841,12 +1849,16 @@ public static partial class McpMod
                 ["cost"] = card.EnergyCost.CostsX ? "X" : card.EnergyCost.GetAmountToSpend().ToString(),
                 ["description"] = SafeGetCardDescription(card),
                 ["is_upgraded"] = card.IsUpgraded,
+                ["is_selected"] = isSelected,
                 ["keywords"] = BuildHoverTips(card.HoverTips)
             });
+            if (isSelected)
+                selectedCardIndices.Add(index);
             index++;
         }
         state["cards"] = selectableCards;
 
+        state["selected_card_indices"] = selectedCardIndices;
         state["selected_cards"] = BuildCompactCardList(selectedCards);
         state["selected_count"] = selectedCards.Count;
         state["min_select"] = prefs.MinSelect;
@@ -1896,6 +1908,17 @@ public static partial class McpMod
             return cards.ToList();
 
         return new List<CardModel>();
+    }
+
+    private static bool ContainsCardReference(IEnumerable<CardModel> cards, CardModel candidate)
+    {
+        foreach (var card in cards)
+        {
+            if (ReferenceEquals(card, candidate))
+                return true;
+        }
+
+        return false;
     }
 
     private static List<Dictionary<string, object?>> BuildCompactCardList(IEnumerable<CardModel> cards)

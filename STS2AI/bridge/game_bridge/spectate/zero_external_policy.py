@@ -27,6 +27,7 @@ from zero.config import EncoderConfig
 from zero.features import BatchCollator
 from zero.model import ZeroNet
 from zero.orchestration import ModelPolicyAdapter
+from game_bridge.session.state_semantics import is_actionable_combat_state
 
 
 def _read_required_env(name: str) -> str:
@@ -75,8 +76,7 @@ class ZeroExternalPolicyAdapter:
             self.reset_episode()
             return None
 
-        state_type = str(state.get("state_type") or "")
-        if state_type != "combat":
+        if not is_actionable_combat_state(state):
             self.reset_episode()
             return dict(enabled_legal[0])
 

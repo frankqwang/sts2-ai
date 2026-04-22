@@ -31,13 +31,6 @@ class CollectConfig:
     max_steps_per_episode: int = 200
     epsilon_greedy: float = 0.0
     temperature: float = 0.0
-    # 当前主线先做 RL，默认只用策略自身采样，不在 collect 阶段接搜索。
-    # search_guided_collect / search_only_collect 仅保留为显式实验模式。
-    mode: str = "policy_only_collect"
-    search_guidance_priority_threshold: float = 1.2
-    search_guidance_max_steps_per_episode: int = 8
-    search_guidance_target_encounters: tuple[str, ...] = ()
-    search_guidance_port_offset: int = 100
 
 
 @dataclass(slots=True)
@@ -61,24 +54,19 @@ class EncoderConfig:
 class LossWeights:
     policy: float = 1.0
     value: float = 0.5
-    ranking: float = 0.5
     delta: float = 0.2
     uncertainty: float = 0.1
-    policy_search_kl_weight: float = 1.25
-    policy_behavior_ce_weight: float = 0.75
-    policy_bad_rollout_ce_scale: float = 0.35
+    policy_behavior_ce_weight: float = 1.0
 
 
 @dataclass(slots=True)
 class PoolConfig:
-    recent_online_weight: float = 0.35
-    search_weight: float = 0.25
-    rare_weight: float = 0.20
-    reanalyse_weight: float = 0.10
-    legacy_weight: float = 0.10
+    recent_online_weight: float = 0.45
+    rare_weight: float = 0.25
+    reanalyse_weight: float = 0.15
+    legacy_weight: float = 0.15
     bucket_capacity: int = 2048
     rare_bucket_capacity: int = 256
-    search_bucket_capacity: int = 1024
     """样本池默认权重与基础容量。
 
     基础容量只是冷启动下限。运行中会根据最近若干轮样本量动态放大，
@@ -88,27 +76,6 @@ class PoolConfig:
 
     dynamic_capacity_enabled: bool = True
     dynamic_capacity_recent_iterations: int = 2
-
-
-@dataclass(slots=True)
-class SearchConfig:
-    # 当前主线默认关闭搜索/MCTS；相关链路仅作为后续实验能力保留。
-    mode: str = "disabled"
-    top2_gap_threshold: float = 0.05
-    uncertainty_threshold: float = 0.55
-    near_lethal_hp_ratio: float = 0.25
-    max_requests_per_iteration: int = 0
-    max_root_actions: int = 8
-    rollouts_per_action: int = 2
-    max_branch_steps: int = 24
-    allow_branching: bool = False
-    rollout_policy: str = "aggregate_search_prior"
-    rollout_scorer: str = "fight_quality"
-    trace_topk: int = 4
-    enable_snapshot_restore: bool = True
-    leaf_eval_horizon: int = 3
-    leaf_value_weight: float = 0.75
-    root_cache_size: int = 128
 
 
 @dataclass(slots=True)
@@ -126,6 +93,8 @@ class TrainConfig:
     prefetch_batches: int = 2
     ppo_clip_ratio: float = 0.2
     ppo_value_coef: float = 0.5
+    ppo_imagination_value_coef: float = 0.25
+    ppo_imagination_delta_coef: float = 0.10
     ppo_entropy_coef: float = 0.01
     ppo_advantage_norm: bool = True
     ppo_gamma: float = 0.99
@@ -138,7 +107,6 @@ class EvalConfig:
     episodes_per_cohort: int = 32
     promote_min_win_rate_gain: float = 0.01
     allow_hp_quality_drop: float = 0.02
-    promote_min_search_agreement_gain: float = 0.0
     promote_min_enemy_hp_gain: float = 0.0
     promote_min_fight_quality_gain: float = 0.0
     significance_z: float = 0.0
@@ -161,7 +129,6 @@ class ZeroConfig:
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     losses: LossWeights = field(default_factory=LossWeights)
     pools: PoolConfig = field(default_factory=PoolConfig)
-    search: SearchConfig = field(default_factory=SearchConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     evaluation: EvalConfig = field(default_factory=EvalConfig)
     checkpoints: CheckpointConfig = field(default_factory=CheckpointConfig)

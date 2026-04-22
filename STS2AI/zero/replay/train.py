@@ -17,7 +17,7 @@ from __future__ import annotations
 注意：
 - 这里默认依赖已经清洗好的 replay case 索引，不直接读取 `runs_full_detail`
 - 想重建索引，请用 `zero.replay.build_case_index`
-- 当前主线默认关闭 search / MCTS，先聚焦 policy-only 的 RL 闭环
+- 当前主线专注 policy-only RL，已完全移除搜索/MCTS 相关逻辑
 - collect 支持探索；eval 始终保持贪心，便于稳定比较版本差异
 """
 
@@ -38,7 +38,7 @@ from contextlib import ExitStack
 from zero import ZeroConfig, ZeroLoopRunner
 from zero.analysis import generate_training_analysis
 from zero.buffers import ArtifactStore
-from zero.config import CollectConfig, EvalConfig, LossWeights, SearchConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
+from zero.config import CollectConfig, EvalConfig, TrainConfig, ZERO_RUNTIME_DEFAULTS
 from zero.features import BatchCollator
 from zero.model import ZeroNet
 from zero.orchestration import ModelPolicyAdapter, ParallelTrajectoryCollector
@@ -46,7 +46,6 @@ from zero.orchestration.trainer import LocalCheckpointStore
 from zero.paths import STS2AI_ROOT, ZeroPaths
 from zero.replay import (
     FixedSkadaCaseEvaluator,
-    NoopSearchBackend,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaReplayRuntime,
@@ -101,46 +100,6 @@ def _build_eval_config(*, episodes_per_cohort: int, strict_promotion: bool) -> E
     )
 
 
-def config_losses_for_search_mode(search_mode: str) -> LossWeights:
-    """按 search 强度给一版保守但可用的损失权重。"""
-    weights = LossWeights()
-    if search_mode == "disabled":
-        weights.policy_search_kl_weight = 0.0
-        return weights
-    if search_mode == "weak":
-        return weights
-    weights.ranking = 0.9
-    weights.delta = 0.08
-    weights.uncertainty = 0.04
-    weights.policy_search_kl_weight = 1.8
-    weights.policy_behavior_ce_weight = 0.0
-    weights.policy_bad_rollout_ce_scale = 0.0
-    return weights
-
-
-def normalize_search_mode(search_mode: str) -> str:
-    """统一搜索模式命名。"""
-    return search_mode
-
-
-def build_search_backend(
-    cases,
-    *,
-    search_mode: str,
-    config: SearchConfig,
-    port: int,
-    auto_launch: bool,
-    connect_timeout_s: float,
-):
-    normalized_mode = normalize_search_mode(search_mode)
-    if normalized_mode == "disabled":
-        return NoopSearchBackend()
-    raise ValueError(
-        "当前主线已明确关闭搜索/MCTS，`build_search_backend(...)` 只允许 "
-        "`search_mode=disabled`。如需继续做搜索实验，请走单独实验脚本，不要复用主训练入口。"
-    )
-
-
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -165,12 +124,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--collect-episodes", type=int, default=8)
     parser.add_argument("--parallel-envs", type=int, default=1)
     parser.add_argument(
-        "--collect-mode",
-        choices=["search_only_collect", "policy_only_collect", "search_guided_collect"],
-        default="policy_only_collect",
-        help="collect 动作来源；当前主线默认只跑 policy/RL，不默认接搜索。",
-    )
-    parser.add_argument(
         "--collect-epsilon-greedy",
         type=float,
         default=None,
@@ -182,8 +135,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="仅作用于 collect rollout 的 softmax 温度；0 表示关闭温度采样。",
     )
-    parser.add_argument("--search-guidance-priority-threshold", type=float, default=1.2)
-    parser.add_argument("--search-guidance-max-steps-per-episode", type=int, default=8)
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument(
         "--progress-only",
@@ -210,17 +161,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="history_transformer",
         help="实验用模型结构变体；默认沿用当前 history transformer。",
     )
-    parser.add_argument(
-        "--search-mode",
-        dest="search_mode",
-        choices=["disabled", "weak", "search_root_sweep", "search_branching"],
-        default="disabled",
-        help="搜索后端模式；当前主线只允许 disabled，传其它值会直接报错。",
-    )
-    parser.add_argument("--search-max-root-actions", type=int, default=8)
-    parser.add_argument("--search-rollouts-per-action", type=int, default=2)
-    parser.add_argument("--search-max-branch-steps", type=int, default=24)
-    parser.add_argument("--search-rollout-policy", choices=["aggregate_search_prior"], default="aggregate_search_prior")
     parser.add_argument(
         "--host-path",
         type=Path,
@@ -299,16 +239,6 @@ def _apply_target_filters(cases, *, target_encounter: str, target_case_id: str):
 def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
-    args.search_mode = normalize_search_mode(args.search_mode)
-    if args.search_mode != "disabled":
-        raise ValueError(
-            "当前主线已明确关闭搜索/MCTS。请使用 `--search-mode disabled`；"
-            "如需继续做搜索实验，请走单独实验脚本，不要复用主训练入口。"
-        )
-    if args.collect_mode in {"search_guided_collect", "search_only_collect"}:
-        raise ValueError(
-            "当前主线已明确关闭搜索 collect。请使用 `--collect-mode policy_only_collect`。"
-        )
 
     random.seed(args.seed)
     cases = load_case_index(args.case_index)
@@ -394,19 +324,6 @@ def main() -> None:
             episodes_per_iteration=args.collect_episodes,
             epsilon_greedy=collect_epsilon_greedy,
             temperature=collect_temperature,
-            mode=args.collect_mode,
-            search_guidance_priority_threshold=args.search_guidance_priority_threshold,
-            search_guidance_max_steps_per_episode=args.search_guidance_max_steps_per_episode,
-            search_guidance_target_encounters=tuple(
-                value for value in [args.target_encounter.strip().upper()] if value
-            ),
-        ),
-        search=SearchConfig(
-            mode=args.search_mode,
-            top2_gap_threshold=1.0,
-            uncertainty_threshold=0.0,
-            near_lethal_hp_ratio=1.0,
-            max_requests_per_iteration=0,
         ),
         train=TrainConfig(
             algorithm=args.train_algorithm,
@@ -416,18 +333,12 @@ def main() -> None:
             weight_decay=1e-4,
             grad_clip_norm=1.0,
         ),
-        losses=config_losses_for_search_mode(args.search_mode),
         evaluation=_build_eval_config(
             episodes_per_cohort=args.eval_episodes,
             strict_promotion=args.strict_promotion,
         ),
     )
     config.encoder.model_variant = args.model_variant
-    config.search.max_root_actions = args.search_max_root_actions
-    config.search.rollouts_per_action = args.search_rollouts_per_action
-    config.search.max_branch_steps = args.search_max_branch_steps
-    config.search.allow_branching = args.search_mode == "search_branching"
-    config.search.rollout_policy = args.search_rollout_policy
 
     artifact_store = ArtifactStore(config.paths)
     checkpoint_store = LocalCheckpointStore(config.paths.checkpoints)
@@ -436,7 +347,6 @@ def main() -> None:
             launch_shared_proto_sim(port=args.port, connect_timeout_s=45.0, host_path=args.host_path)
         )
         collect_ports = [args.port]
-        guidance_ports = []
         if args.parallel_envs > 1:
             if curriculum_mode != "ordered_run":
                 raise ValueError("并发 collect 目前仅支持 ordered_run 模式。")
@@ -449,14 +359,6 @@ def main() -> None:
                         host_path=args.host_path,
                     )
                 )
-        for guidance_port in guidance_ports:
-            stack.enter_context(
-                launch_shared_proto_sim(
-                    port=guidance_port,
-                    connect_timeout_s=45.0,
-                    host_path=args.host_path,
-                )
-            )
 
         try:
             evaluator = None
@@ -512,14 +414,6 @@ def main() -> None:
                     parallel_envs=args.parallel_envs,
                     ports=collect_ports,
                 )
-            search_backend = build_search_backend(
-                train_cases,
-                search_mode=args.search_mode,
-                config=config.search,
-                port=args.port,
-                auto_launch=False,
-                connect_timeout_s=45.0,
-            )
 
             baseline_policy = RandomPolicy()
             baseline = None
@@ -535,7 +429,6 @@ def main() -> None:
                     iteration=iteration,
                     runtime_factory=runtime_factory,
                     policy=policy,
-                    search_backend=search_backend,
                     baseline_eval=baseline if iteration == 1 else None,
                 )
                 manifests.append(manifest.to_dict())
@@ -555,7 +448,6 @@ def main() -> None:
         "resolved_output_root": str(output_root),
         "model_variant": args.model_variant,
         "train_algorithm": args.train_algorithm,
-        "search_mode": args.search_mode,
         "train_cases": [case.to_dict() for case in train_cases],
         "eval_cases": [case.to_dict() for case in eval_cases],
         "baseline": [asdict(item) for item in baseline] if baseline else [],

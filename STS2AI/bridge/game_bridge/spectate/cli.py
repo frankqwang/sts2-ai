@@ -29,6 +29,7 @@ def main() -> None:
     parser.add_argument("--host-path", type=str, default="")
     parser.add_argument("--dll-path", type=str, default="", help=argparse.SUPPRESS)
     parser.add_argument("--character-id", type=str, default="IRONCLAD")
+    parser.add_argument("--encounter-id", type=str, default="")
     parser.add_argument("--seed", type=str, default="")
     parser.add_argument("--build-file", type=str, default="")
     parser.add_argument("--max-steps", type=int, default=800)
@@ -77,6 +78,7 @@ def main() -> None:
                     "host_path": str(Path(resolved_host_path).resolve()) if resolved_host_path else None,
                     "overlay_file": str(overlay_path) if overlay_path else None,
                     "build_file": args.build_file or None,
+                    "encounter_id": args.encounter_id or None,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -90,6 +92,7 @@ def main() -> None:
         )
         result = controller.play_episode(
             character_id=args.character_id,
+            encounter_id=args.encounter_id or None,
             seed=args.seed or None,
             build=build_payload,
             max_steps=args.max_steps,

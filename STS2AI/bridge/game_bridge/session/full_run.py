@@ -119,6 +119,7 @@ class ApiBackedFullRunClient:
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
@@ -130,6 +131,8 @@ class ApiBackedFullRunClient:
                 "character_id": str(character_id),
                 "ascension": int(ascension_level),
             }
+            if encounter_id:
+                payload["encounter_id"] = str(encounter_id)
             if seed:
                 payload["seed"] = str(seed)
             if normalized_build is not None:
@@ -153,6 +156,8 @@ class ApiBackedFullRunClient:
             "character_id": str(character_id),
             "ascension": int(ascension_level),
         }
+        if encounter_id:
+            payload["encounter_id"] = str(encounter_id)
         if seed:
             payload["seed"] = str(seed)
         if normalized_build is not None:
@@ -320,6 +325,7 @@ class FullRunClientLike(Protocol):
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
@@ -644,6 +650,7 @@ class PipeBackedFullRunClient(PipeSnapshotMixin):
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
@@ -654,6 +661,8 @@ class PipeBackedFullRunClient(PipeSnapshotMixin):
             "character_id": str(character_id),
             "ascension_level": int(ascension_level),
         }
+        if encounter_id:
+            params["encounter_id"] = str(encounter_id)
         if seed:
             params["seed"] = str(seed)
         if normalized_build is not None:

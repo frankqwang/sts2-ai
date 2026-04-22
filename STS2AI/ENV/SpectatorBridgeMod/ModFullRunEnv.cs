@@ -66,8 +66,9 @@ public static partial class McpMod
         try
         {
             Dictionary<string, JsonElement> parsed = NormalizeFullRunEnvPayload(ParseFullRunEnvRequestObject(request, allowEmptyBody: true));
+            bool combatReset = HasEncounterReset(parsed);
             Dictionary<string, object?> initialState = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
-            if (GetStateType(initialState) != "menu")
+            if (!combatReset && GetStateType(initialState) != "menu")
             {
                 RunOnMainThread(async () =>
                 {
@@ -75,14 +76,19 @@ public static partial class McpMod
                     return 0;
                 }).GetAwaiter().GetResult();
             }
-            // Wait for menu readiness using legacy dict builder (complex UI state detection)
-            WaitForFullRunEnvState(
-                predicate: static current => IsMenuReadyForFullRunReset(current),
-                timeoutMs: GetOptionalInt(parsed, "timeout_ms", 20000),
-                pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 50));
-            Dictionary<string, object?> startResult = RunOnMainThread(() => ExecuteStartRun(parsed)).GetAwaiter().GetResult();
+            if (!combatReset)
+            {
+                // Wait for menu readiness using legacy dict builder (complex UI state detection)
+                WaitForFullRunEnvState(
+                    predicate: static current => IsMenuReadyForFullRunReset(current),
+                    timeoutMs: GetOptionalInt(parsed, "timeout_ms", 20000),
+                    pollDelayMs: GetOptionalInt(parsed, "poll_delay_ms", 50));
+            }
+            Dictionary<string, object?> startResult = combatReset
+                ? RunOnMainThread(() => ExecuteStartVisibleCombatAsync(parsed)).GetAwaiter().GetResult().GetAwaiter().GetResult()
+                : RunOnMainThread(() => ExecuteStartRun(parsed)).GetAwaiter().GetResult();
             if (IsErrorResult(startResult, out string? resetError))
-                throw new InvalidOperationException(resetError ?? "Failed to start run.");
+                throw new InvalidOperationException(resetError ?? (combatReset ? "Failed to start combat." : "Failed to start run."));
 
             // Wait for run to settle using legacy dict builder, then return DTO state
             WaitForFullRunEnvState(
@@ -108,7 +114,8 @@ public static partial class McpMod
         }
         catch (Exception ex)
         {
-            SendError(response, 500, $"Full run env reset failed: {ex.Message}");
+            Godot.GD.PrintErr($"[STS2 MCP Spectator] Full run env reset exception: {ex}");
+            SendError(response, 500, $"Full run env reset failed: {ex}");
         }
     }
 
@@ -266,7 +273,16 @@ public static partial class McpMod
     {
         if (!payload.ContainsKey("ascension") && payload.TryGetValue("ascension_level", out JsonElement ascensionLevel))
             payload["ascension"] = ascensionLevel;
+        if (!payload.ContainsKey("encounter_id") && payload.TryGetValue("encounter", out JsonElement encounter))
+            payload["encounter_id"] = encounter;
         return payload;
+    }
+
+    private static bool HasEncounterReset(Dictionary<string, JsonElement> payload)
+    {
+        return payload.TryGetValue("encounter_id", out JsonElement encounter)
+            && encounter.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(encounter.GetString());
     }
 
     // ── DTO-based helpers for v2 API ──────────────────────────
@@ -894,18 +910,10 @@ public static partial class McpMod
         bool previewShowing = GetBool(selectState, "preview_showing");
         int selectedCount = GetInt(selectState, "selected_count", 0);
         int maxSelect = GetInt(selectState, "max_select", -1);
-        bool selectionQuotaReached = maxSelect > 0 && selectedCount >= maxSelect;
 
-        if (!previewShowing && !selectionQuotaReached)
+        if (SelectionActionSemantics.ShouldExposeSelectionActions(selectedCount, maxSelect, previewShowing))
         {
-            var selectedIndices = new HashSet<int>();
-            foreach (Dictionary<string, object?> selCard in EnumerateDictionaries(selectState.TryGetValue("selected_cards", out object? rawSel) ? rawSel : null))
-            {
-                int idx = GetInt(selCard, "index", -1);
-                if (idx >= 0)
-                    selectedIndices.Add(idx);
-            }
-
+            HashSet<int> selectedIndices = GetSelectedCardIndices(selectState, "cards");
             foreach (Dictionary<string, object?> card in EnumerateDictionaries(selectState.TryGetValue("cards", out object? rawCards) ? rawCards : null))
             {
                 int cardIndex = GetInt(card, "index", -1);
@@ -930,13 +938,24 @@ public static partial class McpMod
             return;
         if (TryGetDict(battleState, "card_selection", out Dictionary<string, object?> cardSelectionState))
         {
-            foreach (Dictionary<string, object?> card in EnumerateDictionaries(cardSelectionState.TryGetValue("selectable_cards", out object? rawCards) ? rawCards : null))
+            int selectedCount = EnumerateDictionaries(cardSelectionState.TryGetValue("selected_cards", out object? rawSelectedCards) ? rawSelectedCards : null).Count();
+            int maxSelect = GetInt(cardSelectionState, "max_select", -1);
+            HashSet<int> selectedIndices = GetSelectedCardIndices(cardSelectionState, "selectable_cards");
+
+            if (SelectionActionSemantics.ShouldExposeSelectionActions(selectedCount, maxSelect))
             {
-                actions.Add(new Dictionary<string, object?>
+                foreach (Dictionary<string, object?> card in EnumerateDictionaries(cardSelectionState.TryGetValue("selectable_cards", out object? rawCards) ? rawCards : null))
                 {
-                    ["action"] = "combat_select_card",
-                    ["card_index"] = GetInt(card, "index", -1)
-                });
+                    int cardIndex = GetInt(card, "index", -1);
+                    if (cardIndex < 0 || selectedIndices.Contains(cardIndex))
+                        continue;
+
+                    actions.Add(new Dictionary<string, object?>
+                    {
+                        ["action"] = "combat_select_card",
+                        ["card_index"] = cardIndex
+                    });
+                }
             }
 
             AppendIfTrue(actions, cardSelectionState, "can_confirm", new Dictionary<string, object?> { ["action"] = "combat_confirm_selection" });
@@ -1045,16 +1064,70 @@ public static partial class McpMod
         if (!TryGetDict(state, "hand_select", out Dictionary<string, object?> handSelectState))
             return;
 
-        foreach (Dictionary<string, object?> card in EnumerateDictionaries(handSelectState.TryGetValue("cards", out object? rawCards) ? rawCards : null))
+        int selectedCount = GetInt(handSelectState, "selected_count", 0);
+        int maxSelect = GetInt(handSelectState, "max_select", -1);
+        HashSet<int> selectedIndices = GetSelectedCardIndices(handSelectState, "cards");
+
+        if (SelectionActionSemantics.ShouldExposeSelectionActions(selectedCount, maxSelect))
         {
-            actions.Add(new Dictionary<string, object?>
+            foreach (Dictionary<string, object?> card in EnumerateDictionaries(handSelectState.TryGetValue("cards", out object? rawCards) ? rawCards : null))
             {
-                ["action"] = "combat_select_card",
-                ["card_index"] = GetInt(card, "index", -1)
-            });
+                int cardIndex = GetInt(card, "index", -1);
+                if (cardIndex < 0 || selectedIndices.Contains(cardIndex))
+                    continue;
+
+                // Hand-selection screens such as PURITY treat clicking an already-selected card as a toggle.
+                // For AI callers we expose a monotonic action set: keep adding picks until quota, then confirm.
+                actions.Add(new Dictionary<string, object?>
+                {
+                    ["action"] = "combat_select_card",
+                    ["card_index"] = cardIndex
+                });
+            }
         }
 
         AppendIfTrue(actions, handSelectState, "can_confirm", new Dictionary<string, object?> { ["action"] = "combat_confirm_selection" });
+    }
+
+    private static HashSet<int> GetSelectedCardIndices(Dictionary<string, object?> selectionState, string cardsKey)
+    {
+        var cardStates = new List<SelectionCardState>();
+
+        foreach (Dictionary<string, object?> card in EnumerateDictionaries(selectionState.TryGetValue(cardsKey, out object? rawCards) ? rawCards : null))
+        {
+            int cardIndex = GetInt(card, "index", -1);
+            if (cardIndex < 0)
+                continue;
+
+            cardStates.Add(new SelectionCardState(cardIndex, GetBool(card, "is_selected", defaultValue: false)));
+        }
+
+        var explicitSelectedIndices = new List<int>();
+        if (selectionState.TryGetValue("selected_card_indices", out object? rawSelectedIndices)
+            && rawSelectedIndices is IEnumerable enumerable
+            && rawSelectedIndices is not string)
+        {
+            foreach (object? item in enumerable)
+            {
+                if (item == null)
+                    continue;
+
+                int parsedIndex;
+                if (item is int intValue)
+                    parsedIndex = intValue;
+                else if (item is long longValue && longValue is >= int.MinValue and <= int.MaxValue)
+                    parsedIndex = (int)longValue;
+                else if (item is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Number && jsonElement.TryGetInt32(out int jsonValue))
+                    parsedIndex = jsonValue;
+                else if (!int.TryParse(item.ToString(), out parsedIndex))
+                    continue;
+
+                if (parsedIndex >= 0)
+                    explicitSelectedIndices.Add(parsedIndex);
+            }
+        }
+
+        return SelectionActionSemantics.CollectSelectedIndices(explicitSelectedIndices, cardStates);
     }
 
     private static void AppendOverlayLegalActions(List<Dictionary<string, object?>> actions, Dictionary<string, object?> state)

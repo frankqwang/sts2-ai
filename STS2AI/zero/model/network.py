@@ -16,6 +16,7 @@ class ZeroNetOutput:
     enemy_hp_fraction_dealt: torch.Tensor
     self_hp_fraction_remaining: torch.Tensor
     ppo_value: torch.Tensor
+    action_value: torch.Tensor
     delta_pred: torch.Tensor
     uncertainty: torch.Tensor
 
@@ -33,7 +34,13 @@ class ZeroNet(nn.Module):
             if self.history is None
             else ResidualHistoryFusion(config)
         )
-        self.policy_head = MlpBlock(config.hidden_dim + config.action_dim, config.hidden_dim, 1)
+        self.dynamics_head = nn.Sequential(
+            nn.Linear(config.hidden_dim + config.action_dim, config.hidden_dim),
+            nn.GELU(),
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+        )
+        self.dynamics_norm = nn.LayerNorm(config.hidden_dim)
+        self.policy_head = MlpBlock(config.hidden_dim * 2 + config.action_dim + 1, config.hidden_dim, 1)
         self.value_head = MlpBlock(config.hidden_dim, config.hidden_dim, 3)
         self.ppo_value_head = nn.Sequential(
             nn.Linear(config.hidden_dim, config.hidden_dim),
@@ -41,7 +48,16 @@ class ZeroNet(nn.Module):
             nn.Linear(config.hidden_dim, 1),
         )
         delta_dim = 3 + config.max_enemies * 2 + 3
-        self.delta_head = MlpBlock(config.hidden_dim, config.hidden_dim, delta_dim)
+        self.action_value_head = nn.Sequential(
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.GELU(),
+            nn.Linear(config.hidden_dim, 1),
+        )
+        self.delta_head = nn.Sequential(
+            nn.Linear(config.hidden_dim, config.hidden_dim),
+            nn.GELU(),
+            nn.Linear(config.hidden_dim, delta_dim),
+        )
         self.uncertainty_head = MlpBlock(config.hidden_dim, config.hidden_dim, 1)
 
     def forward(self, batch) -> ZeroNetOutput:
@@ -54,12 +70,28 @@ class ZeroNet(nn.Module):
 
         action_hidden = self.action(batch)
         expanded_context = context_hidden.unsqueeze(1).expand(-1, action_hidden.size(1), -1)
-        policy_logits = self.policy_head(torch.cat([expanded_context, action_hidden], dim=-1)).squeeze(-1)
+        # MuZero-lite: imagine one-step latent aftermath for each legal action,
+        # then let both policy scoring and per-action value read that latent.
+        imagined_next_hidden = self.dynamics_norm(self.dynamics_head(torch.cat([expanded_context, action_hidden], dim=-1)))
+        action_value = self.action_value_head(imagined_next_hidden).squeeze(-1)
+        policy_logits = self.policy_head(
+            torch.cat(
+                [
+                    expanded_context,
+                    action_hidden,
+                    imagined_next_hidden,
+                    action_value.unsqueeze(-1),
+                ],
+                dim=-1,
+            )
+        ).squeeze(-1)
         policy_logits = policy_logits.masked_fill(batch.action_mask <= 0, float("-inf"))
+        action_value = action_value.masked_fill(batch.action_mask <= 0, 0.0)
 
         values = self.value_head(context_hidden)
         ppo_value = self.ppo_value_head(context_hidden).squeeze(-1)
-        delta_pred = self.delta_head(context_hidden)
+        delta_pred = self.delta_head(imagined_next_hidden)
+        delta_pred = delta_pred.masked_fill(batch.action_mask.unsqueeze(-1) <= 0, 0.0)
         uncertainty = self.uncertainty_head(context_hidden).squeeze(-1)
         return ZeroNetOutput(
             policy_logits=policy_logits,
@@ -67,6 +99,7 @@ class ZeroNet(nn.Module):
             enemy_hp_fraction_dealt=values[:, 1],
             self_hp_fraction_remaining=values[:, 2],
             ppo_value=ppo_value,
+            action_value=action_value,
             delta_pred=delta_pred,
             uncertainty=uncertainty,
         )

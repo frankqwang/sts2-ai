@@ -66,10 +66,12 @@ class ModelForwardTests(unittest.TestCase):
 
                 self.assertEqual(tuple(output.policy_logits.shape), (2, 3))
                 self.assertEqual(tuple(output.ppo_value.shape), (2,))
-                self.assertEqual(tuple(output.delta_pred.shape), (2, 3 + config.max_enemies * 2 + 3))
+                self.assertEqual(tuple(output.action_value.shape), (2, 3))
+                self.assertEqual(tuple(output.delta_pred.shape), (2, 3, 3 + config.max_enemies * 2 + 3))
                 self.assertEqual(tuple(output.uncertainty.shape), (2,))
                 self.assertTrue(torch.isfinite(output.policy_logits).all().item())
                 self.assertTrue(torch.isfinite(output.ppo_value).all().item())
+                self.assertTrue(torch.isfinite(output.action_value).all().item())
                 self.assertTrue(torch.isfinite(output.delta_pred).all().item())
                 self.assertTrue(torch.isfinite(output.uncertainty).all().item())
 

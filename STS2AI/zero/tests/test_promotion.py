@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import unittest
 
@@ -63,7 +63,6 @@ class PromotionJudgeTests(unittest.TestCase):
                 fight_win_rate=1.0,
                 enemy_hp_fraction_dealt=1.0,
                 self_hp_fraction_remaining=0.5,
-                search_agreement_at_1=0.5,
                 metadata={"num_episodes": 1, "timeout_rate": 0.0, "avg_no_progress_ratio": 0.3, "avg_max_no_progress_streak": 20.0},
             )
         ]

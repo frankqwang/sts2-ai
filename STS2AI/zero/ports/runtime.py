@@ -1,9 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
-from ..domain import BattleState, EvalSummary, SearchLabel, SearchRequest
+from ..domain import BattleState, EvalSummary
 
 
 class BattleRuntime(Protocol):
@@ -17,16 +17,6 @@ class Policy(Protocol):
     def select_action(self, state: BattleState) -> int: ...
     def score_actions(self, state: BattleState) -> list[float]: ...
     def estimate_uncertainty(self, state: BattleState) -> float: ...
-
-
-class SearchBackend(Protocol):
-    def label_request(
-        self,
-        request: SearchRequest,
-        runtime_factory: Callable[[], BattleRuntime] | None = None,
-        seed: str | None = None,
-        policy: Policy | None = None,
-    ) -> SearchLabel: ...
 
 
 class Evaluator(Protocol):

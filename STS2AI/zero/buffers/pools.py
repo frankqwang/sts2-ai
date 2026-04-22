@@ -186,14 +186,12 @@ class SamplePoolSet:
         self._recent_iteration_samples: deque[int] = deque(maxlen=max(1, config.dynamic_capacity_recent_iterations))
         self._base_capacities = {
             "recent_online": config.bucket_capacity,
-            "search": config.search_bucket_capacity,
             "rare": config.rare_bucket_capacity,
             "reanalyse": max(1, config.bucket_capacity // 2),
             "legacy": config.bucket_capacity,
         }
         self._pools = {
             "recent_online": BucketedSamplePool("recent_online", config.bucket_capacity, retention_mode="score"),
-            "search": BucketedSamplePool("search", config.search_bucket_capacity, retention_mode="score"),
             "rare": BucketedSamplePool("rare", config.rare_bucket_capacity, retention_mode="score"),
             "reanalyse": BucketedSamplePool("reanalyse", max(1, config.bucket_capacity // 2), retention_mode="score"),
             "legacy": BucketedSamplePool("legacy", config.bucket_capacity, retention_mode="score"),
@@ -228,7 +226,6 @@ class SamplePoolSet:
     def mixed_sample(self, batch_size: int) -> list[TrainingSample]:
         weighted = [
             ("recent_online", self._config.recent_online_weight),
-            ("search", self._config.search_weight),
             ("rare", self._config.rare_weight),
             ("reanalyse", self._config.reanalyse_weight),
             ("legacy", self._config.legacy_weight),
@@ -274,7 +271,6 @@ class SamplePoolSet:
             target_total=target_total,
             weighted_bases=[
                 ("recent_online", self._config.recent_online_weight, self._base_capacities["recent_online"]),
-                ("search", self._config.search_weight, self._base_capacities["search"]),
                 ("rare", self._config.rare_weight, self._base_capacities["rare"]),
                 ("reanalyse", self._config.reanalyse_weight, self._base_capacities["reanalyse"]),
                 ("legacy", self._config.legacy_weight, self._base_capacities["legacy"]),

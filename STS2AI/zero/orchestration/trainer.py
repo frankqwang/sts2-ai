@@ -25,7 +25,6 @@ from ..ports import Policy
 class _PpoLiteLosses:
     policy: torch.Tensor
     value: torch.Tensor
-    ranking: torch.Tensor
     delta: torch.Tensor
     uncertainty: torch.Tensor
     total: torch.Tensor
@@ -45,19 +44,44 @@ def _compute_ppo_lite_losses(output, batch, config: TrainConfig) -> _PpoLiteLoss
     policy = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
 
     value = F.mse_loss(output.ppo_value, batch.ppo_return)
+    imagined_action_value = _gather_action_scalar(output.action_value, batch.behavior_action_index)
+    imagined_value = F.mse_loss(imagined_action_value, batch.ppo_return)
+    value = value + config.ppo_imagination_value_coef * imagined_value
+    delta = F.mse_loss(
+        _gather_action_vector(output.delta_pred, batch.behavior_action_index),
+        batch.delta_targets,
+    )
     probs = torch.softmax(safe_logits, dim=-1)
     entropy = -(probs * log_probs).sum(dim=-1).mean()
 
-    total = policy + config.ppo_value_coef * value - config.ppo_entropy_coef * entropy
-    zero = torch.zeros((), device=total.device, dtype=total.dtype)
+    total = (
+        policy
+        + config.ppo_value_coef * value
+        + config.ppo_imagination_delta_coef * delta
+        - config.ppo_entropy_coef * entropy
+    )
     return _PpoLiteLosses(
         policy=policy,
         value=value,
-        ranking=zero,
-        delta=zero,
+        delta=delta,
         uncertainty=entropy,
         total=total,
     )
+
+
+def _gather_action_scalar(values: torch.Tensor, action_index: torch.Tensor) -> torch.Tensor:
+    if values.dim() != 2:
+        raise ValueError(f"expected [batch, actions] action values, got shape={tuple(values.shape)}")
+    return values.gather(1, action_index.unsqueeze(1)).squeeze(1)
+
+
+def _gather_action_vector(values: torch.Tensor, action_index: torch.Tensor) -> torch.Tensor:
+    if values.dim() == 2:
+        return values
+    if values.dim() != 3:
+        raise ValueError(f"expected [batch, actions, dim] delta tensor, got shape={tuple(values.shape)}")
+    gather_index = action_index.view(-1, 1, 1).expand(-1, 1, values.size(-1))
+    return values.gather(1, gather_index).squeeze(1)
 
 
 def _resolve_device(name: str) -> torch.device:
@@ -150,7 +174,6 @@ class ZeroTrainer:
 
             batch = self._collator.collate(samples).to(self._device)
             pool_counts = Counter(sample.pool_name for sample in samples)
-            search_ratio = sum(1 for sample in samples if sample.search_label is not None) / max(1, len(samples))
             self._optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=self._device.type, enabled=self._amp_enabled):
                 output = self._model(batch)
@@ -188,26 +211,22 @@ class ZeroTrainer:
             metrics.steps += 1
             metrics.policy_loss += float(losses.policy.detach())
             metrics.value_loss += float(losses.value.detach())
-            metrics.ranking_loss += float(losses.ranking.detach())
             metrics.delta_loss += float(losses.delta.detach())
             metrics.uncertainty_loss += float(losses.uncertainty.detach())
             metrics.total_loss += float(losses.total.detach())
             metrics.grad_norm += float(grad_norm)
             metrics.learning_rate += float(self._optimizer.param_groups[0]["lr"])
-            metrics.search_sample_ratio += float(search_ratio)
             for pool_name, count in pool_counts.items():
                 metrics.pool_usage[pool_name] = metrics.pool_usage.get(pool_name, 0) + int(count)
 
         if metrics.steps > 0:
             metrics.policy_loss /= metrics.steps
             metrics.value_loss /= metrics.steps
-            metrics.ranking_loss /= metrics.steps
             metrics.delta_loss /= metrics.steps
             metrics.uncertainty_loss /= metrics.steps
             metrics.total_loss /= metrics.steps
             metrics.grad_norm /= metrics.steps
             metrics.learning_rate /= metrics.steps
-            metrics.search_sample_ratio /= metrics.steps
         else:
             metrics.zero_step = True
         return metrics
@@ -270,7 +289,6 @@ class ZeroTrainer:
                 metrics.steps += 1
                 metrics.policy_loss += float(losses.policy.detach())
                 metrics.value_loss += float(losses.value.detach())
-                metrics.ranking_loss += float(losses.ranking.detach())
                 metrics.delta_loss += float(losses.delta.detach())
                 metrics.uncertainty_loss += float(losses.uncertainty.detach())
                 metrics.total_loss += float(losses.total.detach())
@@ -282,7 +300,6 @@ class ZeroTrainer:
         if metrics.steps > 0:
             metrics.policy_loss /= metrics.steps
             metrics.value_loss /= metrics.steps
-            metrics.ranking_loss /= metrics.steps
             metrics.delta_loss /= metrics.steps
             metrics.uncertainty_loss /= metrics.steps
             metrics.total_loss /= metrics.steps
@@ -362,6 +379,8 @@ class ModelPolicyAdapter(Policy):
             result = {
                 "scores": [],
                 "action_index": 0,
+                "action_values": [],
+                "lookahead_value": 0.0,
                 "uncertainty": 0.0,
                 "fight_win_prob": 0.0,
                 "enemy_hp_fraction_dealt": 0.0,
@@ -376,6 +395,7 @@ class ModelPolicyAdapter(Policy):
         logits = output.policy_logits[0]
         valid = int(batch.action_mask[0].sum().item())
         scores = logits[:valid].tolist()
+        action_values = output.action_value[0][:valid].tolist()
         action_index = max(range(len(scores)), key=lambda index: scores[index]) if scores else 0
         uncertainty = float(torch.sigmoid(output.uncertainty)[0].item())
         fight_win_prob = float(torch.sigmoid(output.fight_win)[0].item())
@@ -385,6 +405,8 @@ class ModelPolicyAdapter(Policy):
         result = {
             "scores": scores,
             "action_index": action_index,
+            "action_values": action_values,
+            "lookahead_value": float(action_values[action_index]) if action_values else 0.0,
             "uncertainty": uncertainty,
             "fight_win_prob": fight_win_prob,
             "enemy_hp_fraction_dealt": enemy_hp_fraction_dealt,

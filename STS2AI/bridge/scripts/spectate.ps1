@@ -140,6 +140,8 @@ $pythonExe = Resolve-PythonExe -ExplicitPath $PythonExe
 $resolvedBaseUrl = Resolve-BaseUrl -BaseUrl $BaseUrl -McpPort $McpPort
 $resolvedMcpPort = Resolve-McpPortFromBaseUrl -ResolvedBaseUrl $resolvedBaseUrl -DefaultPort $McpPort
 $singleplayerStateUrl = Resolve-SingleplayerStateUrl -ResolvedBaseUrl $resolvedBaseUrl
+$spectatorModSource = Join-Path $sts2aiRoot "ENV\SpectatorBridgeMod\bin\Debug\net9.0"
+$spectatorModInstallDir = Sync-SpectatorModArtifacts -SourceDir $spectatorModSource -GodotExe $godotExe
 
 $resolvedHybridCheckpoint = Resolve-RequiredRecordingCheckpoint `
     -ExplicitPath $Checkpoint `
@@ -244,6 +246,7 @@ $manifest = [ordered]@{
     step_delay = $StepDelay
     combat_delay = $CombatDelay
     godot_exe = $godotExe
+    spectator_mod_dir = $spectatorModInstallDir
     python_exe = $pythonExe
     checkpoint = $resolvedHybridCheckpoint
     combat_checkpoint = $resolvedCombatCheckpoint
@@ -267,6 +270,7 @@ Write-Host "Episodes           : $Episodes"
 Write-Host "Seed               : $(if ([string]::IsNullOrWhiteSpace($Seed)) { '<random>' } else { $Seed })"
 Write-Host "HybridCheckpoint   : $resolvedHybridCheckpoint"
 Write-Host "CombatCheckpoint   : $(if ($resolvedCombatCheckpoint) { $resolvedCombatCheckpoint } else { 'embedded / not found' })"
+Write-Host "SpectatorModDir    : $spectatorModInstallDir"
 Write-Host "OverlayFile        : $resolvedDecisionOverlayFile"
 Write-Host "RecordingOverlay   : http://localhost:$OverlayPort/?mode=recording"
 Write-Host "DashboardOverlay   : http://localhost:$OverlayPort/"

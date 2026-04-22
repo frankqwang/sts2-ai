@@ -24,11 +24,17 @@ class SpectatorController:
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
         max_steps: int = 800,
     ) -> dict[str, Any]:
-        state = self.session.reset(character_id=character_id, seed=seed, build=build)
+        state = self.session.reset(
+            character_id=character_id,
+            encounter_id=encounter_id,
+            seed=seed,
+            build=build,
+        )
         idle_polls = 0
         steps_taken = 0
         for step_index in range(max_steps):

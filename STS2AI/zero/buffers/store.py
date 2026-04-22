@@ -1,13 +1,12 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
 import tempfile
-from dataclasses import asdict
 from pathlib import Path
 from typing import Iterable
 
-from ..domain import IterationManifest, SearchRequest, TrainingSample
+from ..domain import IterationManifest, TrainingSample
 from ..paths import ZeroPaths
 
 
@@ -19,11 +18,6 @@ class ArtifactStore:
     def write_dataset_shard(self, iteration: int, samples: Iterable[TrainingSample]) -> Path:
         path = self._paths.dataset_shards / f"iter_{iteration:04d}.jsonl"
         self._write_jsonl(path, (sample.to_dict() for sample in samples))
-        return path
-
-    def write_search_labels(self, iteration: int, requests: Iterable[SearchRequest]) -> Path:
-        path = self._paths.search_labels / f"iter_{iteration:04d}.jsonl"
-        self._write_jsonl(path, (asdict(request) for request in requests))
         return path
 
     def write_raw_runs(self, iteration: int, rows: Iterable[dict[str, object]]) -> Path:

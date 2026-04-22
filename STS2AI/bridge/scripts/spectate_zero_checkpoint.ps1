@@ -4,6 +4,7 @@ param(
     [ValidateSet("stateless", "history_transformer", "recurrent_gru")]
     [string]$ModelVariant = "stateless",
     [string]$BuildFile = "",
+    [string]$EncounterId = "",
     [string]$GodotExe = "",
     [string]$PythonExe = "",
     [string]$BaseUrl = "",
@@ -11,6 +12,8 @@ param(
     [string]$Resolution = "1600x900",
     [string]$CharacterId = "IRONCLAD",
     [string]$Seed = "",
+    [double]$RequestTimeoutSeconds = 120.0,
+    [double]$ReadyTimeoutSeconds = 150.0,
     [double]$StepDelay = 0.9,
     [int]$MaxSteps = 800,
     [string]$OutputDir = "",
@@ -60,6 +63,8 @@ if ($godotExe -match "_console\.exe$") {
 $pythonExe = Resolve-PythonExe -ExplicitPath $PythonExe
 $resolvedBaseUrl = Resolve-BaseUrl -BaseUrl $BaseUrl -McpPort $McpPort
 $singleplayerStateUrl = Resolve-SingleplayerStateUrl -ResolvedBaseUrl $resolvedBaseUrl
+$spectatorModSource = Join-Path $sts2aiRoot "ENV\SpectatorBridgeMod\bin\Debug\net9.0"
+$spectatorModInstallDir = Sync-SpectatorModArtifacts -SourceDir $spectatorModSource -GodotExe $godotExe
 
 $resolvedAppDataRoot = if ([string]::IsNullOrWhiteSpace($AppDataRoot)) {
     Join-Path $runRoot "appdata"
@@ -84,14 +89,18 @@ $manifest = [ordered]@{
     checkpoint = $resolvedCheckpoint
     model_variant = $ModelVariant
     build_file = $(if ([string]::IsNullOrWhiteSpace($resolvedBuildFile)) { $null } else { $resolvedBuildFile })
+    encounter_id = $(if ([string]::IsNullOrWhiteSpace($EncounterId)) { $null } else { $EncounterId })
     base_url = $resolvedBaseUrl
     mcp_port = $McpPort
     resolution = $Resolution
     character_id = $CharacterId
     seed = $(if ([string]::IsNullOrWhiteSpace($Seed)) { $null } else { $Seed })
+    request_timeout_s = $RequestTimeoutSeconds
+    ready_timeout_s = $ReadyTimeoutSeconds
     step_delay = $StepDelay
     max_steps = $MaxSteps
     godot_exe = $godotExe
+    spectator_mod_dir = $spectatorModInstallDir
     python_exe = $pythonExe
     appdata_root = $resolvedAppDataRoot
     overlay_file = $overlayFile
@@ -126,14 +135,17 @@ $pythonArgs = @(
     "--external-policy", "game_bridge.spectate.zero_external_policy:select_action",
     "--overlay-file", $overlayFile,
     "--base-url", $resolvedBaseUrl,
-    "--request-timeout-s", "30",
-    "--ready-timeout-s", "90",
+    "--request-timeout-s", ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.##}", $RequestTimeoutSeconds)),
+    "--ready-timeout-s", ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.##}", $ReadyTimeoutSeconds)),
     "--character-id", $CharacterId,
     "--max-steps", [string]$MaxSteps,
     "--step-delay", ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.00}", $StepDelay))
 )
 if (-not [string]::IsNullOrWhiteSpace($Seed)) {
     $pythonArgs += @("--seed", $Seed)
+}
+if (-not [string]::IsNullOrWhiteSpace($EncounterId)) {
+    $pythonArgs += @("--encounter-id", $EncounterId)
 }
 if (-not [string]::IsNullOrWhiteSpace($resolvedBuildFile)) {
     $pythonArgs += @("--build-file", $resolvedBuildFile)

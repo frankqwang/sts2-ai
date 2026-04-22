@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sqlite3
 import tempfile
@@ -10,17 +10,12 @@ from zero.domain import (
     BattleState,
     EnemyState,
     FightLabel,
-    LegalAction,
     PileSummary,
     PlayerState,
     StaticContext,
-    SearchRequest,
-    TrainingSample,
-    TransitionDelta,
     assess_transition_progress,
 )
 from zero.replay.skada import (
-    MultiCaseAggregateSearchBackend,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
     SkadaBuild,
@@ -169,43 +164,6 @@ class SkadaReplayTests(unittest.TestCase):
         self.assertEqual(restored.case_id, case.case_id)
         self.assertEqual(restored.build.deck[0]["id"], "STRIKE_IRONCLAD")
 
-    def test_multi_case_search_backend_routes_by_case_id(self):
-        case = self._make_case(floor=2, encounter_id="SHRINKER_BEETLE_WEAK")
-        case.card_usage = {"STRIKE_IRONCLAD": {"plays": 3, "damage": 9.0, "block": 0.0, "energy": 3.0}}
-        search_backend = MultiCaseAggregateSearchBackend([case])
-        sample = TrainingSample(
-            sample_id="sample1",
-            run_id="run1",
-            fight_id="fight1",
-            step_idx=0,
-            state=BattleState(
-                player=PlayerState(hp=70.0, max_hp=80.0, block=0.0, energy=3.0),
-                enemies=[EnemyState(enemy_id="enemy", hp=20.0, max_hp=20.0, block=0.0, intent_id="attack")],
-                hand=[],
-                piles=PileSummary(),
-                context=StaticContext(
-                    character_id="IRONCLAD",
-                    encounter_id="SHRINKER_BEETLE_WEAK",
-                    metadata={"skada_case_id": case.case_id},
-                ),
-                legal_actions=[
-                    LegalAction(action_id="play_strike", action_type="play_card", card_id="STRIKE_IRONCLAD"),
-                    LegalAction(action_id="end_turn", action_type="end_turn"),
-                ],
-            ),
-            history=[],
-            legal_actions=[
-                LegalAction(action_id="play_strike", action_type="play_card", card_id="STRIKE_IRONCLAD"),
-                LegalAction(action_id="end_turn", action_type="end_turn"),
-            ],
-            behavior_action_index=0,
-            delta=TransitionDelta(),
-            fight_label=FightLabel(fight_win=1.0, enemy_hp_fraction_dealt=1.0, self_hp_fraction_remaining=1.0),
-        )
-        request = SearchRequest(request_id="req1", sample=sample, priority=1.0)
-        label = search_backend.label_request(request)
-        self.assertEqual(label.best_action_index, 0)
-
     def test_ordered_run_runtime_factory_resets_after_failure(self):
         cases = [
             self._make_case(floor=2, encounter_id="CASE_A"),
@@ -255,9 +213,6 @@ class SkadaReplayTests(unittest.TestCase):
                     "no_progress_ratio": 0.25,
                     "max_no_progress_streak": 1,
                 },
-                "agreement_hits": 1.0,
-                "overlap_hits": 1.0,
-                "agreement_steps": 1,
                 "success": result["success"],
             }
 

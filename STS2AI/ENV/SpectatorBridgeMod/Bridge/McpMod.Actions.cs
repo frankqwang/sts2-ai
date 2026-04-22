@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading;
+using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
@@ -41,6 +42,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.Unlocks;
 using System.Threading.Tasks;
 
@@ -242,9 +244,19 @@ public static partial class McpMod
             seed = game.DebugSeedOverride ?? SeedHelper.GetRandomSeed();
         }
 
+        SimulationBuildSpec? build;
+        try
+        {
+            build = TryParseBuildSpec(data);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error(ex.Message);
+        }
+
         // Bypass NGame.StartNewSingleplayerRun so spectator can force a fully
         // unlocked run while still using the shared singleplayer launch flow.
-        var acts = ActModel.GetRandomList(new MegaCrit.Sts2.Core.Random.Rng((uint)StringHelper.GetDeterministicHashCode(seed)), UnlockState.all, isMultiplayer: false)
+        var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false)
             .Select(static act => act.ToMutable())
             .ToList();
         Player player = Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId);
@@ -252,9 +264,10 @@ public static partial class McpMod
             new List<Player> { player },
             acts,
             Array.Empty<ModifierModel>(),
-            GameMode.Standard,
             ascension,
             seed);
+        SimulationBuildSupport.ApplyToPlayerIfRequested(player, build);
+        SimulationBuildSupport.RemoveOwnedRelicsFromGrabBags(runState, player);
         RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: true, dailyTime: null);
         MethodInfo? startPreparedRunMethod = typeof(RunManager).GetMethod("StartPreparedSinglePlayerRun", BindingFlags.Instance | BindingFlags.Public);
         if (startPreparedRunMethod != null)
@@ -274,6 +287,109 @@ public static partial class McpMod
             ["status"] = "ok",
             ["message"] = $"Starting run as {character.Id.Entry} at ascension {ascension}",
             ["character_id"] = character.Id.Entry,
+            ["ascension"] = ascension,
+            ["seed"] = seed
+        };
+    }
+
+    private static async Task<Dictionary<string, object?>> ExecuteStartVisibleCombatAsync(Dictionary<string, JsonElement> data)
+    {
+        var game = NGame.Instance;
+        if (game == null)
+            return Error("Game is not active");
+
+        if (!TryGetJsonString(data, "encounter_id", out string encounterId))
+            return Error("Missing 'encounter_id'");
+
+        CharacterModel? character = null;
+        if (data.TryGetValue("character_id", out var characterIdElem))
+        {
+            string? requestedId = characterIdElem.GetString();
+            if (string.IsNullOrWhiteSpace(requestedId))
+                return Error("'character_id' is empty");
+            character = ResolveCharacter(requestedId);
+            if (character == null)
+                return Error($"Unknown character_id '{requestedId}'");
+        }
+        character ??= ModelDb.Character<Ironclad>();
+
+        EncounterModel? encounter = ResolveEncounter(encounterId);
+        if (encounter == null)
+            return Error($"Unknown encounter_id '{encounterId}'");
+
+        int ascension = 0;
+        if (data.TryGetValue("ascension", out var ascensionElem))
+            ascension = Math.Max(0, ascensionElem.GetInt32());
+
+        string seed;
+        if (data.TryGetValue("seed", out var seedElem))
+        {
+            string? requestedSeed = seedElem.GetString();
+            if (string.IsNullOrWhiteSpace(requestedSeed))
+                return Error("'seed' is empty");
+            seed = SeedHelper.CanonicalizeSeed(requestedSeed);
+        }
+        else
+        {
+            seed = game.DebugSeedOverride ?? SeedHelper.GetRandomSeed();
+        }
+
+        SimulationBuildSpec? build;
+        try
+        {
+            build = TryParseBuildSpec(data);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error(ex.Message);
+        }
+
+        if (RunManager.Instance.IsInProgress)
+        {
+            RunManager.Instance.CleanUp();
+            await game.ToSignal(game.GetTree(), "process_frame");
+            Godot.GD.Print("[STS2 MCP Spectator] visible combat reset: cleaned up previous run");
+        }
+
+        RunState runState = RunState.CreateForNewRun(
+            new List<Player> { Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId) },
+            ActModel.GetDefaultList().Select(static act => act.ToMutable()).ToList(),
+            Array.Empty<ModifierModel>(),
+            ascension,
+            seed);
+        Player player = runState.Players.First();
+        Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: run created seed={seed} asc={ascension} encounter={encounter.Id.Entry}");
+        SimulationBuildSupport.ApplyToPlayerIfRequested(player, build);
+        SimulationBuildSupport.RemoveOwnedRelicsFromGrabBags(runState, player);
+        RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: false, dailyTime: null);
+        Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: setup complete room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount}");
+        bool previousPreloadEnabled = PreloadManager.Enabled;
+        PreloadManager.Enabled = false;
+        await PreloadManager.LoadRunAssets(new[] { character });
+        Godot.GD.Print("[STS2 MCP Spectator] visible combat reset: run asset set initialized without blocking preload");
+        await RunManager.Instance.FinalizeStartingRelics();
+        try
+        {
+            RunManager.Instance.Launch();
+            game.RootSceneContainer.SetCurrentScene(NRun.Create(runState));
+            await RunManager.Instance.SetActInternal(0);
+            Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: act ready current_room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount}");
+            await game.ToSignal(game.GetTree(), "process_frame");
+            Godot.GD.Print("[STS2 MCP Spectator] visible combat reset: entering debug room");
+            await RunManager.Instance.EnterRoomDebug(encounter.RoomType, MapPointType.Unassigned, encounter.ToMutable(), showTransition: false);
+            Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: entered debug room current_room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount}");
+        }
+        finally
+        {
+            PreloadManager.Enabled = previousPreloadEnabled;
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["status"] = "ok",
+            ["message"] = $"Starting single combat {encounter.Id.Entry} as {character.Id.Entry}",
+            ["character_id"] = character.Id.Entry,
+            ["encounter_id"] = encounter.Id.Entry,
             ["ascension"] = ascension,
             ["seed"] = seed
         };
@@ -340,6 +456,42 @@ public static partial class McpMod
             return randomCharacter;
 
         return null;
+    }
+
+    private static EncounterModel? ResolveEncounter(string encounterId)
+    {
+        string value = encounterId.Trim();
+        if (value.Length == 0)
+            return null;
+
+        try
+        {
+            ModelId modelId = new(ModelId.SlugifyCategory<EncounterModel>(), value.ToUpperInvariant());
+            return ModelDb.GetById<EncounterModel>(modelId);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static SimulationBuildSpec? TryParseBuildSpec(Dictionary<string, JsonElement> data)
+    {
+        if (!data.TryGetValue("build", out JsonElement build))
+            return null;
+        return SimulationBuildSupport.ParseJsonElement(build);
+    }
+
+    private static bool TryGetJsonString(Dictionary<string, JsonElement> data, string key, out string value)
+    {
+        if (data.TryGetValue(key, out JsonElement element) && element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString()?.Trim() ?? string.Empty;
+            return value.Length > 0;
+        }
+
+        value = string.Empty;
+        return false;
     }
 
     private static Dictionary<string, object?> ExecutePlayCard(Player player, Dictionary<string, JsonElement> data)
