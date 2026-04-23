@@ -32,6 +32,7 @@ class TensorBatch:
     player_buff_mask: torch.Tensor
     enemy_numeric: torch.Tensor
     enemy_ids: torch.Tensor
+    enemy_target_ids: torch.Tensor
     enemy_intent_ids: torch.Tensor
     enemy_buff_ids: torch.Tensor
     enemy_buff_values: torch.Tensor
@@ -46,18 +47,29 @@ class TensorBatch:
     action_numeric: torch.Tensor
     action_type_ids: torch.Tensor
     action_card_ids: torch.Tensor
+    action_card_indices: torch.Tensor
+    action_target_ids: torch.Tensor
     action_mask: torch.Tensor
     behavior_action_index: torch.Tensor
     fight_targets: torch.Tensor
     delta_targets: torch.Tensor
-    uncertainty_target: torch.Tensor
     sample_weight: torch.Tensor
     fight_quality_score: torch.Tensor
     behavior_ce_scale: torch.Tensor
     old_logprob: torch.Tensor
     old_value: torch.Tensor
+    old_intent_logprob: torch.Tensor
+    old_intent_value: torch.Tensor
     ppo_return: torch.Tensor
     ppo_advantage: torch.Tensor
+    turn_id: torch.Tensor
+    turn_start_mask: torch.Tensor
+    active_intent: torch.Tensor
+    turn_return: torch.Tensor
+    turn_advantage: torch.Tensor
+    chosen_action_future_targets: torch.Tensor
+    submenu_confirm_target: torch.Tensor
+    submenu_has_confirm: torch.Tensor
 
     def to(self, device: torch.device | str) -> "TensorBatch":
         return TensorBatch(**{field: getattr(self, field).to(device) for field in self.__dataclass_fields__})
@@ -74,6 +86,13 @@ class BatchCollator:
 
     def collate_inference(self, state, history, legal_actions) -> TensorBatch:
         encoded = [self._extractor.encode_inference(state, history, legal_actions)]
+        return self._collate_encoded(encoded)
+
+    def collate_inference_batch(self, requests: list[tuple]) -> TensorBatch:
+        encoded = [
+            self._extractor.encode_inference(state, history, legal_actions)
+            for state, history, legal_actions in requests
+        ]
         return self._collate_encoded(encoded)
 
     def _collate_encoded(self, encoded: list[EncodedSample]) -> TensorBatch:
@@ -125,6 +144,7 @@ class BatchCollator:
                 enemy_feature_dim,
             ),
             enemy_ids=_to_tensor_2d_int([item.enemy_ids for item in encoded], self._config.max_enemies),
+            enemy_target_ids=_to_tensor_2d_int([item.enemy_target_ids for item in encoded], self._config.max_enemies),
             enemy_intent_ids=_to_tensor_2d_int([item.enemy_intent_ids for item in encoded], self._config.max_enemies),
             enemy_buff_ids=_to_tensor_3d_int([item.enemy_buff_ids for item in encoded], self._config.max_enemies, enemy_buff_width),
             enemy_buff_values=_to_tensor_3d_float([item.enemy_buff_values for item in encoded], self._config.max_enemies, enemy_buff_width),
@@ -157,6 +177,15 @@ class BatchCollator:
                 [item.action_card_ids for item in encoded],
                 action_width,
             ),
+            action_card_indices=_to_tensor_2d_int_fill(
+                [item.action_card_indices for item in encoded],
+                action_width,
+                fill_value=-1,
+            ),
+            action_target_ids=_to_tensor_2d_int(
+                [item.action_target_ids for item in encoded],
+                action_width,
+            ),
             action_mask=_mask_from_lengths(
                 [len(item.action_numeric) for item in encoded],
                 action_width,
@@ -164,14 +193,23 @@ class BatchCollator:
             behavior_action_index=torch.tensor([item.behavior_action_index for item in encoded], dtype=torch.long),
             fight_targets=_to_tensor_2d([item.fight_targets for item in encoded]),
             delta_targets=_to_tensor_2d([item.delta_targets for item in encoded]),
-            uncertainty_target=torch.tensor([item.uncertainty_target for item in encoded], dtype=torch.float32),
             sample_weight=torch.tensor([item.sample_weight for item in encoded], dtype=torch.float32),
             fight_quality_score=torch.tensor([item.fight_quality_score for item in encoded], dtype=torch.float32),
             behavior_ce_scale=torch.tensor([item.behavior_ce_scale for item in encoded], dtype=torch.float32),
             old_logprob=torch.tensor([item.old_logprob for item in encoded], dtype=torch.float32),
             old_value=torch.tensor([item.old_value for item in encoded], dtype=torch.float32),
+            old_intent_logprob=torch.tensor([item.old_intent_logprob for item in encoded], dtype=torch.float32),
+            old_intent_value=torch.tensor([item.old_intent_value for item in encoded], dtype=torch.float32),
             ppo_return=torch.tensor([item.ppo_return for item in encoded], dtype=torch.float32),
             ppo_advantage=torch.tensor([item.ppo_advantage for item in encoded], dtype=torch.float32),
+            turn_id=torch.tensor([item.turn_id for item in encoded], dtype=torch.long),
+            turn_start_mask=torch.tensor([item.turn_start_mask for item in encoded], dtype=torch.float32),
+            active_intent=torch.tensor([item.active_intent for item in encoded], dtype=torch.long),
+            turn_return=torch.tensor([item.turn_return for item in encoded], dtype=torch.float32),
+            turn_advantage=torch.tensor([item.turn_advantage for item in encoded], dtype=torch.float32),
+            chosen_action_future_targets=_to_tensor_2d([item.chosen_action_future_targets for item in encoded]),
+            submenu_confirm_target=torch.tensor([item.submenu_confirm_target for item in encoded], dtype=torch.float32),
+            submenu_has_confirm=torch.tensor([item.submenu_has_confirm for item in encoded], dtype=torch.float32),
         )
 
 
@@ -185,6 +223,16 @@ def _to_tensor_2d_int(rows: list[list[int]], width: int) -> torch.Tensor:
         values = list(row[:width])
         if len(values) < width:
             values.extend([0] * (width - len(values)))
+        padded.append(values)
+    return torch.tensor(padded, dtype=torch.long)
+
+
+def _to_tensor_2d_int_fill(rows: list[list[int]], width: int, *, fill_value: int) -> torch.Tensor:
+    padded = []
+    for row in rows:
+        values = list(row[:width])
+        if len(values) < width:
+            values.extend([fill_value] * (width - len(values)))
         padded.append(values)
     return torch.tensor(padded, dtype=torch.long)
 

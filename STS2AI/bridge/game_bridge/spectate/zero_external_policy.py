@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import replace
@@ -88,12 +89,14 @@ class ZeroExternalPolicyAdapter:
                 self.reset_episode()
 
         action_index = int(self._policy.select_action(battle_state))
-        if action_index < 0 or action_index >= len(enabled_legal):
+        if action_index < 0 or action_index >= len(battle_state.legal_actions):
             action_index = 0
 
+        selected_raw_action = self._resolve_enabled_action(battle_state, enabled_legal, action_index)
         self._previous_state = battle_state
         self._previous_action_index = action_index
-        return dict(enabled_legal[action_index])
+        self._log_selection(battle_state, enabled_legal, action_index, selected_raw_action)
+        return dict(selected_raw_action)
 
     def _convert_enabled_combat_state(
         self,
@@ -101,12 +104,17 @@ class ZeroExternalPolicyAdapter:
         enabled_legal: list[dict[str, Any]],
     ):
         battle_state = convert_game_bridge_state(raw_state)
-        enabled_ids = {self._build_action_instance_id(action) for action in enabled_legal}
-        filtered_legal = [
-            action
-            for action in battle_state.legal_actions
-            if action.action_id in enabled_ids and action.can_execute
-        ]
+        legal_by_id: dict[str, list[Any]] = {}
+        for action in battle_state.legal_actions:
+            if not action.can_execute:
+                continue
+            legal_by_id.setdefault(action.action_id, []).append(action)
+        filtered_legal: list[Any] = []
+        for raw_action in enabled_legal:
+            action_id = self._build_action_instance_id(raw_action)
+            matched_actions = legal_by_id.get(action_id) or []
+            if matched_actions:
+                filtered_legal.append(matched_actions.pop(0))
         if not filtered_legal:
             filtered_legal = [action for action in battle_state.legal_actions if action.can_execute]
         if not filtered_legal:
@@ -116,6 +124,60 @@ class ZeroExternalPolicyAdapter:
             legal_actions=filtered_legal,
             raw={**battle_state.raw, "legal_actions": enabled_legal},
         )
+
+    def _resolve_enabled_action(
+        self,
+        battle_state,
+        enabled_legal: list[dict[str, Any]],
+        action_index: int,
+    ) -> dict[str, Any]:
+        if not enabled_legal:
+            raise ValueError("enabled_legal 不能为空")
+        if 0 <= action_index < len(battle_state.legal_actions):
+            selected_action = battle_state.legal_actions[action_index]
+            selected_id = str(getattr(selected_action, "action_id", "") or "")
+            for raw_action in enabled_legal:
+                if self._build_action_instance_id(raw_action) == selected_id:
+                    return raw_action
+        safe_index = min(max(int(action_index), 0), len(enabled_legal) - 1)
+        return enabled_legal[safe_index]
+
+    def _log_selection(
+        self,
+        battle_state,
+        enabled_legal: list[dict[str, Any]],
+        action_index: int,
+        selected_raw_action: dict[str, Any],
+    ) -> None:
+        try:
+            metadata = getattr(getattr(battle_state, "context", None), "metadata", {}) or {}
+            hand_cards = [str(getattr(card, "card_id", "") or "") for card in getattr(battle_state, "hand", [])]
+            legal_action_ids = [
+                str(getattr(action, "action_id", "") or "")
+                for action in getattr(battle_state, "legal_actions", [])
+            ]
+            selected_action_id = (
+                str(getattr(battle_state.legal_actions[action_index], "action_id", "") or "")
+                if 0 <= action_index < len(getattr(battle_state, "legal_actions", []))
+                else ""
+            )
+            payload = {
+                "event": "visible_policy_step",
+                "round_number_raw": metadata.get("round_number_raw"),
+                "state_type": metadata.get("state_type"),
+                "player_hp": float(getattr(getattr(battle_state, "player", None), "hp", 0.0) or 0.0),
+                "enemy_hp": [float(getattr(enemy, "hp", 0.0) or 0.0) for enemy in getattr(battle_state, "enemies", [])],
+                "hand": hand_cards,
+                "legal_action_ids": legal_action_ids,
+                "selected_action_index": int(action_index),
+                "selected_action_id": selected_action_id,
+                "returned_action_id": self._build_action_instance_id(selected_raw_action),
+                "returned_action": selected_raw_action,
+                "enabled_count": len(enabled_legal),
+            }
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+        except Exception:
+            return None
 
     @staticmethod
     def _build_action_instance_id(raw: dict[str, Any]) -> str:

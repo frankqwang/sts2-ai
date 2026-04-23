@@ -252,7 +252,7 @@ public static partial class McpMod
         var runInfo = new Dictionary<string, object?>
         {
             ["act"] = runState.CurrentActIndex + 1,
-            ["floor"] = runState.TotalFloor,
+            ["floor"] = GetDisplayedFloor(runState),
             ["ascension"] = runState.AscensionLevel
         };
         if (upcomingBoss != null)

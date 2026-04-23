@@ -166,7 +166,6 @@ def _render_raw_fight(
         legal_action_lines = _legal_action_lines(legal_actions, name_catalog=name_catalog)
         line3 = (
             f"选择：{_format_action(action, name_catalog=name_catalog)} | "
-            f"unc={float(meta.get('uncertainty', 0.0) or 0.0):.3f} "
             f"gap={float(meta.get('top2_gap', 0.0) or 0.0):.3f} | "
             f"prog={'Y' if bool(meta.get('made_progress', False)) else 'N'} "
             f"enemy_hp_delta={float(meta.get('enemy_hp_delta', 0.0) or 0.0):.1f}"

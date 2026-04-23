@@ -15,6 +15,7 @@ V0 目标很克制：
 """
 
 import json
+import random
 import sqlite3
 import time
 from collections import defaultdict
@@ -623,6 +624,18 @@ class SkadaReplayRuntime:
         # 让后续 episode 继续复用 reset-only 路径，真正关闭交给进程级清理。
         return None
 
+    def get_last_reset_timing(self) -> dict[str, float]:
+        hook = getattr(self._runtime, "get_last_reset_timing", None)
+        if callable(hook):
+            return dict(hook() or {})
+        return {}
+
+    def get_last_step_timing(self) -> dict[str, float]:
+        hook = getattr(self._runtime, "get_last_step_timing", None)
+        if callable(hook):
+            return dict(hook() or {})
+        return {}
+
     def _decorate_state(self, state):
         metadata = dict(state.context.metadata)
         build_counts = _build_semantic_counts(self._case.build)
@@ -741,6 +754,75 @@ class OrderedRunRuntimeFactory:
     @property
     def current_case_id(self) -> str:
         return self._cases[self._index].case_id
+
+
+class SkadaCaseRuntimeFactory:
+    """通用 skada combat runtime factory。
+
+    用途：
+    - 单 case / targeted case / random cases 训练
+    - 支持 `clone_for_port(...)`，便于并发 collect 复用同一套 case 选择语义
+
+    `mode` 语义：
+    - `fixed`: 始终返回第一条 case
+    - `ordered`: 每次调用按顺序轮转 case，独立于胜负
+    - `random`: 每次调用随机采样一个 case
+    """
+
+    def __init__(
+        self,
+        cases: list[SkadaCombatCase],
+        *,
+        mode: str = "fixed",
+        seed: int = 0,
+        port: int = 15527,
+        auto_launch: bool = True,
+        connect_timeout_s: float = 30.0,
+    ):
+        if not cases:
+            raise ValueError("SkadaCaseRuntimeFactory 需要至少一个 case。")
+        normalized_mode = str(mode or "fixed").strip().lower()
+        if normalized_mode not in {"fixed", "ordered", "random"}:
+            raise ValueError(f"不支持的 case runtime mode: {mode}")
+        self._cases = list(cases)
+        self._mode = normalized_mode
+        self._seed = int(seed)
+        self._port = port
+        self._auto_launch = auto_launch
+        self._connect_timeout_s = connect_timeout_s
+        self._index = 0
+        self._rng = random.Random(self._seed)
+
+    def __call__(self) -> SkadaReplayRuntime:
+        if self._mode == "random":
+            case = self._rng.choice(self._cases)
+        elif self._mode == "ordered":
+            case = self._cases[self._index]
+            self._index = (self._index + 1) % len(self._cases)
+        else:
+            case = self._cases[0]
+        return SkadaReplayRuntime(
+            case,
+            port=self._port,
+            auto_launch=self._auto_launch,
+            connect_timeout_s=self._connect_timeout_s,
+        )
+
+    def clone_for_port(self, port: int) -> "SkadaCaseRuntimeFactory":
+        return SkadaCaseRuntimeFactory(
+            list(self._cases),
+            mode=self._mode,
+            seed=self._seed + int(port),
+            port=port,
+            auto_launch=self._auto_launch,
+            connect_timeout_s=self._connect_timeout_s,
+        )
+
+    @property
+    def current_case_id(self) -> str:
+        if self._mode == "ordered":
+            return self._cases[self._index].case_id
+        return self._cases[0].case_id
 
 
 class FixedSkadaCaseEvaluator:
@@ -929,12 +1011,14 @@ def _rollout_case_episode(
             inference = infer_hook(state) if callable(infer_hook) else None
             if isinstance(inference, dict):
                 action_index = int(inference.get("action_index", 0) or 0)
-                policy_scores = list(inference.get("scores", []) or [])
-                policy_uncertainty = float(inference.get("uncertainty", 0.0) or 0.0)
+                raw_scores = inference.get("scores", [])
+                if hasattr(raw_scores, "tolist"):
+                    policy_scores = [float(value) for value in raw_scores.tolist()]
+                else:
+                    policy_scores = list(raw_scores or [])
             else:
                 action_index = policy.select_action(state)
                 policy_scores = []
-                policy_uncertainty = float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0)
             policy_select_duration_s += time.perf_counter() - infer_started_at
             chosen_action = state.legal_actions[action_index] if state.legal_actions else None
             env_step_started_at = time.perf_counter()
@@ -961,7 +1045,6 @@ def _rollout_case_episode(
                 fight_outcome=next_state.run_outcome,
                 run_outcome=next_state.run_outcome,
                 metadata={
-                    "uncertainty": float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0),
                     "top2_gap": 0.0,
                     "made_progress": bool(progress.made_progress),
                     "enemy_hp_delta": float(progress.enemy_hp_delta),
@@ -991,7 +1074,6 @@ def _rollout_case_episode(
                     "card_id": chosen_action.card_id if chosen_action is not None else "",
                     "target_id": chosen_action.target_id if chosen_action is not None else "",
                     "policy_scores": policy_scores,
-                    "policy_uncertainty": policy_uncertainty,
                     "policy_topk_indices": _topk_indices_from_scores(policy_scores, topk=4),
                     "state": serialized_transition["state"],
                     "action": serialized_transition["action"],

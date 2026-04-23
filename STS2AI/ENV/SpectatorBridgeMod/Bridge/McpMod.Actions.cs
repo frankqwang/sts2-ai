@@ -50,6 +50,8 @@ namespace STS2_MCP;
 
 public static partial class McpMod
 {
+    private static int? _visibleCombatFloorOverride;
+
     private static Dictionary<string, object?> ExecuteAction(string action, Dictionary<string, JsonElement> data)
     {
         if (!RunManager.Instance.IsInProgress)
@@ -195,6 +197,7 @@ public static partial class McpMod
 
     private static Dictionary<string, object?> ExecuteStartRun(Dictionary<string, JsonElement> data)
     {
+        _visibleCombatFloorOverride = null;
         if (RunManager.Instance.IsInProgress)
             return Error("Run already in progress");
 
@@ -344,6 +347,9 @@ public static partial class McpMod
             return Error(ex.Message);
         }
 
+        int requestedFloor = ResolveRequestedFloor(data, build);
+        _visibleCombatFloorOverride = requestedFloor > 0 ? requestedFloor : null;
+
         if (RunManager.Instance.IsInProgress)
         {
             RunManager.Instance.CleanUp();
@@ -362,7 +368,7 @@ public static partial class McpMod
         SimulationBuildSupport.ApplyToPlayerIfRequested(player, build);
         SimulationBuildSupport.RemoveOwnedRelicsFromGrabBags(runState, player);
         RunManager.Instance.SetUpNewSinglePlayer(runState, shouldSave: false, dailyTime: null);
-        Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: setup complete room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount}");
+        Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: setup complete room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount} total_floor={runState.TotalFloor} display_floor={GetDisplayedFloor(runState)}");
         bool previousPreloadEnabled = PreloadManager.Enabled;
         PreloadManager.Enabled = false;
         await PreloadManager.LoadRunAssets(new[] { character });
@@ -373,11 +379,11 @@ public static partial class McpMod
             RunManager.Instance.Launch();
             game.RootSceneContainer.SetCurrentScene(NRun.Create(runState));
             await RunManager.Instance.SetActInternal(0);
-            Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: act ready current_room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount}");
+            Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: act ready current_room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount} total_floor={runState.TotalFloor} display_floor={GetDisplayedFloor(runState)}");
             await game.ToSignal(game.GetTree(), "process_frame");
             Godot.GD.Print("[STS2 MCP Spectator] visible combat reset: entering debug room");
             await RunManager.Instance.EnterRoomDebug(encounter.RoomType, MapPointType.Unassigned, encounter.ToMutable(), showTransition: false);
-            Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: entered debug room current_room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount}");
+            Godot.GD.Print($"[STS2 MCP Spectator] visible combat reset: entered debug room current_room={(runState.CurrentRoom?.RoomType.ToString() ?? "null")} room_count={runState.CurrentRoomCount} total_floor={runState.TotalFloor} display_floor={GetDisplayedFloor(runState)}");
         }
         finally
         {
@@ -393,6 +399,19 @@ public static partial class McpMod
             ["ascension"] = ascension,
             ["seed"] = seed
         };
+    }
+
+    private static int ResolveRequestedFloor(Dictionary<string, JsonElement> data, SimulationBuildSpec? build)
+    {
+        int floor = Math.Max(0, build?.Floor ?? 0);
+        if (floor > 0)
+            return floor;
+        return Math.Max(0, GetOptionalInt(data, "floor", 0));
+    }
+
+    private static int GetDisplayedFloor(RunState runState)
+    {
+        return _visibleCombatFloorOverride ?? runState.TotalFloor;
     }
 
     private static bool TryEnsureCharacterSelectOpen(

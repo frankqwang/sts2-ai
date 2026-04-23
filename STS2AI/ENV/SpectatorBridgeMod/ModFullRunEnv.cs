@@ -422,7 +422,7 @@ public static partial class McpMod
         if (!IsCombatLike(state.state_type))
             return true;
 
-        return !IsCombatPresentationBusy();
+        return !IsCombatPresentationBusy() && HasCombatInputSnapshotReady(state);
     }
 
     private static bool IsResetStateReady(FullRunApiState state)
@@ -442,6 +442,27 @@ public static partial class McpMod
             return false;
 
         return IsStepStateSettled(state);
+    }
+
+    private static bool HasCombatInputSnapshotReady(FullRunApiState state)
+    {
+        if (!IsCombatLike(state.state_type))
+            return true;
+
+        var battle = state.battle;
+        if (battle == null)
+            return false;
+
+        if (battle.round <= 0)
+            return false;
+
+        bool hasPlayCardAction = state.legal_actions != null
+            && state.legal_actions.Any(action => string.Equals(action.action, "play_card", StringComparison.Ordinal));
+        int handCount = battle.player?.hand?.Count ?? 0;
+        if (hasPlayCardAction && handCount == 0)
+            return false;
+
+        return true;
     }
 
     private static bool IsCombatReadyForPlayerInput()

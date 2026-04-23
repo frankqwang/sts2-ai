@@ -76,7 +76,6 @@ class SampleBuilderTests(unittest.TestCase):
         self.assertTrue(samples[0].bucket_key.startswith("combat|A1_"))
         self.assertEqual(samples[1].behavior_action_index, 0)
         self.assertGreater(samples[0].keep_score, 0.0)
-        self.assertAlmostEqual(samples[0].metadata["uncertainty_target"], 0.45)
         self.assertGreater(samples[0].fight_score, 0.0)
         self.assertGreater(samples[0].sample_weight, 0.1)
         self.assertIn("score_band", samples[0].metadata)
@@ -202,6 +201,57 @@ class SampleBuilderTests(unittest.TestCase):
             ]
         )
         self.assertEqual(samples, [])
+
+    def test_submenu_confirm_target_marks_explicit_confirm_choice(self) -> None:
+        builder = SampleBuilder(EncoderConfig(history_steps=4))
+        state0 = BattleState(
+            player=PlayerState(hp=60.0, max_hp=80.0, block=0.0, energy=1.0),
+            enemies=[EnemyState(enemy_id="slime", hp=30.0, max_hp=40.0, block=0.0, intent_id="attack")],
+            hand=[
+                HandCardState(card_id="TREMBLE", cost_now=1.0, tags=["skill"]),
+                HandCardState(card_id="DARK_EMBRACE", cost_now=2.0, tags=["power"]),
+            ],
+            piles=PileSummary(draw_pile_size=5, discard_pile_size=1),
+            context=StaticContext(
+                character_id="IRONCLAD",
+                act=1,
+                floor=25,
+                encounter_class="normal",
+                metadata={
+                    "state_type": "hand_select",
+                    "submenu_selected_count": 1,
+                    "submenu_max_select": 3,
+                    "submenu_remaining_slots": 2,
+                    "submenu_can_confirm": True,
+                },
+            ),
+            legal_actions=[
+                LegalAction(action_id="select_dark", action_type="combat_select_card", card_id="DARK_EMBRACE", tags=["power"]),
+                LegalAction(action_id="confirm", action_type="combat_confirm_selection"),
+            ],
+        )
+        state1 = make_state(hp=60.0, enemy_hp=30.0, step=1)
+        samples = builder.build(
+            [
+                RawTransition(
+                    run_id="run1",
+                    fight_id="fight1",
+                    step_idx=0,
+                    seed="seed",
+                    action_index=1,
+                    state=state0,
+                    action=state0.legal_actions[1],
+                    next_state=state1,
+                    done=False,
+                    fight_outcome="",
+                    run_outcome="",
+                )
+            ]
+        )
+
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0].submenu_has_confirm, 1.0)
+        self.assertEqual(samples[0].submenu_confirm_target, 1.0)
 
 
 if __name__ == "__main__":

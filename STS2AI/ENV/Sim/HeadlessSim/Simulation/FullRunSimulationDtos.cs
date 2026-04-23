@@ -47,6 +47,9 @@ public sealed class SimulationBuildSpec
 
 	[JsonPropertyName("gold")]
 	public int? Gold { get; set; }
+
+	[JsonPropertyName("floor")]
+	public int? Floor { get; set; }
 }
 
 public sealed class SimulationBuildCardSpec

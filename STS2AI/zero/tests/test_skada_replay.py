@@ -5,6 +5,17 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import sys
+
+_sts2ai_root = Path(__file__).resolve().parents[2]
+_bridge_root = _sts2ai_root / "bridge"
+if str(_sts2ai_root) not in sys.path:
+    sys.path.insert(0, str(_sts2ai_root))
+if str(_bridge_root) not in sys.path:
+    sys.path.insert(0, str(_bridge_root))
+
+from game_bridge.catalog.sim_catalog import GameCatalog
+from data.skada.generate_stratified_case_pool import _unsupported_build_reasons
 
 from zero.domain import (
     BattleState,
@@ -18,6 +29,7 @@ from zero.domain import (
 from zero.replay.skada import (
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
+    SkadaCaseRuntimeFactory,
     SkadaBuild,
     SkadaCombatCase,
     _build_eval_label,
@@ -158,6 +170,42 @@ class SkadaReplayTests(unittest.TestCase):
         self.assertEqual(build.deck[-1]["id"], "BASH")
         self.assertEqual(build.relics, [{"id": "BURNING_BLOOD"}])
 
+    def test_game_catalog_model_exists_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "game_catalog.sqlite"
+            con = sqlite3.connect(str(db_path))
+            try:
+                con.execute("CREATE TABLE cards (id TEXT PRIMARY KEY)")
+                con.execute("CREATE TABLE relics (id TEXT PRIMARY KEY)")
+                con.execute("CREATE TABLE potions (id TEXT PRIMARY KEY)")
+                con.execute("INSERT INTO cards (id) VALUES ('BASH')")
+                con.execute("INSERT INTO relics (id) VALUES ('BURNING_BLOOD')")
+                con.execute("INSERT INTO potions (id) VALUES ('FIRE_POTION')")
+                con.commit()
+            finally:
+                con.close()
+            catalog = GameCatalog(db_path=db_path)
+            self.assertTrue(catalog.card_exists("bash"))
+            self.assertTrue(catalog.relic_exists("burning_blood"))
+            self.assertTrue(catalog.potion_exists("fire_potion"))
+            self.assertFalse(catalog.relic_exists("XUAN_GANG_HUI_GUANG_BI"))
+
+    def test_unsupported_build_reasons_flags_unknown_model_ids(self):
+        case = self._make_case(floor=9, encounter_id="CASE_A")
+        case.build.relics = [{"id": "BURNING_BLOOD"}, {"id": "EXTRARELICS-ORANGE_PELLETS"}]
+        case.build.deck = [{"id": "STRIKE_IRONCLAD"}, {"id": "UNKNOWN_CARD"}]
+        with patch("data.skada.generate_stratified_case_pool.GAME_CATALOG") as catalog:
+            catalog.relic_exists.side_effect = lambda relic_id: relic_id == "BURNING_BLOOD"
+            catalog.card_exists.side_effect = lambda card_id: card_id == "STRIKE_IRONCLAD"
+            reasons = _unsupported_build_reasons(case)
+        self.assertEqual(
+            sorted(reasons),
+            [
+                "unsupported_card:UNKNOWN_CARD",
+                "unsupported_relic:EXTRARELICS-ORANGE_PELLETS",
+            ],
+        )
+
     def test_skada_case_round_trip(self):
         case = self._make_case(floor=2, encounter_id="SHRINKER_BEETLE_WEAK")
         restored = SkadaCombatCase.from_dict(case.to_dict())
@@ -175,6 +223,25 @@ class SkadaReplayTests(unittest.TestCase):
         self.assertEqual(factory.current_case_id, cases[1].case_id)
         factory.on_episode_end({"outcome": "defeat", "truncated": False})
         self.assertEqual(factory.current_case_id, cases[0].case_id)
+
+    def test_skada_case_runtime_factory_ordered_rotates_cases(self):
+        cases = [
+            self._make_case(floor=2, encounter_id="CASE_A"),
+            self._make_case(floor=4, encounter_id="CASE_B"),
+        ]
+        factory = SkadaCaseRuntimeFactory(cases, mode="ordered", auto_launch=False)
+        first = factory()
+        second = factory()
+        self.assertEqual(first._case.case_id, cases[0].case_id)
+        self.assertEqual(second._case.case_id, cases[1].case_id)
+
+    def test_skada_case_runtime_factory_clone_for_port_preserves_mode(self):
+        cases = [self._make_case(floor=2, encounter_id="CASE_A")]
+        factory = SkadaCaseRuntimeFactory(cases, mode="fixed", port=15527, auto_launch=False)
+        clone = factory.clone_for_port(15531)
+        runtime = clone()
+        self.assertEqual(runtime._case.case_id, cases[0].case_id)
+        self.assertEqual(clone._port, 15531)
 
     def test_ordered_run_evaluator_stops_after_failure(self):
         cases = [

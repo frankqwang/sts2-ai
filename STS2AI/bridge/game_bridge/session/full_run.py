@@ -123,6 +123,7 @@ class ApiBackedFullRunClient:
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
+        floor: int | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
         normalized_build = normalize_build_spec(build)
@@ -137,6 +138,8 @@ class ApiBackedFullRunClient:
                 payload["seed"] = str(seed)
             if normalized_build is not None:
                 payload["build"] = normalized_build
+            if floor is not None:
+                payload["floor"] = int(floor)
             wait_timeout = self.ready_timeout_s if timeout_s is None else float(timeout_s)
             initial_state = self._request_v2_state()
             if not is_menu_ready_for_v2_reset(initial_state):
@@ -162,6 +165,8 @@ class ApiBackedFullRunClient:
             payload["seed"] = str(seed)
         if normalized_build is not None:
             payload["build"] = normalized_build
+        if floor is not None:
+            payload["floor"] = int(floor)
         try:
             state = self._singleplayer.act(payload)
         except SingleplayerApiError:
@@ -329,6 +334,7 @@ class FullRunClientLike(Protocol):
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
+        floor: int | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]: ...
 
@@ -654,6 +660,7 @@ class PipeBackedFullRunClient(PipeSnapshotMixin):
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
+        floor: int | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
         normalized_build = normalize_build_spec(build)
@@ -667,6 +674,8 @@ class PipeBackedFullRunClient(PipeSnapshotMixin):
             params["seed"] = str(seed)
         if normalized_build is not None:
             params["build"] = normalized_build
+        if floor is not None:
+            params["floor"] = int(floor)
         state = self._call("reset", params)
         if isinstance(state, dict):
             return state

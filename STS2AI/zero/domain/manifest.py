@@ -7,9 +7,11 @@ from dataclasses import asdict, dataclass, field
 class TrainingSummary:
     steps: int = 0
     policy_loss: float = 0.0
+    policy_align_loss: float = 0.0
     value_loss: float = 0.0
     delta_loss: float = 0.0
-    uncertainty_loss: float = 0.0
+    future_summary_loss: float = 0.0
+    policy_entropy: float = 0.0
     total_loss: float = 0.0
     grad_norm: float = 0.0
     learning_rate: float = 0.0
@@ -47,6 +49,7 @@ class PromotionDecision:
 class IterationManifest:
     iteration: int
     collector_version: str
+    collect_settings: dict[str, float | int] = field(default_factory=dict)
     sample_counts: dict[str, int] = field(default_factory=dict)
     admission_stats: dict[str, object] = field(default_factory=dict)
     pool_sizes: dict[str, int] = field(default_factory=dict)
@@ -62,6 +65,7 @@ class IterationManifest:
         return {
             "iteration": self.iteration,
             "collector_version": self.collector_version,
+            "collect_settings": dict(self.collect_settings),
             "sample_counts": dict(self.sample_counts),
             "admission_stats": dict(self.admission_stats),
             "pool_sizes": dict(self.pool_sizes),

@@ -34,7 +34,8 @@ internal static class SimulationBuildSupport
 			|| build.MaxHp.HasValue
 			|| build.MaxEnergy.HasValue
 			|| build.MaxPotionSlots.HasValue
-			|| build.Gold.HasValue;
+			|| build.Gold.HasValue
+			|| build.Floor.HasValue;
 	}
 
 	public static SimulationBuildSpec? ParseJson(string? buildJson)

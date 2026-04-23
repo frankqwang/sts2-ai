@@ -95,6 +95,12 @@ class ZeroLoopRunner:
             raise ValueError("run_iteration 需要 policy，或已有晋级后的 active policy。")
 
         collector_version = self._active_version or type(collector_policy).__name__
+        collect_epsilon_greedy, collect_temperature = self.config.collect.resolve_for_iteration(iteration)
+        collect_settings = {
+            "epsilon_greedy": float(collect_epsilon_greedy),
+            "temperature": float(collect_temperature),
+            "anneal_iterations": int(self.config.collect.anneal_iterations),
+        }
         external_episode_end = getattr(runtime_factory, "on_episode_end", None)
         iteration_started_at = time.perf_counter()
         self._write_progress(
@@ -102,11 +108,13 @@ class ZeroLoopRunner:
             phase="iteration",
             status="started",
             collector_version=collector_version,
+            collect_settings=collect_settings,
         )
         self._write_status(
             iteration,
             phase="started",
             collector_version=collector_version,
+            collect_settings=collect_settings,
         )
         collect_started_at = time.perf_counter()
         transitions = self._collector.collect(
@@ -114,8 +122,8 @@ class ZeroLoopRunner:
             policy=collector_policy,
             episodes=self.config.collect.episodes_per_iteration,
             max_steps=self.config.collect.max_steps_per_episode,
-            epsilon_greedy=self.config.collect.epsilon_greedy,
-            temperature=self.config.collect.temperature,
+            epsilon_greedy=collect_epsilon_greedy,
+            temperature=collect_temperature,
             seed=self.config.seed + iteration,
             on_episode_start=lambda event: self._write_progress(iteration, phase="collect_episode", status="started", **event),
             on_transition=lambda transition: self.artifact_store.append_raw_run_row(iteration, transition.to_dict()),
@@ -131,12 +139,14 @@ class ZeroLoopRunner:
             status="completed",
             duration_s=round(time.perf_counter() - collect_started_at, 6),
             transitions=len(transitions),
+            collect_settings=collect_settings,
         )
         self._write_status(
             iteration,
             phase="collect_completed",
             transitions=len(transitions),
             elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
+            collect_settings=collect_settings,
         )
 
         build_started_at = time.perf_counter()
@@ -296,6 +306,7 @@ class ZeroLoopRunner:
         manifest = IterationManifest(
             iteration=iteration,
             collector_version=collector_version,
+            collect_settings=collect_settings,
             sample_counts={
                 "transitions": len(transitions),
                 "samples": len(samples),

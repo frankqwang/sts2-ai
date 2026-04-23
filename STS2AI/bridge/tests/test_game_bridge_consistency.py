@@ -43,6 +43,7 @@ def test_build_spec_normalization_accepts_aliases():
             "energy": 4,
             "potion_slot_count": 3,
             "gold": 99,
+            "floor": 25,
         }
     )
 
@@ -61,6 +62,7 @@ def test_build_spec_normalization_accepts_aliases():
         "max_energy": 4,
         "max_potion_slots": 3,
         "gold": 99,
+        "floor": 25,
     }
 
     typed = BuildSpecPy.from_dict(
@@ -76,6 +78,26 @@ def test_build_spec_normalization_accepts_aliases():
         "relics": [{"id": "BurningBlood"}],
         "potions": [{"id": "FirePotion", "slot": 0}],
         "max_potion_slots": 2,
+    }
+
+
+def test_build_spec_normalization_accepts_nested_case_payload_floor():
+    normalized = normalize_build_spec(
+        {
+            "floor": 25,
+            "build": {
+                "deck": ["Strike_R"],
+                "relics": ["BurningBlood"],
+                "current_hp": 55,
+            },
+        }
+    )
+
+    assert normalized == {
+        "deck": [{"id": "Strike_R", "upgrade_level": 0}],
+        "relics": [{"id": "BurningBlood"}],
+        "current_hp": 55,
+        "floor": 25,
     }
 
 

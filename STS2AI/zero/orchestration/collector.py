@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import random
 import time
@@ -9,6 +10,9 @@ from typing import Callable
 
 from ..domain import HistoryStep, RawTransition, TransitionDelta, assess_transition_progress, compact_raw_transition
 from ..ports import BattleRuntime, Policy
+
+
+_logger = logging.getLogger(__name__)
 
 
 class TrajectoryCollector:
@@ -45,7 +49,27 @@ class TrajectoryCollector:
             episode_started_at = time.perf_counter()
             reset_duration_s = 0.0
             policy_infer_duration_s = 0.0
+            policy_collate_duration_s = 0.0
+            policy_forward_duration_s = 0.0
+            policy_postprocess_duration_s = 0.0
+            intent_forward_duration_s = 0.0
+            action_forward_duration_s = 0.0
+            batch_wait_duration_s = 0.0
+            batch_size_total = 0
+            batch_size_samples = 0
             env_step_duration_s = 0.0
+            runtime_reset_call_duration_s = 0.0
+            runtime_reset_transport_duration_s = 0.0
+            runtime_reset_transport_write_duration_s = 0.0
+            runtime_reset_transport_read_duration_s = 0.0
+            runtime_reset_transport_decode_duration_s = 0.0
+            runtime_reset_state_convert_duration_s = 0.0
+            runtime_step_call_duration_s = 0.0
+            runtime_step_transport_duration_s = 0.0
+            runtime_step_transport_write_duration_s = 0.0
+            runtime_step_transport_read_duration_s = 0.0
+            runtime_step_transport_decode_duration_s = 0.0
+            runtime_step_state_convert_duration_s = 0.0
             observe_duration_s = 0.0
             emit_duration_s = 0.0
             emitted_steps = 0
@@ -54,6 +78,9 @@ class TrajectoryCollector:
             no_progress_steps = 0
             max_no_progress_streak = 0
             current_no_progress_streak = 0
+            turn_id_fallback_used_steps = 0
+            last_turn_id: int | None = None
+            turn_id_fallback_warned = False
             if on_episode_start is not None:
                 on_episode_start(
                     {
@@ -66,6 +93,21 @@ class TrajectoryCollector:
                 reset_started_at = time.perf_counter()
                 state = runtime.reset()
                 reset_duration_s = time.perf_counter() - reset_started_at
+                reset_timing = _runtime_timing(runtime, "get_last_reset_timing")
+                runtime_reset_call_duration_s = float(reset_timing.get("session_call_duration_s", 0.0) or 0.0)
+                runtime_reset_transport_duration_s = float(reset_timing.get("transport_duration_s", 0.0) or 0.0)
+                runtime_reset_transport_write_duration_s = float(
+                    reset_timing.get("transport_write_duration_s", 0.0) or 0.0
+                )
+                runtime_reset_transport_read_duration_s = float(
+                    reset_timing.get("transport_read_duration_s", 0.0) or 0.0
+                )
+                runtime_reset_transport_decode_duration_s = float(
+                    reset_timing.get("transport_decode_duration_s", 0.0) or 0.0
+                )
+                runtime_reset_state_convert_duration_s = float(
+                    reset_timing.get("state_convert_duration_s", 0.0) or 0.0
+                )
                 last_state = state
                 reset_hook = getattr(policy, "reset_episode", None)
                 if callable(reset_hook):
@@ -75,11 +117,65 @@ class TrajectoryCollector:
                         break
                     infer_started_at = time.perf_counter()
                     inference = self._infer_policy(policy, state)
+                    turn_id_fallback_used = bool(inference.get("turn_id_fallback_used", False))
+                    current_turn_id = int(inference.get("turn_id", 0) or 0)
+                    if current_turn_id > 0:
+                        if last_turn_id is not None and current_turn_id < last_turn_id:
+                            raise ValueError(
+                                f"turn_id 非单调: last_turn_id={last_turn_id} current_turn_id={current_turn_id} "
+                                f"episode_index={episode_index} run_id={run_id} fight_id={fight_id}"
+                            )
+                        last_turn_id = current_turn_id
+                    if turn_id_fallback_used:
+                        turn_id_fallback_used_steps += 1
+                        if not turn_id_fallback_warned:
+                            _logger.warning(
+                                "zero.collector turn_id fallback used episode_index=%s run_id=%s fight_id=%s",
+                                episode_index,
+                                run_id,
+                                fight_id,
+                            )
+                            turn_id_fallback_warned = True
                     policy_infer_duration_s += time.perf_counter() - infer_started_at
-                    scores = inference["scores"]
-                    greedy_action = inference["action_index"]
-                    uncertainty = inference["uncertainty"]
-                    action_index, sampled_logprob = _sample_action(
+                    policy_collate_duration_s += float(inference.get("policy_collate_duration_s", 0.0) or 0.0)
+                    intent_forward_duration_s += float(inference.get("intent_forward_duration_s", 0.0) or 0.0)
+                    action_forward_duration_s += float(inference.get("action_forward_duration_s", 0.0) or 0.0)
+                    policy_forward_duration_s += float(inference.get("policy_forward_duration_s", 0.0) or 0.0)
+                    policy_postprocess_duration_s += float(inference.get("policy_postprocess_duration_s", 0.0) or 0.0)
+                    batch_wait_duration_s += float(inference.get("batch_wait_duration_s", 0.0) or 0.0)
+                    batch_size_total += int(inference.get("batch_size_effective", 1) or 1)
+                    batch_size_samples += 1
+                    is_turn_start = bool(inference.get("is_turn_start", False))
+                    chosen_intent = int(inference.get("active_intent", 0) or 0)
+                    behavior_intent_logprob = 0.0
+                    scores = [float(value) for value in (inference["scores"] or [])]
+                    greedy_action = int(inference["action_index"])
+                    intent_scores_raw = inference.get("intent_scores", [])
+                    has_intent_scores = bool(intent_scores_raw)
+                    if is_turn_start and has_intent_scores:
+                        intent_scores = [float(value) for value in intent_scores_raw]
+                        greedy_intent = chosen_intent
+                        chosen_intent, behavior_intent_logprob = _sample_action(
+                            scores=intent_scores,
+                            greedy_action=greedy_intent,
+                            epsilon_greedy=epsilon_greedy,
+                            temperature=temperature,
+                            rng=rng,
+                        )
+                        intent_hook = getattr(policy, "observe_intent_choice", None)
+                        if callable(intent_hook):
+                            intent_hook(state, chosen_intent)
+                        action_scores_by_intent = inference.get("action_scores_by_intent", [])
+                        action_indices_by_intent = inference.get("action_index_by_intent", [])
+                        action_intent_count = len(action_scores_by_intent)
+                        if 0 <= chosen_intent < action_intent_count:
+                            chosen_scores = action_scores_by_intent[chosen_intent]
+                            scores = [float(value) for value in chosen_scores]
+                        action_index_count = len(action_indices_by_intent)
+                        if 0 <= chosen_intent < action_index_count:
+                            greedy_action = int(action_indices_by_intent[chosen_intent])
+                    model_log_probs = _compute_model_log_probs(scores)
+                    action_index, behavior_logprob = _sample_action(
                         scores=scores,
                         greedy_action=greedy_action,
                         epsilon_greedy=epsilon_greedy,
@@ -89,6 +185,21 @@ class TrajectoryCollector:
                     env_step_started_at = time.perf_counter()
                     next_state = runtime.step(action_index)
                     env_step_duration_s += time.perf_counter() - env_step_started_at
+                    step_timing = _runtime_timing(runtime, "get_last_step_timing")
+                    runtime_step_call_duration_s += float(step_timing.get("session_call_duration_s", 0.0) or 0.0)
+                    runtime_step_transport_duration_s += float(step_timing.get("transport_duration_s", 0.0) or 0.0)
+                    runtime_step_transport_write_duration_s += float(
+                        step_timing.get("transport_write_duration_s", 0.0) or 0.0
+                    )
+                    runtime_step_transport_read_duration_s += float(
+                        step_timing.get("transport_read_duration_s", 0.0) or 0.0
+                    )
+                    runtime_step_transport_decode_duration_s += float(
+                        step_timing.get("transport_decode_duration_s", 0.0) or 0.0
+                    )
+                    runtime_step_state_convert_duration_s += float(
+                        step_timing.get("state_convert_duration_s", 0.0) or 0.0
+                    )
                     action = state.legal_actions[action_index]
                     progress = assess_transition_progress(state, next_state)
                     reward = _compute_reward(state, action, next_state)
@@ -114,9 +225,18 @@ class TrajectoryCollector:
                         reward=float(reward),
                         metadata={
                             "action_id": action.action_id,
-                            "uncertainty": float(uncertainty),
-                            "old_logprob": float(sampled_logprob),
+                            # PPO 分母应对应“旧模型本身”的策略概率，而不是 rollout
+                            # 采样器经 temperature / epsilon 扰动后的行为概率。
+                            "old_logprob": float(model_log_probs[action_index]) if model_log_probs else 0.0,
+                            "behavior_logprob": float(behavior_logprob),
                             "value_pred": float(inference.get("ppo_value", 0.0) or 0.0),
+                            "old_intent_logprob": float(inference.get("old_intent_logprob", 0.0) or 0.0),
+                            "behavior_intent_logprob": float(behavior_intent_logprob),
+                            "old_intent_value": float(inference.get("intent_value", 0.0) or 0.0),
+                            "active_intent": int(chosen_intent),
+                            "turn_start_mask": 1 if is_turn_start else 0,
+                            "turn_id": int(inference.get("turn_id", 0) or 0),
+                            "turn_id_fallback_used": turn_id_fallback_used,
                             "reward": float(reward),
                             "top2_gap": _top2_gap(scores),
                             "made_progress": bool(progress.made_progress),
@@ -176,7 +296,44 @@ class TrajectoryCollector:
                             ),
                             "reset_duration_s": round(reset_duration_s, 6),
                             "policy_infer_duration_s": round(policy_infer_duration_s, 6),
+                            "policy_collate_duration_s": round(policy_collate_duration_s, 6),
+                            "intent_forward_duration_s": round(intent_forward_duration_s, 6),
+                            "action_forward_duration_s": round(action_forward_duration_s, 6),
+                            "policy_forward_duration_s": round(policy_forward_duration_s, 6),
+                            "policy_postprocess_duration_s": round(policy_postprocess_duration_s, 6),
+                            "avg_batch_wait_duration_s": round(
+                                batch_wait_duration_s / max(batch_size_samples, 1),
+                                6,
+                            ),
+                            "avg_batch_size_effective": round(
+                                batch_size_total / max(batch_size_samples, 1),
+                                4,
+                            ),
                             "env_step_duration_s": round(env_step_duration_s, 6),
+                            "runtime_reset_call_duration_s": round(runtime_reset_call_duration_s, 6),
+                            "runtime_reset_transport_duration_s": round(runtime_reset_transport_duration_s, 6),
+                            "runtime_reset_transport_write_duration_s": round(runtime_reset_transport_write_duration_s, 6),
+                            "runtime_reset_transport_read_duration_s": round(runtime_reset_transport_read_duration_s, 6),
+                            "runtime_reset_transport_decode_duration_s": round(
+                                runtime_reset_transport_decode_duration_s,
+                                6,
+                            ),
+                            "runtime_reset_state_convert_duration_s": round(
+                                runtime_reset_state_convert_duration_s,
+                                6,
+                            ),
+                            "runtime_step_call_duration_s": round(runtime_step_call_duration_s, 6),
+                            "runtime_step_transport_duration_s": round(runtime_step_transport_duration_s, 6),
+                            "runtime_step_transport_write_duration_s": round(runtime_step_transport_write_duration_s, 6),
+                            "runtime_step_transport_read_duration_s": round(runtime_step_transport_read_duration_s, 6),
+                            "runtime_step_transport_decode_duration_s": round(
+                                runtime_step_transport_decode_duration_s,
+                                6,
+                            ),
+                            "runtime_step_state_convert_duration_s": round(
+                                runtime_step_state_convert_duration_s,
+                                6,
+                            ),
                             "observe_duration_s": round(observe_duration_s, 6),
                             "emit_duration_s": round(emit_duration_s, 6),
                             "overhead_duration_s": round(overhead_duration_s, 6),
@@ -188,6 +345,9 @@ class TrajectoryCollector:
                             "no_progress_steps": no_progress_steps,
                             "no_progress_ratio": round(no_progress_steps / max(emitted_steps, 1), 6),
                             "max_no_progress_streak": max_no_progress_streak,
+                            "turn_id_fallback_used_steps": int(turn_id_fallback_used_steps),
+                            "turn_id_fallback_used": bool(turn_id_fallback_used_steps > 0),
+                            "max_turn_id": int(last_turn_id or 0),
                         }
                     )
         return transitions
@@ -197,24 +357,63 @@ class TrajectoryCollector:
         if callable(infer_hook):
             result = infer_hook(state)
             return {
-                "scores": list(result.get("scores", [])),
+                "scores": result.get("scores", []),
                 "action_index": int(result.get("action_index", 0) or 0),
-                "uncertainty": float(result.get("uncertainty", 0.0) or 0.0),
+                "intent_scores": result.get("intent_scores", []),
+                "action_scores_by_intent": result.get("action_scores_by_intent", []),
+                "action_index_by_intent": result.get("action_index_by_intent", []),
+                "is_turn_start": bool(result.get("is_turn_start", False)),
+                "turn_id": int(result.get("turn_id", 0) or 0),
+                "turn_id_fallback_used": bool(result.get("turn_id_fallback_used", False)),
+                "active_intent": int(result.get("active_intent", 0) or 0),
+                "old_intent_logprob": float(result.get("old_intent_logprob", 0.0) or 0.0),
+                "intent_value": float(result.get("intent_value", 0.0) or 0.0),
                 "fight_win_prob": float(result.get("fight_win_prob", 0.0) or 0.0),
                 "enemy_hp_fraction_dealt": float(result.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
                 "self_hp_fraction_remaining": float(result.get("self_hp_fraction_remaining", 0.0) or 0.0),
                 "ppo_value": float(result.get("ppo_value", 0.0) or 0.0),
+                "policy_collate_duration_s": float(result.get("policy_collate_duration_s", 0.0) or 0.0),
+                "intent_forward_duration_s": float(result.get("intent_forward_duration_s", 0.0) or 0.0),
+                "action_forward_duration_s": float(result.get("action_forward_duration_s", 0.0) or 0.0),
+                "policy_forward_duration_s": float(result.get("policy_forward_duration_s", 0.0) or 0.0),
+                "policy_postprocess_duration_s": float(result.get("policy_postprocess_duration_s", 0.0) or 0.0),
+                "batch_wait_duration_s": float(result.get("batch_wait_duration_s", 0.0) or 0.0),
+                "batch_size_effective": int(result.get("batch_size_effective", 1) or 1),
             }
         scores = policy.score_actions(state)
         return {
             "scores": scores,
             "action_index": int(policy.select_action(state)),
-            "uncertainty": float(policy.estimate_uncertainty(state)),
+            "intent_scores": [],
+            "action_scores_by_intent": [],
+            "action_index_by_intent": [],
+            "is_turn_start": False,
+            "turn_id": 0,
+            "turn_id_fallback_used": False,
+            "active_intent": 0,
+            "old_intent_logprob": 0.0,
+            "intent_value": 0.0,
             "fight_win_prob": 0.0,
             "enemy_hp_fraction_dealt": 0.0,
             "self_hp_fraction_remaining": 0.0,
             "ppo_value": 0.0,
+            "policy_collate_duration_s": 0.0,
+            "intent_forward_duration_s": 0.0,
+            "action_forward_duration_s": 0.0,
+            "policy_forward_duration_s": 0.0,
+            "policy_postprocess_duration_s": 0.0,
+            "batch_wait_duration_s": 0.0,
+            "batch_size_effective": 1,
         }
+
+
+def _runtime_timing(runtime, method_name: str) -> dict[str, float]:
+    hook = getattr(runtime, method_name, None)
+    if callable(hook):
+        payload = hook()
+        if isinstance(payload, dict):
+            return payload
+    return {}
 
 
 def _top2_gap(scores: list[float]) -> float:
@@ -309,3 +508,17 @@ def _sample_action(
     normalized = [prob / total for prob in behavior_probs]
     action_index = int(rng.choices(range(action_count), weights=normalized, k=1)[0])
     return action_index, float(math.log(max(normalized[action_index], 1e-8)))
+
+
+def _compute_model_log_probs(scores: list[float]) -> list[float]:
+    if not scores:
+        return []
+    max_score = max(scores)
+    shifted = [score - max_score for score in scores]
+    weights = [math.exp(max(-50.0, min(50.0, value))) for value in shifted]
+    total = sum(weights)
+    if total <= 0.0:
+        uniform_logprob = float(-math.log(len(scores)))
+        return [uniform_logprob for _ in scores]
+    probs = [weight / total for weight in weights]
+    return [float(math.log(max(prob, 1e-8))) for prob in probs]

@@ -34,6 +34,7 @@ class EnemyState:
     alive: bool = True
     buffs: dict[str, float] = field(default_factory=dict)
     tags: list[str] = field(default_factory=list)
+    target_key: str = ""
 
 
 @dataclass(slots=True)

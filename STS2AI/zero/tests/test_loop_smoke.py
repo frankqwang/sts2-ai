@@ -43,9 +43,6 @@ class FakePolicy:
     def score_actions(self, state: BattleState) -> list[float]:
         return [1.0, 0.1]
 
-    def estimate_uncertainty(self, state: BattleState) -> float:
-        return 0.7
-
 
 class FakeEvaluator:
     def evaluate(self, policy) -> list[EvalSummary]:
@@ -177,6 +174,48 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             )
             self.assertFalse(manifest2.promotion.promoted)
             self.assertNotEqual(manifest2.promotion.reason, "首次评估通过")
+
+    def test_collect_schedule_anneals_into_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = ZeroConfig(
+                paths=ZeroPaths(root=root),
+                collect=CollectConfig(
+                    episodes_per_iteration=1,
+                    max_steps_per_episode=2,
+                    epsilon_greedy=0.2,
+                    temperature=0.4,
+                    final_epsilon_greedy=0.05,
+                    final_temperature=0.1,
+                    anneal_iterations=4,
+                ),
+                train=TrainConfig(batch_size=2, steps_per_iteration=1),
+                evaluation=EvalConfig(episodes_per_cohort=1, promote_min_win_rate_gain=-1.0),
+            )
+            runner = ZeroLoopRunner(
+                config=config,
+                artifact_store=ArtifactStore(config.paths),
+                checkpoint_store=LocalCheckpointStore(config.paths.checkpoints),
+                evaluator=FakeEvaluator(),
+            )
+
+            manifest1 = runner.run_iteration(
+                iteration=1,
+                runtime_factory=FakeRuntime,
+                policy=FakePolicy(),
+                baseline_eval=None,
+            )
+            manifest4 = runner.run_iteration(
+                iteration=4,
+                runtime_factory=FakeRuntime,
+                policy=None,
+                baseline_eval=None,
+            )
+
+            self.assertAlmostEqual(float(manifest1.collect_settings["epsilon_greedy"]), 0.2)
+            self.assertAlmostEqual(float(manifest1.collect_settings["temperature"]), 0.4)
+            self.assertAlmostEqual(float(manifest4.collect_settings["epsilon_greedy"]), 0.05)
+            self.assertAlmostEqual(float(manifest4.collect_settings["temperature"]), 0.1)
 
 
 if __name__ == "__main__":

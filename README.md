@@ -248,10 +248,10 @@ python -m zero.analysis.rollout_benchmark `
 
 `STS2AI/Artifacts` 下的直接子目录统一用：
 
-- `MM-DD-HH-MM-name`
+- `MMDD-HHMM-name`
 
 例如：
-- `04-20-23-10-skada-replay-train`
+- `0420-2310-skada-replay-train`
 
 这样可以直接按名称顺序定位最新训练目录。
 

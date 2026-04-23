@@ -93,6 +93,7 @@ class PipeConnection:
         self._call_count = 0
         self._error_count = 0
         self._last_activity = time.monotonic()
+        self._last_call_metrics: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -155,15 +156,31 @@ class PipeConnection:
         timeout_ms = int(timeout_s * 1000)
 
         payload = self._encode_request(method, params or {})
+        call_started_at = time.perf_counter()
         with self._lock:
             if self._transport is None or not self._transport.is_connected():
                 raise TransportClosedError(f"pipe {self.cfg.pipe_name} not connected")
+            write_started_at = time.perf_counter()
             self._transport.write_frame(payload, timeout_ms=self.cfg.write_timeout_ms)
+            write_duration_s = time.perf_counter() - write_started_at
+            read_started_at = time.perf_counter()
             resp_bytes = self._transport.read_frame(timeout_ms=timeout_ms)
+            read_duration_s = time.perf_counter() - read_started_at
             self._call_count += 1
             self._last_activity = time.monotonic()
-
+        decode_started_at = time.perf_counter()
         result = self._decode_response(resp_bytes)
+        decode_duration_s = time.perf_counter() - decode_started_at
+        total_duration_s = time.perf_counter() - call_started_at
+        self._last_call_metrics = {
+            "method": str(method),
+            "request_bytes": int(len(payload)),
+            "response_bytes": int(len(resp_bytes)),
+            "write_duration_s": float(write_duration_s),
+            "read_duration_s": float(read_duration_s),
+            "decode_duration_s": float(decode_duration_s),
+            "total_duration_s": float(total_duration_s),
+        }
         if isinstance(result, dict) and result.get("error"):
             raise SimulatorApiError(
                 str(result["error"]),
@@ -274,6 +291,10 @@ class PipeConnection:
             "connected": self.is_connected(),
             "idle_s": round(time.monotonic() - self._last_activity, 2),
         }
+
+    @property
+    def last_call_metrics(self) -> dict[str, Any]:
+        return dict(self._last_call_metrics)
 
     @property
     def last_activity(self) -> float:

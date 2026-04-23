@@ -1,8 +1,8 @@
 param(
     [switch]$StopExistingGodot,
     [string]$CheckpointPath,
-    [ValidateSet("stateless", "history_transformer", "recurrent_gru")]
-    [string]$ModelVariant = "stateless",
+    [ValidateSet("stateless", "history_transformer", "recurrent_gru", "hierarchical_intent")]
+    [string]$ModelVariant = "hierarchical_intent",
     [string]$BuildFile = "",
     [string]$EncounterId = "",
     [string]$GodotExe = "",
@@ -12,6 +12,7 @@ param(
     [string]$Resolution = "1600x900",
     [string]$CharacterId = "IRONCLAD",
     [string]$Seed = "",
+    [int]$Floor = 0,
     [double]$RequestTimeoutSeconds = 120.0,
     [double]$ReadyTimeoutSeconds = 150.0,
     [double]$StepDelay = 0.9,
@@ -95,6 +96,7 @@ $manifest = [ordered]@{
     resolution = $Resolution
     character_id = $CharacterId
     seed = $(if ([string]::IsNullOrWhiteSpace($Seed)) { $null } else { $Seed })
+    floor = $(if ($Floor -gt 0) { $Floor } else { $null })
     request_timeout_s = $RequestTimeoutSeconds
     ready_timeout_s = $ReadyTimeoutSeconds
     step_delay = $StepDelay
@@ -143,6 +145,9 @@ $pythonArgs = @(
 )
 if (-not [string]::IsNullOrWhiteSpace($Seed)) {
     $pythonArgs += @("--seed", $Seed)
+}
+if ($Floor -gt 0) {
+    $pythonArgs += @("--floor", [string]$Floor)
 }
 if (-not [string]::IsNullOrWhiteSpace($EncounterId)) {
     $pythonArgs += @("--encounter-id", $EncounterId)

@@ -75,6 +75,7 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
 
     _plot_training_metrics(training_df, analysis_dir / "training_metrics.png")
     _plot_sampling_metrics(sampling_df, episode_df, analysis_dir / "sampling_metrics.png")
+    _plot_timing_breakdown(episode_df, analysis_dir / "timing_breakdown.png")
     _plot_pool_diagnostics(sampling_df, analysis_dir / "pool_diagnostics.png")
     _plot_eval_metrics(eval_df, analysis_dir / "evaluation_metrics.png")
     _plot_rollout_behavior(rollout_df, analysis_dir / "rollout_behavior.png")
@@ -96,6 +97,8 @@ def _build_training_dataframe(manifests: list[dict[str, Any]]) -> pd.DataFrame:
             "promotion_reason": (manifest.get("promotion") or {}).get("reason", ""),
         }
         row.update(training)
+        if "policy_entropy" not in row and "uncertainty_loss" in row:
+            row["policy_entropy"] = row.get("uncertainty_loss", 0.0)
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -217,7 +220,26 @@ def _build_episode_event_dataframe(logs_dir: Path) -> pd.DataFrame:
                 "avg_core_step_throughput": float(df.get("core_step_throughput", pd.Series(dtype=float)).mean() if "core_step_throughput" in df else 0.0),
                 "avg_reset_duration_s": float(df.get("reset_duration_s", pd.Series(dtype=float)).mean() if "reset_duration_s" in df else 0.0),
                 "avg_policy_infer_duration_s": float(df.get("policy_infer_duration_s", pd.Series(dtype=float)).mean() if "policy_infer_duration_s" in df else 0.0),
+                "avg_policy_collate_duration_s": float(df.get("policy_collate_duration_s", pd.Series(dtype=float)).mean() if "policy_collate_duration_s" in df else 0.0),
+                "avg_intent_forward_duration_s": float(df.get("intent_forward_duration_s", pd.Series(dtype=float)).mean() if "intent_forward_duration_s" in df else 0.0),
+                "avg_action_forward_duration_s": float(df.get("action_forward_duration_s", pd.Series(dtype=float)).mean() if "action_forward_duration_s" in df else 0.0),
+                "avg_policy_forward_duration_s": float(df.get("policy_forward_duration_s", pd.Series(dtype=float)).mean() if "policy_forward_duration_s" in df else 0.0),
+                "avg_policy_postprocess_duration_s": float(df.get("policy_postprocess_duration_s", pd.Series(dtype=float)).mean() if "policy_postprocess_duration_s" in df else 0.0),
+                "avg_batch_wait_duration_s": float(df.get("avg_batch_wait_duration_s", pd.Series(dtype=float)).mean() if "avg_batch_wait_duration_s" in df else 0.0),
+                "avg_batch_size_effective": float(df.get("avg_batch_size_effective", pd.Series(dtype=float)).mean() if "avg_batch_size_effective" in df else 0.0),
                 "avg_env_step_duration_s": float(df.get("env_step_duration_s", pd.Series(dtype=float)).mean() if "env_step_duration_s" in df else 0.0),
+                "avg_runtime_reset_call_duration_s": float(df.get("runtime_reset_call_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_call_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_duration_s": float(df.get("runtime_reset_transport_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_write_duration_s": float(df.get("runtime_reset_transport_write_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_write_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_read_duration_s": float(df.get("runtime_reset_transport_read_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_read_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_decode_duration_s": float(df.get("runtime_reset_transport_decode_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_decode_duration_s" in df else 0.0),
+                "avg_runtime_reset_state_convert_duration_s": float(df.get("runtime_reset_state_convert_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_state_convert_duration_s" in df else 0.0),
+                "avg_runtime_step_call_duration_s": float(df.get("runtime_step_call_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_call_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_duration_s": float(df.get("runtime_step_transport_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_write_duration_s": float(df.get("runtime_step_transport_write_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_write_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_read_duration_s": float(df.get("runtime_step_transport_read_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_read_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_decode_duration_s": float(df.get("runtime_step_transport_decode_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_decode_duration_s" in df else 0.0),
+                "avg_runtime_step_state_convert_duration_s": float(df.get("runtime_step_state_convert_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_state_convert_duration_s" in df else 0.0),
                 "avg_observe_duration_s": float(df.get("observe_duration_s", pd.Series(dtype=float)).mean() if "observe_duration_s" in df else 0.0),
                 "avg_emit_duration_s": float(df.get("emit_duration_s", pd.Series(dtype=float)).mean() if "emit_duration_s" in df else 0.0),
                 "avg_overhead_duration_s": float(df.get("overhead_duration_s", pd.Series(dtype=float)).mean() if "overhead_duration_s" in df else 0.0),
@@ -226,6 +248,20 @@ def _build_episode_event_dataframe(logs_dir: Path) -> pd.DataFrame:
                 "timeouts": int((df.get("truncated", False) == True).sum()) if "truncated" in df else 0,
             }
         )
+        row = rows[-1]
+        avg_steps = max(float(row["avg_episode_steps"]), 1e-6)
+        row["policy_collate_ms_per_step"] = float(row["avg_policy_collate_duration_s"]) * 1000.0 / avg_steps
+        row["intent_forward_ms_per_step"] = float(row["avg_intent_forward_duration_s"]) * 1000.0 / avg_steps
+        row["action_forward_ms_per_step"] = float(row["avg_action_forward_duration_s"]) * 1000.0 / avg_steps
+        row["policy_forward_ms_per_step"] = float(row["avg_policy_forward_duration_s"]) * 1000.0 / avg_steps
+        row["policy_postprocess_ms_per_step"] = float(row["avg_policy_postprocess_duration_s"]) * 1000.0 / avg_steps
+        row["batch_wait_ms_per_step"] = float(row["avg_batch_wait_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_ms_per_step"] = float(row["avg_runtime_step_transport_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_read_ms_per_step"] = float(row["avg_runtime_step_transport_read_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_write_ms_per_step"] = float(row["avg_runtime_step_transport_write_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_decode_ms_per_step"] = float(row["avg_runtime_step_transport_decode_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_convert_ms_per_step"] = float(row["avg_runtime_step_state_convert_duration_s"]) * 1000.0 / avg_steps
+        row["env_step_ms_per_step"] = float(row["avg_env_step_duration_s"]) * 1000.0 / avg_steps
     return pd.DataFrame(rows)
 
 
@@ -598,9 +634,17 @@ def _plot_training_metrics(df: pd.DataFrame, output_path: Path) -> None:
     x = df["iteration"]
 
     axes[0, 0].plot(x, df["total_loss"], marker="o", label="total")
-    for column in ("policy_loss", "value_loss", "delta_loss", "uncertainty_loss"):
+    for column in (
+        "policy_loss",
+        "policy_align_loss",
+        "value_loss",
+        "delta_loss",
+        "future_summary_loss",
+        "policy_entropy",
+    ):
         if column in df:
-            axes[0, 0].plot(x, df[column], marker="o", label=column.replace("_loss", ""))
+            label = "policy_entropy" if column == "policy_entropy" else column.replace("_loss", "")
+            axes[0, 0].plot(x, df[column], marker="o", label=label)
     axes[0, 0].set_title("Training Losses")
     axes[0, 0].legend(fontsize=8)
 
@@ -677,6 +721,64 @@ def _plot_sampling_metrics(sampling_df: pd.DataFrame, episode_df: pd.DataFrame, 
             axes[1, 1].legend(fontsize=8)
         else:
             axes[1, 1].axis("off")
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_timing_breakdown(episode_df: pd.DataFrame, output_path: Path) -> None:
+    if episode_df.empty:
+        return
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8))
+    x = episode_df["iteration"]
+
+    for column in (
+        "batch_wait_ms_per_step",
+        "policy_collate_ms_per_step",
+        "intent_forward_ms_per_step",
+        "action_forward_ms_per_step",
+        "policy_forward_ms_per_step",
+        "policy_postprocess_ms_per_step",
+        "runtime_step_transport_ms_per_step",
+        "runtime_step_convert_ms_per_step",
+        "env_step_ms_per_step",
+    ):
+        if column in episode_df:
+            axes[0, 0].plot(x, episode_df[column], marker="o", label=column.replace("_ms_per_step", ""))
+    axes[0, 0].set_title("Per-step Timing (ms)")
+    axes[0, 0].legend(fontsize=8)
+
+    for column in (
+        "avg_runtime_step_transport_write_duration_s",
+        "avg_runtime_step_transport_read_duration_s",
+        "avg_runtime_step_transport_decode_duration_s",
+    ):
+        if column in episode_df:
+            axes[0, 1].plot(x, episode_df[column] * 1000.0, marker="o", label=column.replace("avg_runtime_step_", "").replace("_duration_s", ""))
+    axes[0, 1].set_title("Bridge/Pipe Breakdown Per Episode (ms)")
+    axes[0, 1].legend(fontsize=8)
+
+    for column in (
+        "avg_runtime_reset_transport_duration_s",
+        "avg_runtime_reset_state_convert_duration_s",
+        "avg_reset_duration_s",
+    ):
+        if column in episode_df:
+            axes[1, 0].plot(x, episode_df[column] * 1000.0, marker="o", label=column.replace("avg_", "").replace("_duration_s", ""))
+    axes[1, 0].set_title("Reset Timing Per Episode (ms)")
+    axes[1, 0].legend(fontsize=8)
+
+    for column in (
+        "avg_episode_duration_s",
+        "avg_policy_infer_duration_s",
+        "avg_env_step_duration_s",
+        "avg_overhead_duration_s",
+    ):
+        if column in episode_df:
+            axes[1, 1].plot(x, episode_df[column], marker="o", label=column.replace("avg_", "").replace("_duration_s", ""))
+    axes[1, 1].set_title("Episode Duration Components (s)")
+    axes[1, 1].legend(fontsize=8)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
@@ -769,6 +871,13 @@ def _plot_rollout_behavior(rollout_df: pd.DataFrame, output_path: Path) -> None:
 def _plot_cohort_heatmap(eval_df: pd.DataFrame, output_path: Path) -> None:
     if eval_df.empty:
         return
+    heatmap_df = (
+        eval_df.groupby(["cohort_name", "iteration"], as_index=False)
+        .agg(
+            fight_win_rate=("fight_win_rate", "mean"),
+            timeout_rate=("timeout_rate", "mean"),
+        )
+    )
     metric_columns = [
         ("fight_win_rate", "Cohort Win Rate"),
         ("timeout_rate", "Cohort Timeout Rate"),
@@ -777,7 +886,7 @@ def _plot_cohort_heatmap(eval_df: pd.DataFrame, output_path: Path) -> None:
     if len(metric_columns) == 1:
         axes = [axes]
     for axis, (metric, title) in zip(axes, metric_columns, strict=False):
-        pivot = eval_df.pivot(index="cohort_name", columns="iteration", values=metric).fillna(0.0)
+        pivot = heatmap_df.pivot(index="cohort_name", columns="iteration", values=metric).fillna(0.0)
         image = axis.imshow(pivot.values, aspect="auto", cmap="viridis")
         axis.set_title(title)
         axis.set_xlabel("Iteration")

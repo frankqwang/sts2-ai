@@ -3,7 +3,7 @@
 主线定位：
 
 - 专注 policy-only 的 RL 闭环，完全不做搜索 / MCTS
-- 模型的决策能力来自自身学到的 policy / value / delta / uncertainty，而不是依赖外部 save/load 做回溯
+- 模型的决策能力来自自身学到的 policy / PPO value / delta / future summary，而不是依赖外部 save/load 做回溯
 - 搜索 / MCTS 相关链路（包括 `SearchBackend`、`SearchQueueBuilder`、same-seed root search、snapshot 回溯）已从代码里整体删除
 
 1. `sim state -> BattleState`
@@ -17,7 +17,7 @@
    - 当前状态 `state`
    - 选择的 `action_index`
    - 执行动作后的 `next_state`
-   - 辅助 meta，比如 `uncertainty`、`top2_gap`
+   - 辅助 meta，比如 `top2_gap`
 
    代码在 [collector.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/collector.py:10)。输出是 `RawTransition` 序列。
 
@@ -29,7 +29,6 @@
    - `fight_label`：战斗胜负、敌方掉血比例、我方剩余血量
    - `bucket_key` / `rare_cohort_tags`
    - `keep_score`
-   - `uncertainty_target`
 
    也就是说，`RawTransition` 是“保真日志”，`TrainingSample` 是“可训练样本”。
 
@@ -56,13 +55,13 @@
    - `CurrentStateEncoder`
    - `HistoryEncoder`
    - `ActionEncoder`
-   - 多头输出：`policy / value / delta / uncertainty`
+   - 多头输出：`policy / ppo_value / action_value / delta / future_summary`
 
    损失在 [losses.py](/C:/dev/sts2-ai/STS2AI/zero/model/losses.py:22)：
    - `policy`（行为动作加权 CE）
    - `value`
    - `delta`
-   - `uncertainty`
+   - `future_summary`
 
    `ZeroTrainer` 负责真正训练，见 [trainer.py](/C:/dev/sts2-ai/STS2AI/zero/orchestration/trainer.py:17)。
 
@@ -96,4 +95,4 @@
 本阶段最关心的是：
 - 纯 policy 能不能稳定学起来
 - evaluator cohort 是否足够稳定
-- policy/value/delta/uncertainty 各头是否有正常学习信号
+- policy/value/delta/future_summary 各头是否有正常学习信号

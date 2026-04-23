@@ -90,9 +90,19 @@ class TrainingSample:
     keep_score: float = 0.0
     old_logprob: float = 0.0
     old_value: float = 0.0
+    old_intent_logprob: float = 0.0
+    old_intent_value: float = 0.0
     reward: float = 0.0
     ppo_return: float = 0.0
     ppo_advantage: float = 0.0
+    turn_id: int = 0
+    turn_start_mask: float = 0.0
+    active_intent: int = 0
+    turn_return: float = 0.0
+    turn_advantage: float = 0.0
+    chosen_action_future_targets: list[float] = field(default_factory=list)
+    submenu_confirm_target: float = 0.0
+    submenu_has_confirm: float = 0.0
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -176,6 +186,7 @@ def compact_battle_state(state: BattleState) -> BattleState:
                 alive=enemy.alive,
                 buffs=dict(enemy.buffs),
                 tags=list(enemy.tags),
+                target_key=enemy.target_key,
             )
             for enemy in state.enemies
         ],

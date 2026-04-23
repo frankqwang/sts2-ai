@@ -129,11 +129,19 @@ class BuildSpecPy:
     max_energy: int | None = None
     max_potion_slots: int | None = None
     gold: int | None = None
+    floor: int | None = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "BuildSpecPy":
         if not isinstance(value, dict):
             raise TypeError("build must be a dict when provided")
+
+        raw_value = value
+        nested_build = raw_value.get("build")
+        if nested_build is not None:
+            if not isinstance(nested_build, dict):
+                raise TypeError("build.build must be a dict when provided")
+            value = nested_build
 
         deck_entries = value.get("deck", value.get("cards")) or []
         if not isinstance(deck_entries, list):
@@ -156,6 +164,12 @@ class BuildSpecPy:
             max_energy=_extract_optional_int(value, "max_energy", "energy"),
             max_potion_slots=_extract_optional_int(value, "max_potion_slots", "max_potions", "potion_slot_count"),
             gold=_extract_optional_int(value, "gold"),
+            floor=(
+                _extract_optional_int(raw_value, "floor", "current_floor", "run_floor")
+                if value is not raw_value
+                else None
+            )
+            or _extract_optional_int(value, "floor", "current_floor", "run_floor"),
         )
 
     def to_sim_dict(self) -> dict[str, Any]:
@@ -175,7 +189,7 @@ class BuildSpecPy:
                 seen_slots.add(slot)
                 potions_payload.append(potion_payload)
             payload["potions"] = potions_payload
-        for key in ("current_hp", "max_hp", "max_energy", "max_potion_slots", "gold"):
+        for key in ("current_hp", "max_hp", "max_energy", "max_potion_slots", "gold", "floor"):
             value = getattr(self, key)
             if value is not None:
                 payload[key] = int(value)

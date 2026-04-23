@@ -42,7 +42,6 @@ def make_sample(*, encounter_class: str = "normal", alive_enemy: bool = True) ->
         fight_label=FightLabel(fight_win=0.0, enemy_hp_fraction_dealt=0.5, self_hp_fraction_remaining=0.25),
         rare_cohort_tags=["elite"] if encounter_class == "elite" else [],
         keep_score=1.2,
-        metadata={"uncertainty_target": 0.9},
     )
 
 

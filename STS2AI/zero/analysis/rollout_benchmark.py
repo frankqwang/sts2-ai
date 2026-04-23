@@ -45,9 +45,6 @@ class RandomPolicy:
     def score_actions(self, state) -> list[float]:
         return [1.0 for _ in state.legal_actions]
 
-    def estimate_uncertainty(self, state) -> float:
-        return 0.5
-
 
 @dataclass(slots=True)
 class WorkerResult:

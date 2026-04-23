@@ -31,19 +31,50 @@ class CollectConfig:
     max_steps_per_episode: int = 200
     epsilon_greedy: float = 0.0
     temperature: float = 0.0
+    final_epsilon_greedy: float | None = None
+    final_temperature: float | None = None
+    anneal_iterations: int = 1
+
+    def resolve_for_iteration(self, iteration: int) -> tuple[float, float]:
+        epsilon_end = (
+            float(self.final_epsilon_greedy)
+            if self.final_epsilon_greedy is not None
+            else float(self.epsilon_greedy)
+        )
+        temperature_end = (
+            float(self.final_temperature)
+            if self.final_temperature is not None
+            else float(self.temperature)
+        )
+        total = max(1, int(self.anneal_iterations or 1))
+        if total <= 1:
+            progress = 1.0
+        else:
+            progress = min(max(float(iteration - 1), 0.0), float(total - 1)) / float(total - 1)
+        epsilon = float(self.epsilon_greedy) + (epsilon_end - float(self.epsilon_greedy)) * progress
+        temperature = float(self.temperature) + (temperature_end - float(self.temperature)) * progress
+        return max(0.0, epsilon), max(0.0, temperature)
 
 
 @dataclass(slots=True)
 class EncoderConfig:
-    model_variant: str = "history_transformer"
+    policy_arch: str = "flat"
+    history_variant: str = "recurrent_gru"
+    model_variant: str | None = None
     hidden_dim: int = 256
     action_dim: int = 192
+    future_summary_dim: int = 3
     history_dim: int = 256
     history_steps: int = 8
-    history_layers: int = 4
+    history_layers: int = 1
     history_heads: int = 4
     history_dropout: float = 0.1
     history_gate_bias: float = -1.5
+    token_backbone_layers: int = 4
+    token_backbone_heads: int = 4
+    intent_vocab_size: int = 4
+    intent_dim: int = 64
+    microbatch_window_ms: float = 2.0
     max_enemies: int = 4
     max_hand_cards: int = 10
     buff_slots: int = 16
@@ -53,10 +84,14 @@ class EncoderConfig:
 @dataclass(slots=True)
 class LossWeights:
     policy: float = 1.0
+    policy_align: float = 0.25
     value: float = 0.5
     delta: float = 0.2
-    uncertainty: float = 0.1
+    future_summary: float = 0.1
+    submenu_policy: float = 0.35
+    submenu_confirm: float = 0.2
     policy_behavior_ce_weight: float = 1.0
+    policy_value_align_temperature: float = 0.75
 
 
 @dataclass(slots=True)
@@ -93,13 +128,25 @@ class TrainConfig:
     prefetch_batches: int = 2
     ppo_clip_ratio: float = 0.2
     ppo_value_coef: float = 0.5
-    ppo_imagination_value_coef: float = 0.25
-    ppo_imagination_delta_coef: float = 0.10
+    ppo_turn_intent_coef: float = 1.0
+    ppo_turn_value_coef: float = 0.5
+    ppo_future_summary_coef: float = 0.10
+    ppo_policy_align_coef: float = 0.15
+    ppo_submenu_policy_coef: float = 0.35
+    ppo_submenu_confirm_coef: float = 0.20
+    ppo_policy_align_temperature: float = 0.75
+    ppo_behavior_ce_coef: float = 0.10
+    ppo_action_entropy_coef: float = 0.01
+    ppo_intent_entropy_coef: float = 0.05
     ppo_entropy_coef: float = 0.01
+    action_imitation_adv_temperature: float = 5.0
     ppo_advantage_norm: bool = True
     ppo_gamma: float = 0.99
     ppo_gae_lambda: float = 0.95
     ppo_epochs: int = 4
+    ppo_value_clip: float = 0.2
+    normalize_step_returns: bool = True
+    normalize_turn_returns: bool = True
 
 
 @dataclass(slots=True)
