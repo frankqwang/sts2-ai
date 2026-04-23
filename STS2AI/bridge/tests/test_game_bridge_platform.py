@@ -11,6 +11,7 @@ if str(_python_root) not in sys.path:
     sys.path.insert(0, str(_python_root))
 
 import game_bridge
+from game_bridge.generated import game_state_pb2 as pb
 from game_bridge.session.base import SessionFactory
 from game_bridge.session.combat import CombatSession
 from game_bridge.session.full_run import PipeBackedFullRunClient, create_full_run_client
@@ -19,6 +20,7 @@ from game_bridge.spectate.controller import SpectatorController
 from game_bridge.spectate.overlay import OverlayWriter
 from game_bridge.spectate.policy import NullPolicy, ReplayPolicy
 from game_bridge.transport.connection import PipeConnection, PipeConnectionConfig
+from game_bridge.transport.proto_codec import ProtoCodec
 from game_bridge.types import PolicyContext, SessionConfig
 
 
@@ -298,3 +300,34 @@ def test_pipe_connection_auto_launch_uses_short_probe_timeout(monkeypatch: pytes
     assert launcher_calls == [19999]
     assert connect_timeouts == [1.0, 15.0]
     assert conn.is_connected() is True
+
+
+def test_proto_codec_combat_reset_preserves_optional_build_presence():
+    codec = ProtoCodec()
+    payload = codec.encode_request(
+        "combat_reset",
+        {
+            "character_id": "IRONCLAD",
+            "encounter_id": "CHOMPERS_NORMAL",
+            "build": {
+                "deck": [{"id": "STRIKE_IRONCLAD", "upgrade_level": 0}],
+                "relics": [{"id": "BURNING_BLOOD"}],
+                "potions": [{"id": "FIRE_POTION", "slot": 1}],
+                "gold": 0,
+            },
+        },
+    )
+
+    req = pb.PipeRequestEnvelope()
+    req.ParseFromString(payload)
+
+    assert req.method == pb.COMBAT_RESET
+    assert req.combat_reset.build.HasField("gold") is True
+    assert req.combat_reset.build.gold == 0
+    assert req.combat_reset.build.HasField("current_hp") is False
+    assert req.combat_reset.build.HasField("max_hp") is False
+    assert req.combat_reset.build.HasField("max_energy") is False
+    assert req.combat_reset.build.HasField("max_potion_slots") is False
+    assert len(req.combat_reset.build.potions) == 1
+    assert req.combat_reset.build.potions[0].id == "FIRE_POTION"
+    assert req.combat_reset.build.potions[0].slot == 1

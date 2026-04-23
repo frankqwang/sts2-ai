@@ -10,7 +10,6 @@ from __future__ import annotations
 """
 
 import copy
-import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -37,8 +36,6 @@ class ParallelTrajectoryCollector:
         epsilon_greedy: float = 0.0,
         temperature: float = 0.0,
         seed: int | None = None,
-        search_guidance_factory=None,
-        search_self_play_factory=None,
         on_episode_start: Callable[[dict[str, object]], None] | None = None,
         on_transition: Callable[[RawTransition], None] | None = None,
         on_episode_end: Callable[[dict[str, object]], None] | None = None,
@@ -52,8 +49,6 @@ class ParallelTrajectoryCollector:
                 epsilon_greedy=epsilon_greedy,
                 temperature=temperature,
                 seed=seed,
-                search_guidance_factory=search_guidance_factory,
-                search_self_play_factory=search_self_play_factory,
                 on_episode_start=on_episode_start,
                 on_transition=on_transition,
                 on_episode_end=on_episode_end,
@@ -76,12 +71,6 @@ class ParallelTrajectoryCollector:
             worker_factory = clone_factory(self._ports[worker_id])
             worker_policy = _clone_policy(policy)
             worker_episode_end = getattr(worker_factory, "on_episode_end", None)
-            worker_search_guidance_factory = None
-            worker_search_self_play_factory = None
-            if search_guidance_factory is not None:
-                worker_search_guidance_factory = lambda _ignored=None, port=self._ports[worker_id]: search_guidance_factory(port)
-            if search_self_play_factory is not None:
-                worker_search_self_play_factory = lambda _ignored=None, port=self._ports[worker_id]: search_self_play_factory(port)
 
             def _handle_episode_end(event: dict[str, object]) -> None:
                 if callable(worker_episode_end):
@@ -96,8 +85,6 @@ class ParallelTrajectoryCollector:
                 epsilon_greedy=epsilon_greedy,
                 temperature=temperature,
                 seed=(seed + worker_id) if seed is not None else None,
-                search_guidance_factory=worker_search_guidance_factory,
-                search_self_play_factory=worker_search_self_play_factory,
                 on_episode_start=(lambda event: _wrap_callback(on_episode_start, {"worker_id": worker_id, **event})),
                 on_transition=(lambda transition: _wrap_callback(on_transition, transition)),
                 on_episode_end=_handle_episode_end,

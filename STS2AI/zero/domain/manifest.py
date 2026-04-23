@@ -7,14 +7,14 @@ from dataclasses import asdict, dataclass, field
 class TrainingSummary:
     steps: int = 0
     policy_loss: float = 0.0
+    policy_align_loss: float = 0.0
     value_loss: float = 0.0
-    ranking_loss: float = 0.0
     delta_loss: float = 0.0
-    uncertainty_loss: float = 0.0
+    future_summary_loss: float = 0.0
+    policy_entropy: float = 0.0
     total_loss: float = 0.0
     grad_norm: float = 0.0
     learning_rate: float = 0.0
-    search_sample_ratio: float = 0.0
     skipped_non_finite_steps: int = 0
     zero_step: bool = False
     pool_usage: dict[str, int] = field(default_factory=dict)
@@ -29,8 +29,6 @@ class EvalSummary:
     fight_win_rate: float
     enemy_hp_fraction_dealt: float
     self_hp_fraction_remaining: float
-    search_agreement_at_1: float = 0.0
-    search_topk_overlap: float = 0.0
     metadata: dict[str, float | int | str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -51,7 +49,7 @@ class PromotionDecision:
 class IterationManifest:
     iteration: int
     collector_version: str
-    search_version: str
+    collect_settings: dict[str, float | int] = field(default_factory=dict)
     sample_counts: dict[str, int] = field(default_factory=dict)
     admission_stats: dict[str, object] = field(default_factory=dict)
     pool_sizes: dict[str, int] = field(default_factory=dict)
@@ -67,7 +65,7 @@ class IterationManifest:
         return {
             "iteration": self.iteration,
             "collector_version": self.collector_version,
-            "search_version": self.search_version,
+            "collect_settings": dict(self.collect_settings),
             "sample_counts": dict(self.sample_counts),
             "admission_stats": dict(self.admission_stats),
             "pool_sizes": dict(self.pool_sizes),

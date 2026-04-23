@@ -29,10 +29,13 @@ internal static class SimulationBuildSupport
 
 		return build.Deck != null
 			|| build.Relics != null
+			|| build.Potions != null
 			|| build.CurrentHp.HasValue
 			|| build.MaxHp.HasValue
 			|| build.MaxEnergy.HasValue
-			|| build.Gold.HasValue;
+			|| build.MaxPotionSlots.HasValue
+			|| build.Gold.HasValue
+			|| build.Floor.HasValue;
 	}
 
 	public static SimulationBuildSpec? ParseJson(string? buildJson)
@@ -87,6 +90,25 @@ internal static class SimulationBuildSupport
 		{
 			save.Relics = build.Relics.Select(CreateSerializableRelic).ToList();
 			AddDiscoveredRelics(save, save.Relics);
+		}
+
+		if (build.MaxPotionSlots.HasValue)
+		{
+			save.MaxPotionSlotCount = Math.Max(0, build.MaxPotionSlots.Value);
+		}
+
+		if (build.Potions != null)
+		{
+			save.Potions = build.Potions
+				.Select(CreateSerializablePotion)
+				.OrderBy(static potion => potion.SlotIndex)
+				.ToList();
+			if (save.Potions.Count > 0)
+			{
+				int requiredSlotCount = save.Potions.Max(static potion => potion.SlotIndex) + 1;
+				save.MaxPotionSlotCount = Math.Max(save.MaxPotionSlotCount, requiredSlotCount);
+			}
+			AddDiscoveredPotions(save, save.Potions);
 		}
 
 		if (build.MaxHp.HasValue)
@@ -152,6 +174,17 @@ internal static class SimulationBuildSupport
 		};
 	}
 
+	private static SerializablePotion CreateSerializablePotion(SimulationBuildPotionSpec spec)
+	{
+		PotionModel potion = ResolvePotion(spec.Id);
+		int slotIndex = Math.Max(0, spec.Slot ?? spec.SlotIndex ?? 0);
+		return new SerializablePotion
+		{
+			Id = potion.Id,
+			SlotIndex = slotIndex
+		};
+	}
+
 	private static CardModel ResolveCard(string? rawId)
 	{
 		string id = NormalizeId(rawId, "card");
@@ -185,6 +218,13 @@ internal static class SimulationBuildSupport
 		string id = NormalizeId(rawId, "relic");
 		ModelId modelId = new(ModelId.SlugifyCategory<RelicModel>(), id.ToUpperInvariant());
 		return ModelDb.GetById<RelicModel>(modelId);
+	}
+
+	private static PotionModel ResolvePotion(string? rawId)
+	{
+		string id = NormalizeId(rawId, "potion");
+		ModelId modelId = new(ModelId.SlugifyCategory<PotionModel>(), id.ToUpperInvariant());
+		return ModelDb.GetById<PotionModel>(modelId);
 	}
 
 	private static string NormalizeId(string? rawId, string entityType)
@@ -230,6 +270,24 @@ internal static class SimulationBuildSupport
 			if (discovered.Add(relicId))
 			{
 				save.DiscoveredRelics.Add(relicId);
+			}
+		}
+	}
+
+	private static void AddDiscoveredPotions(SerializablePlayer save, IEnumerable<SerializablePotion> potions)
+	{
+		save.DiscoveredPotions ??= new List<ModelId>();
+		HashSet<ModelId> discovered = save.DiscoveredPotions.ToHashSet();
+		foreach (SerializablePotion potion in potions)
+		{
+			ModelId? potionId = potion.Id;
+			if (potionId == null)
+			{
+				continue;
+			}
+			if (discovered.Add(potionId))
+			{
+				save.DiscoveredPotions.Add(potionId);
 			}
 		}
 	}

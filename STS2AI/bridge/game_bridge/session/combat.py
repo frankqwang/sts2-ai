@@ -312,6 +312,9 @@ class CombatSession(PipeSnapshotMixin):
         la = self._current_raw.get("legal_actions")
         return list(la) if isinstance(la, list) else []
 
+    def get_last_transport_metrics(self) -> dict[str, Any]:
+        return dict(getattr(self._conn, "last_call_metrics", {}) or {})
+
 
 def _unwrap_state(result: Any) -> dict[str, Any]:
     """ProtoCodec 直接返回 GameState dict;某些 opcode 返回 envelope。保一致。"""

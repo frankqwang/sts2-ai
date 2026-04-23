@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 
@@ -14,7 +14,7 @@ from .battle import (
     TargetSummary,
     TransitionDelta,
 )
-from .labels import FightLabel, SearchLabel
+from .labels import FightLabel
 
 
 @dataclass(slots=True)
@@ -40,6 +40,7 @@ class RawTransition:
     done: bool
     fight_outcome: str
     run_outcome: str
+    reward: float = 0.0
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -57,8 +58,8 @@ class TrainingSample:
     Important invariant:
     - A pool entry must own its own `TrainingSample` instance.
     - If the same logical decision point is admitted to multiple pools
-      (`recent_online`, `search`, `rare`), callers must clone via
-      `clone_for_pool()` instead of mutating and reusing the same object.
+      (`recent_online`, `rare`), callers must clone via `clone_for_pool()`
+      instead of mutating and reusing the same object.
     """
 
     sample_id: str
@@ -72,7 +73,6 @@ class TrainingSample:
     behavior_action_index: int
     delta: TransitionDelta
     fight_label: FightLabel
-    search_label: SearchLabel | None = None
     # Stable action identity carried alongside the categorical index so callers
     # do not need to mentally reconstruct "which action was chosen".
     behavior_action_id: str = ""
@@ -83,12 +83,26 @@ class TrainingSample:
     archetype_tags: list[str] = field(default_factory=list)
     rare_cohort_tags: list[str] = field(default_factory=list)
     policy_disagreement: float = 0.0
-    search_budget: float = 0.0
     step_progress_score: float = 0.0
     fight_score: float = 0.0
     episode_score_proxy: float = 0.0
     sample_weight: float = 1.0
     keep_score: float = 0.0
+    old_logprob: float = 0.0
+    old_value: float = 0.0
+    old_intent_logprob: float = 0.0
+    old_intent_value: float = 0.0
+    reward: float = 0.0
+    ppo_return: float = 0.0
+    ppo_advantage: float = 0.0
+    turn_id: int = 0
+    turn_start_mask: float = 0.0
+    active_intent: int = 0
+    turn_return: float = 0.0
+    turn_advantage: float = 0.0
+    chosen_action_future_targets: list[float] = field(default_factory=list)
+    submenu_confirm_target: float = 0.0
+    submenu_has_confirm: float = 0.0
     metadata: dict[str, str | float | int | bool] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -102,7 +116,13 @@ class TrainingSample:
             return self.legal_actions[0]
         raise IndexError("TrainingSample has no legal_actions to resolve behavior_action.")
 
-    def clone_for_pool(self, *, pool_name: str, keep_score: float | None = None, metadata: dict[str, str | float | int | bool] | None = None, search_label: SearchLabel | None = None) -> "TrainingSample":
+    def clone_for_pool(
+        self,
+        *,
+        pool_name: str,
+        keep_score: float | None = None,
+        metadata: dict[str, str | float | int | bool] | None = None,
+    ) -> "TrainingSample":
         merged_metadata = dict(self.metadata)
         if metadata:
             merged_metadata.update(metadata)
@@ -111,16 +131,7 @@ class TrainingSample:
             pool_name=pool_name,
             keep_score=self.keep_score if keep_score is None else keep_score,
             metadata=merged_metadata,
-            search_label=self.search_label if search_label is None else search_label,
         )
-
-
-@dataclass(slots=True)
-class SearchRequest:
-    request_id: str
-    sample: TrainingSample
-    priority: float
-    reason_tags: list[str] = field(default_factory=list)
 
 
 def compact_legal_action(action: LegalAction) -> LegalAction:
@@ -175,6 +186,7 @@ def compact_battle_state(state: BattleState) -> BattleState:
                 alive=enemy.alive,
                 buffs=dict(enemy.buffs),
                 tags=list(enemy.tags),
+                target_key=enemy.target_key,
             )
             for enemy in state.enemies
         ],
@@ -197,6 +209,9 @@ def compact_battle_state(state: BattleState) -> BattleState:
             draw_pile_size=state.piles.draw_pile_size,
             discard_pile_size=state.piles.discard_pile_size,
             exhaust_pile_size=state.piles.exhaust_pile_size,
+            draw_cards=list(state.piles.draw_cards),
+            discard_cards=list(state.piles.discard_cards),
+            exhaust_cards=list(state.piles.exhaust_cards),
             attack_count=state.piles.attack_count,
             skill_count=state.piles.skill_count,
             power_count=state.piles.power_count,
@@ -209,6 +224,7 @@ def compact_battle_state(state: BattleState) -> BattleState:
             floor=state.context.floor,
             encounter_class=state.context.encounter_class,
             encounter_id=state.context.encounter_id,
+            deck_cards=list(state.context.deck_cards),
             relics=list(state.context.relics),
             fixed_powers=list(state.context.fixed_powers),
             metadata=dict(state.context.metadata),
@@ -234,6 +250,7 @@ def compact_raw_transition(transition: RawTransition) -> RawTransition:
         done=transition.done,
         fight_outcome=transition.fight_outcome,
         run_outcome=transition.run_outcome,
+        reward=float(transition.reward),
         metadata=dict(transition.metadata),
     )
 

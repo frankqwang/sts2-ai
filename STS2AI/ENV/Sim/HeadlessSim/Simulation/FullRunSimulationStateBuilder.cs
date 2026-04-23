@@ -475,14 +475,13 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 		}
 		int maxSelect = selection.MaxSelect;
 		int selectedCount = selection.SelectedCards.Count;
-		bool selectionQuotaReached = maxSelect > 0 && selectedCount >= maxSelect;
-		bool previewShowing = selectionQuotaReached && selection.CanConfirm;
+		bool previewShowing = SelectionActionSemantics.IsQuotaReached(selectedCount, maxSelect) && selection.CanConfirm;
 		bool canCancel = selection.Cancelable;
 		if (!canCancel && previewShowing && selectedCount > 0)
 		{
 			canCancel = true;
 		}
-		if (!previewShowing)
+		if (SelectionActionSemantics.ShouldExposeSelectionActions(selectedCount, maxSelect, previewShowing))
 		{
 			foreach (CombatTrainingSelectableCardSnapshot card in selection.SelectableCards)
 			{
@@ -689,17 +688,21 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			}
 			if (combatState.IsHandSelectionActive && combatState.HandSelection != null)
 			{
-				foreach (CombatTrainingHandCardSnapshot card in combatState.HandSelection.SelectableCards)
+				CombatTrainingHandSelectionSnapshot handSelection = combatState.HandSelection;
+				if (SelectionActionSemantics.ShouldExposeSelectionActions(handSelection.SelectedCards.Count, handSelection.MaxSelect))
 				{
-					actions.Add(new FullRunSimulationLegalAction
+					foreach (CombatTrainingHandCardSnapshot card in handSelection.SelectableCards)
 					{
-						Action = "combat_select_card",
-						CardIndex = card.HandIndex,
-						Label = card.Title,
-						IsSupported = true
-					});
+						actions.Add(new FullRunSimulationLegalAction
+						{
+							Action = "combat_select_card",
+							CardIndex = card.HandIndex,
+							Label = card.Title,
+							IsSupported = true
+						});
+					}
 				}
-				if (combatState.HandSelection.CanConfirm)
+				if (handSelection.CanConfirm)
 				{
 					actions.Add(new FullRunSimulationLegalAction
 					{
@@ -712,17 +715,21 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			}
 			if (combatState.IsCardSelectionActive && combatState.CardSelection != null)
 			{
-				foreach (CombatTrainingSelectableCardSnapshot card2 in combatState.CardSelection.SelectableCards)
+				CombatTrainingCardSelectionSnapshot cardSelection = combatState.CardSelection;
+				if (SelectionActionSemantics.ShouldExposeSelectionActions(cardSelection.SelectedCards.Count, cardSelection.MaxSelect))
 				{
-					actions.Add(new FullRunSimulationLegalAction
+					foreach (CombatTrainingSelectableCardSnapshot card2 in cardSelection.SelectableCards)
 					{
-						Action = "combat_select_card",
-						CardIndex = card2.ChoiceIndex,
-						Label = card2.Title,
-						IsSupported = true
-					});
+						actions.Add(new FullRunSimulationLegalAction
+						{
+							Action = "combat_select_card",
+							CardIndex = card2.ChoiceIndex,
+							Label = card2.Title,
+							IsSupported = true
+						});
+					}
 				}
-				if (combatState.CardSelection.CanConfirm)
+				if (cardSelection.CanConfirm)
 				{
 					actions.Add(new FullRunSimulationLegalAction
 					{

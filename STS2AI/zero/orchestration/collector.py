@@ -1,213 +1,24 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import logging
 import math
 import random
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass
 from typing import Callable
 
-from ..domain import FightLabel, HistoryStep, RawTransition, SearchRequest, TrainingSample, TransitionDelta, assess_transition_progress, compact_raw_transition
-from ..ports import BattleRuntime, Policy, SearchBackend
-from .search import SearchQueueBuilder
+from ..domain import HistoryStep, RawTransition, TransitionDelta, assess_transition_progress, compact_raw_transition
+from ..ports import BattleRuntime, Policy
 
 
-@dataclass(slots=True)
-class SearchDecision:
-    action_index: int
-    priority: float
-    reason_tags: list[str]
-    search_policy: list[float]
-    search_topk: list[int]
-    search_best_action_index: int
-    search_ranking_margin: float
-    search_value: float
-    search_trace: list[dict[str, float | int | str | bool]]
-    source: str = "search"
-    search_duration_s: float = 0.0
-    search_simulations: int = 0
-    search_cache_hit: bool = False
-
-
-class SearchGuidedActionSelector:
-    """在 collect 时按优先级让 search backend 接管动作选择。"""
-
-    def __init__(
-        self,
-        *,
-        search_backend: SearchBackend,
-        queue_builder: SearchQueueBuilder,
-        policy: Policy | None = None,
-        priority_threshold: float,
-        max_guided_steps_per_episode: int,
-        target_encounters: tuple[str, ...] = (),
-    ):
-        self._search_backend = search_backend
-        self._queue_builder = queue_builder
-        self._policy = policy
-        self._priority_threshold = float(priority_threshold)
-        self._max_guided_steps_per_episode = max(0, int(max_guided_steps_per_episode))
-        self._target_encounters = {value.strip().upper() for value in target_encounters if value}
-        self._guided_steps = 0
-
-    def reset_episode(self) -> None:
-        self._guided_steps = 0
-
-    def maybe_select_action(
-        self,
-        *,
-        run_id: str,
-        fight_id: str,
-        step_idx: int,
-        state,
-        history: list[HistoryStep],
-        prefix_action_indices: list[int],
-        policy_scores: list[float],
-        policy_uncertainty: float,
-        policy_fight_win_prob: float,
-        policy_enemy_hp_fraction_dealt: float,
-        policy_self_hp_fraction_remaining: float,
-        greedy_action: int,
-    ) -> SearchDecision | None:
-        if not state.legal_actions or self._guided_steps >= self._max_guided_steps_per_episode:
-            return None
-        sample = _build_guidance_sample(
-            run_id=run_id,
-            fight_id=fight_id,
-            step_idx=step_idx,
-            state=state,
-            history=history,
-            prefix_action_indices=prefix_action_indices,
-            policy_uncertainty=policy_uncertainty,
-            policy_scores=policy_scores,
-            policy_fight_win_prob=policy_fight_win_prob,
-            policy_enemy_hp_fraction_dealt=policy_enemy_hp_fraction_dealt,
-            policy_self_hp_fraction_remaining=policy_self_hp_fraction_remaining,
-            greedy_action=greedy_action,
-        )
-        priority, reason_tags = self._queue_builder.score_sample(sample)
-        encounter_id = str(state.context.encounter_id or "").upper()
-        force_guidance = bool(encounter_id and encounter_id in self._target_encounters)
-        if not force_guidance and priority < self._priority_threshold:
-            return None
-        label = _label_with_optional_policy(
-            self._search_backend,
-            SearchRequest(
-                request_id=sample.sample_id,
-                sample=sample,
-                priority=max(priority, self._priority_threshold),
-                reason_tags=(["search_guided_target"] if force_guidance else []) + list(reason_tags),
-            ),
-            seed=str(state.context.metadata.get("seed", "")),
-            policy=self._policy,
-        )
-        action_index = int(label.best_action_index)
-        if action_index < 0 or action_index >= len(state.legal_actions):
-            return None
-        self._guided_steps += 1
-        return SearchDecision(
-            action_index=action_index,
-            priority=max(priority, self._priority_threshold),
-            reason_tags=(["search_guided_target"] if force_guidance else []) + list(reason_tags),
-            search_policy=list(label.policy),
-            search_topk=list(label.topk_indices),
-            search_best_action_index=int(label.best_action_index),
-            search_ranking_margin=float(label.ranking_margin),
-            search_value=float(label.search_value),
-            search_trace=list(label.search_trace),
-            search_duration_s=float(label.metadata.get("search_duration_s", 0.0) or 0.0),
-            search_simulations=int(label.metadata.get("search_simulations", 0) or 0),
-            search_cache_hit=bool(label.metadata.get("search_cache_hit", False)),
-            source="search_guided",
-        )
-
-
-class SearchSelfPlaySelector:
-    """每个决策点都调用搜索，并直接按搜索分布出动作。"""
-
-    def __init__(self, *, search_backend: SearchBackend, policy: Policy | None = None):
-        self._search_backend = search_backend
-        self._policy = policy
-
-    def select_action(
-        self,
-        *,
-        run_id: str,
-        fight_id: str,
-        step_idx: int,
-        state,
-        history: list[HistoryStep],
-        prefix_action_indices: list[int],
-        policy_scores: list[float],
-        policy_uncertainty: float,
-        policy_fight_win_prob: float,
-        policy_enemy_hp_fraction_dealt: float,
-        policy_self_hp_fraction_remaining: float,
-        greedy_action: int,
-        temperature: float,
-        epsilon_greedy: float,
-        rng: random.Random,
-    ) -> SearchDecision | None:
-        if not state.legal_actions:
-            return None
-        sample = _build_guidance_sample(
-            run_id=run_id,
-            fight_id=fight_id,
-            step_idx=step_idx,
-            state=state,
-            history=history,
-            prefix_action_indices=prefix_action_indices,
-            policy_uncertainty=policy_uncertainty,
-            policy_scores=policy_scores,
-            policy_fight_win_prob=policy_fight_win_prob,
-            policy_enemy_hp_fraction_dealt=policy_enemy_hp_fraction_dealt,
-            policy_self_hp_fraction_remaining=policy_self_hp_fraction_remaining,
-            greedy_action=greedy_action,
-        )
-        label = _label_with_optional_policy(
-            self._search_backend,
-            SearchRequest(
-                request_id=sample.sample_id,
-                sample=sample,
-                priority=1.0,
-                reason_tags=["search_self_play"],
-            ),
-            seed=str(state.context.metadata.get("seed", "")),
-            policy=self._policy,
-        )
-        if not label.policy:
-            return None
-        action_index = _sample_policy_action(
-            policy=label.policy,
-            best_action=label.best_action_index,
-            epsilon_greedy=epsilon_greedy,
-            temperature=temperature,
-            rng=rng,
-        )
-        if action_index < 0 or action_index >= len(state.legal_actions):
-            return None
-        return SearchDecision(
-            action_index=action_index,
-            priority=1.0,
-            reason_tags=["search_self_play"],
-            search_policy=list(label.policy),
-            search_topk=list(label.topk_indices),
-            search_best_action_index=int(label.best_action_index),
-            search_ranking_margin=float(label.ranking_margin),
-            search_value=float(label.search_value),
-            search_trace=list(label.search_trace),
-            search_duration_s=float(label.metadata.get("search_duration_s", 0.0) or 0.0),
-            search_simulations=int(label.metadata.get("search_simulations", 0) or 0),
-            search_cache_hit=bool(label.metadata.get("search_cache_hit", False)),
-            source="search_self_play",
-        )
+_logger = logging.getLogger(__name__)
 
 
 class TrajectoryCollector:
     """Roll out a policy and emit lossless-enough combat transitions.
 
-    Collector now supports:
+    Collector supports:
     - single-pass policy inference when the policy exposes `infer(state)`
     - rollout-time exploration (`temperature` / `epsilon_greedy`)
     - deterministic RNG control via `seed`
@@ -223,39 +34,53 @@ class TrajectoryCollector:
         epsilon_greedy: float = 0.0,
         temperature: float = 0.0,
         seed: int | None = None,
-        search_guidance_factory: Callable[[int | None], SearchGuidedActionSelector | None] | None = None,
-        search_self_play_factory: Callable[[int | None], SearchSelfPlaySelector | None] | None = None,
         on_episode_start: Callable[[dict[str, object]], None] | None = None,
         on_transition: Callable[[RawTransition], None] | None = None,
         on_episode_end: Callable[[dict[str, object]], None] | None = None,
     ) -> list[RawTransition]:
         transitions: list[RawTransition] = []
         rng = random.Random(seed)
-        search_guidance = search_guidance_factory(None) if search_guidance_factory is not None else None
-        search_self_play = search_self_play_factory(None) if search_self_play_factory is not None else None
         for episode_index in range(episodes):
             run_id = uuid.uuid4().hex
             fight_id = uuid.uuid4().hex
             runtime = runtime_factory()
-            if search_guidance is not None:
-                search_guidance.reset_episode()
             history_window: deque[HistoryStep] = deque()
             prefix_action_indices: list[int] = []
             episode_started_at = time.perf_counter()
             reset_duration_s = 0.0
             policy_infer_duration_s = 0.0
+            policy_collate_duration_s = 0.0
+            policy_forward_duration_s = 0.0
+            policy_postprocess_duration_s = 0.0
+            intent_forward_duration_s = 0.0
+            action_forward_duration_s = 0.0
+            batch_wait_duration_s = 0.0
+            batch_size_total = 0
+            batch_size_samples = 0
             env_step_duration_s = 0.0
+            runtime_reset_call_duration_s = 0.0
+            runtime_reset_transport_duration_s = 0.0
+            runtime_reset_transport_write_duration_s = 0.0
+            runtime_reset_transport_read_duration_s = 0.0
+            runtime_reset_transport_decode_duration_s = 0.0
+            runtime_reset_state_convert_duration_s = 0.0
+            runtime_step_call_duration_s = 0.0
+            runtime_step_transport_duration_s = 0.0
+            runtime_step_transport_write_duration_s = 0.0
+            runtime_step_transport_read_duration_s = 0.0
+            runtime_step_transport_decode_duration_s = 0.0
+            runtime_step_state_convert_duration_s = 0.0
             observe_duration_s = 0.0
             emit_duration_s = 0.0
-            search_duration_s = 0.0
-            search_simulations = 0
-            search_cache_hits = 0
             emitted_steps = 0
             last_state = None
             progress_steps = 0
             no_progress_steps = 0
             max_no_progress_streak = 0
             current_no_progress_streak = 0
+            turn_id_fallback_used_steps = 0
+            last_turn_id: int | None = None
+            turn_id_fallback_warned = False
             if on_episode_start is not None:
                 on_episode_start(
                     {
@@ -268,6 +93,21 @@ class TrajectoryCollector:
                 reset_started_at = time.perf_counter()
                 state = runtime.reset()
                 reset_duration_s = time.perf_counter() - reset_started_at
+                reset_timing = _runtime_timing(runtime, "get_last_reset_timing")
+                runtime_reset_call_duration_s = float(reset_timing.get("session_call_duration_s", 0.0) or 0.0)
+                runtime_reset_transport_duration_s = float(reset_timing.get("transport_duration_s", 0.0) or 0.0)
+                runtime_reset_transport_write_duration_s = float(
+                    reset_timing.get("transport_write_duration_s", 0.0) or 0.0
+                )
+                runtime_reset_transport_read_duration_s = float(
+                    reset_timing.get("transport_read_duration_s", 0.0) or 0.0
+                )
+                runtime_reset_transport_decode_duration_s = float(
+                    reset_timing.get("transport_decode_duration_s", 0.0) or 0.0
+                )
+                runtime_reset_state_convert_duration_s = float(
+                    reset_timing.get("state_convert_duration_s", 0.0) or 0.0
+                )
                 last_state = state
                 reset_hook = getattr(policy, "reset_episode", None)
                 if callable(reset_hook):
@@ -277,72 +117,92 @@ class TrajectoryCollector:
                         break
                     infer_started_at = time.perf_counter()
                     inference = self._infer_policy(policy, state)
+                    turn_id_fallback_used = bool(inference.get("turn_id_fallback_used", False))
+                    current_turn_id = int(inference.get("turn_id", 0) or 0)
+                    if current_turn_id > 0:
+                        if last_turn_id is not None and current_turn_id < last_turn_id:
+                            raise ValueError(
+                                f"turn_id 非单调: last_turn_id={last_turn_id} current_turn_id={current_turn_id} "
+                                f"episode_index={episode_index} run_id={run_id} fight_id={fight_id}"
+                            )
+                        last_turn_id = current_turn_id
+                    if turn_id_fallback_used:
+                        turn_id_fallback_used_steps += 1
+                        if not turn_id_fallback_warned:
+                            _logger.warning(
+                                "zero.collector turn_id fallback used episode_index=%s run_id=%s fight_id=%s",
+                                episode_index,
+                                run_id,
+                                fight_id,
+                            )
+                            turn_id_fallback_warned = True
                     policy_infer_duration_s += time.perf_counter() - infer_started_at
-                    scores = inference["scores"]
-                    greedy_action = inference["action_index"]
-                    uncertainty = inference["uncertainty"]
-                    search_decision = None
-                    if search_self_play is not None:
-                        search_decision = search_self_play.select_action(
-                            run_id=run_id,
-                            fight_id=fight_id,
-                            step_idx=step_idx,
-                            state=state,
-                            history=list(history_window),
-                            prefix_action_indices=prefix_action_indices,
-                            policy_scores=scores,
-                            policy_uncertainty=uncertainty,
-                            policy_fight_win_prob=float(inference.get("fight_win_prob", 0.0) or 0.0),
-                            policy_enemy_hp_fraction_dealt=float(inference.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
-                            policy_self_hp_fraction_remaining=float(inference.get("self_hp_fraction_remaining", 0.0) or 0.0),
-                            greedy_action=greedy_action,
-                            temperature=temperature,
-                            epsilon_greedy=epsilon_greedy,
-                            rng=rng,
-                        )
-                    elif search_guidance is not None:
-                        search_decision = search_guidance.maybe_select_action(
-                            run_id=run_id,
-                            fight_id=fight_id,
-                            step_idx=step_idx,
-                            state=state,
-                            history=list(history_window),
-                            prefix_action_indices=prefix_action_indices,
-                            policy_scores=scores,
-                            policy_uncertainty=uncertainty,
-                            policy_fight_win_prob=float(inference.get("fight_win_prob", 0.0) or 0.0),
-                            policy_enemy_hp_fraction_dealt=float(inference.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
-                            policy_self_hp_fraction_remaining=float(inference.get("self_hp_fraction_remaining", 0.0) or 0.0),
-                            greedy_action=greedy_action,
-                        )
-                    if search_decision is not None:
-                        search_duration_s += float(search_decision.search_duration_s)
-                        search_simulations += int(search_decision.search_simulations)
-                        search_cache_hits += int(search_decision.search_cache_hit)
-                    if search_self_play is not None:
-                        action_index = search_decision.action_index if search_decision is not None else greedy_action
-                    else:
-                        sampled_action_index = _sample_action(
-                            scores=scores,
-                            greedy_action=greedy_action,
+                    policy_collate_duration_s += float(inference.get("policy_collate_duration_s", 0.0) or 0.0)
+                    intent_forward_duration_s += float(inference.get("intent_forward_duration_s", 0.0) or 0.0)
+                    action_forward_duration_s += float(inference.get("action_forward_duration_s", 0.0) or 0.0)
+                    policy_forward_duration_s += float(inference.get("policy_forward_duration_s", 0.0) or 0.0)
+                    policy_postprocess_duration_s += float(inference.get("policy_postprocess_duration_s", 0.0) or 0.0)
+                    batch_wait_duration_s += float(inference.get("batch_wait_duration_s", 0.0) or 0.0)
+                    batch_size_total += int(inference.get("batch_size_effective", 1) or 1)
+                    batch_size_samples += 1
+                    is_turn_start = bool(inference.get("is_turn_start", False))
+                    chosen_intent = int(inference.get("active_intent", 0) or 0)
+                    behavior_intent_logprob = 0.0
+                    scores = [float(value) for value in (inference["scores"] or [])]
+                    greedy_action = int(inference["action_index"])
+                    intent_scores_raw = inference.get("intent_scores", [])
+                    has_intent_scores = bool(intent_scores_raw)
+                    if is_turn_start and has_intent_scores:
+                        intent_scores = [float(value) for value in intent_scores_raw]
+                        greedy_intent = chosen_intent
+                        chosen_intent, behavior_intent_logprob = _sample_action(
+                            scores=intent_scores,
+                            greedy_action=greedy_intent,
                             epsilon_greedy=epsilon_greedy,
                             temperature=temperature,
                             rng=rng,
                         )
-                        action_index = search_decision.action_index if search_decision is not None else sampled_action_index
-                    # 搜索返回的是当前 `state.legal_actions` 语义空间里的 index。
-                    # 后端 runtime 已支持在 `step(...)` 时把 legal index 映射回 raw action，
-                    # 因此这里不能再用 `state.raw["legal_actions"]` 的长度做过严校验，
-                    # 否则会把“legal 有效 / raw 稀疏或顺序不同”的搜索决策误清空，
-                    # 退回学生 greedy，看起来像“只有 step0 在搜”。
-                    if search_decision is not None and (action_index < 0 or action_index >= len(state.legal_actions)):
-                        search_decision = None
-                        action_index = greedy_action if search_self_play is not None else sampled_action_index
+                        intent_hook = getattr(policy, "observe_intent_choice", None)
+                        if callable(intent_hook):
+                            intent_hook(state, chosen_intent)
+                        action_scores_by_intent = inference.get("action_scores_by_intent", [])
+                        action_indices_by_intent = inference.get("action_index_by_intent", [])
+                        action_intent_count = len(action_scores_by_intent)
+                        if 0 <= chosen_intent < action_intent_count:
+                            chosen_scores = action_scores_by_intent[chosen_intent]
+                            scores = [float(value) for value in chosen_scores]
+                        action_index_count = len(action_indices_by_intent)
+                        if 0 <= chosen_intent < action_index_count:
+                            greedy_action = int(action_indices_by_intent[chosen_intent])
+                    model_log_probs = _compute_model_log_probs(scores)
+                    action_index, behavior_logprob = _sample_action(
+                        scores=scores,
+                        greedy_action=greedy_action,
+                        epsilon_greedy=epsilon_greedy,
+                        temperature=temperature,
+                        rng=rng,
+                    )
                     env_step_started_at = time.perf_counter()
                     next_state = runtime.step(action_index)
                     env_step_duration_s += time.perf_counter() - env_step_started_at
+                    step_timing = _runtime_timing(runtime, "get_last_step_timing")
+                    runtime_step_call_duration_s += float(step_timing.get("session_call_duration_s", 0.0) or 0.0)
+                    runtime_step_transport_duration_s += float(step_timing.get("transport_duration_s", 0.0) or 0.0)
+                    runtime_step_transport_write_duration_s += float(
+                        step_timing.get("transport_write_duration_s", 0.0) or 0.0
+                    )
+                    runtime_step_transport_read_duration_s += float(
+                        step_timing.get("transport_read_duration_s", 0.0) or 0.0
+                    )
+                    runtime_step_transport_decode_duration_s += float(
+                        step_timing.get("transport_decode_duration_s", 0.0) or 0.0
+                    )
+                    runtime_step_state_convert_duration_s += float(
+                        step_timing.get("state_convert_duration_s", 0.0) or 0.0
+                    )
                     action = state.legal_actions[action_index]
                     progress = assess_transition_progress(state, next_state)
+                    reward = _compute_reward(state, action, next_state)
                     if progress.made_progress:
                         progress_steps += 1
                         current_no_progress_streak = 0
@@ -362,27 +222,26 @@ class TrajectoryCollector:
                         done=next_state.terminal,
                         fight_outcome=next_state.run_outcome,
                         run_outcome=next_state.run_outcome,
+                        reward=float(reward),
                         metadata={
                             "action_id": action.action_id,
-                            "uncertainty": float(uncertainty),
+                            # PPO 分母应对应“旧模型本身”的策略概率，而不是 rollout
+                            # 采样器经 temperature / epsilon 扰动后的行为概率。
+                            "old_logprob": float(model_log_probs[action_index]) if model_log_probs else 0.0,
+                            "behavior_logprob": float(behavior_logprob),
+                            "value_pred": float(inference.get("ppo_value", 0.0) or 0.0),
+                            "old_intent_logprob": float(inference.get("old_intent_logprob", 0.0) or 0.0),
+                            "behavior_intent_logprob": float(behavior_intent_logprob),
+                            "old_intent_value": float(inference.get("intent_value", 0.0) or 0.0),
+                            "active_intent": int(chosen_intent),
+                            "turn_start_mask": 1 if is_turn_start else 0,
+                            "turn_id": int(inference.get("turn_id", 0) or 0),
+                            "turn_id_fallback_used": turn_id_fallback_used,
+                            "reward": float(reward),
                             "top2_gap": _top2_gap(scores),
                             "made_progress": bool(progress.made_progress),
                             "enemy_hp_delta": float(progress.enemy_hp_delta),
                             "enemy_count_delta": int(progress.enemy_count_delta),
-                            "search_guided": bool(search_decision is not None and search_decision.source == "search_guided"),
-                            "search_collected": bool(search_decision is not None and search_decision.source == "search_self_play"),
-                            "search_guidance_priority": float(search_decision.priority) if search_decision else 0.0,
-                            "search_guidance_tags": "|".join(search_decision.reason_tags) if search_decision else "",
-                            "search_policy": list(search_decision.search_policy) if search_decision else [],
-                            "search_topk": list(search_decision.search_topk) if search_decision else [],
-                            "search_best_action_index": int(search_decision.search_best_action_index) if search_decision else -1,
-                            "search_ranking_margin": float(search_decision.search_ranking_margin) if search_decision else 0.0,
-                            "search_value": float(search_decision.search_value) if search_decision else 0.0,
-                            "search_trace": list(search_decision.search_trace) if search_decision else [],
-                            "search_source": str(search_decision.source) if search_decision else "",
-                            "search_duration_s": float(search_decision.search_duration_s) if search_decision else 0.0,
-                            "search_simulations": int(search_decision.search_simulations) if search_decision else 0,
-                            "search_cache_hit": bool(search_decision.search_cache_hit) if search_decision else False,
                         },
                     )
                     if on_transition is not None:
@@ -421,7 +280,6 @@ class TrajectoryCollector:
                         + env_step_duration_s
                         + observe_duration_s
                         + emit_duration_s
-                        + search_duration_s
                     )
                     overhead_duration_s = max(0.0, duration_s - accounted_duration_s)
                     on_episode_end(
@@ -438,12 +296,46 @@ class TrajectoryCollector:
                             ),
                             "reset_duration_s": round(reset_duration_s, 6),
                             "policy_infer_duration_s": round(policy_infer_duration_s, 6),
+                            "policy_collate_duration_s": round(policy_collate_duration_s, 6),
+                            "intent_forward_duration_s": round(intent_forward_duration_s, 6),
+                            "action_forward_duration_s": round(action_forward_duration_s, 6),
+                            "policy_forward_duration_s": round(policy_forward_duration_s, 6),
+                            "policy_postprocess_duration_s": round(policy_postprocess_duration_s, 6),
+                            "avg_batch_wait_duration_s": round(
+                                batch_wait_duration_s / max(batch_size_samples, 1),
+                                6,
+                            ),
+                            "avg_batch_size_effective": round(
+                                batch_size_total / max(batch_size_samples, 1),
+                                4,
+                            ),
                             "env_step_duration_s": round(env_step_duration_s, 6),
+                            "runtime_reset_call_duration_s": round(runtime_reset_call_duration_s, 6),
+                            "runtime_reset_transport_duration_s": round(runtime_reset_transport_duration_s, 6),
+                            "runtime_reset_transport_write_duration_s": round(runtime_reset_transport_write_duration_s, 6),
+                            "runtime_reset_transport_read_duration_s": round(runtime_reset_transport_read_duration_s, 6),
+                            "runtime_reset_transport_decode_duration_s": round(
+                                runtime_reset_transport_decode_duration_s,
+                                6,
+                            ),
+                            "runtime_reset_state_convert_duration_s": round(
+                                runtime_reset_state_convert_duration_s,
+                                6,
+                            ),
+                            "runtime_step_call_duration_s": round(runtime_step_call_duration_s, 6),
+                            "runtime_step_transport_duration_s": round(runtime_step_transport_duration_s, 6),
+                            "runtime_step_transport_write_duration_s": round(runtime_step_transport_write_duration_s, 6),
+                            "runtime_step_transport_read_duration_s": round(runtime_step_transport_read_duration_s, 6),
+                            "runtime_step_transport_decode_duration_s": round(
+                                runtime_step_transport_decode_duration_s,
+                                6,
+                            ),
+                            "runtime_step_state_convert_duration_s": round(
+                                runtime_step_state_convert_duration_s,
+                                6,
+                            ),
                             "observe_duration_s": round(observe_duration_s, 6),
                             "emit_duration_s": round(emit_duration_s, 6),
-                            "search_duration_s": round(search_duration_s, 6),
-                            "search_simulations": int(search_simulations),
-                            "search_cache_hits": int(search_cache_hits),
                             "overhead_duration_s": round(overhead_duration_s, 6),
                             "terminal": bool(last_state.terminal) if last_state is not None else False,
                             "truncated": truncated,
@@ -453,6 +345,9 @@ class TrajectoryCollector:
                             "no_progress_steps": no_progress_steps,
                             "no_progress_ratio": round(no_progress_steps / max(emitted_steps, 1), 6),
                             "max_no_progress_streak": max_no_progress_streak,
+                            "turn_id_fallback_used_steps": int(turn_id_fallback_used_steps),
+                            "turn_id_fallback_used": bool(turn_id_fallback_used_steps > 0),
+                            "max_turn_id": int(last_turn_id or 0),
                         }
                     )
         return transitions
@@ -462,22 +357,63 @@ class TrajectoryCollector:
         if callable(infer_hook):
             result = infer_hook(state)
             return {
-                "scores": list(result.get("scores", [])),
+                "scores": result.get("scores", []),
                 "action_index": int(result.get("action_index", 0) or 0),
-                "uncertainty": float(result.get("uncertainty", 0.0) or 0.0),
+                "intent_scores": result.get("intent_scores", []),
+                "action_scores_by_intent": result.get("action_scores_by_intent", []),
+                "action_index_by_intent": result.get("action_index_by_intent", []),
+                "is_turn_start": bool(result.get("is_turn_start", False)),
+                "turn_id": int(result.get("turn_id", 0) or 0),
+                "turn_id_fallback_used": bool(result.get("turn_id_fallback_used", False)),
+                "active_intent": int(result.get("active_intent", 0) or 0),
+                "old_intent_logprob": float(result.get("old_intent_logprob", 0.0) or 0.0),
+                "intent_value": float(result.get("intent_value", 0.0) or 0.0),
                 "fight_win_prob": float(result.get("fight_win_prob", 0.0) or 0.0),
                 "enemy_hp_fraction_dealt": float(result.get("enemy_hp_fraction_dealt", 0.0) or 0.0),
                 "self_hp_fraction_remaining": float(result.get("self_hp_fraction_remaining", 0.0) or 0.0),
+                "ppo_value": float(result.get("ppo_value", 0.0) or 0.0),
+                "policy_collate_duration_s": float(result.get("policy_collate_duration_s", 0.0) or 0.0),
+                "intent_forward_duration_s": float(result.get("intent_forward_duration_s", 0.0) or 0.0),
+                "action_forward_duration_s": float(result.get("action_forward_duration_s", 0.0) or 0.0),
+                "policy_forward_duration_s": float(result.get("policy_forward_duration_s", 0.0) or 0.0),
+                "policy_postprocess_duration_s": float(result.get("policy_postprocess_duration_s", 0.0) or 0.0),
+                "batch_wait_duration_s": float(result.get("batch_wait_duration_s", 0.0) or 0.0),
+                "batch_size_effective": int(result.get("batch_size_effective", 1) or 1),
             }
         scores = policy.score_actions(state)
         return {
             "scores": scores,
             "action_index": int(policy.select_action(state)),
-            "uncertainty": float(policy.estimate_uncertainty(state)),
+            "intent_scores": [],
+            "action_scores_by_intent": [],
+            "action_index_by_intent": [],
+            "is_turn_start": False,
+            "turn_id": 0,
+            "turn_id_fallback_used": False,
+            "active_intent": 0,
+            "old_intent_logprob": 0.0,
+            "intent_value": 0.0,
             "fight_win_prob": 0.0,
             "enemy_hp_fraction_dealt": 0.0,
             "self_hp_fraction_remaining": 0.0,
+            "ppo_value": 0.0,
+            "policy_collate_duration_s": 0.0,
+            "intent_forward_duration_s": 0.0,
+            "action_forward_duration_s": 0.0,
+            "policy_forward_duration_s": 0.0,
+            "policy_postprocess_duration_s": 0.0,
+            "batch_wait_duration_s": 0.0,
+            "batch_size_effective": 1,
         }
+
+
+def _runtime_timing(runtime, method_name: str) -> dict[str, float]:
+    hook = getattr(runtime, method_name, None)
+    if callable(hook):
+        payload = hook()
+        if isinstance(payload, dict):
+            return payload
+    return {}
 
 
 def _top2_gap(scores: list[float]) -> float:
@@ -487,6 +423,56 @@ def _top2_gap(scores: list[float]) -> float:
     return float(ordered[0] - ordered[1])
 
 
+def _compute_reward(state, action, next_state) -> float:
+    current_enemy_hp = sum(float(enemy.hp) for enemy in state.enemies if enemy.alive)
+    next_enemy_hp = sum(float(enemy.hp) for enemy in next_state.enemies if enemy.alive)
+    current_enemy_max_hp = max(1.0, sum(float(enemy.max_hp) for enemy in state.enemies))
+    combat_start_hp = max(
+        1.0,
+        float(state.context.metadata.get("combat_start_hp") or 0.0)
+        or float(state.player.max_hp)
+        or float(state.player.hp)
+        or 1.0,
+    )
+    enemy_progress = max(0.0, current_enemy_hp - next_enemy_hp) / current_enemy_max_hp
+    self_loss = max(0.0, float(state.player.hp) - float(next_state.player.hp)) / combat_start_hp
+    engine_gain = max(0.0, _engine_buff_total(next_state.player.buffs) - _engine_buff_total(state.player.buffs))
+    exhaust_delta = max(0.0, float(next_state.piles.exhaust_pile_size) - float(state.piles.exhaust_pile_size))
+    engine_active = max(_engine_buff_total(state.player.buffs), _engine_buff_total(next_state.player.buffs))
+
+    reward = 0.15 * enemy_progress - 0.45 * self_loss - 0.003
+    reward += 0.06 * engine_gain
+    if exhaust_delta > 0.0:
+        if engine_active > 0.0:
+            reward += 0.04 * exhaust_delta * min(engine_active, 2.0)
+        else:
+            reward -= 0.01 * exhaust_delta
+    if getattr(action, "action_type", "") == "end_turn":
+        if any(legal.can_execute and legal.action_type != "end_turn" for legal in state.legal_actions):
+            reward -= 0.02 * max(0.0, float(state.player.energy))
+        if enemy_progress <= 0.0 and self_loss <= 0.0:
+            reward -= 0.03
+    outcome = str(next_state.run_outcome or "").strip().lower()
+    if next_state.terminal:
+        target_hp_after = max(0.0, float(state.context.metadata.get("combat_target_hp_after") or 0.0))
+        hp_target_gap_ratio = min(1.0, abs(max(0.0, float(next_state.player.hp)) - target_hp_after) / combat_start_hp)
+        if outcome in {"victory", "win"}:
+            reward += 2.0 + max(0.0, float(next_state.player.hp)) / combat_start_hp
+            reward += 0.5 * (1.0 - hp_target_gap_ratio)
+        else:
+            reward -= 2.0
+            reward -= 0.25 * hp_target_gap_ratio
+    return float(reward)
+
+
+def _engine_buff_total(buffs: dict[str, float]) -> float:
+    return (
+        float(buffs.get("FEEL_NO_PAIN_POWER", 0.0) or 0.0)
+        + float(buffs.get("DARK_EMBRACE_POWER", 0.0) or 0.0)
+        + float(buffs.get("PYRE_POWER", 0.0) or 0.0)
+    )
+
+
 def _sample_action(
     *,
     scores: list[float],
@@ -494,107 +480,45 @@ def _sample_action(
     epsilon_greedy: float,
     temperature: float,
     rng: random.Random,
-) -> int:
+) -> tuple[int, float]:
     if not scores:
-        return 0
+        return 0, 0.0
     greedy_action = min(max(greedy_action, 0), len(scores) - 1)
-    if epsilon_greedy > 0.0 and rng.random() < epsilon_greedy:
-        return rng.randrange(len(scores))
-    if temperature <= 0.0 or len(scores) == 1:
-        return greedy_action
-    max_score = max(scores)
-    logits = [(score - max_score) / max(temperature, 1e-6) for score in scores]
-    weights = [math.exp(min(50.0, value)) for value in logits]
-    if sum(weights) <= 0.0:
-        return greedy_action
-    return rng.choices(range(len(scores)), weights=weights, k=1)[0]
+    action_count = len(scores)
+    if temperature <= 0.0 or action_count == 1:
+        base_probs = [0.0 for _ in scores]
+        base_probs[greedy_action] = 1.0
+    else:
+        max_score = max(scores)
+        logits = [(score - max_score) / max(temperature, 1e-6) for score in scores]
+        weights = [math.exp(min(50.0, value)) for value in logits]
+        total = sum(weights)
+        if total <= 0.0:
+            base_probs = [0.0 for _ in scores]
+            base_probs[greedy_action] = 1.0
+        else:
+            base_probs = [weight / total for weight in weights]
 
-
-def _sample_policy_action(
-    *,
-    policy: list[float],
-    best_action: int,
-    epsilon_greedy: float,
-    temperature: float,
-    rng: random.Random,
-) -> int:
-    if not policy:
-        return max(0, best_action)
-    best_action = min(max(best_action, 0), len(policy) - 1)
-    if epsilon_greedy > 0.0 and rng.random() < epsilon_greedy:
-        return rng.randrange(len(policy))
-    if temperature <= 0.0 or len(policy) == 1:
-        return best_action
-    logits = [max(1e-8, float(value)) for value in policy]
-    adjusted = [pow(value, 1.0 / max(temperature, 1e-6)) for value in logits]
-    total = sum(adjusted)
+    epsilon = min(max(float(epsilon_greedy), 0.0), 1.0)
+    uniform_prob = 1.0 / float(action_count)
+    behavior_probs = [((1.0 - epsilon) * prob) + (epsilon * uniform_prob) for prob in base_probs]
+    total = sum(behavior_probs)
     if total <= 0.0:
-        return best_action
-    return rng.choices(range(len(policy)), weights=adjusted, k=1)[0]
+        return greedy_action, 0.0
+    normalized = [prob / total for prob in behavior_probs]
+    action_index = int(rng.choices(range(action_count), weights=normalized, k=1)[0])
+    return action_index, float(math.log(max(normalized[action_index], 1e-8)))
 
 
-def _label_with_optional_policy(search_backend: SearchBackend, request: SearchRequest, *, seed: str, policy: Policy | None):
-    if policy is None:
-        return search_backend.label_request(request, seed=seed)
-    try:
-        return search_backend.label_request(request, seed=seed, policy=policy)
-    except TypeError:
-        return search_backend.label_request(request, seed=seed)
-
-
-def _build_guidance_sample(
-    *,
-    run_id: str,
-    fight_id: str,
-    step_idx: int,
-    state,
-    history: list[HistoryStep],
-    prefix_action_indices: list[int],
-    policy_uncertainty: float,
-    policy_scores: list[float],
-    policy_fight_win_prob: float,
-    policy_enemy_hp_fraction_dealt: float,
-    policy_self_hp_fraction_remaining: float,
-    greedy_action: int,
-) -> TrainingSample:
-    return TrainingSample(
-        sample_id=f"guided:{fight_id}:{step_idx}",
-        run_id=run_id,
-        fight_id=fight_id,
-        step_idx=step_idx,
-        state=state,
-        history=history,
-        legal_actions=state.legal_actions,
-        behavior_action_index=max(0, min(greedy_action, max(len(state.legal_actions) - 1, 0))),
-        behavior_action_id=state.legal_actions[max(0, min(greedy_action, max(len(state.legal_actions) - 1, 0)))].action_id if state.legal_actions else "",
-        delta=TransitionDelta(),
-        fight_label=FightLabel(
-            fight_win=0.0,
-            enemy_hp_fraction_dealt=0.0,
-            self_hp_fraction_remaining=1.0,
-            player_hp=float(state.player.hp),
-            player_max_hp=float(max(state.player.max_hp, 1.0)),
-        ),
-        bucket_key=f"guided|{state.context.encounter_class}|floor{state.context.floor}",
-        pool_name="recent_online",
-        main_card_id=state.legal_actions[max(0, min(greedy_action, max(len(state.legal_actions) - 1, 0)))].card_id if state.legal_actions else "",
-        risk_band="normal",
-        step_progress_score=0.0,
-        fight_score=float(state.context.metadata.get("fight_score_hint", 0.0) or 0.0),
-        episode_score_proxy=0.0,
-        sample_weight=1.0,
-        keep_score=0.0,
-        metadata={
-            "prefix_action_indices": list(prefix_action_indices),
-            "uncertainty": float(policy_uncertainty),
-            "top2_gap": _top2_gap(policy_scores),
-            "policy_scores": list(policy_scores),
-            "policy_fight_win_prob": float(policy_fight_win_prob),
-            "policy_enemy_hp_fraction_dealt": float(policy_enemy_hp_fraction_dealt),
-            "policy_self_hp_fraction_remaining": float(policy_self_hp_fraction_remaining),
-            "fight_timeout": False,
-            "fight_no_progress_ratio": 0.0,
-            "hp_quality_score": 1.0,
-            "fight_score": 0.0,
-        },
-    )
+def _compute_model_log_probs(scores: list[float]) -> list[float]:
+    if not scores:
+        return []
+    max_score = max(scores)
+    shifted = [score - max_score for score in scores]
+    weights = [math.exp(max(-50.0, min(50.0, value))) for value in shifted]
+    total = sum(weights)
+    if total <= 0.0:
+        uniform_logprob = float(-math.log(len(scores)))
+        return [uniform_logprob for _ in scores]
+    probs = [weight / total for weight in weights]
+    return [float(math.log(max(prob, 1e-8))) for prob in probs]

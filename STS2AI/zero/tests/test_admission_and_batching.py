@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import unittest
 
@@ -42,7 +42,6 @@ def make_sample(*, encounter_class: str = "normal", alive_enemy: bool = True) ->
         fight_label=FightLabel(fight_win=0.0, enemy_hp_fraction_dealt=0.5, self_hp_fraction_remaining=0.25),
         rare_cohort_tags=["elite"] if encounter_class == "elite" else [],
         keep_score=1.2,
-        metadata={"uncertainty_target": 0.9},
     )
 
 
@@ -51,25 +50,9 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         planner = SampleAdmissionPlanner()
         sample = make_sample(encounter_class="elite")
         online_entries = planner.build_online_entries([sample])
-        search_entries = planner.build_search_entries([sample.clone_for_pool(pool_name="recent_online")])
 
         self.assertEqual([item.pool_name for item in online_entries], ["recent_online", "rare"])
-        self.assertEqual([item.pool_name for item in search_entries], ["search", "rare"])
         self.assertIsNot(online_entries[0], online_entries[1])
-        self.assertIsNot(search_entries[0], search_entries[1])
-
-    def test_search_admission_does_not_back_mutate_online_entry(self) -> None:
-        planner = SampleAdmissionPlanner()
-        sample = make_sample(encounter_class="elite")
-        online_entries = planner.build_online_entries([sample])
-        labeled_sample = sample.clone_for_pool(
-            pool_name="recent_online",
-            metadata={"search_priority": 1.5},
-        )
-        search_entries = planner.build_search_entries([labeled_sample])
-
-        self.assertNotIn("search_priority", online_entries[0].metadata)
-        self.assertEqual(search_entries[0].metadata["search_priority"], 1.5)
 
     def test_online_admission_thins_redundant_no_progress_samples(self) -> None:
         planner = SampleAdmissionPlanner()
@@ -100,11 +83,10 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         counts = _allocate_counts(
             3,
             [
-                ("recent_online", 0.35, 10),
-                ("search", 0.25, 10),
-                ("rare", 0.20, 10),
-                ("reanalyse", 0.10, 10),
-                ("legacy", 0.10, 10),
+                ("recent_online", 0.45, 10),
+                ("rare", 0.25, 10),
+                ("reanalyse", 0.15, 10),
+                ("legacy", 0.15, 10),
             ],
         )
 
@@ -115,17 +97,15 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         capacities = _allocate_capacities(
             target_total=12000,
             weighted_bases=[
-                ("recent_online", 0.35, 2048),
-                ("search", 0.25, 1024),
-                ("rare", 0.20, 256),
-                ("reanalyse", 0.10, 1024),
-                ("legacy", 0.10, 2048),
+                ("recent_online", 0.45, 2048),
+                ("rare", 0.25, 256),
+                ("reanalyse", 0.15, 1024),
+                ("legacy", 0.15, 2048),
             ],
         )
 
         self.assertEqual(sum(capacities.values()), 12000)
         self.assertGreater(capacities["recent_online"], 2048)
-        self.assertGreater(capacities["search"], 1024)
 
     def test_sample_pool_set_expands_capacity_and_prefers_higher_keep_score(self) -> None:
         pools = SamplePoolSet(PoolConfig())
@@ -148,7 +128,7 @@ class AdmissionAndBatchingTests(unittest.TestCase):
         self.assertIn("high", recent_items)
 
     def test_pool_counters_report_add_reject_and_sample(self) -> None:
-        pools = SamplePoolSet(PoolConfig(bucket_capacity=1, search_bucket_capacity=1, rare_bucket_capacity=1))
+        pools = SamplePoolSet(PoolConfig(bucket_capacity=1, rare_bucket_capacity=1))
         low = make_sample()
         low.sample_id = "low"
         low.keep_score = 0.1

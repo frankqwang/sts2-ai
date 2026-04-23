@@ -31,23 +31,50 @@ class CollectConfig:
     max_steps_per_episode: int = 200
     epsilon_greedy: float = 0.0
     temperature: float = 0.0
-    # 当前主线先做 RL，默认只用策略自身采样，不在 collect 阶段接搜索。
-    # search_guided_collect / search_only_collect 仅保留为显式实验模式。
-    mode: str = "policy_only_collect"
-    search_guidance_priority_threshold: float = 1.2
-    search_guidance_max_steps_per_episode: int = 8
-    search_guidance_target_encounters: tuple[str, ...] = ()
-    search_guidance_port_offset: int = 100
+    final_epsilon_greedy: float | None = None
+    final_temperature: float | None = None
+    anneal_iterations: int = 1
+
+    def resolve_for_iteration(self, iteration: int) -> tuple[float, float]:
+        epsilon_end = (
+            float(self.final_epsilon_greedy)
+            if self.final_epsilon_greedy is not None
+            else float(self.epsilon_greedy)
+        )
+        temperature_end = (
+            float(self.final_temperature)
+            if self.final_temperature is not None
+            else float(self.temperature)
+        )
+        total = max(1, int(self.anneal_iterations or 1))
+        if total <= 1:
+            progress = 1.0
+        else:
+            progress = min(max(float(iteration - 1), 0.0), float(total - 1)) / float(total - 1)
+        epsilon = float(self.epsilon_greedy) + (epsilon_end - float(self.epsilon_greedy)) * progress
+        temperature = float(self.temperature) + (temperature_end - float(self.temperature)) * progress
+        return max(0.0, epsilon), max(0.0, temperature)
 
 
 @dataclass(slots=True)
 class EncoderConfig:
+    policy_arch: str = "flat"
+    history_variant: str = "recurrent_gru"
+    model_variant: str | None = None
     hidden_dim: int = 256
     action_dim: int = 192
+    future_summary_dim: int = 3
     history_dim: int = 256
     history_steps: int = 8
-    history_layers: int = 4
+    history_layers: int = 1
     history_heads: int = 4
+    history_dropout: float = 0.1
+    history_gate_bias: float = -1.5
+    token_backbone_layers: int = 4
+    token_backbone_heads: int = 4
+    intent_vocab_size: int = 4
+    intent_dim: int = 64
+    microbatch_window_ms: float = 2.0
     max_enemies: int = 4
     max_hand_cards: int = 10
     buff_slots: int = 16
@@ -57,25 +84,24 @@ class EncoderConfig:
 @dataclass(slots=True)
 class LossWeights:
     policy: float = 1.0
+    policy_align: float = 0.25
     value: float = 0.5
-    ranking: float = 0.5
     delta: float = 0.2
-    uncertainty: float = 0.1
-    policy_search_kl_weight: float = 1.25
-    policy_behavior_ce_weight: float = 0.75
-    policy_bad_rollout_ce_scale: float = 0.35
+    future_summary: float = 0.1
+    submenu_policy: float = 0.35
+    submenu_confirm: float = 0.2
+    policy_behavior_ce_weight: float = 1.0
+    policy_value_align_temperature: float = 0.75
 
 
 @dataclass(slots=True)
 class PoolConfig:
-    recent_online_weight: float = 0.35
-    search_weight: float = 0.25
-    rare_weight: float = 0.20
-    reanalyse_weight: float = 0.10
-    legacy_weight: float = 0.10
+    recent_online_weight: float = 0.45
+    rare_weight: float = 0.25
+    reanalyse_weight: float = 0.15
+    legacy_weight: float = 0.15
     bucket_capacity: int = 2048
     rare_bucket_capacity: int = 256
-    search_bucket_capacity: int = 1024
     """样本池默认权重与基础容量。
 
     基础容量只是冷启动下限。运行中会根据最近若干轮样本量动态放大，
@@ -88,28 +114,8 @@ class PoolConfig:
 
 
 @dataclass(slots=True)
-class SearchConfig:
-    # 当前主线默认关闭搜索/MCTS；相关链路仅作为后续实验能力保留。
-    mode: str = "disabled"
-    top2_gap_threshold: float = 0.05
-    uncertainty_threshold: float = 0.55
-    near_lethal_hp_ratio: float = 0.25
-    max_requests_per_iteration: int = 0
-    max_root_actions: int = 8
-    rollouts_per_action: int = 2
-    max_branch_steps: int = 24
-    allow_branching: bool = False
-    rollout_policy: str = "aggregate_search_prior"
-    rollout_scorer: str = "fight_quality"
-    trace_topk: int = 4
-    enable_snapshot_restore: bool = True
-    leaf_eval_horizon: int = 3
-    leaf_value_weight: float = 0.75
-    root_cache_size: int = 128
-
-
-@dataclass(slots=True)
 class TrainConfig:
+    algorithm: str = "behavior_clone"
     batch_size: int = 32
     learning_rate: float = 3e-4
     weight_decay: float = 1e-4
@@ -120,6 +126,27 @@ class TrainConfig:
     device: str = "auto"
     amp_enabled: bool = True
     prefetch_batches: int = 2
+    ppo_clip_ratio: float = 0.2
+    ppo_value_coef: float = 0.5
+    ppo_turn_intent_coef: float = 1.0
+    ppo_turn_value_coef: float = 0.5
+    ppo_future_summary_coef: float = 0.10
+    ppo_policy_align_coef: float = 0.15
+    ppo_submenu_policy_coef: float = 0.35
+    ppo_submenu_confirm_coef: float = 0.20
+    ppo_policy_align_temperature: float = 0.75
+    ppo_behavior_ce_coef: float = 0.10
+    ppo_action_entropy_coef: float = 0.01
+    ppo_intent_entropy_coef: float = 0.05
+    ppo_entropy_coef: float = 0.01
+    action_imitation_adv_temperature: float = 5.0
+    ppo_advantage_norm: bool = True
+    ppo_gamma: float = 0.99
+    ppo_gae_lambda: float = 0.95
+    ppo_epochs: int = 4
+    ppo_value_clip: float = 0.2
+    normalize_step_returns: bool = True
+    normalize_turn_returns: bool = True
 
 
 @dataclass(slots=True)
@@ -127,7 +154,6 @@ class EvalConfig:
     episodes_per_cohort: int = 32
     promote_min_win_rate_gain: float = 0.01
     allow_hp_quality_drop: float = 0.02
-    promote_min_search_agreement_gain: float = 0.0
     promote_min_enemy_hp_gain: float = 0.0
     promote_min_fight_quality_gain: float = 0.0
     significance_z: float = 0.0
@@ -150,7 +176,6 @@ class ZeroConfig:
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     losses: LossWeights = field(default_factory=LossWeights)
     pools: PoolConfig = field(default_factory=PoolConfig)
-    search: SearchConfig = field(default_factory=SearchConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     evaluation: EvalConfig = field(default_factory=EvalConfig)
     checkpoints: CheckpointConfig = field(default_factory=CheckpointConfig)

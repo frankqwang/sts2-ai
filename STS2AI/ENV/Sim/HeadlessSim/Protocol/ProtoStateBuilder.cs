@@ -449,16 +449,19 @@ internal static class ProtoStateBuilder
 		if (snapshot.IsHandSelectionActive && snapshot.HandSelection != null)
 		{
 			var hs = snapshot.HandSelection;
-			foreach (CombatTrainingHandCardSnapshot card in hs.SelectableCards)
+			if (SelectionActionSemantics.ShouldExposeSelectionActions(hs.SelectedCards.Count, hs.MaxSelect))
 			{
-				gs.LegalActions.Add(new LegalAction
+				foreach (CombatTrainingHandCardSnapshot card in hs.SelectableCards)
 				{
-					Action = "select_hand_card",
-					Index = card.HandIndex,
-					CardIndex = card.HandIndex,
-					CardId = card.Id ?? "",
-					Label = card.Title ?? card.Id ?? "",
-				});
+					gs.LegalActions.Add(new LegalAction
+					{
+						Action = "select_hand_card",
+						Index = card.HandIndex,
+						CardIndex = card.HandIndex,
+						CardId = card.Id ?? "",
+						Label = card.Title ?? card.Id ?? "",
+					});
+				}
 			}
 			if (hs.CanConfirm)
 			{
@@ -474,16 +477,19 @@ internal static class ProtoStateBuilder
 		if (snapshot.IsCardSelectionActive && snapshot.CardSelection != null)
 		{
 			var cs = snapshot.CardSelection;
-			foreach (CombatTrainingSelectableCardSnapshot opt in cs.SelectableCards)
+			if (SelectionActionSemantics.ShouldExposeSelectionActions(cs.SelectedCards.Count, cs.MaxSelect))
 			{
-				gs.LegalActions.Add(new LegalAction
+				foreach (CombatTrainingSelectableCardSnapshot opt in cs.SelectableCards)
 				{
-					Action = "select_card_option",
-					Index = opt.ChoiceIndex,
-					CardIndex = opt.ChoiceIndex,
-					CardId = opt.Id ?? "",
-					Label = opt.Title ?? opt.Id ?? "",
-				});
+					gs.LegalActions.Add(new LegalAction
+					{
+						Action = "select_card_option",
+						Index = opt.ChoiceIndex,
+						CardIndex = opt.ChoiceIndex,
+						CardId = opt.Id ?? "",
+						Label = opt.Title ?? opt.Id ?? "",
+					});
+				}
 			}
 			if (cs.CanConfirm)
 			{

@@ -15,9 +15,10 @@ V0 目标很克制：
 """
 
 import json
+import random
 import sqlite3
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -29,8 +30,6 @@ from ..domain import (
     EvalSummary,
     FightLabel,
     RawTransition,
-    SearchLabel,
-    SearchRequest,
     assess_transition_progress,
     compute_fight_score,
     compute_hp_quality_score,
@@ -284,6 +283,41 @@ def _coerce_dict(value: object) -> dict[str, Any]:
 
 _default_starter_template = default_starter_build
 
+_ENGINE_POWER_IDS = {
+    "BARRICADE",
+    "CORRUPTION",
+    "DARK_EMBRACE",
+    "DEMON_FORM",
+    "EVOLVE",
+    "FEEL_NO_PAIN",
+    "INFLAME",
+    "METALLICIZE",
+    "PYRE",
+    "RUPTURE",
+}
+_EXHAUST_ENABLER_IDS = {
+    "BURNING_PACT",
+    "FIEND_FIRE",
+    "PURITY",
+    "SECOND_WIND",
+    "SEVER_SOUL",
+    "TRUE_GRIT",
+}
+_EXHAUST_PAYOFF_IDS = {
+    "DARK_EMBRACE",
+    "FEEL_NO_PAIN",
+    "PACTS_END",
+    "PYRE",
+}
+_RESOURCE_CARD_IDS = {
+    "BLOODLETTING",
+    "BURNING_PACT",
+    "INFERNAL_BLADE",
+    "OFFERING",
+    "POMMEL_STRIKE",
+    "SHRUG_IT_OFF",
+}
+
 
 def _default_game_wiki_db_path() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "game_wiki" / "game_catalog.sqlite"
@@ -526,96 +560,6 @@ def _build_card_usage_map(combat: dict[str, Any]) -> dict[str, dict[str, float |
     return usage
 
 
-class AggregateCardUsageSearchBackend:
-    """Weak search prior from human combat aggregates.
-
-    This is intentionally not a true oracle. It only says:
-    - actions whose card ids were used more / dealt more / blocked more in the
-      human fight should receive higher prior weight
-    - unmatched actions (including end_turn) get a small fallback score
-    """
-
-    def __init__(self, case: SkadaCombatCase):
-        self._case = case
-        self._score_table = {
-            card_id: (
-                1.0
-                + float(stats.get("plays") or 0.0)
-                + 0.05 * float(stats.get("damage") or 0.0)
-                + 0.05 * float(stats.get("block") or 0.0)
-            )
-            for card_id, stats in case.card_usage.items()
-        }
-
-    def label_request(self, request: SearchRequest, runtime_factory=None, seed: str | None = None) -> SearchLabel:
-        sample = request.sample
-        if not sample.legal_actions:
-            return SearchLabel(search_value=float(self._case.won))
-        scores = []
-        for action in sample.legal_actions:
-            score = self._score_table.get(action.card_id.upper(), 0.05)
-            if action.action_type == "end_turn":
-                score = 0.01
-            scores.append(float(score))
-        total = sum(scores) or 1.0
-        policy = [score / total for score in scores]
-        best_action_index = max(range(len(scores)), key=lambda idx: scores[idx])
-        ordered = sorted(scores, reverse=True)
-        margin = float(ordered[0] - ordered[1]) if len(ordered) >= 2 else float(ordered[0])
-        return SearchLabel(
-            policy=policy,
-            topk_indices=sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[: min(3, len(scores))],
-            best_action_index=best_action_index,
-            ranking_margin=margin,
-            search_value=FightLabel(
-                fight_win=1.0 if self._case.won else 0.0,
-                enemy_hp_fraction_dealt=1.0 if self._case.won else 0.7,
-                self_hp_fraction_remaining=max(
-                    0.0,
-                    min(
-                        1.0,
-                        float(self._case.floor_state.get("hp_after", 0) or 0)
-                        / float(max(int(self._case.build.max_hp), 1)),
-                    ),
-                ),
-                player_hp=float(self._case.floor_state.get("hp_after", 0) or 0),
-                player_max_hp=float(max(int(self._case.build.max_hp), 1)),
-            ).fight_score,
-            metadata={"search_prior": "AggregateCardUsageSearchBackend"},
-        )
-
-
-class MultiCaseAggregateSearchBackend:
-    """Dispatch aggregate card-usage search backends by replay case id.
-
-    This keeps the V0 aggregate prior simple while allowing one training job to mix
-    many skada-derived combat roots.
-    """
-
-    def __init__(self, cases: Iterable[SkadaCombatCase]):
-        case_list = list(cases)
-        search_backend_map = {case.case_id: AggregateCardUsageSearchBackend(case) for case in case_list}
-        if not search_backend_map:
-            raise ValueError("MultiCaseAggregateSearchBackend 需要至少一个 case。")
-        self._cases = case_list
-        self._search_backends = search_backend_map
-
-    def label_request(self, request: SearchRequest, runtime_factory=None, seed: str | None = None) -> SearchLabel:
-        case_id = str(request.sample.state.context.metadata.get("skada_case_id") or "")
-        search_backend = self._search_backends.get(case_id)
-        if search_backend is None:
-            fallback_search_backend = next(iter(self._search_backends.values()))
-            label = fallback_search_backend.label_request(request, runtime_factory=runtime_factory, seed=seed)
-            metadata = dict(label.metadata)
-            metadata["search_fallback_case_id"] = case_id
-            label.metadata = metadata
-            return label
-        return search_backend.label_request(request, runtime_factory=runtime_factory, seed=seed)
-
-    def clone_for_port(self, port: int) -> "MultiCaseAggregateSearchBackend":
-        return MultiCaseAggregateSearchBackend(self._cases)
-
-
 class SkadaReplayRuntime:
     """BattleRuntime wrapper that annotates states with stable skada case metadata."""
 
@@ -680,8 +624,23 @@ class SkadaReplayRuntime:
         # 让后续 episode 继续复用 reset-only 路径，真正关闭交给进程级清理。
         return None
 
+    def get_last_reset_timing(self) -> dict[str, float]:
+        hook = getattr(self._runtime, "get_last_reset_timing", None)
+        if callable(hook):
+            return dict(hook() or {})
+        return {}
+
+    def get_last_step_timing(self) -> dict[str, float]:
+        hook = getattr(self._runtime, "get_last_step_timing", None)
+        if callable(hook):
+            return dict(hook() or {})
+        return {}
+
     def _decorate_state(self, state):
         metadata = dict(state.context.metadata)
+        build_counts = _build_semantic_counts(self._case.build)
+        combat_start_hp = int(self._case.build.current_hp or 0)
+        combat_target_hp_after = int((self._case.floor_state or {}).get("hp_after") or 0)
         metadata.update(
             {
                 "skada_case_id": self._case.case_id,
@@ -689,6 +648,14 @@ class SkadaReplayRuntime:
                 "skada_floor": self._case.floor,
                 "skada_source_line": self._case.source_line,
                 "skada_source_path": self._case.source_path,
+                "combat_start_hp": combat_start_hp,
+                "combat_target_hp_after": combat_target_hp_after,
+                "combat_target_hp_loss_ratio": _safe_ratio(combat_start_hp - combat_target_hp_after, combat_start_hp),
+                "build_engine_count": float(build_counts["engine"]),
+                "build_enabler_count": float(build_counts["enabler"]),
+                "build_payoff_count": float(build_counts["payoff"]),
+                "build_resource_count": float(build_counts["resource"]),
+                "build_card_count": float(build_counts["total_cards"]),
             }
         )
         state.context.metadata = metadata
@@ -699,6 +666,38 @@ def close_shared_replay_runtimes() -> None:
     for runtime in list(_SHARED_REPLAY_RUNTIMES.values()):
         runtime.close()
     _SHARED_REPLAY_RUNTIMES.clear()
+
+
+def _normalize_card_id(value: str) -> str:
+    return str(value or "").upper().replace("+", "").strip()
+
+
+def _build_semantic_counts(build: SkadaBuild) -> dict[str, float]:
+    counts = {
+        "engine": 0.0,
+        "enabler": 0.0,
+        "payoff": 0.0,
+        "resource": 0.0,
+        "total_cards": float(len(build.deck)),
+    }
+    for card in build.deck:
+        card_id = _normalize_card_id(str(card.get("id") or ""))
+        if card_id in _ENGINE_POWER_IDS:
+            counts["engine"] += 1.0
+        if card_id in _EXHAUST_ENABLER_IDS:
+            counts["enabler"] += 1.0
+        if card_id in _EXHAUST_PAYOFF_IDS:
+            counts["payoff"] += 1.0
+        if card_id in _RESOURCE_CARD_IDS:
+            counts["resource"] += 1.0
+    return counts
+
+
+def _safe_ratio(value: float, total: float) -> float:
+    total = float(total or 0.0)
+    if total <= 0.0:
+        return 0.0
+    return float(value) / total
 
 
 class OrderedRunRuntimeFactory:
@@ -757,6 +756,75 @@ class OrderedRunRuntimeFactory:
         return self._cases[self._index].case_id
 
 
+class SkadaCaseRuntimeFactory:
+    """通用 skada combat runtime factory。
+
+    用途：
+    - 单 case / targeted case / random cases 训练
+    - 支持 `clone_for_port(...)`，便于并发 collect 复用同一套 case 选择语义
+
+    `mode` 语义：
+    - `fixed`: 始终返回第一条 case
+    - `ordered`: 每次调用按顺序轮转 case，独立于胜负
+    - `random`: 每次调用随机采样一个 case
+    """
+
+    def __init__(
+        self,
+        cases: list[SkadaCombatCase],
+        *,
+        mode: str = "fixed",
+        seed: int = 0,
+        port: int = 15527,
+        auto_launch: bool = True,
+        connect_timeout_s: float = 30.0,
+    ):
+        if not cases:
+            raise ValueError("SkadaCaseRuntimeFactory 需要至少一个 case。")
+        normalized_mode = str(mode or "fixed").strip().lower()
+        if normalized_mode not in {"fixed", "ordered", "random"}:
+            raise ValueError(f"不支持的 case runtime mode: {mode}")
+        self._cases = list(cases)
+        self._mode = normalized_mode
+        self._seed = int(seed)
+        self._port = port
+        self._auto_launch = auto_launch
+        self._connect_timeout_s = connect_timeout_s
+        self._index = 0
+        self._rng = random.Random(self._seed)
+
+    def __call__(self) -> SkadaReplayRuntime:
+        if self._mode == "random":
+            case = self._rng.choice(self._cases)
+        elif self._mode == "ordered":
+            case = self._cases[self._index]
+            self._index = (self._index + 1) % len(self._cases)
+        else:
+            case = self._cases[0]
+        return SkadaReplayRuntime(
+            case,
+            port=self._port,
+            auto_launch=self._auto_launch,
+            connect_timeout_s=self._connect_timeout_s,
+        )
+
+    def clone_for_port(self, port: int) -> "SkadaCaseRuntimeFactory":
+        return SkadaCaseRuntimeFactory(
+            list(self._cases),
+            mode=self._mode,
+            seed=self._seed + int(port),
+            port=port,
+            auto_launch=self._auto_launch,
+            connect_timeout_s=self._connect_timeout_s,
+        )
+
+    @property
+    def current_case_id(self) -> str:
+        if self._mode == "ordered":
+            return self._cases[self._index].case_id
+        return self._cases[0].case_id
+
+
 class FixedSkadaCaseEvaluator:
     """Evaluate a policy on one or more fixed skada-derived combat roots.
 
@@ -790,10 +858,6 @@ class FixedSkadaCaseEvaluator:
         for case_index, case in enumerate(self._cases):
             episode_labels: list[FightLabel] = []
             episode_metrics: list[dict[str, float | int | bool]] = []
-            agreement_hits = 0.0
-            overlap_hits = 0.0
-            agreement_steps = 0
-            search_backend = AggregateCardUsageSearchBackend(case)
             for episode_index in range(self._episodes_per_case):
                 result = _rollout_case_episode(
                     case=case,
@@ -803,24 +867,17 @@ class FixedSkadaCaseEvaluator:
                     connect_timeout_s=self._connect_timeout_s,
                     trace_name=self._trace_name,
                     artifact_store=self._artifact_store,
-                    search_backend=search_backend,
                     case_index=case_index,
                     episode_index=episode_index,
                 )
                 episode_labels.append(result["label"])
                 episode_metrics.append(result["metrics"])
-                agreement_hits += float(result["agreement_hits"])
-                overlap_hits += float(result["overlap_hits"])
-                agreement_steps += int(result["agreement_steps"])
 
             summaries.append(
                 _build_case_eval_summary(
                     case=case,
                     labels=episode_labels,
                     metrics=episode_metrics,
-                    agreement_hits=agreement_hits,
-                    overlap_hits=overlap_hits,
-                    agreement_steps=agreement_steps,
                     metadata_extra={},
                 )
             )
@@ -865,7 +922,6 @@ class OrderedRunCaseEvaluator:
     def evaluate(self, policy) -> list[EvalSummary]:
         per_case_labels: dict[str, list[FightLabel]] = defaultdict(list)
         per_case_metrics: dict[str, list[dict[str, float | int | bool]]] = defaultdict(list)
-        per_case_agreement: dict[str, list[tuple[float, float, int]]] = defaultdict(list)
 
         for attempt_index in range(self._run_attempts):
             for case_index, case in enumerate(self._cases):
@@ -877,19 +933,11 @@ class OrderedRunCaseEvaluator:
                     connect_timeout_s=self._connect_timeout_s,
                     trace_name=self._trace_name,
                     artifact_store=self._artifact_store,
-                    search_backend=AggregateCardUsageSearchBackend(case),
                     case_index=case_index,
                     episode_index=attempt_index,
                 )
                 per_case_labels[case.case_id].append(result["label"])
                 per_case_metrics[case.case_id].append(result["metrics"])
-                per_case_agreement[case.case_id].append(
-                    (
-                        float(result["agreement_hits"]),
-                        float(result["overlap_hits"]),
-                        int(result["agreement_steps"]),
-                    )
-                )
                 if not bool(result["success"]):
                     break
 
@@ -897,18 +945,11 @@ class OrderedRunCaseEvaluator:
         for case in self._cases:
             labels = per_case_labels.get(case.case_id, [])
             metrics = per_case_metrics.get(case.case_id, [])
-            agreement_stats = per_case_agreement.get(case.case_id, [])
-            agreement_hits = sum(item[0] for item in agreement_stats)
-            overlap_hits = sum(item[1] for item in agreement_stats)
-            agreement_steps = sum(item[2] for item in agreement_stats)
             summaries.append(
                 _build_case_eval_summary(
                     case=case,
                     labels=labels,
                     metrics=metrics,
-                    agreement_hits=agreement_hits,
-                    overlap_hits=overlap_hits,
-                    agreement_steps=agreement_steps,
                     metadata_extra={
                         "run_attempts": self._run_attempts,
                         "reached_episodes": len(labels),
@@ -928,7 +969,6 @@ def _rollout_case_episode(
     connect_timeout_s: float,
     trace_name: str,
     artifact_store: ArtifactStore | None,
-    search_backend: AggregateCardUsageSearchBackend,
     case_index: int,
     episode_index: int,
 ) -> dict[str, object]:
@@ -963,9 +1003,6 @@ def _rollout_case_episode(
         no_progress_steps = 0
         max_no_progress_streak = 0
         current_no_progress_streak = 0
-        agreement_hits = 0.0
-        overlap_hits = 0.0
-        agreement_steps = 0
         for _ in range(200):
             if state.terminal or not state.legal_actions:
                 break
@@ -974,18 +1011,15 @@ def _rollout_case_episode(
             inference = infer_hook(state) if callable(infer_hook) else None
             if isinstance(inference, dict):
                 action_index = int(inference.get("action_index", 0) or 0)
-                policy_scores = list(inference.get("scores", []) or [])
-                policy_uncertainty = float(inference.get("uncertainty", 0.0) or 0.0)
+                raw_scores = inference.get("scores", [])
+                if hasattr(raw_scores, "tolist"):
+                    policy_scores = [float(value) for value in raw_scores.tolist()]
+                else:
+                    policy_scores = list(raw_scores or [])
             else:
                 action_index = policy.select_action(state)
                 policy_scores = []
-                policy_uncertainty = float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0)
             policy_select_duration_s += time.perf_counter() - infer_started_at
-            search_label = _search_label_for_actions(search_backend, state.legal_actions)
-            if search_label.best_action_index >= 0:
-                agreement_steps += 1
-                agreement_hits += 1.0 if action_index == search_label.best_action_index else 0.0
-                overlap_hits += 1.0 if action_index in search_label.topk_indices else 0.0
             chosen_action = state.legal_actions[action_index] if state.legal_actions else None
             env_step_started_at = time.perf_counter()
             next_state = runtime.step(action_index)
@@ -1011,7 +1045,6 @@ def _rollout_case_episode(
                 fight_outcome=next_state.run_outcome,
                 run_outcome=next_state.run_outcome,
                 metadata={
-                    "uncertainty": float(getattr(policy, "estimate_uncertainty", lambda _state: 0.0)(state) or 0.0),
                     "top2_gap": 0.0,
                     "made_progress": bool(progress.made_progress),
                     "enemy_hp_delta": float(progress.enemy_hp_delta),
@@ -1041,15 +1074,10 @@ def _rollout_case_episode(
                     "card_id": chosen_action.card_id if chosen_action is not None else "",
                     "target_id": chosen_action.target_id if chosen_action is not None else "",
                     "policy_scores": policy_scores,
-                    "policy_uncertainty": policy_uncertainty,
                     "policy_topk_indices": _topk_indices_from_scores(policy_scores, topk=4),
                     "state": serialized_transition["state"],
                     "action": serialized_transition["action"],
                     "next_state": serialized_transition["next_state"],
-                    "search_best_action_index": search_label.best_action_index,
-                    "search_topk_indices": search_label.topk_indices,
-                    "search_policy": search_label.policy,
-                    "search_trace": search_label.search_trace,
                     "made_progress": bool(progress.made_progress),
                     "enemy_hp_delta": float(progress.enemy_hp_delta),
                     "enemy_count_delta": int(progress.enemy_count_delta),
@@ -1133,9 +1161,6 @@ def _rollout_case_episode(
         return {
             "label": _build_eval_label(state, truncated=truncated),
             "metrics": metrics,
-            "agreement_hits": agreement_hits,
-            "overlap_hits": overlap_hits,
-            "agreement_steps": agreement_steps,
             "success": success,
         }
     finally:
@@ -1147,9 +1172,6 @@ def _build_case_eval_summary(
     case: SkadaCombatCase,
     labels: list[FightLabel],
     metrics: list[dict[str, float | int | bool]],
-    agreement_hits: float,
-    overlap_hits: float,
-    agreement_steps: int,
     metadata_extra: dict[str, object],
 ) -> EvalSummary:
     aggregate = _aggregate_eval_labels(labels)
@@ -1201,8 +1223,6 @@ def _build_case_eval_summary(
         fight_win_rate=aggregate.fight_win,
         enemy_hp_fraction_dealt=aggregate.enemy_hp_fraction_dealt,
         self_hp_fraction_remaining=aggregate.self_hp_fraction_remaining,
-        search_agreement_at_1=(agreement_hits / agreement_steps) if agreement_steps else 0.0,
-        search_topk_overlap=(overlap_hits / agreement_steps) if agreement_steps else 0.0,
         metadata=metadata,
     )
 
@@ -1246,27 +1266,6 @@ def _aggregate_eval_labels(labels: list[FightLabel]) -> FightLabel:
         self_hp_fraction_remaining=sum(label.self_hp_fraction_remaining for label in labels) / denom,
         player_hp=sum(label.player_hp for label in labels) / denom,
         player_max_hp=sum(label.player_max_hp for label in labels) / denom,
-    )
-
-
-def _search_label_for_actions(search_backend: AggregateCardUsageSearchBackend, legal_actions) -> SearchLabel:
-    if not legal_actions:
-        return SearchLabel(best_action_index=-1)
-    scores = []
-    for action in legal_actions:
-        score = search_backend._score_table.get(action.card_id.upper(), 0.05)
-        if action.action_type == "end_turn":
-            score = 0.01
-        scores.append(float(score))
-    total = sum(scores) or 1.0
-    policy = [score / total for score in scores]
-    best_action_index = max(range(len(scores)), key=lambda idx: scores[idx])
-    return SearchLabel(
-        policy=policy,
-        topk_indices=sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)[: min(3, len(scores))],
-        best_action_index=best_action_index,
-        ranking_margin=0.0,
-        search_value=0.0,
     )
 
 

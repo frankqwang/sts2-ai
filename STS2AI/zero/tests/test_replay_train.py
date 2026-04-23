@@ -3,19 +3,33 @@ from __future__ import annotations
 import tempfile
 import unittest
 import os
+import importlib.util
+import sys
 from pathlib import Path
 
-from zero.config import SearchConfig, ZeroConfig
-from zero.domain import IterationManifest, PromotionDecision, TrainingSummary
+from zero.config import ZeroConfig
 from zero.paths import ZeroPaths
-from zero.replay import NoopSearchBackend, SkadaBuild, SkadaCombatCase
+from zero.replay import SkadaBuild, SkadaCombatCase
 from zero.replay.train import (
     build_fresh_policy,
-    build_search_backend,
-    normalize_search_mode,
+    merge_manifest_history,
+    resolve_resume_iteration_start,
+    resolve_shared_sim_layout,
     resolve_run_output_root,
 )
 from zero.orchestration import ModelPolicyAdapter
+from zero.orchestration.trainer import _sanitize_score_list
+
+_CASE_PACK_MODULE_PATH = Path(__file__).resolve().parents[2] / "data" / "skada" / "generate_zero_case_pack.py"
+_CASE_PACK_SPEC = importlib.util.spec_from_file_location("generate_zero_case_pack", _CASE_PACK_MODULE_PATH)
+if _CASE_PACK_SPEC is None or _CASE_PACK_SPEC.loader is None:
+    raise RuntimeError(f"无法加载 case pack 脚本: {_CASE_PACK_MODULE_PATH}")
+_CASE_PACK_MODULE = importlib.util.module_from_spec(_CASE_PACK_SPEC)
+sys.modules[_CASE_PACK_SPEC.name] = _CASE_PACK_MODULE
+_CASE_PACK_SPEC.loader.exec_module(_CASE_PACK_MODULE)
+BUCKETS = _CASE_PACK_MODULE.BUCKETS
+build_case_pack = _CASE_PACK_MODULE.build_case_pack
+classify_case_bucket = _CASE_PACK_MODULE.classify_case_bucket
 
 
 def _make_case() -> SkadaCombatCase:
@@ -37,45 +51,17 @@ def _make_case() -> SkadaCombatCase:
 
 
 class ReplayTrainHelpersTests(unittest.TestCase):
+    def test_sanitize_score_list_replaces_nonfinite_values(self) -> None:
+        sanitized = _sanitize_score_list([1.0, float("nan"), float("inf"), -float("inf"), -3.5])
+        self.assertEqual(sanitized[0], 1.0)
+        self.assertEqual(sanitized[1], -1.0e9)
+        self.assertEqual(sanitized[2], -1.0e9)
+        self.assertEqual(sanitized[3], -1.0e9)
+        self.assertEqual(sanitized[4], -3.5)
+
     def test_build_fresh_policy_returns_model_policy_adapter(self) -> None:
         policy = build_fresh_policy(ZeroConfig())
         self.assertIsInstance(policy, ModelPolicyAdapter)
-
-    def test_normalize_search_mode_keeps_only_public_search_modes(self) -> None:
-        self.assertEqual(normalize_search_mode("disabled"), "disabled")
-        self.assertEqual(normalize_search_mode("search_root_sweep"), "search_root_sweep")
-        self.assertEqual(normalize_search_mode("search_branching"), "search_branching")
-
-    def test_build_search_backend_returns_noop_backend_when_search_is_disabled(self) -> None:
-        backend = build_search_backend(
-            [_make_case()],
-            search_mode="disabled",
-            config=SearchConfig(),
-            port=15527,
-            auto_launch=False,
-            connect_timeout_s=1.0,
-        )
-        self.assertIsInstance(backend, NoopSearchBackend)
-
-    def test_build_search_backend_rejects_non_disabled_modes(self) -> None:
-        with self.assertRaises(ValueError):
-            build_search_backend(
-                [_make_case()],
-                search_mode="search_root_sweep",
-                config=SearchConfig(),
-                port=15527,
-                auto_launch=False,
-                connect_timeout_s=1.0,
-            )
-        with self.assertRaises(ValueError):
-            build_search_backend(
-                [_make_case()],
-                search_mode="weak",
-                config=SearchConfig(),
-                port=15527,
-                auto_launch=False,
-                connect_timeout_s=1.0,
-            )
 
     def test_resolve_run_output_root_prefers_stable_run_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -92,8 +78,8 @@ class ReplayTrainHelpersTests(unittest.TestCase):
     def test_resolve_run_output_root_reuses_latest_legacy_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base_root = Path(temp_dir)
-            legacy_old = base_root / "04-20-10-00-skada-replay-train" / "my_run"
-            legacy_new = base_root / "04-21-10-00-skada-replay-train" / "my_run"
+            legacy_old = base_root / "0420-1000-skada-replay-train" / "my_run"
+            legacy_new = base_root / "0421-1000-skada-replay-train" / "my_run"
             legacy_old.mkdir(parents=True, exist_ok=True)
             legacy_new.mkdir(parents=True, exist_ok=True)
             os.utime(legacy_old, (1, 1))
@@ -116,27 +102,103 @@ class ReplayTrainHelpersTests(unittest.TestCase):
             self.assertEqual(resolved.parent, base_root)
             self.assertTrue(resolved.name.endswith("my_run"))
 
-    def test_zero_paths_uses_search_labels_as_public_artifact_dir(self) -> None:
+    def test_zero_paths_exposes_expected_subdirs(self) -> None:
         paths = ZeroPaths(root=Path("C:/tmp/zero-run"))
-        self.assertEqual(paths.search_labels, Path("C:/tmp/zero-run/search_labels"))
-        self.assertEqual(paths.search_labels, paths.search_labels)
+        self.assertEqual(paths.raw_runs, Path("C:/tmp/zero-run/raw_runs"))
+        self.assertEqual(paths.dataset_shards, Path("C:/tmp/zero-run/dataset_shards"))
+        self.assertEqual(paths.manifests, Path("C:/tmp/zero-run/manifests"))
 
-    def test_iteration_manifest_to_dict_uses_public_search_policy_names(self) -> None:
-        manifest = IterationManifest(
-            iteration=1,
-            collector_version="policy_v0001",
-            search_version="MultiCaseMctsSearcher",
-            sample_counts={"search_requests": 3, "search_entries": 2, "search_labeled_samples": 2},
-            admission_stats={"search_requests": 3, "search_entries": 2},
-            training=TrainingSummary(search_sample_ratio=0.4),
-            promotion=PromotionDecision(promoted=False, reason="pending"),
+    def test_resolve_shared_sim_layout_skips_base_sim_for_parallel_progress_only(self) -> None:
+        launch_base, collect_ports = resolve_shared_sim_layout(
+            base_port=15527,
+            parallel_envs=4,
+            progress_only=True,
+            curriculum_mode="ordered_run",
         )
-        payload = manifest.to_dict()
-        self.assertEqual(payload["search_version"], "MultiCaseMctsSearcher")
-        self.assertEqual(payload["sample_counts"]["search_requests"], 3)
-        self.assertEqual(payload["sample_counts"]["search_entries"], 2)
-        self.assertEqual(payload["sample_counts"]["search_labeled_samples"], 2)
-        self.assertEqual(payload["training"]["search_sample_ratio"], 0.4)
+        self.assertFalse(launch_base)
+        self.assertEqual(collect_ports, [15528, 15529, 15530, 15531])
+
+    def test_resolve_shared_sim_layout_keeps_base_sim_when_eval_may_run(self) -> None:
+        launch_base, collect_ports = resolve_shared_sim_layout(
+            base_port=15527,
+            parallel_envs=4,
+            progress_only=False,
+            curriculum_mode="ordered_run",
+        )
+        self.assertTrue(launch_base)
+        self.assertEqual(collect_ports, [15528, 15529, 15530, 15531])
+
+    def test_resolve_shared_sim_layout_allows_parallel_targeted_cases(self) -> None:
+        launch_base, collect_ports = resolve_shared_sim_layout(
+            base_port=15527,
+            parallel_envs=4,
+            progress_only=True,
+            curriculum_mode="targeted_cases",
+        )
+        self.assertFalse(launch_base)
+        self.assertEqual(collect_ports, [15528, 15529, 15530, 15531])
+
+    def test_resolve_resume_iteration_start_uses_existing_manifest_and_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir)
+            (run_root / "manifests").mkdir(parents=True, exist_ok=True)
+            (run_root / "raw_runs").mkdir(parents=True, exist_ok=True)
+            (run_root / "logs").mkdir(parents=True, exist_ok=True)
+            (run_root / "manifests" / "iter_0012.json").write_text("{}", encoding="utf-8")
+            (run_root / "raw_runs" / "iter_0011.jsonl").write_text("", encoding="utf-8")
+            existing_metadata = {
+                "manifests": [
+                    {"iteration": 9},
+                    {"iteration": 10},
+                ]
+            }
+            self.assertEqual(
+                resolve_resume_iteration_start(run_root, existing_metadata=existing_metadata),
+                13,
+            )
+
+    def test_merge_manifest_history_keeps_latest_per_iteration(self) -> None:
+        existing = [
+            {"iteration": 9, "value": "old9"},
+            {"iteration": 10, "value": "old10"},
+        ]
+        new = [
+            {"iteration": 10, "value": "new10"},
+            {"iteration": 11, "value": "new11"},
+        ]
+        merged = merge_manifest_history(existing, new)
+        self.assertEqual([row["iteration"] for row in merged], [9, 10, 11])
+        self.assertEqual(merged[1]["value"], "new10")
+
+    def test_classify_case_bucket_prefers_submenu_exhaust(self) -> None:
+        case = _make_case()
+        case.build.deck = [{"id": "PURITY", "upgrade_level": 0}]
+        self.assertEqual(classify_case_bucket(case), "submenu_exhaust")
+
+    def test_build_case_pack_balances_fixed_sizes(self) -> None:
+        cases = []
+        for bucket_index, bucket in enumerate(BUCKETS):
+            for item_index in range(12):
+                case = _make_case()
+                case.run_id = 1000 + bucket_index * 100 + item_index
+                case.floor = 10 + item_index
+                if bucket == "submenu_exhaust":
+                    case.build.deck = [{"id": "PURITY", "upgrade_level": 0}]
+                elif bucket == "setup_payoff":
+                    case.build.deck = [{"id": "FEEL_NO_PAIN", "upgrade_level": 0}]
+                elif bucket == "resource_dig":
+                    case.build.deck = [{"id": "BLOODLETTING", "upgrade_level": 0}]
+                else:
+                    case.build.deck = [{"id": "STRIKE_IRONCLAD", "upgrade_level": 0}]
+                    case.encounter_type = "Elite"
+                cases.append(case)
+
+        manifest = build_case_pack(cases, train_size=16, eval_size=8, seed=123)
+        self.assertEqual(len(manifest["train_case_ids"]), 16)
+        self.assertEqual(len(manifest["eval_case_ids"]), 8)
+        self.assertTrue(set(manifest["train_case_ids"]).isdisjoint(set(manifest["eval_case_ids"])))
+        self.assertEqual(sum(manifest["bucket_train_counts"].values()), 16)
+        self.assertEqual(sum(manifest["bucket_eval_counts"].values()), 8)
 
 
 if __name__ == "__main__":

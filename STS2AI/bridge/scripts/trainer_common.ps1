@@ -67,6 +67,69 @@ function Resolve-PythonExe {
     throw "Unable to locate a Python executable. Pass -PythonExe, set STS2_PYTHON_EXE, or put Python on PATH."
 }
 
+function Resolve-SpectatorModInstallDir {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$GodotExe
+    )
+
+    $godotDir = Split-Path -Parent $GodotExe
+    if ([string]::IsNullOrWhiteSpace($godotDir)) {
+        throw "Unable to resolve Godot install directory from: $GodotExe"
+    }
+
+    return (Join-Path $godotDir "mods\sts2_mcp_spectator")
+}
+
+function Sync-SpectatorModArtifacts {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceDir,
+        [Parameter(Mandatory = $true)]
+        [string]$GodotExe
+    )
+
+    $resolvedSource = (Resolve-Path -LiteralPath $SourceDir -ErrorAction Stop).Path
+    $installDir = Resolve-SpectatorModInstallDir -GodotExe $GodotExe
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+    $requiredFiles = @(
+        "sts2_mcp_spectator.dll",
+        "sts2_mcp_spectator.json"
+    )
+    foreach ($name in $requiredFiles) {
+        $sourcePath = Join-Path $resolvedSource $name
+        if (-not (Test-Path -LiteralPath $sourcePath)) {
+            throw "Spectator mod artifact missing: $sourcePath"
+        }
+        Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $installDir $name) -Force
+    }
+
+    $optionalFiles = @(
+        "README.md"
+    )
+    foreach ($name in $optionalFiles) {
+        $sourcePath = Join-Path $resolvedSource $name
+        if (Test-Path -LiteralPath $sourcePath) {
+            Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $installDir $name) -Force
+        }
+    }
+
+    $staleFiles = @(
+        "sts2_mcp_spectator.deps.json",
+        "sts2_mcp_spectator.pdb",
+        "sts2_mcp_spectator.runtimeconfig.json"
+    )
+    foreach ($name in $staleFiles) {
+        $stalePath = Join-Path $installDir $name
+        if (Test-Path -LiteralPath $stalePath) {
+            Remove-Item -LiteralPath $stalePath -Force
+        }
+    }
+
+    return $installDir
+}
+
 function Resolve-BaseUrl {
     param(
         [string]$BaseUrl,

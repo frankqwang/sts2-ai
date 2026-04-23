@@ -1,8 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import unittest
 
-from zero.config import EncoderConfig, SearchConfig
+from zero.config import EncoderConfig
 from zero.domain import (
     BattleState,
     EnemyState,
@@ -13,7 +13,6 @@ from zero.domain import (
     RawTransition,
     StaticContext,
 )
-from zero.orchestration.search import SearchQueueBuilder
 from zero.orchestration.sample_builder import SampleBuilder
 
 
@@ -77,7 +76,6 @@ class SampleBuilderTests(unittest.TestCase):
         self.assertTrue(samples[0].bucket_key.startswith("combat|A1_"))
         self.assertEqual(samples[1].behavior_action_index, 0)
         self.assertGreater(samples[0].keep_score, 0.0)
-        self.assertAlmostEqual(samples[0].metadata["uncertainty_target"], 0.45)
         self.assertGreater(samples[0].fight_score, 0.0)
         self.assertGreater(samples[0].sample_weight, 0.1)
         self.assertIn("score_band", samples[0].metadata)
@@ -180,34 +178,6 @@ class SampleBuilderTests(unittest.TestCase):
         bad_weights = [sample.sample_weight for sample in samples if sample.fight_id == "fight-bad"]
         self.assertGreater(sum(good_weights) / len(good_weights), sum(bad_weights) / len(bad_weights))
 
-    def test_timeout_like_samples_are_prioritized_for_search(self) -> None:
-        builder = SampleBuilder(EncoderConfig(history_steps=4))
-        state0 = make_state(hp=60.0, enemy_hp=40.0, step=0)
-        state0.context.encounter_class = "elite"
-        state1 = make_state(hp=48.0, enemy_hp=40.0, step=1, terminal=True, outcome="defeat")
-        transition = RawTransition(
-            run_id="run1",
-            fight_id="fight1",
-            step_idx=0,
-            seed="seed",
-            action_index=1,
-            state=state0,
-            action=state0.legal_actions[1],
-            next_state=state1,
-            done=True,
-            fight_outcome="defeat",
-            run_outcome="defeat",
-            metadata={"top2_gap": 0.0, "made_progress": False},
-        )
-        sample = builder.build([transition])[0]
-        sample.metadata["fight_timeout"] = True
-        sample.metadata["fight_no_progress_ratio"] = 1.0
-        queue = SearchQueueBuilder(SearchConfig(max_requests_per_iteration=8))
-        requests = queue.select([sample])
-        self.assertEqual(len(requests), 1)
-        self.assertIn("fight_timeout", requests[0].reason_tags)
-        self.assertIn("high_no_progress", requests[0].reason_tags)
-
     def test_behavior_index_mismatch_drops_sample_instead_of_falling_back_to_zero(self) -> None:
         builder = SampleBuilder(EncoderConfig(history_steps=4))
         state0 = make_state(hp=80.0, enemy_hp=40.0, step=0)
@@ -232,10 +202,35 @@ class SampleBuilderTests(unittest.TestCase):
         )
         self.assertEqual(samples, [])
 
-    def test_search_collected_transition_builds_search_label_and_disables_behavior_ce(self) -> None:
+    def test_submenu_confirm_target_marks_explicit_confirm_choice(self) -> None:
         builder = SampleBuilder(EncoderConfig(history_steps=4))
-        state0 = make_state(hp=80.0, enemy_hp=40.0, step=0)
-        state1 = make_state(hp=78.0, enemy_hp=28.0, step=1, terminal=True, outcome="victory")
+        state0 = BattleState(
+            player=PlayerState(hp=60.0, max_hp=80.0, block=0.0, energy=1.0),
+            enemies=[EnemyState(enemy_id="slime", hp=30.0, max_hp=40.0, block=0.0, intent_id="attack")],
+            hand=[
+                HandCardState(card_id="TREMBLE", cost_now=1.0, tags=["skill"]),
+                HandCardState(card_id="DARK_EMBRACE", cost_now=2.0, tags=["power"]),
+            ],
+            piles=PileSummary(draw_pile_size=5, discard_pile_size=1),
+            context=StaticContext(
+                character_id="IRONCLAD",
+                act=1,
+                floor=25,
+                encounter_class="normal",
+                metadata={
+                    "state_type": "hand_select",
+                    "submenu_selected_count": 1,
+                    "submenu_max_select": 3,
+                    "submenu_remaining_slots": 2,
+                    "submenu_can_confirm": True,
+                },
+            ),
+            legal_actions=[
+                LegalAction(action_id="select_dark", action_type="combat_select_card", card_id="DARK_EMBRACE", tags=["power"]),
+                LegalAction(action_id="confirm", action_type="combat_confirm_selection"),
+            ],
+        )
+        state1 = make_state(hp=60.0, enemy_hp=30.0, step=1)
         samples = builder.build(
             [
                 RawTransition(
@@ -243,32 +238,20 @@ class SampleBuilderTests(unittest.TestCase):
                     fight_id="fight1",
                     step_idx=0,
                     seed="seed",
-                    action_index=0,
+                    action_index=1,
                     state=state0,
-                    action=state0.legal_actions[0],
+                    action=state0.legal_actions[1],
                     next_state=state1,
-                    done=True,
-                    fight_outcome="victory",
-                    run_outcome="victory",
-                    metadata={
-                        "top2_gap": 0.1,
-                        "made_progress": True,
-                        "search_collected": True,
-                        "search_source": "search_self_play",
-                        "search_policy": [0.2, 0.8],
-                        "search_topk": [1, 0],
-                        "search_best_action_index": 1,
-                        "search_ranking_margin": 0.35,
-                        "search_value": 0.91,
-                        "search_trace": [{"action_index": 1, "visits": 8}],
-                    },
+                    done=False,
+                    fight_outcome="",
+                    run_outcome="",
                 )
             ]
         )
+
         self.assertEqual(len(samples), 1)
-        self.assertIsNotNone(samples[0].search_label)
-        self.assertEqual(samples[0].search_label.best_action_index, 1)
-        self.assertEqual(samples[0].metadata["behavior_ce_scale"], 0.0)
+        self.assertEqual(samples[0].submenu_has_confirm, 1.0)
+        self.assertEqual(samples[0].submenu_confirm_target, 1.0)
 
 
 if __name__ == "__main__":

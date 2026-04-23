@@ -18,7 +18,7 @@ from zero.domain import (
     TransitionDelta,
 )
 from zero.features import BatchCollator
-from zero.model import ZeroNet
+from zero.model import FlatPolicyOutput, HierarchicalPolicyOutput, ZeroNet
 
 
 def make_sample() -> TrainingSample:
@@ -56,18 +56,40 @@ def make_sample() -> TrainingSample:
 
 class ModelForwardTests(unittest.TestCase):
     def test_network_forward_shapes(self) -> None:
-        config = EncoderConfig()
-        collator = BatchCollator(config)
-        batch = collator.collate([make_sample(), make_sample()])
-        model = ZeroNet(config)
-        output = model(batch)
+        for variant in ("stateless", "history_transformer", "recurrent_gru", "hierarchical_intent"):
+            with self.subTest(variant=variant):
+                config = EncoderConfig(model_variant=variant)
+                collator = BatchCollator(config)
+                batch = collator.collate([make_sample(), make_sample()])
+                model = ZeroNet(config)
+                output = model(batch)
 
-        self.assertEqual(tuple(output.policy_logits.shape), (2, 3))
-        self.assertEqual(tuple(output.delta_pred.shape), (2, 3 + config.max_enemies * 2 + 3))
-        self.assertEqual(tuple(output.uncertainty.shape), (2,))
-        self.assertTrue(torch.isfinite(output.policy_logits).all().item())
-        self.assertTrue(torch.isfinite(output.delta_pred).all().item())
-        self.assertTrue(torch.isfinite(output.uncertainty).all().item())
+                if variant == "hierarchical_intent":
+                    self.assertIsInstance(output, HierarchicalPolicyOutput)
+                    self.assertEqual(tuple(output.intent_logits.shape), (2, config.intent_vocab_size))
+                    self.assertEqual(tuple(output.intent_value.shape), (2,))
+                    self.assertEqual(tuple(output.action_logits.shape), (2, config.intent_vocab_size, 3))
+                    self.assertEqual(tuple(output.action_value.shape), (2, config.intent_vocab_size, 3))
+                    self.assertEqual(tuple(output.death_risk_2t.shape), (2, config.intent_vocab_size))
+                    self.assertEqual(tuple(output.next_turn_power.shape), (2, config.intent_vocab_size))
+                    self.assertEqual(tuple(output.setup_value.shape), (2, config.intent_vocab_size))
+                    self.assertEqual(tuple(output.confirm_now_logit.shape), (2, config.intent_vocab_size))
+                    self.assertTrue(torch.isfinite(output.intent_logits).all().item())
+                    self.assertTrue(torch.isfinite(output.intent_value).all().item())
+                else:
+                    self.assertIsInstance(output, FlatPolicyOutput)
+                    self.assertEqual(tuple(output.state_value.shape), (2,))
+                    self.assertEqual(tuple(output.action_logits.shape), (2, 3))
+                    self.assertEqual(tuple(output.action_value.shape), (2, 3))
+                    self.assertEqual(tuple(output.death_risk_2t.shape), (2,))
+                    self.assertEqual(tuple(output.next_turn_power.shape), (2,))
+                    self.assertEqual(tuple(output.setup_value.shape), (2,))
+                    self.assertEqual(tuple(output.confirm_now_logit.shape), (2,))
+                    self.assertTrue(torch.isfinite(output.state_value).all().item())
+                self.assertTrue(torch.isfinite(output.action_value).all().item())
+                self.assertTrue(torch.isfinite(output.death_risk_2t).all().item())
+                self.assertTrue(torch.isfinite(output.next_turn_power).all().item())
+                self.assertTrue(torch.isfinite(output.setup_value).all().item())
 
 
 if __name__ == "__main__":

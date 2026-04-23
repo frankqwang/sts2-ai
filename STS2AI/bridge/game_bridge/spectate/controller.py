@@ -24,10 +24,21 @@ class SpectatorController:
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         seed: str | None = None,
+        build: dict[str, Any] | None = None,
+        floor: int | None = None,
         max_steps: int = 800,
     ) -> dict[str, Any]:
-        state = self.session.reset(character_id=character_id, seed=seed)
+        reset_kwargs: dict[str, Any] = {
+            "character_id": character_id,
+            "encounter_id": encounter_id,
+            "seed": seed,
+            "build": build,
+        }
+        if floor is not None:
+            reset_kwargs["floor"] = floor
+        state = self.session.reset(**reset_kwargs)
         idle_polls = 0
         steps_taken = 0
         for step_index in range(max_steps):

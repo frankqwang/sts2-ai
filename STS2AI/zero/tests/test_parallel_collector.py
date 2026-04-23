@@ -68,9 +68,6 @@ class _GreedyPolicy:
     def score_actions(self, state: BattleState) -> list[float]:
         return [1.0 for _ in state.legal_actions]
 
-    def estimate_uncertainty(self, state: BattleState) -> float:
-        return 0.0
-
 
 class ParallelCollectorTests(unittest.TestCase):
     def test_worker_clone_advances_its_own_ordered_runtime_factory(self) -> None:

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import tempfile
 import unittest
@@ -43,16 +43,6 @@ class FakePolicy:
     def score_actions(self, state: BattleState) -> list[float]:
         return [1.0, 0.1]
 
-    def estimate_uncertainty(self, state: BattleState) -> float:
-        return 0.7
-
-
-class FakeSearchBackend:
-    def label_request(self, request, runtime_factory=None, seed=None):
-        from zero.domain import SearchLabel
-
-        return SearchLabel(policy=[0.8, 0.2], topk_indices=[0], best_action_index=0, ranking_margin=0.6, search_value=0.9)
-
 
 class FakeEvaluator:
     def evaluate(self, policy) -> list[EvalSummary]:
@@ -62,7 +52,6 @@ class FakeEvaluator:
                 fight_win_rate=0.6,
                 enemy_hp_fraction_dealt=0.8,
                 self_hp_fraction_remaining=0.5,
-                search_agreement_at_1=0.5,
             )
         ]
 
@@ -73,23 +62,12 @@ class WeakEvaluator:
 
     def evaluate(self, policy) -> list[EvalSummary]:
         self._calls += 1
-        if self._calls == 1:
-            return [
-                EvalSummary(
-                    cohort_name="main",
-                    fight_win_rate=0.1,
-                    enemy_hp_fraction_dealt=0.2,
-                    self_hp_fraction_remaining=0.1,
-                    search_agreement_at_1=0.1,
-                )
-            ]
         return [
             EvalSummary(
                 cohort_name="main",
                 fight_win_rate=0.1,
                 enemy_hp_fraction_dealt=0.2,
                 self_hp_fraction_remaining=0.1,
-                search_agreement_at_1=0.1,
             )
         ]
 
@@ -116,7 +94,7 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             root = Path(temp_dir)
             config = ZeroConfig(
                 paths=ZeroPaths(root=root),
-                collect=CollectConfig(episodes_per_iteration=2, max_steps_per_episode=2, mode="policy_only_collect"),
+                collect=CollectConfig(episodes_per_iteration=2, max_steps_per_episode=2),
                 train=TrainConfig(batch_size=2, steps_per_iteration=1),
                 evaluation=EvalConfig(episodes_per_cohort=2, promote_min_win_rate_gain=-1.0),
             )
@@ -130,12 +108,10 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=1,
                 runtime_factory=FakeRuntime,
                 policy=FakePolicy(),
-                search_backend=FakeSearchBackend(),
                 baseline_eval=None,
             )
             self.assertTrue(manifest.promotion.promoted)
             self.assertEqual(manifest.collector_version, "FakePolicy")
-            self.assertEqual(manifest.sample_counts["search_requests"], 4)
             self.assertTrue((config.paths.manifests / "iter_0001.json").exists())
             self.assertEqual(runner.checkpoint_store.read_active_version(), "policy_v0001")
 
@@ -149,7 +125,6 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=2,
                 runtime_factory=FakeRuntime,
                 policy=None,
-                search_backend=FakeSearchBackend(),
                 baseline_eval=None,
             )
             self.assertTrue((config.paths.checkpoints / "policy_v0002.pt").exists())
@@ -161,13 +136,12 @@ class ZeroLoopSmokeTests(unittest.TestCase):
             root = Path(temp_dir)
             config = ZeroConfig(
                 paths=ZeroPaths(root=root),
-                collect=CollectConfig(episodes_per_iteration=1, max_steps_per_episode=2, mode="policy_only_collect"),
+                collect=CollectConfig(episodes_per_iteration=1, max_steps_per_episode=2),
                 train=TrainConfig(batch_size=2, steps_per_iteration=1),
                 evaluation=EvalConfig(
                     episodes_per_cohort=1,
                     promote_min_win_rate_gain=0.5,
                     promote_min_enemy_hp_gain=0.5,
-                    promote_min_search_agreement_gain=0.5,
                 ),
             )
             runner = ZeroLoopRunner(
@@ -180,14 +154,12 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=1,
                 runtime_factory=FakeRuntime,
                 policy=FakePolicy(),
-                search_backend=FakeSearchBackend(),
                 baseline_eval=[
                     EvalSummary(
                         cohort_name="main",
                         fight_win_rate=0.9,
                         enemy_hp_fraction_dealt=0.9,
                         self_hp_fraction_remaining=0.9,
-                        search_agreement_at_1=0.9,
                     )
                 ],
             )
@@ -198,11 +170,52 @@ class ZeroLoopSmokeTests(unittest.TestCase):
                 iteration=2,
                 runtime_factory=FakeRuntime,
                 policy=FakePolicy(),
-                search_backend=FakeSearchBackend(),
                 baseline_eval=None,
             )
             self.assertFalse(manifest2.promotion.promoted)
             self.assertNotEqual(manifest2.promotion.reason, "首次评估通过")
+
+    def test_collect_schedule_anneals_into_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = ZeroConfig(
+                paths=ZeroPaths(root=root),
+                collect=CollectConfig(
+                    episodes_per_iteration=1,
+                    max_steps_per_episode=2,
+                    epsilon_greedy=0.2,
+                    temperature=0.4,
+                    final_epsilon_greedy=0.05,
+                    final_temperature=0.1,
+                    anneal_iterations=4,
+                ),
+                train=TrainConfig(batch_size=2, steps_per_iteration=1),
+                evaluation=EvalConfig(episodes_per_cohort=1, promote_min_win_rate_gain=-1.0),
+            )
+            runner = ZeroLoopRunner(
+                config=config,
+                artifact_store=ArtifactStore(config.paths),
+                checkpoint_store=LocalCheckpointStore(config.paths.checkpoints),
+                evaluator=FakeEvaluator(),
+            )
+
+            manifest1 = runner.run_iteration(
+                iteration=1,
+                runtime_factory=FakeRuntime,
+                policy=FakePolicy(),
+                baseline_eval=None,
+            )
+            manifest4 = runner.run_iteration(
+                iteration=4,
+                runtime_factory=FakeRuntime,
+                policy=None,
+                baseline_eval=None,
+            )
+
+            self.assertAlmostEqual(float(manifest1.collect_settings["epsilon_greedy"]), 0.2)
+            self.assertAlmostEqual(float(manifest1.collect_settings["temperature"]), 0.4)
+            self.assertAlmostEqual(float(manifest4.collect_settings["epsilon_greedy"]), 0.05)
+            self.assertAlmostEqual(float(manifest4.collect_settings["temperature"]), 0.1)
 
 
 if __name__ == "__main__":

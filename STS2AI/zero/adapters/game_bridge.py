@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from ..config import ZERO_RUNTIME_DEFAULTS
 from ..domain import (
@@ -16,6 +17,33 @@ from ..domain import (
     TargetSummary,
 )
 
+_ENGINE_POWER_IDS = {
+    "BARRICADE",
+    "CORRUPTION",
+    "DARK_EMBRACE",
+    "DEMON_FORM",
+    "EVOLVE",
+    "FEEL_NO_PAIN",
+    "INFLAME",
+    "METALLICIZE",
+    "PYRE",
+    "RUPTURE",
+}
+_EXHAUST_PAYOFF_IDS = {
+    "DARK_EMBRACE",
+    "FEEL_NO_PAIN",
+    "PACTS_END",
+    "PYRE",
+}
+_RESOURCE_CARD_IDS = {
+    "BLOODLETTING",
+    "BURNING_PACT",
+    "INFERNAL_BLADE",
+    "OFFERING",
+    "POMMEL_STRIKE",
+    "SHRUG_IT_OFF",
+}
+
 
 def convert_game_bridge_state(
     raw: dict[str, Any],
@@ -28,10 +56,21 @@ def convert_game_bridge_state(
     run_raw = _as_dict(raw.get("run"))
     top_player_raw = _as_dict(raw.get("player"))
     battle_player_raw = _as_dict(battle_raw.get("player"))
+    selection_raw = _resolve_selection_state(raw, battle_raw)
 
     enemies_raw = _as_list(raw.get("enemies")) or _as_list(battle_raw.get("enemies"))
-    hand_raw = _as_list(battle_raw.get("hand")) or _as_list(raw.get("hand"))
+    hand_raw = (
+        _as_list(battle_raw.get("hand"))
+        or _as_list(battle_player_raw.get("hand"))
+        or _as_list(raw.get("hand"))
+        or _as_list(top_player_raw.get("hand"))
+    )
+    selection_cards_raw = _as_list(selection_raw.get("cards"))
     legal_actions_raw = _as_list(raw.get("legal_actions"))
+    draw_pile_cards = _normalize_named_items(_as_list(battle_raw.get("draw_pile_cards")))
+    discard_pile_cards = _normalize_named_items(_as_list(battle_raw.get("discard_pile_cards")))
+    exhaust_pile_cards = _normalize_named_items(_as_list(battle_raw.get("exhaust_pile_cards")))
+    deck_cards = _normalize_deck_cards(_as_list(top_player_raw.get("deck")))
 
     player_buffs = _powers_to_mapping(_as_list(battle_player_raw.get("powers")) or _as_list(top_player_raw.get("powers")))
     player = PlayerState(
@@ -59,6 +98,7 @@ def convert_game_bridge_state(
             alive=bool(_pick(item, "alive", "is_alive", default=True)),
             buffs=_powers_to_mapping(_as_list(item.get("buffs")) or _as_list(item.get("powers"))),
             tags=[str(tag) for tag in _as_list(item.get("tags"))],
+            target_key=str(_pick(item, "target_id", "combat_id", "entity_id", "enemy_id", "id", default="")),
         )
         for index, item in enumerate(enemies_raw)
     ]
@@ -80,9 +120,12 @@ def convert_game_bridge_state(
     ]
 
     piles = PileSummary(
-        draw_pile_size=int(len(_as_list(battle_raw.get("draw_pile_cards"))) or _pick(top_player_raw, "draw_pile_count", default=0)),
-        discard_pile_size=int(len(_as_list(battle_raw.get("discard_pile_cards"))) or _pick(top_player_raw, "discard_pile_count", default=0)),
-        exhaust_pile_size=int(len(_as_list(battle_raw.get("exhaust_pile_cards"))) or _pick(top_player_raw, "exhaust_pile_count", default=0)),
+        draw_pile_size=int(len(draw_pile_cards) or _pick(top_player_raw, "draw_pile_count", default=0)),
+        discard_pile_size=int(len(discard_pile_cards) or _pick(top_player_raw, "discard_pile_count", default=0)),
+        exhaust_pile_size=int(len(exhaust_pile_cards) or _pick(top_player_raw, "exhaust_pile_count", default=0)),
+        draw_cards=draw_pile_cards,
+        discard_cards=discard_pile_cards,
+        exhaust_cards=exhaust_pile_cards,
         attack_count=sum(1 for item in hand_raw if str(_pick(item, "type", "card_type", default="")).lower() == "attack"),
         skill_count=sum(1 for item in hand_raw if str(_pick(item, "type", "card_type", default="")).lower() == "skill"),
         power_count=sum(1 for item in hand_raw if str(_pick(item, "type", "card_type", default="")).lower() == "power"),
@@ -93,24 +136,41 @@ def convert_game_bridge_state(
     act_value = int(_pick(run_raw, "act", default=0))
     if act_value <= 0:
         act_value = 1
+    round_number_raw = _pick(
+        raw,
+        "round_number_raw",
+        default=_pick(battle_raw, "round_number_raw", "round", default=0),
+    )
+    try:
+        turn_id = int(round_number_raw or 0)
+    except (TypeError, ValueError):
+        turn_id = 0
     context = StaticContext(
         character_id=str(_pick(raw, "character_id", default=ZERO_RUNTIME_DEFAULTS.default_character_id)),
         act=act_value,
         floor=int(_pick(run_raw, "floor", default=0)),
         encounter_class=encounter_class,
         encounter_id=encounter_id,
+        deck_cards=deck_cards,
         relics=_normalize_named_items(_as_list(top_player_raw.get("relics"))),
         fixed_powers=list(player_buffs.keys()),
         metadata={
             "seed": str(fallback_seed or ""),
             "state_type": str(_pick(raw, "state_type", default="")),
-            "round_number_raw": _pick(raw, "round_number_raw", default=_pick(battle_raw, "round_number_raw", default=0)),
+            "round_number_raw": round_number_raw,
+            "turn_id": turn_id,
             "turn_side": str(_pick(battle_raw, "turn_side", default="")),
+            **_selection_metadata(selection_raw, hand_raw),
         },
     )
 
     legal_actions = [
-        _convert_action(item, hand_raw=hand_raw, enemies_raw=enemies_raw)
+        _convert_action(
+            item,
+            hand_raw=hand_raw,
+            selection_cards_raw=selection_cards_raw,
+            enemies_raw=enemies_raw,
+        )
         for item in legal_actions_raw
     ]
     return BattleState(
@@ -152,6 +212,8 @@ class GameBridgeCombatRuntime:
         self._build = build
         self._encounter_class = _resolve_encounter_class(encounter_id)
         self._latest_state: BattleState | None = None
+        self._last_reset_timing: dict[str, float] = {}
+        self._last_step_timing: dict[str, float] = {}
 
     def configure(
         self,
@@ -173,18 +235,31 @@ class GameBridgeCombatRuntime:
 
     def reset(self, *, seed: str | None = None) -> BattleState:
         resolved_seed = seed or self._seed
+        session_reset_started_at = time.perf_counter()
         raw = self._session.reset(
             character_id=self._character_id,
             encounter_id=self._encounter_id,
             seed=resolved_seed,
             build=self._build,
         )
+        session_reset_duration_s = time.perf_counter() - session_reset_started_at
+        transport_metrics = self._get_last_transport_metrics()
+        convert_started_at = time.perf_counter()
         self._latest_state = convert_game_bridge_state(
             raw,
             fallback_encounter_id=self._encounter_id,
             fallback_seed=resolved_seed,
             fallback_encounter_class=self._encounter_class,
         )
+        state_convert_duration_s = time.perf_counter() - convert_started_at
+        self._last_reset_timing = {
+            "session_call_duration_s": float(session_reset_duration_s),
+            "transport_duration_s": float(transport_metrics.get("total_duration_s", 0.0) or 0.0),
+            "transport_write_duration_s": float(transport_metrics.get("write_duration_s", 0.0) or 0.0),
+            "transport_read_duration_s": float(transport_metrics.get("read_duration_s", 0.0) or 0.0),
+            "transport_decode_duration_s": float(transport_metrics.get("decode_duration_s", 0.0) or 0.0),
+            "state_convert_duration_s": float(state_convert_duration_s),
+        }
         return self._latest_state
 
     def get_state(self) -> BattleState:
@@ -216,13 +291,26 @@ class GameBridgeCombatRuntime:
                 )
             action_index = resolved_index
         action = action_rows[action_index]
+        session_step_started_at = time.perf_counter()
         next_raw, _, _, _ = self._session.step(action)
+        session_step_duration_s = time.perf_counter() - session_step_started_at
+        transport_metrics = self._get_last_transport_metrics()
+        convert_started_at = time.perf_counter()
         self._latest_state = convert_game_bridge_state(
             next_raw,
             fallback_encounter_id=self._encounter_id,
             fallback_seed=self._seed,
             fallback_encounter_class=self._encounter_class,
         )
+        state_convert_duration_s = time.perf_counter() - convert_started_at
+        self._last_step_timing = {
+            "session_call_duration_s": float(session_step_duration_s),
+            "transport_duration_s": float(transport_metrics.get("total_duration_s", 0.0) or 0.0),
+            "transport_write_duration_s": float(transport_metrics.get("write_duration_s", 0.0) or 0.0),
+            "transport_read_duration_s": float(transport_metrics.get("read_duration_s", 0.0) or 0.0),
+            "transport_decode_duration_s": float(transport_metrics.get("decode_duration_s", 0.0) or 0.0),
+            "state_convert_duration_s": float(state_convert_duration_s),
+        }
         return self._latest_state
 
     def save_state(self) -> str:
@@ -246,13 +334,46 @@ class GameBridgeCombatRuntime:
     def close(self) -> None:
         self._session.close()
 
+    def get_last_reset_timing(self) -> dict[str, float]:
+        return dict(self._last_reset_timing)
 
-def _convert_action(raw: dict[str, Any], *, hand_raw: list[dict[str, Any]], enemies_raw: list[dict[str, Any]]) -> LegalAction:
+    def get_last_step_timing(self) -> dict[str, float]:
+        return dict(self._last_step_timing)
+
+    def _get_last_transport_metrics(self) -> dict[str, Any]:
+        hook = getattr(self._session, "get_last_transport_metrics", None)
+        if callable(hook):
+            return dict(hook() or {})
+        return {}
+
+
+_HAND_CARD_ACTION_TYPES = {
+    "play_card",
+    "select_hand_card",
+    "select_card",
+    "select_card_option",
+    "combat_select_card",
+}
+
+
+def _convert_action(
+    raw: dict[str, Any],
+    *,
+    hand_raw: list[dict[str, Any]],
+    selection_cards_raw: list[dict[str, Any]],
+    enemies_raw: list[dict[str, Any]],
+) -> LegalAction:
     action_name = str(_pick(raw, "action", "type", default=""))
     action_index = _pick(raw, "index", default=None)
     card_index = _pick(raw, "card_index", default=None)
     target_id = _pick(raw, "target_id", default=None)
-    hand_card = _lookup_by_index(hand_raw, card_index) if action_name == "play_card" else {}
+    if action_name in _HAND_CARD_ACTION_TYPES:
+        hand_card = (
+            _lookup_by_index(selection_cards_raw, card_index)
+            or _lookup_by_index(hand_raw, card_index)
+        )
+    else:
+        hand_card = {}
     target_enemy = _lookup_enemy(enemies_raw, target_id)
     card_id = str(_pick(raw, "card_id", default="") or _pick(hand_card, "id", default=""))
     if not card_id and action_name == "play_card":
@@ -316,6 +437,47 @@ def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _resolve_selection_state(raw: dict[str, Any], battle_raw: dict[str, Any]) -> dict[str, Any]:
+    return (
+        _as_dict(raw.get("hand_select"))
+        or _as_dict(raw.get("card_select"))
+        or _as_dict(battle_raw.get("card_selection"))
+    )
+
+
+def _selection_metadata(selection_raw: dict[str, Any], hand_raw: list[dict[str, Any]]) -> dict[str, str | float | int | bool]:
+    if not selection_raw:
+        return {
+            "submenu_selected_count": 0,
+            "submenu_max_select": 0,
+            "submenu_remaining_slots": 0,
+            "submenu_can_confirm": False,
+            "submenu_can_cancel": False,
+            "submenu_selected_engine_count": 0.0,
+            "submenu_selected_payoff_count": 0.0,
+            "submenu_selected_resource_count": 0.0,
+        }
+    selected_cards_raw = _as_list(selection_raw.get("selected_cards"))
+    selected_card_ids = _normalize_named_items(selected_cards_raw)
+    max_select = int(_pick(selection_raw, "max_select", default=0) or 0)
+    selected_count = int(_pick(selection_raw, "selected_count", default=len(selected_card_ids)) or 0)
+    if max_select <= 0 and selected_count > 0:
+        selectable_count = len(_as_list(selection_raw.get("cards"))) or len(hand_raw)
+        max_select = selected_count + selectable_count
+    semantic_counts = _semantic_counts_for_cards(selected_card_ids)
+    remaining_slots = max(0, max_select - selected_count) if max_select > 0 else 0
+    return {
+        "submenu_selected_count": int(selected_count),
+        "submenu_max_select": int(max_select),
+        "submenu_remaining_slots": int(remaining_slots),
+        "submenu_can_confirm": bool(_pick(selection_raw, "can_confirm", default=False)),
+        "submenu_can_cancel": bool(_pick(selection_raw, "can_cancel", default=False)),
+        "submenu_selected_engine_count": float(semantic_counts["engine"]),
+        "submenu_selected_payoff_count": float(semantic_counts["payoff"]),
+        "submenu_selected_resource_count": float(semantic_counts["resource"]),
+    }
+
+
 def _normalize_named_items(items: list[Any]) -> list[str]:
     values: list[str] = []
     for item in items:
@@ -324,6 +486,36 @@ def _normalize_named_items(items: list[Any]) -> list[str]:
         elif isinstance(item, dict):
             values.append(str(_pick(item, "id", "name", default="")))
     return [value for value in values if value]
+
+
+def _normalize_deck_cards(items: list[Any]) -> list[str]:
+    cards: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            card_id = item
+        elif isinstance(item, dict):
+            card_id = str(_pick(item, "id", "card_id", "name", default=""))
+            upgrades = int(_pick(item, "upgrade_level", "upgrades", default=0) or 0)
+            if upgrades > 0 and card_id:
+                card_id = f"{card_id}+{upgrades}"
+        else:
+            continue
+        if card_id:
+            cards.append(card_id)
+    return cards
+
+
+def _semantic_counts_for_cards(card_ids: Iterable[str]) -> dict[str, float]:
+    counts = {"engine": 0.0, "payoff": 0.0, "resource": 0.0}
+    for raw_id in card_ids:
+        normalized_id = str(raw_id or "").upper().replace("+", "").strip()
+        if normalized_id in _ENGINE_POWER_IDS:
+            counts["engine"] += 1.0
+        if normalized_id in _EXHAUST_PAYOFF_IDS:
+            counts["payoff"] += 1.0
+        if normalized_id in _RESOURCE_CARD_IDS:
+            counts["resource"] += 1.0
+    return counts
 
 
 def _powers_to_mapping(items: list[Any]) -> dict[str, float]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Top-level iterative loop for collect -> label -> train -> evaluate -> promote."""
+"""Top-level iterative loop for collect -> train -> evaluate -> promote."""
 
 import json
 import logging
@@ -13,15 +13,14 @@ import torch
 
 from ..buffers import ArtifactStore, SamplePoolSet
 from ..config import ZeroConfig
-from ..domain import IterationManifest
+from ..domain import IterationManifest, PromotionDecision
 from ..features import BatchCollator
 from ..model import ZeroNet
-from ..ports import BattleRuntime, CheckpointStore, Evaluator, Policy, SearchBackend
+from ..ports import BattleRuntime, CheckpointStore, Evaluator, Policy
 from .admission import SampleAdmissionPlanner
-from .collector import SearchGuidedActionSelector, SearchSelfPlaySelector, TrajectoryCollector
+from .collector import TrajectoryCollector
 from .promotion import PromotionJudge
 from .sample_builder import SampleBuilder
-from .search import SearchQueueBuilder, SearchQueueProcessor
 from .trainer import ModelPolicyAdapter, ZeroTrainer
 
 
@@ -56,16 +55,18 @@ class ZeroLoopRunner:
     config: ZeroConfig
     artifact_store: ArtifactStore
     checkpoint_store: CheckpointStore
-    evaluator: Evaluator
+    evaluator: Evaluator | None
 
     def __post_init__(self) -> None:
         self._seed_everything(self.config.seed)
         self._pools = SamplePoolSet(self.config.pools)
         self._collector = TrajectoryCollector()
-        self._sample_builder = SampleBuilder(self.config.encoder)
+        self._sample_builder = SampleBuilder(
+            self.config.encoder,
+            ppo_gamma=self.config.train.ppo_gamma,
+            ppo_gae_lambda=self.config.train.ppo_gae_lambda,
+        )
         self._admission = SampleAdmissionPlanner()
-        self._search_queue = SearchQueueBuilder(self.config.search)
-        self._search_processor = SearchQueueProcessor()
         self._promotion = PromotionJudge(self.config.evaluation)
         self._collator = BatchCollator(self.config.encoder)
         self._active_version: str | None = None
@@ -85,7 +86,6 @@ class ZeroLoopRunner:
         iteration: int,
         runtime_factory: Callable[[], BattleRuntime],
         policy: Policy | None = None,
-        search_backend: SearchBackend,
         baseline_eval: list | None = None,
     ) -> IterationManifest:
         self.artifact_store.reset_iteration_outputs(iteration)
@@ -95,7 +95,12 @@ class ZeroLoopRunner:
             raise ValueError("run_iteration 需要 policy，或已有晋级后的 active policy。")
 
         collector_version = self._active_version or type(collector_policy).__name__
-        search_version = _public_search_backend_name(search_backend)
+        collect_epsilon_greedy, collect_temperature = self.config.collect.resolve_for_iteration(iteration)
+        collect_settings = {
+            "epsilon_greedy": float(collect_epsilon_greedy),
+            "temperature": float(collect_temperature),
+            "anneal_iterations": int(self.config.collect.anneal_iterations),
+        }
         external_episode_end = getattr(runtime_factory, "on_episode_end", None)
         iteration_started_at = time.perf_counter()
         self._write_progress(
@@ -103,33 +108,23 @@ class ZeroLoopRunner:
             phase="iteration",
             status="started",
             collector_version=collector_version,
-            search_version=search_version,
+            collect_settings=collect_settings,
         )
         self._write_status(
             iteration,
             phase="started",
             collector_version=collector_version,
-            search_version=search_version,
+            collect_settings=collect_settings,
         )
         collect_started_at = time.perf_counter()
-        search_guidance_factory = None
-        search_self_play_factory = None
-        if self.config.collect.mode == "search_guided_collect":
-            base_port = getattr(runtime_factory, "_port", None)
-            search_guidance_factory = self._build_search_guidance_factory(search_backend, collector_policy, base_port=base_port)
-        elif self.config.collect.mode == "search_only_collect":
-            base_port = getattr(runtime_factory, "_port", None)
-            search_self_play_factory = self._build_search_self_play_factory(search_backend, collector_policy, base_port=base_port)
         transitions = self._collector.collect(
             runtime_factory=runtime_factory,
             policy=collector_policy,
             episodes=self.config.collect.episodes_per_iteration,
             max_steps=self.config.collect.max_steps_per_episode,
-            epsilon_greedy=self.config.collect.epsilon_greedy,
-            temperature=self.config.collect.temperature,
+            epsilon_greedy=collect_epsilon_greedy,
+            temperature=collect_temperature,
             seed=self.config.seed + iteration,
-            search_guidance_factory=search_guidance_factory,
-            search_self_play_factory=search_self_play_factory,
             on_episode_start=lambda event: self._write_progress(iteration, phase="collect_episode", status="started", **event),
             on_transition=lambda transition: self.artifact_store.append_raw_run_row(iteration, transition.to_dict()),
             on_episode_end=lambda event: self._handle_collect_episode_end(
@@ -144,12 +139,14 @@ class ZeroLoopRunner:
             status="completed",
             duration_s=round(time.perf_counter() - collect_started_at, 6),
             transitions=len(transitions),
+            collect_settings=collect_settings,
         )
         self._write_status(
             iteration,
             phase="collect_completed",
             transitions=len(transitions),
             elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
+            collect_settings=collect_settings,
         )
 
         build_started_at = time.perf_counter()
@@ -166,41 +163,25 @@ class ZeroLoopRunner:
         )
 
         admission_started_at = time.perf_counter()
-        online_entries = self._admission.build_online_entries(samples)
-        if self.config.collect.mode == "search_only_collect":
-            search_requests = []
+        if self.config.train.algorithm == "ppo_lite":
+            online_entries = [
+                sample.clone_for_pool(
+                    pool_name="recent_online",
+                    keep_score=1.0,
+                    metadata={"admission_reason": "ppo_on_policy"},
+                )
+                for sample in samples
+            ]
         else:
-            search_requests = self._search_queue.select(samples)
-        pre_search_duration_s = time.perf_counter() - admission_started_at
+            online_entries = self._admission.build_online_entries(samples)
+        admission_duration_s = time.perf_counter() - admission_started_at
 
-        search_started_at = time.perf_counter()
-        if search_requests:
-            labeled_search_samples = self._search_processor.label(
-                search_requests,
-                search_backend,
-                runtime_factory=runtime_factory,
-                policy=collector_policy,
-            )
+        pool_entry_started_at = time.perf_counter()
+        if self.config.train.algorithm == "ppo_lite":
+            self._pools.replace_pool("recent_online", online_entries)
         else:
-            labeled_search_samples = []
-        search_duration_s = time.perf_counter() - search_started_at
-        self._write_progress(
-            iteration,
-            phase="search_label",
-            status="completed",
-            duration_s=round(search_duration_s, 6),
-            search_requests=len(search_requests),
-            search_labeled_samples=len(labeled_search_samples),
-        )
-
-        search_entry_started_at = time.perf_counter()
-        if self.config.collect.mode == "search_only_collect":
-            search_entries = self._admission.build_search_entries([sample for sample in samples if sample.search_label is not None])
-        else:
-            search_entries = self._admission.build_search_entries(labeled_search_samples)
-        self._pools.add_many(online_entries)
-        self._pools.add_many(search_entries)
-        pool_admission_duration_s = time.perf_counter() - search_entry_started_at
+            self._pools.add_many(online_entries)
+        pool_admission_duration_s = time.perf_counter() - pool_entry_started_at
         pool_counters_after_admission = self._pools.iteration_counters()
         pool_stats_after_admission = self._pools.describe()
         self._write_progress(
@@ -209,7 +190,6 @@ class ZeroLoopRunner:
             status="completed",
             duration_s=round(pool_admission_duration_s, 6),
             online_entries=len(online_entries),
-            search_entries=len(search_entries),
             pool_mutation_counters=pool_counters_after_admission,
             pool_capacities=pool_capacities,
             pool_sizes=self._pools.size_by_pool(),
@@ -221,20 +201,15 @@ class ZeroLoopRunner:
             status="completed",
             duration_s=round(time.perf_counter() - build_started_at, 6),
             sample_build_duration_s=round(sample_build_duration_s, 6),
-            pre_search_duration_s=round(pre_search_duration_s, 6),
-            search_duration_s=round(search_duration_s, 6),
+            admission_duration_s=round(admission_duration_s, 6),
             pool_admission_duration_s=round(pool_admission_duration_s, 6),
             samples=len(samples),
             online_entries=len(online_entries),
-            search_requests=len(search_requests),
-            search_labeled_samples=len(labeled_search_samples),
-            search_entries=len(search_entries),
         )
         self._write_status(
             iteration,
             phase="build_and_label_completed",
             samples=len(samples),
-            search_requests=len(search_requests),
             elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
         )
 
@@ -269,35 +244,16 @@ class ZeroLoopRunner:
         }
         version = f"policy_v{iteration:04d}"
         candidate_path = self.checkpoint_store.save_candidate(version, candidate_payload)
-        self._set_evaluator_trace_context(iteration=iteration, phase="candidate_eval")
-        eval_started_at = time.perf_counter()
-        evaluations = self.evaluator.evaluate(candidate_policy)
-        self._write_progress(
-            iteration,
-            phase="candidate_eval",
-            status="completed",
-            duration_s=round(time.perf_counter() - eval_started_at, 6),
-            cohorts=len(evaluations),
-        )
-        self._write_status(
-            iteration,
-            phase="candidate_eval_completed",
-            cohorts=len(evaluations),
-            elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
-        )
-        baseline = baseline_eval if baseline_eval is not None else self._baseline_eval
-        promotion = self._promotion.decide(candidate_version=version, current=evaluations, baseline=baseline)
-
-        if self._baseline_eval is None:
-            # 即使首轮没有晋级，也要把第一次评估结果沉淀成后续基线，
-            # 否则下一轮会被误判成“首次评估通过”。
-            self._baseline_eval = evaluations
-            self._write_baseline_eval(evaluations)
-
-        if promotion.promoted:
+        evaluations = []
+        if self.evaluator is None:
+            promotion = PromotionDecision(
+                promoted=True,
+                reason="progress_only_no_eval",
+                new_version=version,
+            )
             promoted_payload = {
                 **candidate_payload,
-                "baseline_eval": [asdict(item) for item in evaluations],
+                "baseline_eval": [],
             }
             self.checkpoint_store.save(version, promoted_payload)
             self.checkpoint_store.write_active_version(version)
@@ -305,28 +261,60 @@ class ZeroLoopRunner:
             self._active_version = version
             self._active_policy = candidate_policy
             self._active_training_state = trainer.state_dict()
-            self._baseline_eval = evaluations
-            self._write_baseline_eval(evaluations)
-        elif not self.config.checkpoints.keep_rejected_checkpoints:
-            self.checkpoint_store.discard(candidate_path)
+        else:
+            self._set_evaluator_trace_context(iteration=iteration, phase="candidate_eval")
+            eval_started_at = time.perf_counter()
+            evaluations = self.evaluator.evaluate(candidate_policy)
+            self._write_progress(
+                iteration,
+                phase="candidate_eval",
+                status="completed",
+                duration_s=round(time.perf_counter() - eval_started_at, 6),
+                cohorts=len(evaluations),
+            )
+            self._write_status(
+                iteration,
+                phase="candidate_eval_completed",
+                cohorts=len(evaluations),
+                elapsed_s=round(time.perf_counter() - iteration_started_at, 6),
+            )
+            baseline = baseline_eval if baseline_eval is not None else self._baseline_eval
+            promotion = self._promotion.decide(candidate_version=version, current=evaluations, baseline=baseline)
+
+            if self._baseline_eval is None:
+                # 即使首轮没有晋级，也要把第一次评估结果沉淀成后续基线，
+                # 否则下一轮会被误判成“首次评估通过”。
+                self._baseline_eval = evaluations
+                self._write_baseline_eval(evaluations)
+
+            if promotion.promoted:
+                promoted_payload = {
+                    **candidate_payload,
+                    "baseline_eval": [asdict(item) for item in evaluations],
+                }
+                self.checkpoint_store.save(version, promoted_payload)
+                self.checkpoint_store.write_active_version(version)
+                self.checkpoint_store.discard(candidate_path)
+                self._active_version = version
+                self._active_policy = candidate_policy
+                self._active_training_state = trainer.state_dict()
+                self._baseline_eval = evaluations
+                self._write_baseline_eval(evaluations)
+            elif not self.config.checkpoints.keep_rejected_checkpoints:
+                self.checkpoint_store.discard(candidate_path)
 
         manifest = IterationManifest(
             iteration=iteration,
             collector_version=collector_version,
-            search_version=search_version,
+            collect_settings=collect_settings,
             sample_counts={
                 "transitions": len(transitions),
                 "samples": len(samples),
                 "online_entries": len(online_entries),
-                "search_requests": len(search_requests),
-                "search_labeled_samples": len(labeled_search_samples),
-                "search_entries": len(search_entries),
             },
             admission_stats={
                 "online_candidates": len(samples),
                 "online_entries": len(online_entries),
-                "search_requests": len(search_requests),
-                "search_entries": len(search_entries),
                 "pool_mutation_counters": pool_counters_after_train,
             },
             pool_sizes=self._pools.size_by_pool(),
@@ -338,8 +326,7 @@ class ZeroLoopRunner:
         )
 
         self.artifact_store.write_raw_runs(iteration, [transition.to_dict() for transition in transitions])
-        self.artifact_store.write_search_labels(iteration, search_requests)
-        self.artifact_store.write_dataset_shard(iteration, online_entries + search_entries)
+        self.artifact_store.write_dataset_shard(iteration, online_entries)
         self.artifact_store.write_manifest(manifest)
         self._write_progress(
             iteration,
@@ -368,54 +355,6 @@ class ZeroLoopRunner:
         elif self._active_training_state is not None:
             trainer.load_state_dict(self._active_training_state)
         return trainer
-
-    def _build_search_guidance_factory(self, search_backend: SearchBackend, collector_policy: Policy, *, base_port: int | None):
-        target_encounters = tuple(
-            value.strip().upper()
-            for value in self.config.collect.search_guidance_target_encounters
-            if value and value.strip()
-        )
-        port_offset = int(self.config.collect.search_guidance_port_offset)
-
-        def factory(port: int | None):
-            search_runtime = search_backend
-            guidance_port = None
-            if port is not None:
-                guidance_port = port + port_offset
-            elif base_port is not None:
-                guidance_port = int(base_port) + port_offset
-            if guidance_port is not None:
-                clone_hook = getattr(search_backend, "clone_for_port", None)
-                if callable(clone_hook):
-                    search_runtime = clone_hook(guidance_port)
-            return SearchGuidedActionSelector(
-                search_backend=search_runtime,
-                queue_builder=self._search_queue,
-                policy=collector_policy,
-                priority_threshold=self.config.collect.search_guidance_priority_threshold,
-                max_guided_steps_per_episode=self.config.collect.search_guidance_max_steps_per_episode,
-                target_encounters=target_encounters,
-            )
-
-        return factory
-
-    def _build_search_self_play_factory(self, search_backend: SearchBackend, collector_policy: Policy, *, base_port: int | None):
-        port_offset = int(self.config.collect.search_guidance_port_offset)
-
-        def factory(port: int | None):
-            search_runtime = search_backend
-            search_port = None
-            if port is not None:
-                search_port = port + port_offset
-            elif base_port is not None:
-                search_port = int(base_port) + port_offset
-            if search_port is not None:
-                clone_hook = getattr(search_backend, "clone_for_port", None)
-                if callable(clone_hook):
-                    search_runtime = clone_hook(search_port)
-            return SearchSelfPlaySelector(search_backend=search_runtime, policy=collector_policy)
-
-        return factory
 
     def _try_resume(self) -> None:
         read_active = getattr(self.checkpoint_store, "read_active_version", None)
@@ -472,6 +411,8 @@ class ZeroLoopRunner:
         )
 
     def _set_evaluator_trace_context(self, *, iteration: int, phase: str) -> None:
+        if self.evaluator is None:
+            return
         configure = getattr(self.evaluator, "set_trace_context", None)
         if callable(configure):
             configure(iteration=iteration, phase=phase)
@@ -491,14 +432,3 @@ class ZeroLoopRunner:
         write_baseline = getattr(self.checkpoint_store, "write_baseline_eval", None)
         if callable(write_baseline):
             write_baseline([asdict(item) for item in evaluations])
-
-
-def _public_search_backend_name(search_backend: SearchBackend) -> str:
-    raw_name = type(search_backend).__name__
-    if raw_name == "NoopSearchBackend":
-        return "SearchDisabled"
-    if raw_name == "MultiCaseSearchBackend":
-        return "MultiCaseMctsSearcher"
-    if raw_name == "MultiCaseAggregateSearchBackend":
-        return "MultiCaseAggregatePrior"
-    return raw_name

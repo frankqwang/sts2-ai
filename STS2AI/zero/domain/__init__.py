@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from .battle import (
     BattleState,
@@ -12,7 +12,7 @@ from .battle import (
     TargetSummary,
     TransitionDelta,
 )
-from .labels import FightLabel, SearchLabel
+from .labels import FightLabel
 from .manifest import EvalSummary, IterationManifest, PromotionDecision, TrainingSummary
 from .progress import ProgressSignal, assess_transition_progress
 from .scoring import (
@@ -23,7 +23,6 @@ from .scoring import (
 )
 from .samples import (
     RawTransition,
-    SearchRequest,
     TrainingSample,
     compact_battle_state,
     compact_legal_action,
@@ -46,8 +45,6 @@ __all__ = [
     "RawTransition",
     "StaticContext",
     "TargetSummary",
-    "SearchLabel",
-    "SearchRequest",
     "TrainingSample",
     "TrainingSummary",
     "TransitionDelta",

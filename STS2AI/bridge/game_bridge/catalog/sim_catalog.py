@@ -27,8 +27,9 @@ from pathlib import Path
 from typing import Any
 
 
-_NEW_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "game_wiki" / "game_catalog.sqlite"
-_OLD_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "source_knowledge.sqlite"
+_STS2AI_ROOT = Path(__file__).resolve().parents[3]
+_NEW_DB_PATH = _STS2AI_ROOT / "data" / "game_wiki" / "game_catalog.sqlite"
+_OLD_DB_PATH = _STS2AI_ROOT / "data" / "source_knowledge.sqlite"
 _DB_PATH = _NEW_DB_PATH if _NEW_DB_PATH.exists() else _OLD_DB_PATH
 
 
@@ -367,6 +368,20 @@ class GameCatalog:
     # Cards
     # ------------------------------------------------------------------
 
+    def _model_exists(self, table: str, model_id: str) -> bool:
+        conn = self._connect()
+        if conn is None:
+            return False
+        try:
+            cur = conn.cursor()
+            row = cur.execute(
+                f"SELECT 1 FROM {table} WHERE id=? OR LOWER(id)=? LIMIT 1",
+                (model_id, model_id.lower()),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
     def card_commands(self, card_id: str) -> list[str]:
         """返回 card 的 commands_json（动作 verb 列表，如 [Attack, Block, Draw]）。"""
         conn = self._connect()
@@ -389,18 +404,15 @@ class GameCatalog:
 
     def card_exists(self, card_id: str) -> bool:
         """检查 card_id 是否在真实游戏数据里存在（大小写不敏感）。"""
-        conn = self._connect()
-        if conn is None:
-            return False
-        try:
-            cur = conn.cursor()
-            row = cur.execute(
-                "SELECT 1 FROM cards WHERE id=? OR LOWER(id)=? LIMIT 1",
-                (card_id, card_id.lower()),
-            ).fetchone()
-            return row is not None
-        finally:
-            conn.close()
+        return self._model_exists("cards", card_id)
+
+    def relic_exists(self, relic_id: str) -> bool:
+        """检查 relic_id 是否在真实游戏数据里存在（大小写不敏感）。"""
+        return self._model_exists("relics", relic_id)
+
+    def potion_exists(self, potion_id: str) -> bool:
+        """检查 potion_id 是否在真实游戏数据里存在（大小写不敏感）。"""
+        return self._model_exists("potions", potion_id)
 
     @lru_cache(maxsize=1)
     def draw_cards(self) -> frozenset[str]:

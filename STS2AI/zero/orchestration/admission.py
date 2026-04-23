@@ -1,11 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """Admission rules from logical samples to concrete pool entries.
 
 This module centralizes pool duplication so a logical decision point can be
 represented by separate immutable pool entries:
 - online/base sample -> `recent_online`
-- search-labeled copy -> `search`
 - rare-copy with dedicated capacity -> `rare`
 """
 
@@ -26,28 +25,6 @@ class SampleAdmissionPlanner:
                         pool_name="rare",
                         keep_score=max(sample.keep_score, 1.0),
                         metadata={"admission_reason": "rare_cohort"},
-                    )
-                )
-        return entries
-
-    def build_search_entries(self, samples: list[TrainingSample]) -> list[TrainingSample]:
-        entries: list[TrainingSample] = []
-        for sample in samples:
-            entries.append(
-                sample.clone_for_pool(
-                    pool_name="search",
-                    keep_score=max(sample.keep_score, 1.0),
-                    metadata={"admission_reason": "search_label"},
-                    search_label=sample.search_label,
-                )
-            )
-            if sample.rare_cohort_tags:
-                entries.append(
-                    sample.clone_for_pool(
-                        pool_name="rare",
-                        keep_score=max(sample.keep_score, 1.0),
-                        metadata={"admission_reason": "search_rare"},
-                        search_label=sample.search_label,
                     )
                 )
         return entries

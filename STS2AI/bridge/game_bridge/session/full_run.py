@@ -119,9 +119,11 @@ class ApiBackedFullRunClient:
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
+        floor: int | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
         normalized_build = normalize_build_spec(build)
@@ -130,10 +132,14 @@ class ApiBackedFullRunClient:
                 "character_id": str(character_id),
                 "ascension": int(ascension_level),
             }
+            if encounter_id:
+                payload["encounter_id"] = str(encounter_id)
             if seed:
                 payload["seed"] = str(seed)
             if normalized_build is not None:
                 payload["build"] = normalized_build
+            if floor is not None:
+                payload["floor"] = int(floor)
             wait_timeout = self.ready_timeout_s if timeout_s is None else float(timeout_s)
             initial_state = self._request_v2_state()
             if not is_menu_ready_for_v2_reset(initial_state):
@@ -153,10 +159,14 @@ class ApiBackedFullRunClient:
             "character_id": str(character_id),
             "ascension": int(ascension_level),
         }
+        if encounter_id:
+            payload["encounter_id"] = str(encounter_id)
         if seed:
             payload["seed"] = str(seed)
         if normalized_build is not None:
             payload["build"] = normalized_build
+        if floor is not None:
+            payload["floor"] = int(floor)
         try:
             state = self._singleplayer.act(payload)
         except SingleplayerApiError:
@@ -320,9 +330,11 @@ class FullRunClientLike(Protocol):
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
+        floor: int | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]: ...
 
@@ -644,9 +656,11 @@ class PipeBackedFullRunClient(PipeSnapshotMixin):
         self,
         *,
         character_id: str = "IRONCLAD",
+        encounter_id: str | None = None,
         ascension_level: int = 0,
         seed: str | None = None,
         build: dict[str, Any] | None = None,
+        floor: int | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
         normalized_build = normalize_build_spec(build)
@@ -654,10 +668,14 @@ class PipeBackedFullRunClient(PipeSnapshotMixin):
             "character_id": str(character_id),
             "ascension_level": int(ascension_level),
         }
+        if encounter_id:
+            params["encounter_id"] = str(encounter_id)
         if seed:
             params["seed"] = str(seed)
         if normalized_build is not None:
             params["build"] = normalized_build
+        if floor is not None:
+            params["floor"] = int(floor)
         state = self._call("reset", params)
         if isinstance(state, dict):
             return state

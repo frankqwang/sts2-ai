@@ -16,8 +16,9 @@ from __future__ import annotations
 这四块结构稳定，方便跨 run 对比。
 """
 
+import argparse
 import json
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
+
+ENGINE_CARDS = {"FEEL_NO_PAIN", "DARK_EMBRACE"}
+PAYOFF_CARDS = {"PACTS_END", "TRUE_GRIT", "PURITY", "PYRE", "SECOND_WIND"}
+SUBMENU_ACTION_TYPES = {"select_hand_card", "select_card_option", "confirm_selection", "cancel_selection"}
 
 
 def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Path:
@@ -41,10 +46,11 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     rollout_df = _build_rollout_dataframe(run_root / "raw_runs")
     episode_df = _build_episode_event_dataframe(run_root / "logs")
     encounter_coverage_df = _build_encounter_coverage_dataframe(run_root)
-    encounter_search_df = _build_encounter_search_dataframe(run_root)
     encounter_pool_df = _build_encounter_pool_dataframe(run_root)
-    search_df = _build_search_diagnostics_dataframe(run_root)
-    search_guidance_df = _build_search_guidance_dataframe(run_root)
+    turn_order_df, turn_metrics_df = _build_turn_order_dashboard_dataframes(
+        raw_runs_dir=run_root / "raw_runs",
+        logs_dir=run_root / "logs",
+    )
 
     summary = {
         "iterations": len(manifests),
@@ -63,19 +69,20 @@ def generate_training_analysis(*, run_root: Path, run_metrics_path: Path) -> Pat
     _write_dataframe(rollout_df, analysis_dir / "rollout_metrics.csv")
     _write_dataframe(episode_df, analysis_dir / "episode_metrics.csv")
     _write_dataframe(encounter_coverage_df, analysis_dir / "encounter_coverage.csv")
-    _write_dataframe(encounter_search_df, analysis_dir / "encounter_search_stats.csv")
     _write_dataframe(encounter_pool_df, analysis_dir / "encounter_pool_stats.csv")
-    _write_dataframe(search_df, analysis_dir / "search_diagnostics.csv")
-    _write_dataframe(search_guidance_df, analysis_dir / "search_guidance_diagnostics.csv")
+    _write_dataframe(turn_order_df, analysis_dir / "turn_order_dashboard.csv")
+    _write_dataframe(turn_metrics_df, analysis_dir / "turn_metrics.csv")
 
     _plot_training_metrics(training_df, analysis_dir / "training_metrics.png")
     _plot_sampling_metrics(sampling_df, episode_df, analysis_dir / "sampling_metrics.png")
+    _plot_timing_breakdown(episode_df, analysis_dir / "timing_breakdown.png")
     _plot_pool_diagnostics(sampling_df, analysis_dir / "pool_diagnostics.png")
     _plot_eval_metrics(eval_df, analysis_dir / "evaluation_metrics.png")
     _plot_rollout_behavior(rollout_df, analysis_dir / "rollout_behavior.png")
     _plot_cohort_heatmap(eval_df, analysis_dir / "cohort_overview.png")
     _plot_encounter_coverage(encounter_coverage_df, analysis_dir / "encounter_coverage.png")
-    _plot_search_guidance(search_guidance_df, analysis_dir / "search_guidance.png")
+    _plot_turn_order_dashboard(turn_order_df, analysis_dir / "turn_order_dashboard.png")
+    _write_turn_order_markdown(turn_order_df, analysis_dir / "turn_order_dashboard.md")
     return analysis_dir
 
 
@@ -90,6 +97,8 @@ def _build_training_dataframe(manifests: list[dict[str, Any]]) -> pd.DataFrame:
             "promotion_reason": (manifest.get("promotion") or {}).get("reason", ""),
         }
         row.update(training)
+        if "policy_entropy" not in row and "uncertainty_loss" in row:
+            row["policy_entropy"] = row.get("uncertainty_loss", 0.0)
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -107,8 +116,6 @@ def _build_eval_dataframe(manifests: list[dict[str, Any]]) -> pd.DataFrame:
                     "fight_win_rate": float(item.get("fight_win_rate") or 0.0),
                     "enemy_hp_fraction_dealt": float(item.get("enemy_hp_fraction_dealt") or 0.0),
                     "self_hp_fraction_remaining": float(item.get("self_hp_fraction_remaining") or 0.0),
-                    "search_agreement_at_1": float(item.get("search_agreement_at_1") or 0.0),
-                    "search_topk_overlap": float(item.get("search_topk_overlap") or 0.0),
                     "fight_quality_score": float(metadata.get("fight_quality_score", 0.0) or 0.0),
                     "hp_quality_score": float(metadata.get("hp_quality_score", 0.0) or 0.0),
                     "avg_step_count": float(metadata.get("avg_step_count", 0.0) or 0.0),
@@ -213,7 +220,26 @@ def _build_episode_event_dataframe(logs_dir: Path) -> pd.DataFrame:
                 "avg_core_step_throughput": float(df.get("core_step_throughput", pd.Series(dtype=float)).mean() if "core_step_throughput" in df else 0.0),
                 "avg_reset_duration_s": float(df.get("reset_duration_s", pd.Series(dtype=float)).mean() if "reset_duration_s" in df else 0.0),
                 "avg_policy_infer_duration_s": float(df.get("policy_infer_duration_s", pd.Series(dtype=float)).mean() if "policy_infer_duration_s" in df else 0.0),
+                "avg_policy_collate_duration_s": float(df.get("policy_collate_duration_s", pd.Series(dtype=float)).mean() if "policy_collate_duration_s" in df else 0.0),
+                "avg_intent_forward_duration_s": float(df.get("intent_forward_duration_s", pd.Series(dtype=float)).mean() if "intent_forward_duration_s" in df else 0.0),
+                "avg_action_forward_duration_s": float(df.get("action_forward_duration_s", pd.Series(dtype=float)).mean() if "action_forward_duration_s" in df else 0.0),
+                "avg_policy_forward_duration_s": float(df.get("policy_forward_duration_s", pd.Series(dtype=float)).mean() if "policy_forward_duration_s" in df else 0.0),
+                "avg_policy_postprocess_duration_s": float(df.get("policy_postprocess_duration_s", pd.Series(dtype=float)).mean() if "policy_postprocess_duration_s" in df else 0.0),
+                "avg_batch_wait_duration_s": float(df.get("avg_batch_wait_duration_s", pd.Series(dtype=float)).mean() if "avg_batch_wait_duration_s" in df else 0.0),
+                "avg_batch_size_effective": float(df.get("avg_batch_size_effective", pd.Series(dtype=float)).mean() if "avg_batch_size_effective" in df else 0.0),
                 "avg_env_step_duration_s": float(df.get("env_step_duration_s", pd.Series(dtype=float)).mean() if "env_step_duration_s" in df else 0.0),
+                "avg_runtime_reset_call_duration_s": float(df.get("runtime_reset_call_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_call_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_duration_s": float(df.get("runtime_reset_transport_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_write_duration_s": float(df.get("runtime_reset_transport_write_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_write_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_read_duration_s": float(df.get("runtime_reset_transport_read_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_read_duration_s" in df else 0.0),
+                "avg_runtime_reset_transport_decode_duration_s": float(df.get("runtime_reset_transport_decode_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_transport_decode_duration_s" in df else 0.0),
+                "avg_runtime_reset_state_convert_duration_s": float(df.get("runtime_reset_state_convert_duration_s", pd.Series(dtype=float)).mean() if "runtime_reset_state_convert_duration_s" in df else 0.0),
+                "avg_runtime_step_call_duration_s": float(df.get("runtime_step_call_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_call_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_duration_s": float(df.get("runtime_step_transport_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_write_duration_s": float(df.get("runtime_step_transport_write_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_write_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_read_duration_s": float(df.get("runtime_step_transport_read_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_read_duration_s" in df else 0.0),
+                "avg_runtime_step_transport_decode_duration_s": float(df.get("runtime_step_transport_decode_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_transport_decode_duration_s" in df else 0.0),
+                "avg_runtime_step_state_convert_duration_s": float(df.get("runtime_step_state_convert_duration_s", pd.Series(dtype=float)).mean() if "runtime_step_state_convert_duration_s" in df else 0.0),
                 "avg_observe_duration_s": float(df.get("observe_duration_s", pd.Series(dtype=float)).mean() if "observe_duration_s" in df else 0.0),
                 "avg_emit_duration_s": float(df.get("emit_duration_s", pd.Series(dtype=float)).mean() if "emit_duration_s" in df else 0.0),
                 "avg_overhead_duration_s": float(df.get("overhead_duration_s", pd.Series(dtype=float)).mean() if "overhead_duration_s" in df else 0.0),
@@ -222,6 +248,20 @@ def _build_episode_event_dataframe(logs_dir: Path) -> pd.DataFrame:
                 "timeouts": int((df.get("truncated", False) == True).sum()) if "truncated" in df else 0,
             }
         )
+        row = rows[-1]
+        avg_steps = max(float(row["avg_episode_steps"]), 1e-6)
+        row["policy_collate_ms_per_step"] = float(row["avg_policy_collate_duration_s"]) * 1000.0 / avg_steps
+        row["intent_forward_ms_per_step"] = float(row["avg_intent_forward_duration_s"]) * 1000.0 / avg_steps
+        row["action_forward_ms_per_step"] = float(row["avg_action_forward_duration_s"]) * 1000.0 / avg_steps
+        row["policy_forward_ms_per_step"] = float(row["avg_policy_forward_duration_s"]) * 1000.0 / avg_steps
+        row["policy_postprocess_ms_per_step"] = float(row["avg_policy_postprocess_duration_s"]) * 1000.0 / avg_steps
+        row["batch_wait_ms_per_step"] = float(row["avg_batch_wait_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_ms_per_step"] = float(row["avg_runtime_step_transport_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_read_ms_per_step"] = float(row["avg_runtime_step_transport_read_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_write_ms_per_step"] = float(row["avg_runtime_step_transport_write_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_transport_decode_ms_per_step"] = float(row["avg_runtime_step_transport_decode_duration_s"]) * 1000.0 / avg_steps
+        row["runtime_step_convert_ms_per_step"] = float(row["avg_runtime_step_state_convert_duration_s"]) * 1000.0 / avg_steps
+        row["env_step_ms_per_step"] = float(row["avg_env_step_duration_s"]) * 1000.0 / avg_steps
     return pd.DataFrame(rows)
 
 
@@ -281,53 +321,6 @@ def _build_encounter_coverage_dataframe(run_root: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _build_encounter_search_dataframe(run_root: Path) -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
-    labels_root = run_root / "search_labels"
-    if not labels_root.exists():
-        return pd.DataFrame()
-    for path in sorted(labels_root.glob("iter_*.jsonl")):
-        iteration = _extract_iteration(path.name)
-        grouped: dict[tuple[str, int, str], dict[str, Any]] = {}
-        for line in path.open("r", encoding="utf-8"):
-            text = line.strip()
-            if not text:
-                continue
-            row = json.loads(text)
-            sample = (row.get("sample") or {})
-            state = sample.get("state") or {}
-            context = state.get("context") or {}
-            metadata = sample.get("metadata") or {}
-            encounter_id = str(context.get("encounter_id") or "unknown")
-            floor = int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0)
-            encounter_class = str(context.get("encounter_class") or "default")
-            key = (encounter_id, floor, encounter_class)
-            item = grouped.setdefault(
-                key,
-                {
-                    "iteration": iteration,
-                    "encounter_id": encounter_id,
-                    "floor": floor,
-                    "encounter_class": encounter_class,
-                    "search_requests": 0,
-                    "avg_search_priority": 0.0,
-                    "avg_fight_score": 0.0,
-                    "avg_hp_quality_score": 0.0,
-                },
-            )
-            item["search_requests"] += 1
-            item["avg_search_priority"] += float(row.get("priority") or 0.0)
-            item["avg_fight_score"] += float(metadata.get("fight_score", 0.0) or 0.0)
-            item["avg_hp_quality_score"] += float(metadata.get("hp_quality_score", 0.0) or 0.0)
-        for item in grouped.values():
-            denom = max(int(item["search_requests"]), 1)
-            item["avg_search_priority"] /= denom
-            item["avg_fight_score"] /= denom
-            item["avg_hp_quality_score"] /= denom
-            rows.append(item)
-    return pd.DataFrame(rows)
-
-
 def _build_encounter_pool_dataframe(run_root: Path) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     shard_root = run_root / "dataset_shards"
@@ -373,100 +366,265 @@ def _build_encounter_pool_dataframe(run_root: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _build_search_diagnostics_dataframe(run_root: Path) -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
-    labels_root = run_root / "dataset_shards"
-    if not labels_root.exists():
-        return pd.DataFrame()
-    for path in sorted(labels_root.glob("iter_*.jsonl")):
+def _build_turn_order_dashboard_dataframes(*, raw_runs_dir: Path, logs_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not raw_runs_dir.exists():
+        return pd.DataFrame(), pd.DataFrame()
+
+    episode_events = _load_episode_events_by_iteration_and_run(logs_dir)
+    dashboard_rows: list[dict[str, Any]] = []
+    turn_rows: list[dict[str, Any]] = []
+
+    for path in sorted(raw_runs_dir.glob("iter_*.jsonl")):
         iteration = _extract_iteration(path.name)
+        fights: dict[str, list[dict[str, Any]]] = {}
         for line in path.open("r", encoding="utf-8"):
             text = line.strip()
             if not text:
                 continue
             row = json.loads(text)
-            search_label = row.get("search_label") or {}
-            search_trace = search_label.get("search_trace") or []
-            if not search_trace:
-                continue
-            state = row.get("state") or {}
-            context = state.get("context") or {}
-            for item in search_trace:
-                rows.append(
+            run_id = str(row.get("run_id") or "")
+            fights.setdefault(run_id, []).append(row)
+
+        if not fights:
+            continue
+
+        wins = 0
+        hp_loss_on_win: list[float] = []
+        damage_taken_all: list[float] = []
+        victory_end_hp: list[float] = []
+        turn_steps: list[int] = []
+        submenu_turns = 0
+        no_progress_turns = 0
+        end_turn_with_options_turns = 0
+        long_turns = 0
+        threat_damage_total = 0.0
+        threat_damage_to_attack = 0.0
+        attack_focus_checks = 0
+        attack_focus_hits = 0
+        lethal_checks = 0
+        lethal_hits = 0
+        engine_checks = 0
+        engine_hits = 0
+        quota_checks = 0
+        quota_hits = 0
+        submenu_sequences = 0
+        submenu_overruns = 0
+        submenu_latencies: list[int] = []
+        max_no_progress_streak_values: list[float] = []
+
+        for run_id, rows in fights.items():
+            rows.sort(key=lambda item: int(item.get("step_idx") or 0))
+            event = episode_events.get(iteration, {}).get(run_id)
+            if isinstance(event, dict) and str(event.get("outcome") or "") == "victory":
+                wins += 1
+
+            first = rows[0]
+            last = rows[-1]
+            start_hp = float(
+                ((first.get("state") or {}).get("context") or {}).get("metadata", {}).get(
+                    "combat_start_hp",
+                    ((first.get("state") or {}).get("player") or {}).get("hp", 0.0),
+                )
+                or 0.0
+            )
+            terminal_hp_obs = float((((last.get("next_state") or {}).get("player") or {}).get("hp") or 0.0))
+            relics = set(((first.get("state") or {}).get("context") or {}).get("relics") or [])
+            heal_after_victory = 6.0 if isinstance(event, dict) and str(event.get("outcome") or "") == "victory" and "BURNING_BLOOD" in relics else 0.0
+            est_end_hp = terminal_hp_obs - heal_after_victory
+            est_damage_taken = start_hp - est_end_hp
+            damage_taken_all.append(est_damage_taken)
+            if isinstance(event, dict):
+                max_no_progress_streak_values.append(float(event.get("max_no_progress_streak") or 0.0))
+                if str(event.get("outcome") or "") == "victory":
+                    hp_loss_on_win.append(est_damage_taken)
+                    victory_end_hp.append(est_end_hp)
+
+            turns: dict[int, list[dict[str, Any]]] = {}
+            for row in rows:
+                state = row.get("state") or {}
+                turn = ((state.get("context") or {}).get("metadata") or {}).get("round_number_raw")
+                if isinstance(turn, int):
+                    turns.setdefault(turn, []).append(row)
+
+            for turn, turn_entries in turns.items():
+                turn_entries.sort(key=lambda item: int(item.get("step_idx") or 0))
+                turn_step_count = len(turn_entries)
+                turn_steps.append(turn_step_count)
+                if turn_step_count >= 8:
+                    long_turns += 1
+
+                has_submenu = False
+                any_progress = False
+                repeat_streak_max = 0
+                repeat_last_action_id = ""
+                repeat_count = 0
+                first_targeted_attack_checked = False
+                engine_order: list[str] = []
+                quota_reached = False
+                submenu_latency = 0
+
+                for row in turn_entries:
+                    state = row.get("state") or {}
+                    next_state = row.get("next_state") or {}
+                    legal_actions = state.get("legal_actions") or []
+                    legal_action_types = {str(item.get("action_type") or "") for item in legal_actions}
+                    if ((state.get("context") or {}).get("metadata") or {}).get("state_type") in {"hand_select", "card_select"} or (legal_action_types & SUBMENU_ACTION_TYPES):
+                        has_submenu = True
+
+                    metadata = row.get("metadata") or {}
+                    if bool(metadata.get("made_progress")) or float(metadata.get("enemy_hp_delta") or 0.0) > 0 or float(metadata.get("enemy_count_delta") or 0.0) > 0:
+                        any_progress = True
+
+                    action = row.get("action") or {}
+                    action_type = str(action.get("action_type") or "")
+                    action_id = str(action.get("action_id") or "")
+                    if action_id == repeat_last_action_id:
+                        repeat_count += 1
+                    else:
+                        repeat_last_action_id = action_id
+                        repeat_count = 1
+                    repeat_streak_max = max(repeat_streak_max, repeat_count)
+
+                    enemies = (state.get("enemies") or [])
+                    alive_enemies = [(str(index + 1), enemy) for index, enemy in enumerate(enemies) if bool(enemy.get("alive", True))]
+                    attack_enemy_ids = [enemy_id for enemy_id, enemy in alive_enemies if str(enemy.get("intent_id") or "") == "Attack"]
+                    mixed_intent = bool(attack_enemy_ids) and any(str(enemy.get("intent_id") or "") != "Attack" for _, enemy in alive_enemies)
+                    if mixed_intent and action_type == "play_card" and action.get("target_id"):
+                        damage_delta = max(0.0, float(metadata.get("enemy_hp_delta") or 0.0))
+                        threat_damage_total += damage_delta
+                        if str(action.get("target_id")) in attack_enemy_ids:
+                            threat_damage_to_attack += damage_delta
+                        if not first_targeted_attack_checked:
+                            attack_focus_checks += 1
+                            if str(action.get("target_id")) in attack_enemy_ids:
+                                attack_focus_hits += 1
+                            first_targeted_attack_checked = True
+
+                    lethal_target_ids: set[str] = set()
+                    for legal_action in legal_actions:
+                        if str(legal_action.get("action_type") or "") != "play_card":
+                            continue
+                        target_id = str(legal_action.get("target_id") or "")
+                        if not target_id:
+                            continue
+                        try:
+                            enemy_index = int(target_id) - 1
+                        except ValueError:
+                            continue
+                        if enemy_index < 0 or enemy_index >= len(enemies):
+                            continue
+                        enemy = enemies[enemy_index]
+                        if not bool(enemy.get("alive", True)):
+                            continue
+                        hp_plus_block = float(enemy.get("hp") or 0.0) + float(enemy.get("block") or 0.0)
+                        if float(legal_action.get("damage_now") or 0.0) >= hp_plus_block and hp_plus_block > 0:
+                            lethal_target_ids.add(target_id)
+                    if lethal_target_ids:
+                        lethal_checks += 1
+                        alive_before = sum(1 for enemy in enemies if bool(enemy.get("alive", True)))
+                        alive_after = sum(1 for enemy in ((next_state.get("enemies") or [])) if bool(enemy.get("alive", True)))
+                        if action_type == "play_card" and str(action.get("target_id") or "") in lethal_target_ids and alive_after < alive_before:
+                            lethal_hits += 1
+
+                    if action_type == "play_card":
+                        card_id = str(action.get("card_id") or "")
+                        if card_id in ENGINE_CARDS:
+                            engine_order.append("engine")
+                        elif card_id in PAYOFF_CARDS:
+                            engine_order.append("payoff")
+
+                    if action_type in {"select_hand_card", "select_card_option"}:
+                        next_action_types = [str(item.get("action_type") or "") for item in (next_state.get("legal_actions") or [])]
+                        has_confirm = "confirm_selection" in next_action_types
+                        has_more_select = bool({"select_hand_card", "select_card_option"} & set(next_action_types))
+                        if has_confirm and not has_more_select and not quota_reached:
+                            submenu_sequences += 1
+                            quota_reached = True
+                            submenu_latency = 0
+                            continue
+                    if quota_reached:
+                        if action_type == "confirm_selection":
+                            submenu_latencies.append(submenu_latency)
+                            quota_checks += 1
+                            quota_hits += 1
+                            if submenu_latency > 0:
+                                submenu_overruns += 1
+                            quota_reached = False
+                            submenu_latency = 0
+                        elif ((state.get("context") or {}).get("metadata") or {}).get("state_type") in {"hand_select", "card_select"} or (legal_action_types & SUBMENU_ACTION_TYPES):
+                            submenu_latency += 1
+                        else:
+                            submenu_latencies.append(submenu_latency)
+                            quota_checks += 1
+                            if submenu_latency > 0:
+                                submenu_overruns += 1
+                            quota_reached = False
+                            submenu_latency = 0
+
+                if has_submenu:
+                    submenu_turns += 1
+                if not any_progress:
+                    no_progress_turns += 1
+                if engine_order.count("engine") > 0 and engine_order.count("payoff") > 0:
+                    engine_checks += 1
+                    if engine_order.index("engine") < engine_order.index("payoff"):
+                        engine_hits += 1
+
+                last_row = turn_entries[-1]
+                last_legal_action_types = {
+                    str(item.get("action_type") or "")
+                    for item in (((last_row.get("state") or {}).get("legal_actions") or []))
+                }
+                ended_with_options = False
+                if str((last_row.get("action") or {}).get("action_type") or "") == "end_turn":
+                    meaningful_options = last_legal_action_types - {"end_turn", "confirm_selection", "cancel_selection"}
+                    ended_with_options = bool(meaningful_options)
+                    if ended_with_options:
+                        end_turn_with_options_turns += 1
+
+                turn_rows.append(
                     {
                         "iteration": iteration,
-                        "sample_id": row.get("sample_id", ""),
-                        "encounter_id": context.get("encounter_id", ""),
-                        "floor": int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0),
-                        "action_index": int(item.get("action_index", -1) or -1),
-                        "action_id": item.get("action_id", ""),
-                        "card_id": item.get("card_id", ""),
-                        "visits": int(item.get("visits", 0) or 0),
-                        "score_avg": float(item.get("score_avg", 0.0) or 0.0),
-                        "score_best": float(item.get("score_best", 0.0) or 0.0),
-                        "hp_quality_avg": float(item.get("hp_quality_avg", 0.0) or 0.0),
-                        "speed_quality_avg": float(item.get("speed_quality_avg", 0.0) or 0.0),
-                        "outcome_mode": item.get("outcome_mode", ""),
+                        "run_id": run_id,
+                        "fight_id": str(turn_entries[0].get("fight_id") or ""),
+                        "turn": turn,
+                        "turn_ref": f"{path.name} | run={run_id} | fight={turn_entries[0].get('fight_id', '')} | turn={turn}",
+                        "turn_steps": turn_step_count,
+                        "has_submenu": int(has_submenu),
+                        "no_progress_turn": int(not any_progress),
+                        "ended_with_options": int(ended_with_options),
+                        "repeat_streak_max": repeat_streak_max,
+                        "source_file": path.name,
                     }
                 )
-    return pd.DataFrame(rows)
 
+        total_turns = len(turn_steps)
+        dashboard_rows.append(
+            {
+                "iteration": iteration,
+                "episodes": len(fights),
+                "win_rate": wins / max(len(fights), 1),
+                "avg_hp_loss_on_win": _safe_mean(hp_loss_on_win),
+                "avg_est_damage_taken": _safe_mean(damage_taken_all),
+                "avg_victory_est_end_hp": _safe_mean(victory_end_hp),
+                "mean_turn_steps": _safe_mean(turn_steps),
+                "p95_turn_steps": _percentile(turn_steps, 0.95),
+                "max_turn_steps": max(turn_steps) if turn_steps else 0,
+                "submenu_turn_rate": submenu_turns / max(total_turns, 1),
+                "submenu_overrun_rate": submenu_overruns / max(submenu_sequences, 1) if submenu_sequences else 0.0,
+                "submenu_confirm_latency": _safe_mean(submenu_latencies),
+                "no_progress_turn_rate": no_progress_turns / max(total_turns, 1),
+                "end_turn_with_options_rate": end_turn_with_options_turns / max(total_turns, 1),
+                "threat_damage_share": threat_damage_to_attack / max(threat_damage_total, 1e-9) if threat_damage_total > 0 else 0.0,
+                "lethal_conversion_rate": lethal_hits / max(lethal_checks, 1) if lethal_checks else 0.0,
+                "attack_focus_rate": attack_focus_hits / max(attack_focus_checks, 1) if attack_focus_checks else 0.0,
+                "engine_before_payoff_rate": engine_hits / max(engine_checks, 1) if engine_checks else 0.0,
+                "quota_confirm_rate": quota_hits / max(quota_checks, 1) if quota_checks else 0.0,
+                "p95_max_no_progress_streak": _percentile(max_no_progress_streak_values, 0.95),
+            }
+        )
 
-def _build_search_guidance_dataframe(run_root: Path) -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
-    raw_root = run_root / "raw_runs"
-    if not raw_root.exists():
-        return pd.DataFrame()
-    for path in sorted(raw_root.glob("iter_*.jsonl")):
-        iteration = _extract_iteration(path.name)
-        grouped: dict[tuple[str, int, str], dict[str, Any]] = {}
-        for line in path.open("r", encoding="utf-8"):
-            text = line.strip()
-            if not text:
-                continue
-            row = json.loads(text)
-            state = row.get("state") or {}
-            context = state.get("context") or {}
-            metadata = row.get("metadata") or {}
-            encounter_id = str(context.get("encounter_id") or "unknown")
-            floor = int(context.get("metadata", {}).get("skada_floor", context.get("floor", 0)) or 0)
-            encounter_class = str(context.get("encounter_class") or "default")
-            key = (encounter_id, floor, encounter_class)
-            item = grouped.setdefault(
-                key,
-                {
-                    "iteration": iteration,
-                    "encounter_id": encounter_id,
-                    "floor": floor,
-                    "encounter_class": encounter_class,
-                    "transition_rows": 0,
-                    "guided_steps": 0,
-                    "guided_progress_steps": 0,
-                    "guided_search_value_sum": 0.0,
-                    "guided_priority_sum": 0.0,
-                },
-            )
-            item["transition_rows"] += 1
-            if bool(metadata.get("search_guided", False)):
-                item["guided_steps"] += 1
-                item["guided_progress_steps"] += 1 if bool(metadata.get("made_progress", False)) else 0
-                item["guided_search_value_sum"] += float(metadata.get("search_value", 0.0) or 0.0)
-                item["guided_priority_sum"] += float(metadata.get("search_guidance_priority", 0.0) or 0.0)
-        for item in grouped.values():
-            total_steps = max(int(item["transition_rows"]), 1)
-            guided_steps = max(int(item["guided_steps"]), 1)
-            item["guided_step_ratio"] = float(item["guided_steps"]) / total_steps
-            item["guided_progress_ratio"] = (
-                float(item["guided_progress_steps"]) / guided_steps if item["guided_steps"] > 0 else 0.0
-            )
-            item["avg_guidance_priority"] = (
-                float(item["guided_priority_sum"]) / guided_steps if item["guided_steps"] > 0 else 0.0
-            )
-            item["avg_search_value"] = (
-                float(item["guided_search_value_sum"]) / guided_steps if item["guided_steps"] > 0 else 0.0
-            )
-            rows.append(item)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(dashboard_rows), pd.DataFrame(turn_rows)
 
 
 def _plot_training_metrics(df: pd.DataFrame, output_path: Path) -> None:
@@ -476,9 +634,17 @@ def _plot_training_metrics(df: pd.DataFrame, output_path: Path) -> None:
     x = df["iteration"]
 
     axes[0, 0].plot(x, df["total_loss"], marker="o", label="total")
-    for column in ("policy_loss", "value_loss", "ranking_loss", "delta_loss", "uncertainty_loss"):
+    for column in (
+        "policy_loss",
+        "policy_align_loss",
+        "value_loss",
+        "delta_loss",
+        "future_summary_loss",
+        "policy_entropy",
+    ):
         if column in df:
-            axes[0, 0].plot(x, df[column], marker="o", label=column.replace("_loss", ""))
+            label = "policy_entropy" if column == "policy_entropy" else column.replace("_loss", "")
+            axes[0, 0].plot(x, df[column], marker="o", label=label)
     axes[0, 0].set_title("Training Losses")
     axes[0, 0].legend(fontsize=8)
 
@@ -487,10 +653,9 @@ def _plot_training_metrics(df: pd.DataFrame, output_path: Path) -> None:
     axes[0, 1].set_title("LR / Grad Norm")
     axes[0, 1].legend(fontsize=8)
 
-    axes[1, 0].bar(x, df["search_sample_ratio"], label="search_ratio")
     if "skipped_non_finite_steps" in df:
         axes[1, 0].plot(x, df["skipped_non_finite_steps"], marker="o", color="crimson", label="skipped_non_finite")
-    axes[1, 0].set_title("Search Ratio / Stability")
+    axes[1, 0].set_title("Stability")
     axes[1, 0].legend(fontsize=8)
 
     promoted = df["promoted"].astype(int) if "promoted" in df else pd.Series([0] * len(df))
@@ -562,6 +727,64 @@ def _plot_sampling_metrics(sampling_df: pd.DataFrame, episode_df: pd.DataFrame, 
     plt.close(fig)
 
 
+def _plot_timing_breakdown(episode_df: pd.DataFrame, output_path: Path) -> None:
+    if episode_df.empty:
+        return
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8))
+    x = episode_df["iteration"]
+
+    for column in (
+        "batch_wait_ms_per_step",
+        "policy_collate_ms_per_step",
+        "intent_forward_ms_per_step",
+        "action_forward_ms_per_step",
+        "policy_forward_ms_per_step",
+        "policy_postprocess_ms_per_step",
+        "runtime_step_transport_ms_per_step",
+        "runtime_step_convert_ms_per_step",
+        "env_step_ms_per_step",
+    ):
+        if column in episode_df:
+            axes[0, 0].plot(x, episode_df[column], marker="o", label=column.replace("_ms_per_step", ""))
+    axes[0, 0].set_title("Per-step Timing (ms)")
+    axes[0, 0].legend(fontsize=8)
+
+    for column in (
+        "avg_runtime_step_transport_write_duration_s",
+        "avg_runtime_step_transport_read_duration_s",
+        "avg_runtime_step_transport_decode_duration_s",
+    ):
+        if column in episode_df:
+            axes[0, 1].plot(x, episode_df[column] * 1000.0, marker="o", label=column.replace("avg_runtime_step_", "").replace("_duration_s", ""))
+    axes[0, 1].set_title("Bridge/Pipe Breakdown Per Episode (ms)")
+    axes[0, 1].legend(fontsize=8)
+
+    for column in (
+        "avg_runtime_reset_transport_duration_s",
+        "avg_runtime_reset_state_convert_duration_s",
+        "avg_reset_duration_s",
+    ):
+        if column in episode_df:
+            axes[1, 0].plot(x, episode_df[column] * 1000.0, marker="o", label=column.replace("avg_", "").replace("_duration_s", ""))
+    axes[1, 0].set_title("Reset Timing Per Episode (ms)")
+    axes[1, 0].legend(fontsize=8)
+
+    for column in (
+        "avg_episode_duration_s",
+        "avg_policy_infer_duration_s",
+        "avg_env_step_duration_s",
+        "avg_overhead_duration_s",
+    ):
+        if column in episode_df:
+            axes[1, 1].plot(x, episode_df[column], marker="o", label=column.replace("avg_", "").replace("_duration_s", ""))
+    axes[1, 1].set_title("Episode Duration Components (s)")
+    axes[1, 1].legend(fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
 def _plot_eval_metrics(eval_df: pd.DataFrame, output_path: Path) -> None:
     if eval_df.empty:
         return
@@ -569,14 +792,13 @@ def _plot_eval_metrics(eval_df: pd.DataFrame, output_path: Path) -> None:
         fight_win_rate=("fight_win_rate", "mean"),
         enemy_hp_fraction_dealt=("enemy_hp_fraction_dealt", "mean"),
         self_hp_fraction_remaining=("self_hp_fraction_remaining", "mean"),
-        search_agreement_at_1=("search_agreement_at_1", "mean"),
         timeout_rate=("timeout_rate", "mean"),
         avg_no_progress_ratio=("avg_no_progress_ratio", "mean"),
     )
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 8))
     x = grouped["iteration"]
-    for column in ("fight_win_rate", "enemy_hp_fraction_dealt", "self_hp_fraction_remaining", "search_agreement_at_1"):
+    for column in ("fight_win_rate", "enemy_hp_fraction_dealt", "self_hp_fraction_remaining"):
         axes[0].plot(x, grouped[column], marker="o", label=column)
     axes[0].set_title("Evaluation Quality")
     axes[0].legend(fontsize=8)
@@ -649,6 +871,13 @@ def _plot_rollout_behavior(rollout_df: pd.DataFrame, output_path: Path) -> None:
 def _plot_cohort_heatmap(eval_df: pd.DataFrame, output_path: Path) -> None:
     if eval_df.empty:
         return
+    heatmap_df = (
+        eval_df.groupby(["cohort_name", "iteration"], as_index=False)
+        .agg(
+            fight_win_rate=("fight_win_rate", "mean"),
+            timeout_rate=("timeout_rate", "mean"),
+        )
+    )
     metric_columns = [
         ("fight_win_rate", "Cohort Win Rate"),
         ("timeout_rate", "Cohort Timeout Rate"),
@@ -657,7 +886,7 @@ def _plot_cohort_heatmap(eval_df: pd.DataFrame, output_path: Path) -> None:
     if len(metric_columns) == 1:
         axes = [axes]
     for axis, (metric, title) in zip(axes, metric_columns, strict=False):
-        pivot = eval_df.pivot(index="cohort_name", columns="iteration", values=metric).fillna(0.0)
+        pivot = heatmap_df.pivot(index="cohort_name", columns="iteration", values=metric).fillna(0.0)
         image = axis.imshow(pivot.values, aspect="auto", cmap="viridis")
         axis.set_title(title)
         axis.set_xlabel("Iteration")
@@ -702,44 +931,135 @@ def _plot_encounter_coverage(df: pd.DataFrame, output_path: Path) -> None:
     plt.close(fig)
 
 
-def _plot_search_guidance(df: pd.DataFrame, output_path: Path) -> None:
+def _plot_turn_order_dashboard(df: pd.DataFrame, output_path: Path) -> None:
     if df.empty:
         return
-    grouped = (
-        df.groupby("iteration", as_index=False)
-        .agg(
-            guided_steps=("guided_steps", "sum"),
-            transition_rows=("transition_rows", "sum"),
-            guided_progress_ratio=("guided_progress_ratio", "mean"),
-            avg_guidance_priority=("avg_guidance_priority", "mean"),
-            avg_search_value=("avg_search_value", "mean"),
-        )
-    )
-    if grouped.empty:
-        return
-    grouped["guided_step_ratio"] = grouped["guided_steps"] / grouped["transition_rows"].clip(lower=1)
 
-    fig, axes = plt.subplots(2, 1, figsize=(12, 8))
-    x = grouped["iteration"]
-    axes[0].plot(x, grouped["guided_step_ratio"], marker="o", label="guided_step_ratio")
-    axes[0].plot(x, grouped["guided_progress_ratio"], marker="o", label="guided_progress_ratio")
-    axes[0].set_title("Search Guidance Coverage")
-    axes[0].legend(fontsize=8)
+    df = df.sort_values("iteration")
+    x = df["iteration"]
 
-    axes[1].plot(x, grouped["avg_guidance_priority"], marker="o", label="avg_guidance_priority")
-    axes[1].plot(x, grouped["avg_search_value"], marker="o", label="avg_search_value")
-    axes[1].set_title("Search Guidance Quality")
-    axes[1].legend(fontsize=8)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    axes[0, 0].plot(x, df["win_rate"], marker="o", label="win_rate")
+    if "avg_hp_loss_on_win" in df:
+        axes[0, 0].plot(x, df["avg_hp_loss_on_win"], marker="o", label="avg_hp_loss_on_win")
+    axes[0, 0].set_title("Outcome")
+    axes[0, 0].legend(fontsize=8)
+
+    axes[0, 1].plot(x, df["mean_turn_steps"], marker="o", label="mean_turn_steps")
+    axes[0, 1].plot(x, df["p95_turn_steps"], marker="o", label="p95_turn_steps")
+    axes[0, 1].plot(x, df["p95_max_no_progress_streak"], marker="o", label="p95_no_progress_streak")
+    axes[0, 1].set_title("Turn Flow")
+    axes[0, 1].legend(fontsize=8)
+
+    axes[1, 0].plot(x, df["submenu_turn_rate"], marker="o", label="submenu_turn_rate")
+    axes[1, 0].plot(x, df["submenu_overrun_rate"], marker="o", label="submenu_overrun_rate")
+    axes[1, 0].plot(x, df["quota_confirm_rate"], marker="o", label="quota_confirm_rate")
+    axes[1, 0].set_title("Submenu")
+    axes[1, 0].legend(fontsize=8)
+
+    axes[1, 1].plot(x, df["threat_damage_share"], marker="o", label="threat_damage_share")
+    axes[1, 1].plot(x, df["lethal_conversion_rate"], marker="o", label="lethal_conversion_rate")
+    axes[1, 1].plot(x, df["engine_before_payoff_rate"], marker="o", label="engine_before_payoff_rate")
+    axes[1, 1].set_title("Decision Quality")
+    axes[1, 1].legend(fontsize=8)
+
+    for axis in axes.flat:
+        axis.set_xlabel("iteration")
+        axis.grid(alpha=0.25)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
 
 
+def _write_turn_order_markdown(df: pd.DataFrame, output_path: Path) -> None:
+    if df.empty:
+        return
+    df = df.sort_values("iteration").copy()
+    latest = df.iloc[-1]
+    lines = [
+        "# Turn Order Dashboard",
+        "",
+        "这份摘要面向单个训练 run，不依赖 old/new 对比。",
+        "",
+        "## 指标怎么理解",
+        "",
+        "- `mean_turn_steps / p95_turn_steps / max_turn_steps`：看每回合决策长度有没有收敛。",
+        "- `submenu_turn_rate / submenu_overrun_rate / quota_confirm_rate`：看 submenu 是否还在犹豫、改选、拖步数。",
+        "- `no_progress_turn_rate / end_turn_with_options_rate / p95_max_no_progress_streak`：看是否经常空转或过早结束回合。",
+        "- `threat_damage_share / lethal_conversion_rate / attack_focus_rate`：看是否会处理当前威胁、抓斩杀窗口。",
+        "- `engine_before_payoff_rate`：看是否学会先铺引擎、再兑现。",
+        "",
+        "## 末轮快照",
+        "",
+        f"- `iteration={int(latest['iteration'])}`",
+        f"- `win_rate={_fmt_metric(latest.get('win_rate'))}`",
+        f"- `avg_hp_loss_on_win={_fmt_metric(latest.get('avg_hp_loss_on_win'))}`",
+        f"- `mean_turn_steps={_fmt_metric(latest.get('mean_turn_steps'))}`",
+        f"- `p95_turn_steps={_fmt_metric(latest.get('p95_turn_steps'))}`",
+        f"- `submenu_overrun_rate={_fmt_metric(latest.get('submenu_overrun_rate'))}`",
+        f"- `quota_confirm_rate={_fmt_metric(latest.get('quota_confirm_rate'))}`",
+        f"- `no_progress_turn_rate={_fmt_metric(latest.get('no_progress_turn_rate'))}`",
+        f"- `end_turn_with_options_rate={_fmt_metric(latest.get('end_turn_with_options_rate'))}`",
+        f"- `threat_damage_share={_fmt_metric(latest.get('threat_damage_share'))}`",
+        f"- `lethal_conversion_rate={_fmt_metric(latest.get('lethal_conversion_rate'))}`",
+        f"- `engine_before_payoff_rate={_fmt_metric(latest.get('engine_before_payoff_rate'))}`",
+        "",
+        "## 文件",
+        "",
+        "- `turn_order_dashboard.csv`：iter 级主表",
+        "- `turn_order_dashboard.png`：iter 趋势图",
+        "- `turn_metrics.csv`：turn 级附录，必要时回原始轨迹定位",
+    ]
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def _write_dataframe(df: pd.DataFrame, path: Path) -> None:
     if df.empty:
         return
     df.to_csv(path, index=False, encoding="utf-8")
+
+
+def _load_episode_events_by_iteration_and_run(logs_dir: Path) -> dict[int, dict[str, dict[str, Any]]]:
+    result: dict[int, dict[str, dict[str, Any]]] = {}
+    if not logs_dir.exists():
+        return result
+    for path in sorted(logs_dir.glob("iter_*.events.jsonl")):
+        iteration = _extract_iteration(path.name)
+        items: dict[str, dict[str, Any]] = {}
+        for line in path.open("r", encoding="utf-8"):
+            text = line.strip()
+            if not text:
+                continue
+            event = json.loads(text)
+            if event.get("phase") != "collect_episode" or event.get("status") != "completed":
+                continue
+            run_id = str(event.get("run_id") or "")
+            if run_id:
+                items[run_id] = event
+        if items:
+            result[iteration] = items
+    return result
+
+
+def _safe_mean(values: list[Any]) -> float:
+    if not values:
+        return 0.0
+    return float(pd.Series(values, dtype=float).mean())
+
+
+def _percentile(values: list[Any], quantile: float) -> float:
+    if not values:
+        return 0.0
+    return float(pd.Series(values, dtype=float).quantile(quantile))
+
+
+def _fmt_metric(value: Any) -> str:
+    try:
+        return f"{float(value):.4f}"
+    except (TypeError, ValueError):
+        return "0.0000"
 
 
 def _extract_iteration(name: str) -> int:
@@ -757,3 +1077,23 @@ def _extract_manifests(metrics: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(manifest, dict):
         return [manifest]
     return []
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Regenerate single-run training analysis.")
+    parser.add_argument("--run-root", required=True, help="Path to one training run directory that contains run_metrics.json")
+    parser.add_argument(
+        "--run-metrics-path",
+        default="",
+        help="Optional explicit path to run_metrics.json; defaults to <run-root>/run_metrics.json",
+    )
+    args = parser.parse_args()
+
+    run_root = Path(args.run_root).resolve()
+    run_metrics_path = Path(args.run_metrics_path).resolve() if args.run_metrics_path else (run_root / "run_metrics.json")
+    analysis_dir = generate_training_analysis(run_root=run_root, run_metrics_path=run_metrics_path)
+    print(json.dumps({"analysis_dir": str(analysis_dir)}, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

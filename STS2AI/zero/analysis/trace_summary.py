@@ -157,7 +157,6 @@ def _render_raw_fight(
         meta = row.get("metadata", {})
         legal_actions = state.get("legal_actions") or []
         hand = state.get("hand") or []
-        search_meta = _extract_search_meta(meta)
         line1 = (
             f"[Step {row.get('step_idx', 0):>3}] HP {state['player']['hp']:.0f}/{state['player']['max_hp']:.0f} "
             f"格挡 {state['player']['block']:.0f} 能量 {state['player']['energy']:.0f} | "
@@ -167,7 +166,6 @@ def _render_raw_fight(
         legal_action_lines = _legal_action_lines(legal_actions, name_catalog=name_catalog)
         line3 = (
             f"选择：{_format_action(action, name_catalog=name_catalog)} | "
-            f"unc={float(meta.get('uncertainty', 0.0) or 0.0):.3f} "
             f"gap={float(meta.get('top2_gap', 0.0) or 0.0):.3f} | "
             f"prog={'Y' if bool(meta.get('made_progress', False)) else 'N'} "
             f"enemy_hp_delta={float(meta.get('enemy_hp_delta', 0.0) or 0.0):.1f}"
@@ -178,21 +176,6 @@ def _render_raw_fight(
             f"敌方 {_enemy_brief(next_state.get('enemies') or [], name_catalog=name_catalog)}"
         )
         lines.extend([_wrap(line1), _wrap(line2), f"合法动作（{len(legal_actions)} 个）：", *legal_action_lines, _wrap(line3)])
-        if search_meta["present"]:
-            line3b = (
-                f"search src={search_meta['source']} sims={search_meta['simulations']} "
-                f"cache={'Y' if search_meta['cache_hit'] else 'N'} "
-                f"dur={float(search_meta['duration_s']):.3f}s "
-                f"value={float(search_meta['value']):.3f} "
-                f"best={_best_action_text(search_meta['best_action_index'], legal_actions, name_catalog=name_catalog)}"
-            )
-            line3c = (
-                f"search_topk={_topk_actions_text(search_meta['topk'], legal_actions, name_catalog=name_catalog)}"
-            )
-            lines.extend([_wrap(line3b), _wrap(line3c)])
-            if search_meta["trace"]:
-                lines.append("search_trace：")
-                lines.extend(_search_trace_lines(search_meta["trace"], width=160))
         lines.extend([_wrap(line4), ""])
     last = transitions[-1]
     lines.append(_wrap(f"--- fight 结束标记：done={last.get('done')} outcome={last.get('run_outcome')} ---"))
@@ -217,18 +200,7 @@ def _render_eval_fight(group_key: str, events: list[dict[str, Any]], *, name_cat
             f"格挡 {float(row.get('player_block', 0.0)):.0f} 能量 {float(row.get('player_energy', 0.0)):.0f} | "
             f"敌方 {_enemy_hp_list_brief(row.get('enemy_hp') or [], row.get('enemy_block') or [])}"
         )
-        search_bits: list[str] = []
-        search_best = row.get("search_best_action_index")
-        action_index = row.get("action_index")
-        if search_best is not None and action_index is not None:
-            search_bits.append("search=一致" if int(search_best) == int(action_index) else "search=不一致")
-        search_topk = row.get("search_topk_indices") or []
-        if search_topk and action_index is not None:
-            search_bits.append("topk=命中" if int(action_index) in {int(v) for v in search_topk} else "topk=未命中")
-        line2 = (
-            f"选择：{_format_action(row, name_catalog=name_catalog)}"
-            + (f" | {' '.join(search_bits)}" if search_bits else "")
-        )
+        line2 = f"选择：{_format_action(row, name_catalog=name_catalog)}"
         line3 = (
             f"prog={'Y' if bool(row.get('made_progress', False)) else 'N'} "
             f"enemy_hp_delta={float(row.get('enemy_hp_delta', 0.0) or 0.0):.1f} "
@@ -253,14 +225,6 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
     next_state = row["next_state"]
     action = row.get("action") or {}
     legal_actions = state.get("legal_actions") or []
-    search_bits: list[str] = []
-    search_best = row.get("search_best_action_index")
-    action_index = row.get("action_index")
-    if search_best is not None and action_index is not None:
-        search_bits.append("search=一致" if int(search_best) == int(action_index) else "search=不一致")
-    search_topk = row.get("search_topk_indices") or []
-    if search_topk and action_index is not None:
-        search_bits.append("topk=命中" if int(action_index) in {int(v) for v in search_topk} else "topk=未命中")
     line1 = (
         f"[Step {int(row.get('step_idx', 0)):>3}] HP {float(state['player']['hp']):.0f}/{float(state['player']['max_hp']):.0f} "
         f"格挡 {float(state['player']['block']):.0f} 能量 {float(state['player']['energy']):.0f} | "
@@ -268,17 +232,9 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
     )
     line2 = f"手牌：{_hand_brief(state.get('hand') or [], name_catalog=name_catalog)}"
     legal_action_lines = _legal_action_lines(legal_actions, name_catalog=name_catalog)
-    line3 = (
-        f"选择：{_format_action(action, name_catalog=name_catalog)}"
-        + (f" | {' '.join(search_bits)}" if search_bits else "")
-    )
+    line3 = f"选择：{_format_action(action, name_catalog=name_catalog)}"
     policy_topk = row.get("policy_topk_indices") or []
-    search_topk = row.get("search_topk_indices") or []
-    search_trace = row.get("search_trace") or []
-    line3b = (
-        f"policy_topk={_topk_actions_text(policy_topk, legal_actions, name_catalog=name_catalog)} | "
-        f"search_topk={_topk_actions_text(search_topk, legal_actions, name_catalog=name_catalog)}"
-    )
+    line3b = f"policy_topk={_topk_actions_text(policy_topk, legal_actions, name_catalog=name_catalog)}"
     line4 = (
         f"结果 HP {float(next_state['player']['hp']):.0f}/{float(next_state['player']['max_hp']):.0f} "
         f"格挡 {float(next_state['player']['block']):.0f} 能量 {float(next_state['player']['energy']):.0f} | "
@@ -298,11 +254,8 @@ def _render_eval_step_detailed(row: dict[str, Any], *, name_catalog: dict[str, s
         _wrap(line3b),
         _wrap(line4),
         _wrap(line5),
+        "",
     ]
-    if search_trace:
-        lines.append("search_trace：")
-        lines.extend(_search_trace_lines(search_trace, width=160))
-    lines.append("")
     return lines
 
 
@@ -448,79 +401,6 @@ def _topk_actions_text(indices: list[Any], legal_actions: list[dict[str, Any]], 
         if 0 <= index < len(legal_actions):
             parts.append(f"{index}:{_format_action(legal_actions[index], name_catalog=name_catalog)}")
     return " | ".join(parts) if parts else "无"
-
-
-def _best_action_text(index: Any, legal_actions: list[dict[str, Any]], *, name_catalog: dict[str, str]) -> str:
-    try:
-        parsed = int(index)
-    except (TypeError, ValueError):
-        return "无"
-    if 0 <= parsed < len(legal_actions):
-        return f"{parsed}:{_format_action(legal_actions[parsed], name_catalog=name_catalog)}"
-    return "无"
-
-
-def _extract_search_meta(metadata: dict[str, Any]) -> dict[str, Any]:
-    search_trace = metadata.get("search_trace")
-    if not isinstance(search_trace, list) or not search_trace:
-        legacy_trace = metadata.get("search_teacher_trace")
-        search_trace = legacy_trace if isinstance(legacy_trace, list) else []
-    topk = metadata.get("search_topk")
-    if not isinstance(topk, list) or not topk:
-        legacy_topk = metadata.get("search_teacher_topk")
-        topk = legacy_topk if isinstance(legacy_topk, list) else []
-    best_action_index = metadata.get("search_best_action_index")
-    if best_action_index in (None, ""):
-        best_action_index = metadata.get("search_teacher_best_action_index")
-    value = metadata.get("search_value")
-    if value in (None, ""):
-        value = metadata.get("search_teacher_value")
-    source = str(metadata.get("search_source") or "")
-    present = bool(
-        search_trace
-        or topk
-        or source
-        or metadata.get("search_guided")
-        or metadata.get("search_collected")
-        or best_action_index not in (None, "", -1)
-    )
-    return {
-        "present": present,
-        "trace": search_trace,
-        "topk": topk,
-        "best_action_index": best_action_index,
-        "value": float(value or 0.0),
-        "source": source or ("search_collect" if metadata.get("search_collected") else "search_guided" if metadata.get("search_guided") else ""),
-        "simulations": int(metadata.get("search_simulations", 0) or 0),
-        "cache_hit": bool(metadata.get("search_cache_hit", False)),
-        "duration_s": float(metadata.get("search_duration_s", 0.0) or 0.0),
-    }
-
-
-def _search_trace_lines(search_trace: list[dict[str, Any]], *, width: int) -> list[str]:
-    lines: list[str] = []
-    for item in search_trace[:4]:
-        action_index = item.get("action_index", -1)
-        try:
-            parsed_action_index = int(action_index)
-        except (TypeError, ValueError):
-            parsed_action_index = -1
-        lines.append(
-            _wrap(
-                "  - "
-                f"a{parsed_action_index} "
-                f"{item.get('card_id', '') or item.get('action_id', '')} "
-                f"prior={float(item.get('prior', 0.0) or 0.0):.3f} "
-                f"visits={int(item.get('visits', 0) or 0)} "
-                f"avg={float(item.get('score_avg', 0.0) or 0.0):.3f} "
-                f"best={float(item.get('score_best', 0.0) or 0.0):.3f} "
-                f"hpq={float(item.get('hp_quality_avg', 0.0) or 0.0):.3f} "
-                f"spd={float(item.get('speed_quality_avg', 0.0) or 0.0):.3f} "
-                f"out={item.get('outcome_mode', '')}",
-                width=width,
-            )
-        )
-    return lines or ["  - 无"]
 
 
 def _wrap(text: str, width: int = 180) -> str:

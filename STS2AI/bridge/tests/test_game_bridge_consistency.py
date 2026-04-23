@@ -34,10 +34,16 @@ def test_build_spec_normalization_accepts_aliases():
                 {"card_id": "Bash", "upgrades": 1, "props": {"ethereal": False}},
             ],
             "relic_ids": ["BurningBlood"],
+            "potion_ids": [
+                "FirePotion",
+                {"potion_id": "BlockPotion", "slot_index": 2},
+            ],
             "hp": 55,
             "max_hp": 80,
             "energy": 4,
+            "potion_slot_count": 3,
             "gold": 99,
+            "floor": 25,
         }
     )
 
@@ -47,16 +53,51 @@ def test_build_spec_normalization_accepts_aliases():
             {"id": "Bash", "upgrade_level": 1, "props": {"ethereal": False}},
         ],
         "relics": [{"id": "BurningBlood"}],
+        "potions": [
+            {"id": "FirePotion", "slot": 0},
+            {"id": "BlockPotion", "slot": 2},
+        ],
         "current_hp": 55,
         "max_hp": 80,
         "max_energy": 4,
+        "max_potion_slots": 3,
         "gold": 99,
+        "floor": 25,
     }
 
-    typed = BuildSpecPy.from_dict({"deck": ["Strike_R"], "relics": ["BurningBlood"]})
+    typed = BuildSpecPy.from_dict(
+        {
+            "deck": ["Strike_R"],
+            "relics": ["BurningBlood"],
+            "potions": ["FirePotion"],
+            "max_potion_slots": 2,
+        }
+    )
     assert normalize_build_spec(typed) == {
         "deck": [{"id": "Strike_R", "upgrade_level": 0}],
         "relics": [{"id": "BurningBlood"}],
+        "potions": [{"id": "FirePotion", "slot": 0}],
+        "max_potion_slots": 2,
+    }
+
+
+def test_build_spec_normalization_accepts_nested_case_payload_floor():
+    normalized = normalize_build_spec(
+        {
+            "floor": 25,
+            "build": {
+                "deck": ["Strike_R"],
+                "relics": ["BurningBlood"],
+                "current_hp": 55,
+            },
+        }
+    )
+
+    assert normalized == {
+        "deck": [{"id": "Strike_R", "upgrade_level": 0}],
+        "relics": [{"id": "BurningBlood"}],
+        "current_hp": 55,
+        "floor": 25,
     }
 
 

@@ -1,28 +1,35 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import sys
+
+_sts2ai_root = Path(__file__).resolve().parents[2]
+_bridge_root = _sts2ai_root / "bridge"
+if str(_sts2ai_root) not in sys.path:
+    sys.path.insert(0, str(_sts2ai_root))
+if str(_bridge_root) not in sys.path:
+    sys.path.insert(0, str(_bridge_root))
+
+from game_bridge.catalog.sim_catalog import GameCatalog
+from data.skada.generate_stratified_case_pool import _unsupported_build_reasons
 
 from zero.domain import (
     BattleState,
     EnemyState,
     FightLabel,
-    LegalAction,
     PileSummary,
     PlayerState,
     StaticContext,
-    SearchRequest,
-    TrainingSample,
-    TransitionDelta,
     assess_transition_progress,
 )
 from zero.replay.skada import (
-    MultiCaseAggregateSearchBackend,
     OrderedRunCaseEvaluator,
     OrderedRunRuntimeFactory,
+    SkadaCaseRuntimeFactory,
     SkadaBuild,
     SkadaCombatCase,
     _build_eval_label,
@@ -163,48 +170,47 @@ class SkadaReplayTests(unittest.TestCase):
         self.assertEqual(build.deck[-1]["id"], "BASH")
         self.assertEqual(build.relics, [{"id": "BURNING_BLOOD"}])
 
+    def test_game_catalog_model_exists_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "game_catalog.sqlite"
+            con = sqlite3.connect(str(db_path))
+            try:
+                con.execute("CREATE TABLE cards (id TEXT PRIMARY KEY)")
+                con.execute("CREATE TABLE relics (id TEXT PRIMARY KEY)")
+                con.execute("CREATE TABLE potions (id TEXT PRIMARY KEY)")
+                con.execute("INSERT INTO cards (id) VALUES ('BASH')")
+                con.execute("INSERT INTO relics (id) VALUES ('BURNING_BLOOD')")
+                con.execute("INSERT INTO potions (id) VALUES ('FIRE_POTION')")
+                con.commit()
+            finally:
+                con.close()
+            catalog = GameCatalog(db_path=db_path)
+            self.assertTrue(catalog.card_exists("bash"))
+            self.assertTrue(catalog.relic_exists("burning_blood"))
+            self.assertTrue(catalog.potion_exists("fire_potion"))
+            self.assertFalse(catalog.relic_exists("XUAN_GANG_HUI_GUANG_BI"))
+
+    def test_unsupported_build_reasons_flags_unknown_model_ids(self):
+        case = self._make_case(floor=9, encounter_id="CASE_A")
+        case.build.relics = [{"id": "BURNING_BLOOD"}, {"id": "EXTRARELICS-ORANGE_PELLETS"}]
+        case.build.deck = [{"id": "STRIKE_IRONCLAD"}, {"id": "UNKNOWN_CARD"}]
+        with patch("data.skada.generate_stratified_case_pool.GAME_CATALOG") as catalog:
+            catalog.relic_exists.side_effect = lambda relic_id: relic_id == "BURNING_BLOOD"
+            catalog.card_exists.side_effect = lambda card_id: card_id == "STRIKE_IRONCLAD"
+            reasons = _unsupported_build_reasons(case)
+        self.assertEqual(
+            sorted(reasons),
+            [
+                "unsupported_card:UNKNOWN_CARD",
+                "unsupported_relic:EXTRARELICS-ORANGE_PELLETS",
+            ],
+        )
+
     def test_skada_case_round_trip(self):
         case = self._make_case(floor=2, encounter_id="SHRINKER_BEETLE_WEAK")
         restored = SkadaCombatCase.from_dict(case.to_dict())
         self.assertEqual(restored.case_id, case.case_id)
         self.assertEqual(restored.build.deck[0]["id"], "STRIKE_IRONCLAD")
-
-    def test_multi_case_search_backend_routes_by_case_id(self):
-        case = self._make_case(floor=2, encounter_id="SHRINKER_BEETLE_WEAK")
-        case.card_usage = {"STRIKE_IRONCLAD": {"plays": 3, "damage": 9.0, "block": 0.0, "energy": 3.0}}
-        search_backend = MultiCaseAggregateSearchBackend([case])
-        sample = TrainingSample(
-            sample_id="sample1",
-            run_id="run1",
-            fight_id="fight1",
-            step_idx=0,
-            state=BattleState(
-                player=PlayerState(hp=70.0, max_hp=80.0, block=0.0, energy=3.0),
-                enemies=[EnemyState(enemy_id="enemy", hp=20.0, max_hp=20.0, block=0.0, intent_id="attack")],
-                hand=[],
-                piles=PileSummary(),
-                context=StaticContext(
-                    character_id="IRONCLAD",
-                    encounter_id="SHRINKER_BEETLE_WEAK",
-                    metadata={"skada_case_id": case.case_id},
-                ),
-                legal_actions=[
-                    LegalAction(action_id="play_strike", action_type="play_card", card_id="STRIKE_IRONCLAD"),
-                    LegalAction(action_id="end_turn", action_type="end_turn"),
-                ],
-            ),
-            history=[],
-            legal_actions=[
-                LegalAction(action_id="play_strike", action_type="play_card", card_id="STRIKE_IRONCLAD"),
-                LegalAction(action_id="end_turn", action_type="end_turn"),
-            ],
-            behavior_action_index=0,
-            delta=TransitionDelta(),
-            fight_label=FightLabel(fight_win=1.0, enemy_hp_fraction_dealt=1.0, self_hp_fraction_remaining=1.0),
-        )
-        request = SearchRequest(request_id="req1", sample=sample, priority=1.0)
-        label = search_backend.label_request(request)
-        self.assertEqual(label.best_action_index, 0)
 
     def test_ordered_run_runtime_factory_resets_after_failure(self):
         cases = [
@@ -217,6 +223,25 @@ class SkadaReplayTests(unittest.TestCase):
         self.assertEqual(factory.current_case_id, cases[1].case_id)
         factory.on_episode_end({"outcome": "defeat", "truncated": False})
         self.assertEqual(factory.current_case_id, cases[0].case_id)
+
+    def test_skada_case_runtime_factory_ordered_rotates_cases(self):
+        cases = [
+            self._make_case(floor=2, encounter_id="CASE_A"),
+            self._make_case(floor=4, encounter_id="CASE_B"),
+        ]
+        factory = SkadaCaseRuntimeFactory(cases, mode="ordered", auto_launch=False)
+        first = factory()
+        second = factory()
+        self.assertEqual(first._case.case_id, cases[0].case_id)
+        self.assertEqual(second._case.case_id, cases[1].case_id)
+
+    def test_skada_case_runtime_factory_clone_for_port_preserves_mode(self):
+        cases = [self._make_case(floor=2, encounter_id="CASE_A")]
+        factory = SkadaCaseRuntimeFactory(cases, mode="fixed", port=15527, auto_launch=False)
+        clone = factory.clone_for_port(15531)
+        runtime = clone()
+        self.assertEqual(runtime._case.case_id, cases[0].case_id)
+        self.assertEqual(clone._port, 15531)
 
     def test_ordered_run_evaluator_stops_after_failure(self):
         cases = [
@@ -255,9 +280,6 @@ class SkadaReplayTests(unittest.TestCase):
                     "no_progress_ratio": 0.25,
                     "max_no_progress_streak": 1,
                 },
-                "agreement_hits": 1.0,
-                "overlap_hits": 1.0,
-                "agreement_steps": 1,
                 "success": result["success"],
             }
 

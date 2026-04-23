@@ -209,10 +209,16 @@ class ProtoCodec(ProtocolCodec):
             payload.seed = str(params.get("seed") or "")
             build = params.get("build")
             if isinstance(build, dict):
-                payload.build.current_hp = int(build.get("current_hp") or 0)
-                payload.build.max_hp = int(build.get("max_hp") or 0)
-                payload.build.max_energy = int(build.get("max_energy") or 3)
-                payload.build.gold = int(build.get("gold") or 0)
+                if "current_hp" in build and build.get("current_hp") is not None:
+                    payload.build.current_hp = int(build["current_hp"])
+                if "max_hp" in build and build.get("max_hp") is not None:
+                    payload.build.max_hp = int(build["max_hp"])
+                if "max_energy" in build and build.get("max_energy") is not None:
+                    payload.build.max_energy = int(build["max_energy"])
+                if "gold" in build and build.get("gold") is not None:
+                    payload.build.gold = int(build["gold"])
+                if "max_potion_slots" in build and build.get("max_potion_slots") is not None:
+                    payload.build.max_potion_slots = int(build["max_potion_slots"])
                 for card in build.get("deck") or []:
                     if isinstance(card, dict):
                         payload.build.deck.add(
@@ -226,6 +232,15 @@ class ProtoCodec(ProtocolCodec):
                         payload.build.relics.add(id=str(relic.get("id") or "").upper())
                     elif isinstance(relic, str):
                         payload.build.relics.add(id=relic.upper())
+                for potion in build.get("potions") or []:
+                    if isinstance(potion, dict):
+                        slot = potion.get("slot", potion.get("slot_index", 0))
+                        payload.build.potions.add(
+                            id=str(potion.get("id") or "").upper(),
+                            slot=int(slot or 0),
+                        )
+                    elif isinstance(potion, str):
+                        payload.build.potions.add(id=potion.upper(), slot=0)
             elif build is not None:
                 raise TypeError("combat_reset build must be a dict or None")
             return req.SerializeToString()

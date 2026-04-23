@@ -326,13 +326,20 @@ message RelicSpec {
   string id = 1;
 }
 
+message PotionSpec {
+  string id = 1;
+  int32 slot = 2;
+}
+
 message BuildSpec {
   repeated CardSpec deck = 1;
   repeated RelicSpec relics = 2;
-  int32 current_hp = 3;
-  int32 max_hp = 4;
-  int32 max_energy = 5;
-  int32 gold = 6;
+  optional int32 current_hp = 3;
+  optional int32 max_hp = 4;
+  optional int32 max_energy = 5;
+  optional int32 gold = 6;
+  repeated PotionSpec potions = 7;
+  optional int32 max_potion_slots = 8;
 }
 
 message CombatResetRequest {
