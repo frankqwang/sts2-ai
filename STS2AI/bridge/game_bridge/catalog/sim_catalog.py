@@ -64,10 +64,7 @@ class GameCatalog:
     def attach_sim(self, client: Any) -> None:
         """把 game bridge sim client 接进来，后续所有查询走 sim API（game_catalog）。
 
-        兼容多种 client 类型：
-          - PipeBackedCombatTrainingClient：有 `_call(method, params)` 方法
-          - BinaryBackedFullRunClient：没有 `_call`，底层有 `_pipe.call(...)`
-          - 其他自定义 client：只要有 `_pipe` 且是 PipeClient 即可
+        兼容 GameSession 或测试替身：只要暴露 `_call(method, params)` 即可。
         """
         self._sim_client = client
         self._sim_catalog_cache = None
@@ -98,19 +95,10 @@ class GameCatalog:
     @staticmethod
     def _invoke_sim(client: Any, method: str, params: dict | None = None) -> dict:
         """调 sim RPC，兼容多种 client 接口。"""
-        # 路径 1：client 自带 _call (PipeBackedCombatTrainingClient)
         call_fn = getattr(client, "_call", None)
         if callable(call_fn):
             return call_fn(method, params)
-        # 路径 2：BinaryBackedFullRunClient 底层 _pipe.call
-        pipe = getattr(client, "_pipe", None)
-        if pipe is not None and hasattr(pipe, "call"):
-            # 有些 client 的 _pipe 需要先 ensure_connected
-            ensure = getattr(client, "_ensure_connected", None)
-            if callable(ensure):
-                ensure()
-            return pipe.call(method, params)
-        raise AttributeError(f"sim client {type(client).__name__} has no _call or _pipe.call")
+        raise AttributeError(f"sim client {type(client).__name__} has no _call")
 
     def _connect(self):
         if not self._db_path.exists():

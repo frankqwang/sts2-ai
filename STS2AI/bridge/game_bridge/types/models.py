@@ -16,8 +16,8 @@ class SessionConfig:
     repo_root: str | Path | None = None
     host_path: str | Path | None = None
     base_url: str = "http://127.0.0.1:15526"
-    use_pipe: bool = True
-    transport: str = "proto"
+    transport: str = "pipe_proto"
+    backend: str = "sim"
 
 
 @dataclass(slots=True)

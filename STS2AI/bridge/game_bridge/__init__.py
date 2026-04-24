@@ -2,23 +2,29 @@
 
 from game_bridge.catalog import GAME_CATALOG, GameCatalog
 from game_bridge.session import (
-    CombatSession,
     FullRunSession,
+    GameSession,
+    HttpProtoJsonTransport,
+    PipeProtoTransport,
+    RpcTransport,
     SessionFactory,
     SessionPool,
-    create_combat_session,
-    create_full_run_session,
+    SettlePolicy,
+    create_game_session,
 )
 from game_bridge.sim import launch_headless_sim
 from game_bridge.spectate import PolicyAdapter, SpectatorController
 
 __all__ = [
-    "CombatSession",
     "FullRunSession",
+    "GameSession",
+    "HttpProtoJsonTransport",
+    "PipeProtoTransport",
+    "RpcTransport",
     "SessionFactory",
     "SessionPool",
-    "create_combat_session",
-    "create_full_run_session",
+    "SettlePolicy",
+    "create_game_session",
     "launch_headless_sim",
     "SpectatorController",
     "PolicyAdapter",

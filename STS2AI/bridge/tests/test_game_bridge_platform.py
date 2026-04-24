@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from google.protobuf import json_format
 
 _python_root = Path(__file__).resolve().parents[1]
 if str(_python_root) not in sys.path:
@@ -13,8 +14,7 @@ if str(_python_root) not in sys.path:
 import game_bridge
 from game_bridge.generated import game_state_pb2 as pb
 from game_bridge.session.base import SessionFactory
-from game_bridge.session.combat import CombatSession
-from game_bridge.session.full_run import PipeBackedFullRunClient, create_full_run_client
+from game_bridge.session.game_session import GameSession, PipeProtoTransport, create_game_session
 from game_bridge.session.pool import SessionPool
 from game_bridge.spectate.controller import SpectatorController
 from game_bridge.spectate.overlay import OverlayWriter
@@ -57,30 +57,26 @@ class _FakeSession:
 def test_session_factory_dispatch(monkeypatch: pytest.MonkeyPatch):
     calls: list[tuple[str, dict[str, object]]] = []
 
-    def _fake_combat(**kwargs):
-        calls.append(("combat", kwargs))
-        return "combat-session"
+    def _fake_game_session(**kwargs):
+        mode = str(kwargs.get("mode"))
+        calls.append((mode, kwargs))
+        return f"{mode}-session"
 
-    def _fake_full_run(**kwargs):
-        calls.append(("full_run", kwargs))
-        return "full-run-session"
-
-    monkeypatch.setattr("game_bridge.session.create_combat_session", _fake_combat)
-    monkeypatch.setattr("game_bridge.session.create_full_run_session", _fake_full_run)
+    monkeypatch.setattr("game_bridge.session.create_game_session", _fake_game_session)
 
     combat_factory = SessionFactory(kind="combat", config=SessionConfig(port=2222, auto_launch=True))
     full_run_factory = SessionFactory(
         kind="full_run",
-        config=SessionConfig(port=3333, use_pipe=True, transport="proto", base_url="http://localhost:9"),
+        config=SessionConfig(port=3333, transport="pipe_proto", base_url="http://localhost:9"),
     )
 
     assert combat_factory.create() == "combat-session"
-    assert full_run_factory.create() == "full-run-session"
+    assert full_run_factory.create() == "full_run-session"
     assert calls[0][0] == "combat"
     assert calls[0][1]["port"] == 2222
     assert calls[1][0] == "full_run"
     assert calls[1][1]["port"] == 3333
-    assert calls[1][1]["transport"] == "proto"
+    assert calls[1][1]["transport"] == "pipe_proto"
 
 
 def test_session_pool_reuses_and_closes():
@@ -162,26 +158,48 @@ def test_game_bridge_source_has_no_legacy_training_imports():
             assert marker not in text, f"{path} still references {marker}"
 
 
+def test_game_bridge_source_has_no_legacy_protocol_symbols():
+    runtime_root = _python_root / "game_bridge"
+    forbidden = (
+        "PipeRequestEnvelope",
+        "PipeResponseEnvelope",
+        "JsonCodec",
+        "SingleplayerClient",
+        "BinaryBackedFullRunClient",
+        "PipeBackedFullRunClient",
+        "ApiBackedFullRunClient",
+        "/api/v2/full_run_env",
+        "/api/v1/singleplayer",
+    )
+    for path in list(runtime_root.rglob("*.py")) + list((_python_root / "scripts").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            assert marker not in text, f"{path} still references {marker}"
+
+
 def test_full_run_auto_launch_defaults_are_resolved():
-    client = PipeBackedFullRunClient(port=17777, protocol="proto", auto_launch=True)
+    client = create_game_session(mode="full_run", transport="pipe_proto", backend="sim", port=17777, auto_launch=True)
     try:
-        assert client.repo_root is not None
-        assert client.host_path is not None
-        assert client._conn.cfg.auto_launch is True
-        assert client._conn.cfg.sim_launcher is not None
+        assert isinstance(client, GameSession)
+        assert isinstance(client._transport, PipeProtoTransport)
+        assert client._transport.repo_root is not None
+        assert client._transport.host_path is not None
+        assert client._transport._conn.cfg.auto_launch is True
+        assert client._transport._conn.cfg.sim_launcher is not None
     finally:
         client.close()
 
 
-def test_create_full_run_client_rejects_auto_launch_without_pipe():
-    with pytest.raises(ValueError, match="auto_launch requires use_pipe=True"):
-        create_full_run_client(auto_launch=True, use_pipe=False)
+def test_create_game_session_rejects_unknown_transport():
+    with pytest.raises(ValueError, match="Unsupported GameSession transport"):
+        create_game_session(mode="full_run", transport="pipe_json", backend="sim")
 
 
 def test_combat_session_snapshot_methods_reuse_pipe_mixin():
-    session = object.__new__(CombatSession)
+    session = object.__new__(GameSession)
     calls: list[tuple[str, dict[str, object] | None]] = []
-    session._current_raw = {"state_type": "stale"}
+    session.mode = "combat"
+    session._current_state = {"state_type": "stale"}
 
     def _fake_call(method: str, params: dict[str, object] | None = None):
         calls.append((method, params))
@@ -214,8 +232,8 @@ def test_combat_session_snapshot_methods_reuse_pipe_mixin():
 
 
 def test_combat_session_load_state_refreshes_current_state():
-    session = object.__new__(CombatSession)
-    session._current_raw = {"state_type": "stale", "legal_actions": []}
+    session = object.__new__(GameSession)
+    session._current_state = {"state_type": "stale", "legal_actions": []}
 
     def _fake_call(method: str, params: dict[str, object] | None = None):
         assert method == "load_state"
@@ -236,28 +254,33 @@ def test_combat_session_load_state_refreshes_current_state():
 
 
 def test_combat_session_call_allows_snapshot_rpcs():
-    class _FakeConn:
+    class _FakeTransport:
+        transport_name = "pipe_proto"
+
         def __init__(self):
-            self.connected = False
             self.calls: list[tuple[str, dict[str, object] | None]] = []
 
-        def is_connected(self):
-            return self.connected
+        @property
+        def last_call_metrics(self):
+            return {}
 
         def connect(self):
-            self.connected = True
+            return None
 
-        def safe_call(self, method, params):
+        def close(self):
+            return None
+
+        def call(self, method, params=None, *, timeout_s=None):
             self.calls.append((method, params))
             return {"state_id": "snap-1"}
 
-    session = object.__new__(CombatSession)
-    session._conn = _FakeConn()
+    session = object.__new__(GameSession)
+    session._transport = _FakeTransport()
 
-    result = CombatSession._call(session, "save_search_state")
+    result = GameSession._call(session, "save_search_state")
 
     assert result == {"state_id": "snap-1"}
-    assert session._conn.calls == [("save_search_state", None)]
+    assert session._transport.calls == [("save_search_state", None)]
 
 
 def test_pipe_connection_auto_launch_uses_short_probe_timeout(monkeypatch: pytest.MonkeyPatch):
@@ -318,7 +341,7 @@ def test_proto_codec_combat_reset_preserves_optional_build_presence():
         },
     )
 
-    req = pb.PipeRequestEnvelope()
+    req = pb.BridgeRequestEnvelope()
     req.ParseFromString(payload)
 
     assert req.method == pb.COMBAT_RESET
@@ -331,3 +354,35 @@ def test_proto_codec_combat_reset_preserves_optional_build_presence():
     assert len(req.combat_reset.build.potions) == 1
     assert req.combat_reset.build.potions[0].id == "FIRE_POTION"
     assert req.combat_reset.build.potions[0].slot == 1
+
+
+def test_bridge_envelope_round_trips_through_protobuf_json_mapping():
+    codec = ProtoCodec()
+    request = codec.build_request_message(
+        "act",
+        {"action": "play_card", "card_index": 1, "target_id": 2, "label": "Strike"},
+    )
+    request_json = json_format.MessageToJson(request)
+    parsed_request = pb.BridgeRequestEnvelope()
+    json_format.Parse(request_json, parsed_request)
+
+    assert parsed_request.method == pb.ACT
+    assert parsed_request.act.action.action == "play_card"
+    assert parsed_request.act.action.card_index == 1
+    assert parsed_request.act.action.target_id == 2
+
+    response = pb.BridgeResponseEnvelope(
+        method=pb.ACT,
+        status=pb.OK,
+        act=pb.BridgeActPayload(
+            accepted=True,
+            state=pb.GameState(state_type="monster", terminal=False),
+        ),
+    )
+    response_json = json_format.MessageToJson(response)
+    parsed_response = pb.BridgeResponseEnvelope()
+    json_format.Parse(response_json, parsed_response)
+    decoded = codec.decode_response_message(parsed_response)
+
+    assert decoded["accepted"] is True
+    assert decoded["state"]["state_type"] == "monster"

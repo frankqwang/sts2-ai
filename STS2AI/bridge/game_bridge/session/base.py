@@ -88,23 +88,16 @@ class SessionFactory:
     config: SessionConfig
 
     def create(self):
-        from game_bridge.session import create_combat_session, create_full_run_session
+        from game_bridge.session import create_game_session
 
-        if self.kind == "combat":
-            return create_combat_session(
-                port=self.config.port,
-                auto_launch=self.config.auto_launch,
-                connect_timeout_s=self.config.connect_timeout_s,
-                repo_root=self.config.repo_root,
-                host_path=self.config.host_path,
-            )
-        return create_full_run_session(
+        return create_game_session(
+            mode=self.kind,
             port=self.config.port,
             base_url=self.config.base_url,
-            use_pipe=self.config.use_pipe,
             transport=self.config.transport,
+            backend=self.config.backend,
             auto_launch=self.config.auto_launch,
-            ready_timeout_s=self.config.connect_timeout_s,
+            connect_timeout_s=self.config.connect_timeout_s,
             repo_root=self.config.repo_root,
             host_path=self.config.host_path,
         )

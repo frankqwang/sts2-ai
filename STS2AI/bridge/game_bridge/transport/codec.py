@@ -1,4 +1,4 @@
-"""协议 codec - 把 JSON / proto 的 encode/decode 抽成统一接口。
+"""协议 codec - 把 proto 的 encode/decode 抽成统一接口。
 
 PipeConnection 本身协议无关,通过注入 `ProtocolCodec` 决定 wire format。
 combat / full-run / 未来的 RPC 都复用 PipeConnection + 对应 codec,禁止
@@ -6,8 +6,6 @@ combat / full-run / 未来的 RPC 都复用 PipeConnection + 对应 codec,禁止
 """
 from __future__ import annotations
 
-import json
-import struct
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -41,29 +39,4 @@ class ProtocolCodec(ABC):
         """codec 名,用于日志/pipe 命名"""
 
 
-# ---------------------------------------------------------------------------
-# JSON codec - {"method": "...", "params": {...}} + 4-byte length frame
-# ---------------------------------------------------------------------------
-
-class JsonCodec(ProtocolCodec):
-    """JSON 协议 (combat_training_env 历史默认,pipe 名 sts2_mcts_{port})。"""
-
-    name = "json"
-
-    def encode_request(self, method: str, params: dict[str, Any] | None) -> bytes:
-        req: dict[str, Any] = {"method": method}
-        if params:
-            req["params"] = params
-        return json.dumps(req).encode("utf-8")
-
-    def decode_response(self, payload: bytes) -> dict[str, Any]:
-        return json.loads(payload.decode("utf-8"))
-
-    def read_handshake(self, payload: bytes) -> dict[str, Any]:
-        try:
-            return json.loads(payload.decode("utf-8"))
-        except json.JSONDecodeError:
-            return {}
-
-
-__all__ = ["ProtocolCodec", "JsonCodec"]
+__all__ = ["ProtocolCodec"]

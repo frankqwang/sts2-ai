@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -10,11 +10,12 @@ using Google.Protobuf;
 using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.Training;
 using STS2AI.Bridge;
+using STS2AI.Bridge.Runtime;
 
 namespace HeadlessSim;
 
 // Proto pipe protocol: request router + all ProcessProto* handlers.
-// All messages go through PipeRequestEnvelope / PipeResponseEnvelope.
+// All messages go through BridgeRequestEnvelope / BridgeResponseEnvelope.
 // sim populates GameState.legal_actions directly; Python never infers them.
 internal static partial class Program
 {
@@ -23,41 +24,19 @@ internal static partial class Program
 		byte[] requestBytes)
 	{
 		long requestStart = Stopwatch.GetTimestamp();
-		PipeRequestEnvelope request = PipeRequestEnvelope.Parser.ParseFrom(requestBytes);
-		if (request.Method == PipeMethod.Handshake)
+		BridgeRequestEnvelope request = BridgeRequestEnvelope.Parser.ParseFrom(requestBytes);
+		if (request.Method == BridgeMethod.Handshake)
 		{
 			throw new InvalidOperationException("Handshake is server-initiated and must not be sent as a request.");
 		}
-		PipeMethod method = request.Method;
 		RequestStateCache cache = new RequestStateCache();
+		BridgeMethod method = request.Method;
 		try
 		{
-			return method switch
-			{
-				PipeMethod.Reset => await ProcessProtoResetAsync(service, request, cache),
-				PipeMethod.State => ProcessProtoState(service, cache),
-				PipeMethod.Step => await ProcessProtoStepAsync(service, request, cache),
-				PipeMethod.BatchStep => await ProcessProtoBatchStepAsync(service, request, cache),
-				PipeMethod.SaveState => ProtoStateBuilder.BuildSaveStateResponse(
-					PipeMethod.SaveState, service.SaveState(), service.StateCacheCount),
-				PipeMethod.SaveSearchState => ProtoStateBuilder.BuildSaveStateResponse(
-					PipeMethod.SaveSearchState, service.SaveSearchState(), service.StateCacheCount),
-				PipeMethod.ExportState => ProcessProtoExportState(service, request),
-				PipeMethod.LoadState => await ProcessProtoLoadStateAsync(service, request, cache),
-				PipeMethod.ImportState => await ProcessProtoImportStateAsync(service, request, cache),
-				PipeMethod.DeleteState => ProcessProtoDeleteState(service, request),
-				PipeMethod.PerfStats => ProtoStateBuilder.BuildPerfStatsResponse(FullRunSimulationDiagnostics.Snapshot()),
-				PipeMethod.ResetPerfStats => ProcessProtoResetPerfStats(),
-				PipeMethod.StepLocalPolicy => await ProcessProtoStepLocalPolicyAsync(service, cache),
-				PipeMethod.LoadOrtModel => BuildLoadOrtModelResponse(request),
-				PipeMethod.RunCombatLocal => await ProcessProtoRunCombatLocalAsync(service, request, cache),
-				PipeMethod.SkipCombat => await ProcessProtoSkipCombatAsync(service, cache),
-				PipeMethod.SearchCombatMcts => await ProcessSearchCombatMctsAsync(service, request, cache),
-				PipeMethod.CombatReset => await ProcessProtoCombatResetAsync(request),
-				PipeMethod.CombatStep => await ProcessProtoCombatStepAsync(request),
-				PipeMethod.CombatState => ProcessProtoCombatState(),
-				_ => ProtoStateBuilder.BuildErrorResponse(method, PipeStatus.ProtocolError, "unknown_method", $"Unknown method: {method}")
-			};
+			BridgeResponseEnvelope response = await BridgeRpcDispatcher.DispatchAsync(
+				new HeadlessBridgeRuntime(service, cache),
+				request);
+			return response.ToByteArray();
 		}
 		finally
 		{
@@ -70,9 +49,9 @@ internal static partial class Program
 	}
 
 	private static async Task<byte[]> ProcessProtoResetAsync(
-		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
+		FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.Reset)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.Reset)
 		{
 			throw new InvalidOperationException("reset request missing payload.");
 		}
@@ -84,7 +63,7 @@ internal static partial class Program
 		}
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildStateResponse(PipeMethod.Reset, snapshot);
+			return ProtoStateBuilder.BuildStateResponse(BridgeMethod.Reset, snapshot);
 		}
 	}
 
@@ -97,51 +76,51 @@ internal static partial class Program
 		}
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildStateResponse(PipeMethod.State, snapshot);
+			return ProtoStateBuilder.BuildStateResponse(BridgeMethod.State, snapshot);
 		}
 	}
 
-	private static async Task<byte[]> ProcessProtoStepAsync(
-		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
+	private static async Task<byte[]> ProcessProtoActAsync(
+		FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.Step)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.Act)
 		{
-			throw new InvalidOperationException("step request missing payload.");
+			throw new InvalidOperationException("act request missing payload.");
 		}
-		FullRunSimulationActionRequest action = BuildFullRunSimulationActionRequest(requestEnvelope.Step.Action);
+		FullRunSimulationActionRequest action = BuildFullRunSimulationActionRequest(requestEnvelope.Act.Action);
 		(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot) =
 			await ExecuteFullRunStepAsync(service, cache, action, autoAdvanceToDecisionState: true);
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildStepResponse(PipeMethod.Step, result, snapshot);
+			return ProtoStateBuilder.BuildActResponse(BridgeMethod.Act, result, snapshot);
 		}
 	}
 
-	private static async Task<byte[]> ProcessProtoBatchStepAsync(
-		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
+	private static async Task<byte[]> ProcessProtoBatchActAsync(
+		FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.BatchStep)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.BatchAct)
 		{
-			throw new InvalidOperationException("batch_step request missing payload.");
+			throw new InvalidOperationException("batch_act request missing payload.");
 		}
-		List<FullRunSimulationActionRequest> actions = requestEnvelope.BatchStep.Actions
+		List<FullRunSimulationActionRequest> actions = requestEnvelope.BatchAct.Actions
 			.Select(BuildFullRunSimulationActionRequest)
 			.ToList();
 		FullRunSimulationBatchStepResult result;
-		using (FullRunSimulationDiagnostics.Measure("request.batch_step.runtime_ms"))
+		using (FullRunSimulationDiagnostics.Measure("request.batch_act.runtime_ms"))
 		{
 			result = await service.BatchStepAsync(actions);
 		}
 		FullRunSimulationStateSnapshot snapshot = result.State ?? GetSnapshot(service, cache);
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildBatchStepResponse(result, snapshot);
+			return ProtoStateBuilder.BuildBatchActResponse(result, snapshot);
 		}
 	}
 
-	private static byte[] ProcessProtoExportState(FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope)
+	private static byte[] ProcessProtoExportState(FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.ExportState)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.ExportState)
 		{
 			throw new InvalidOperationException("export_state request missing payload.");
 		}
@@ -152,9 +131,9 @@ internal static partial class Program
 	}
 
 	private static async Task<byte[]> ProcessProtoLoadStateAsync(
-		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
+		FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.LoadState)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.LoadState)
 		{
 			throw new InvalidOperationException("load_state request missing payload.");
 		}
@@ -170,10 +149,10 @@ internal static partial class Program
 			CombatTrainingStateSnapshot? combatSnapshot = CombatTrainingEnvService.BuildStateSnapshot();
 			if (combatSnapshot != null && combatSnapshot.IsCombatActive)
 			{
-				return ProtoStateBuilder.BuildCombatStateResponse(PipeMethod.LoadState, combatSnapshot);
+				return ProtoStateBuilder.BuildCombatStateResponse(BridgeMethod.LoadState, combatSnapshot);
 			}
 		}
-		return ProtoStateBuilder.BuildStateResponse(PipeMethod.LoadState, snapshot);
+		return ProtoStateBuilder.BuildStateResponse(BridgeMethod.LoadState, snapshot);
 	}
 
 	private static bool IsCombatLikeLoadSnapshot(FullRunSimulationStateSnapshot snapshot)
@@ -185,9 +164,9 @@ internal static partial class Program
 	}
 
 	private static async Task<byte[]> ProcessProtoImportStateAsync(
-		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
+		FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.ImportState)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.ImportState)
 		{
 			throw new InvalidOperationException("import_state request missing payload.");
 		}
@@ -198,12 +177,12 @@ internal static partial class Program
 			snapshot = await service.LoadStateFromFile(path);
 		}
 		cache.Snapshot = snapshot;
-		return ProtoStateBuilder.BuildStateResponse(PipeMethod.ImportState, snapshot);
+		return ProtoStateBuilder.BuildStateResponse(BridgeMethod.ImportState, snapshot);
 	}
 
-	private static byte[] ProcessProtoDeleteState(FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope)
+	private static byte[] ProcessProtoDeleteState(FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.DeleteState)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.DeleteState)
 		{
 			throw new InvalidOperationException("delete_state request missing payload.");
 		}
@@ -228,20 +207,20 @@ internal static partial class Program
 		FullRunSimulationStepResult skipResult = await service.StepAsync(
 			new FullRunSimulationActionRequest { Action = "skip_combat" });
 		FullRunSimulationStateSnapshot snapshot = skipResult.State ?? GetSnapshot(service, cache);
-		return ProtoStateBuilder.BuildStepResponse(PipeMethod.SkipCombat, skipResult, snapshot);
+		return ProtoStateBuilder.BuildActResponse(BridgeMethod.SkipCombat, skipResult, snapshot);
 	}
 
 	// ================================================================
 	// Proto combat-only opcodes (2026-04-18)
 	//
-	// 请求/响应全部走 PipeRequestEnvelope / PipeResponseEnvelope。
+	// 请求/响应全部走 BridgeRequestEnvelope / BridgeResponseEnvelope。
 	//
 	// sim 直接 populate GameState.legal_actions,Python 端不再自己推断。
 	// ================================================================
 
-	private static async Task<byte[]> ProcessProtoCombatResetAsync(PipeRequestEnvelope requestEnvelope)
+	private static async Task<byte[]> ProcessProtoCombatResetAsync(BridgeRequestEnvelope requestEnvelope)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.CombatReset)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.CombatReset)
 		{
 			throw new InvalidOperationException("combat_reset request missing payload.");
 		}
@@ -256,19 +235,19 @@ internal static partial class Program
 		catch (Exception exc)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.CombatReset, PipeStatus.SimulatorError,
+				BridgeMethod.CombatReset, BridgeStatus.SimulatorError,
 				"combat_reset_error", exc.Message);
 		}
-		return ProtoStateBuilder.BuildCombatStateResponse(PipeMethod.CombatReset, snapshot);
+		return ProtoStateBuilder.BuildCombatStateResponse(BridgeMethod.CombatReset, snapshot);
 	}
 
-	private static async Task<byte[]> ProcessProtoCombatStepAsync(PipeRequestEnvelope requestEnvelope)
+	private static async Task<byte[]> ProcessProtoCombatActAsync(BridgeRequestEnvelope requestEnvelope)
 	{
-		if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.CombatStep)
+		if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.CombatAct)
 		{
-			throw new InvalidOperationException("combat_step request missing payload.");
+			throw new InvalidOperationException("combat_act request missing payload.");
 		}
-		STS2AI.Bridge.CombatStepRequest req = requestEnvelope.CombatStep;
+		STS2AI.Bridge.CombatStepRequest req = requestEnvelope.CombatAct;
 		CombatTrainingActionRequest action;
 		try
 		{
@@ -277,25 +256,25 @@ internal static partial class Program
 		catch (Exception exc)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.CombatStep, PipeStatus.ProtocolError,
+				BridgeMethod.CombatAct, BridgeStatus.ProtocolError,
 				"action_decode_error", exc.Message);
 		}
 		CombatTrainingStepResult result;
-		using (FullRunSimulationDiagnostics.Measure("request.combat_step.runtime_ms"))
+		using (FullRunSimulationDiagnostics.Measure("request.combat_act.runtime_ms"))
 		{
 			result = await CombatTrainingEnvService.Instance.StepAsync(action);
 		}
 		CombatTrainingStateSnapshot snapshot = result.State ?? CombatTrainingEnvService.Instance.GetState();
-		return ProtoStateBuilder.BuildCombatStepResponse(result, snapshot);
+		return ProtoStateBuilder.BuildCombatActResponse(result, snapshot);
 	}
 
 	private static byte[] ProcessProtoCombatState()
 	{
 		CombatTrainingStateSnapshot snapshot = CombatTrainingEnvService.Instance.GetState();
-		return ProtoStateBuilder.BuildCombatStateResponse(PipeMethod.CombatState, snapshot);
+		return ProtoStateBuilder.BuildCombatStateResponse(BridgeMethod.CombatState, snapshot);
 	}
 
-	private static FullRunSimulationResetRequest BuildProtoResetRequest(PipeResetPayload payload)
+	private static FullRunSimulationResetRequest BuildProtoResetRequest(BridgeResetPayload payload)
 	{
 		return new FullRunSimulationResetRequest
 		{
@@ -312,7 +291,7 @@ internal static partial class Program
 	{
 		if (action == null)
 		{
-			throw new InvalidOperationException("step request action is missing.");
+			throw new InvalidOperationException("act request action is missing.");
 		}
 
 		return new FullRunSimulationActionRequest
@@ -402,6 +381,74 @@ internal static partial class Program
 		return request;
 	}
 
+	private sealed class HeadlessBridgeRuntime(FullRunTrainingEnvService service, RequestStateCache cache) : BridgeRuntimeBase
+	{
+		public override async Task<BridgeResponseEnvelope> ResetAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoResetAsync(service, request, cache));
+
+		public override Task<BridgeResponseEnvelope> StateAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProcessProtoState(service, cache)));
+
+		public override async Task<BridgeResponseEnvelope> ActAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoActAsync(service, request, cache));
+
+		public override async Task<BridgeResponseEnvelope> BatchActAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoBatchActAsync(service, request, cache));
+
+		public override Task<BridgeResponseEnvelope> SaveStateAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProtoStateBuilder.BuildSaveStateResponse(
+				BridgeMethod.SaveState, service.SaveState(), service.StateCacheCount)));
+
+		public override Task<BridgeResponseEnvelope> SaveSearchStateAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProtoStateBuilder.BuildSaveStateResponse(
+				BridgeMethod.SaveSearchState, service.SaveSearchState(), service.StateCacheCount)));
+
+		public override Task<BridgeResponseEnvelope> ExportStateAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProcessProtoExportState(service, request)));
+
+		public override async Task<BridgeResponseEnvelope> LoadStateAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoLoadStateAsync(service, request, cache));
+
+		public override async Task<BridgeResponseEnvelope> ImportStateAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoImportStateAsync(service, request, cache));
+
+		public override Task<BridgeResponseEnvelope> DeleteStateAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProcessProtoDeleteState(service, request)));
+
+		public override Task<BridgeResponseEnvelope> PerfStatsAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProtoStateBuilder.BuildPerfStatsResponse(FullRunSimulationDiagnostics.Snapshot())));
+
+		public override Task<BridgeResponseEnvelope> ResetPerfStatsAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProcessProtoResetPerfStats()));
+
+		public override async Task<BridgeResponseEnvelope> StepLocalPolicyAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoStepLocalPolicyAsync(service, cache));
+
+		public override Task<BridgeResponseEnvelope> LoadOrtModelAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(BuildLoadOrtModelResponse(request)));
+
+		public override async Task<BridgeResponseEnvelope> RunCombatLocalAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoRunCombatLocalAsync(service, request, cache));
+
+		public override async Task<BridgeResponseEnvelope> SkipCombatAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoSkipCombatAsync(service, cache));
+
+		public override async Task<BridgeResponseEnvelope> SearchCombatMctsAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessSearchCombatMctsAsync(service, request, cache));
+
+		public override async Task<BridgeResponseEnvelope> CombatResetAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoCombatResetAsync(request));
+
+		public override async Task<BridgeResponseEnvelope> CombatActAsync(BridgeRequestEnvelope request) =>
+			ParseResponse(await ProcessProtoCombatActAsync(request));
+
+		public override Task<BridgeResponseEnvelope> CombatStateAsync(BridgeRequestEnvelope request) =>
+			Task.FromResult(ParseResponse(ProcessProtoCombatState()));
+	}
+
+	private static BridgeResponseEnvelope ParseResponse(byte[] bytes) =>
+		BridgeResponseEnvelope.Parser.ParseFrom(bytes);
+
 	private static CombatTrainingActionRequest BuildCombatTrainingActionRequest(
 		STS2AI.Bridge.LegalAction? action)
 	{
@@ -436,6 +483,21 @@ internal static partial class Program
 		return req;
 	}
 
+	private static CombatTrainingActionType ParseCombatActionType(string raw)
+	{
+		return raw switch
+		{
+			"play_card" => CombatTrainingActionType.PlayCard,
+			"end_turn" => CombatTrainingActionType.EndTurn,
+			"select_hand_card" or "select_card" => CombatTrainingActionType.SelectHandCard,
+			"confirm_selection" or "combat_confirm_selection" => CombatTrainingActionType.ConfirmSelection,
+			"cancel_selection" or "combat_cancel_selection" => CombatTrainingActionType.CancelSelection,
+			"select_card_choice" or "select_card_option" or "combat_select_card" => CombatTrainingActionType.SelectCardChoice,
+			"use_potion" => CombatTrainingActionType.UsePotion,
+			_ => throw new InvalidOperationException($"Unsupported combat act action: {raw}")
+		};
+	}
+
 	private static async Task<byte[]> ProcessProtoStepLocalPolicyAsync(
 		FullRunTrainingEnvService service, RequestStateCache cache)
 	{
@@ -443,7 +505,7 @@ internal static partial class Program
 		if (_ortPolicy == null)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.StepLocalPolicy, PipeStatus.SimulatorError,
+				BridgeMethod.StepLocalPolicy, BridgeStatus.SimulatorError,
 				"no_ort_model", "No ORT model loaded. Call load_ort_model first.");
 		}
 		FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
@@ -452,7 +514,7 @@ internal static partial class Program
 		if (actionIndex < 0 || actionIndex >= snapshot.LegalActions.Count)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.StepLocalPolicy, PipeStatus.SimulatorError,
+				BridgeMethod.StepLocalPolicy, BridgeStatus.SimulatorError,
 				"invalid_action_index", $"ORT policy returned invalid action index: {actionIndex}");
 		}
 		var la = snapshot.LegalActions[actionIndex];
@@ -470,17 +532,17 @@ internal static partial class Program
 		};
 		FullRunSimulationStepResult result = await service.StepAsync(action);
 		FullRunSimulationStateSnapshot nextSnapshot = result.State ?? GetSnapshot(service, cache);
-		return ProtoStateBuilder.BuildStepResponse(PipeMethod.StepLocalPolicy, result, nextSnapshot);
+		return ProtoStateBuilder.BuildActResponse(BridgeMethod.StepLocalPolicy, result, nextSnapshot);
 	}
 
 	private static async Task<byte[]> ProcessProtoRunCombatLocalAsync(
-		FullRunTrainingEnvService service, PipeRequestEnvelope requestEnvelope, RequestStateCache cache)
+		FullRunTrainingEnvService service, BridgeRequestEnvelope requestEnvelope, RequestStateCache cache)
 	{
 		if (_ortPolicy == null)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.RunCombatLocal,
-				PipeStatus.SimulatorError,
+				BridgeMethod.RunCombatLocal,
+				BridgeStatus.SimulatorError,
 				"ort_not_loaded",
 				"ORT model not loaded. Call load_ort_model first.");
 		}
@@ -488,7 +550,7 @@ internal static partial class Program
 		try
 		{
 			int maxCombatSteps = 600;
-			if (requestEnvelope.PayloadCase == PipeRequestEnvelope.PayloadOneofCase.RunCombatLocal)
+			if (requestEnvelope.PayloadCase == BridgeRequestEnvelope.PayloadOneofCase.RunCombatLocal)
 			{
 				maxCombatSteps = Math.Max(1, requestEnvelope.RunCombatLocal.MaxSteps);
 			}
@@ -649,8 +711,8 @@ internal static partial class Program
 		{
 			Console.Error.WriteLine($"[ORT] RunCombatLocal error: {ex.Message}");
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.RunCombatLocal,
-				PipeStatus.SimulatorError,
+				BridgeMethod.RunCombatLocal,
+				BridgeStatus.SimulatorError,
 				"ort_combat_error",
 				ex.Message);
 		}
@@ -661,11 +723,11 @@ internal static partial class Program
 	private static readonly Random _ortRng = new(42);
 	private static readonly Random _mctsRng = new(1234);
 
-	private static byte[] BuildLoadOrtModelResponse(PipeRequestEnvelope requestEnvelope)
+	private static byte[] BuildLoadOrtModelResponse(BridgeRequestEnvelope requestEnvelope)
 	{
 		try
 		{
-			if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.LoadOrtModel)
+			if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.LoadOrtModel)
 			{
 				throw new InvalidOperationException("load_ort_model request missing payload.");
 			}
@@ -695,8 +757,8 @@ internal static partial class Program
 		{
 			Console.Error.WriteLine($"[ORT] Load failed: {ex.Message}");
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.LoadOrtModel,
-				PipeStatus.SimulatorError,
+				BridgeMethod.LoadOrtModel,
+				BridgeStatus.SimulatorError,
 				"ort_load_error",
 				ex.Message);
 		}
@@ -704,32 +766,32 @@ internal static partial class Program
 
 	private static async Task<byte[]> ProcessSearchCombatMctsAsync(
 		FullRunTrainingEnvService service,
-		PipeRequestEnvelope requestEnvelope,
+		BridgeRequestEnvelope requestEnvelope,
 		RequestStateCache cache)
 	{
 		if (_ortPolicy == null)
 		{
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.SearchCombatMcts,
-				PipeStatus.SimulatorError,
+				BridgeMethod.SearchCombatMcts,
+				BridgeStatus.SimulatorError,
 				"ort_not_loaded",
 				"ORT model not loaded. Call load_ort_model first.");
 		}
 
 		try
 		{
-			if (requestEnvelope.PayloadCase != PipeRequestEnvelope.PayloadOneofCase.SearchCombatMcts)
+			if (requestEnvelope.PayloadCase != BridgeRequestEnvelope.PayloadOneofCase.SearchCombatMcts)
 			{
 				throw new InvalidOperationException("search_combat_mcts request missing payload.");
 			}
-			PipeSearchCombatMctsRequest request = requestEnvelope.SearchCombatMcts;
+			BridgeSearchCombatMctsRequest request = requestEnvelope.SearchCombatMcts;
 			FullRunSimulationStateSnapshot snapshot = GetSnapshot(service, cache);
 			bool isCombat = snapshot.StateType is "monster" or "elite" or "boss" or "combat" or "hand_select" or "card_select" or "combat_pending" or "combat_start_pending";
 			if (!isCombat)
 			{
 				return ProtoStateBuilder.BuildErrorResponse(
-					PipeMethod.SearchCombatMcts,
-					PipeStatus.ProtocolError,
+					BridgeMethod.SearchCombatMcts,
+					BridgeStatus.ProtocolError,
 					"not_in_combat",
 					$"search_combat_mcts requires a combat state, got '{snapshot.StateType}'.");
 			}
@@ -758,35 +820,35 @@ internal static partial class Program
 		{
 			Console.Error.WriteLine($"[MCTS] SearchCombatMcts error: {ex}");
 			return ProtoStateBuilder.BuildErrorResponse(
-				PipeMethod.SearchCombatMcts,
-				PipeStatus.SimulatorError,
+				BridgeMethod.SearchCombatMcts,
+				BridgeStatus.SimulatorError,
 				"combat_mcts_error",
 				ex.Message);
 		}
 	}
 
-	private static PipeMethod SafeParseMethod(byte[] requestBytes)
+	private static BridgeMethod SafeParseMethod(byte[] requestBytes)
 	{
 		try
 		{
-			return PipeRequestEnvelope.Parser.ParseFrom(requestBytes).Method;
+			return BridgeRequestEnvelope.Parser.ParseFrom(requestBytes).Method;
 		}
 		catch
 		{
-			return PipeMethod.State;
+			return BridgeMethod.State;
 		}
 	}
 
-	private static PipeStatus GetProtoPipeErrorStatus(Exception exception)
+	private static BridgeStatus GetProtoBridgeErrorStatus(Exception exception)
 	{
 		return exception switch
 		{
-			InvalidOperationException => PipeStatus.ProtocolError,
-			JsonException => PipeStatus.ProtocolError,
-			EndOfStreamException => PipeStatus.ProtocolError,
-			InvalidProtocolBufferException => PipeStatus.ProtocolError,
-			TimeoutException => PipeStatus.ProtocolError,
-			_ => PipeStatus.SimulatorError
+			InvalidOperationException => BridgeStatus.ProtocolError,
+			JsonException => BridgeStatus.ProtocolError,
+			EndOfStreamException => BridgeStatus.ProtocolError,
+			InvalidProtocolBufferException => BridgeStatus.ProtocolError,
+			TimeoutException => BridgeStatus.ProtocolError,
+			_ => BridgeStatus.SimulatorError
 		};
 	}
 

@@ -21,6 +21,7 @@ using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.Training;
 using STS2AI.Bridge;
+using STS2AI.Bridge.Runtime;
 
 namespace HeadlessSim;
 
@@ -28,7 +29,7 @@ namespace HeadlessSim;
 /// 游戏运行时对象 → Protobuf GameState 消息的映射层。
 ///
 /// 职责：从 <see cref="FullRunSimulationStateSnapshot"/> 等游戏对象中提取数据，
-/// 填充 protoc 自动生成的 <see cref="GameState"/> / pipe envelope message。
+/// 填充 protoc 自动生成的 <see cref="GameState"/> / bridge envelope message。
 ///
 /// 2026-04-21 起，proto pipe 外层也统一使用 protobuf envelope，
 /// 不再手写 `[status][opcode][payload]`。
@@ -47,11 +48,11 @@ internal static class ProtoStateBuilder
 
 	public static byte[] BuildHandshakeResponse()
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.Handshake,
-			Status = PipeStatus.Ok,
-			Handshake = new PipeHandshake
+			Method = BridgeMethod.Handshake,
+			Status = BridgeStatus.Ok,
+			Handshake = new BridgeHandshake
 			{
 				ProtocolVersion = ProtocolVersion,
 				BuildGitSha = BuildGitSha,
@@ -64,27 +65,27 @@ internal static class ProtoStateBuilder
 	// State / result responses
 	// ================================================================
 
-	public static byte[] BuildStateResponse(PipeMethod method, FullRunSimulationStateSnapshot snapshot)
+	public static byte[] BuildStateResponse(BridgeMethod method, FullRunSimulationStateSnapshot snapshot)
 	{
 		GameState state = BuildStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
 			Method = method,
-			Status = PipeStatus.Ok,
-			State = new PipeStatePayload { State = state },
+			Status = BridgeStatus.Ok,
+			State = new BridgeStatePayload { State = state },
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildStepResponse(PipeMethod method, FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot)
+	public static byte[] BuildActResponse(BridgeMethod method, FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot)
 	{
 		GameState state = BuildStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
 			Method = method,
-			Status = result.Accepted ? PipeStatus.Ok : PipeStatus.RejectedAction,
-			Step = new PipeStepPayload
+			Status = result.Accepted ? BridgeStatus.Ok : BridgeStatus.RejectedAction,
+			Act = new BridgeActPayload
 			{
 				Accepted = result.Accepted,
 				Error = result.Error ?? "",
@@ -93,15 +94,15 @@ internal static class ProtoStateBuilder
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildBatchStepResponse(FullRunSimulationBatchStepResult result, FullRunSimulationStateSnapshot snapshot)
+	public static byte[] BuildBatchActResponse(FullRunSimulationBatchStepResult result, FullRunSimulationStateSnapshot snapshot)
 	{
 		GameState state = BuildStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.BatchStep,
-			Status = result.Accepted ? PipeStatus.Ok : PipeStatus.RejectedAction,
-			BatchStep = new PipeBatchStepPayload
+			Method = BridgeMethod.BatchAct,
+			Status = result.Accepted ? BridgeStatus.Ok : BridgeStatus.RejectedAction,
+			BatchAct = new BridgeBatchActPayload
 			{
 				Accepted = result.Accepted,
 				StepsExecuted = Math.Max(0, result.StepsExecuted),
@@ -115,13 +116,13 @@ internal static class ProtoStateBuilder
 	// Auxiliary responses
 	// ================================================================
 
-	public static byte[] BuildErrorResponse(PipeMethod method, PipeStatus status, string errorCode, string error)
+	public static byte[] BuildErrorResponse(BridgeMethod method, BridgeStatus status, string errorCode, string error)
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
 			Method = method,
 			Status = status,
-			Error = new PipeError
+			Error = new BridgeError
 			{
 				ErrorCode = errorCode ?? "",
 				ErrorMessage = error ?? "",
@@ -129,13 +130,13 @@ internal static class ProtoStateBuilder
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildSaveStateResponse(PipeMethod method, string stateId, int cacheSize)
+	public static byte[] BuildSaveStateResponse(BridgeMethod method, string stateId, int cacheSize)
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
 			Method = method,
-			Status = PipeStatus.Ok,
-			SaveState = new PipeSaveStateResult
+			Status = BridgeStatus.Ok,
+			SaveState = new BridgeSaveStateResult
 			{
 				StateId = stateId ?? "",
 				CacheSize = cacheSize,
@@ -145,11 +146,11 @@ internal static class ProtoStateBuilder
 
 	public static byte[] BuildExportStateResponse(string path, int cacheSize)
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.ExportState,
-			Status = PipeStatus.Ok,
-			ExportState = new PipeExportStateResult
+			Method = BridgeMethod.ExportState,
+			Status = BridgeStatus.Ok,
+			ExportState = new BridgeExportStateResult
 			{
 				Path = path ?? "",
 				CacheSize = cacheSize,
@@ -159,11 +160,11 @@ internal static class ProtoStateBuilder
 
 	public static byte[] BuildDeleteStateResponse(bool deleted, int cacheSize)
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.DeleteState,
-			Status = PipeStatus.Ok,
-			DeleteState = new PipeDeleteStateResult
+			Method = BridgeMethod.DeleteState,
+			Status = BridgeStatus.Ok,
+			DeleteState = new BridgeDeleteStateResult
 			{
 				Deleted = deleted,
 				CacheSize = cacheSize,
@@ -173,11 +174,11 @@ internal static class ProtoStateBuilder
 
 	public static byte[] BuildPerfStatsResponse(Dictionary<string, object?> payload)
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.PerfStats,
-			Status = PipeStatus.Ok,
-			PerfStats = new PipePerfStatsResult
+			Method = BridgeMethod.PerfStats,
+			Status = BridgeStatus.Ok,
+			PerfStats = new BridgePerfStatsResult
 			{
 				JsonPayload = JsonSerializer.Serialize(payload),
 			},
@@ -186,17 +187,17 @@ internal static class ProtoStateBuilder
 
 	public static byte[] BuildResetPerfStatsResponse()
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.ResetPerfStats,
-			Status = PipeStatus.Ok,
-			ResetPerfStats = new PipeResetPerfStatsResult { Reset = true },
+			Method = BridgeMethod.ResetPerfStats,
+			Status = BridgeStatus.Ok,
+			ResetPerfStats = new BridgeResetPerfStatsResult { Reset = true },
 		}.ToByteArray();
 	}
 
 	public static byte[] BuildSearchCombatMctsResponse(CombatMctsResult result)
 	{
-		PipeSearchCombatMctsResult payload = new PipeSearchCombatMctsResult
+		BridgeSearchCombatMctsResult payload = new BridgeSearchCombatMctsResult
 		{
 			ActionIndex = result.ActionIndex,
 			RootValue = result.RootValue,
@@ -228,10 +229,10 @@ internal static class ProtoStateBuilder
 		payload.VisitProbs.Add(result.VisitProbs);
 		payload.QValues.Add(result.QValues);
 		payload.Priors.Add(result.Priors);
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.SearchCombatMcts,
-			Status = PipeStatus.Ok,
+			Method = BridgeMethod.SearchCombatMcts,
+			Status = BridgeStatus.Ok,
 			SearchCombatMcts = payload,
 		}.ToByteArray();
 	}
@@ -243,27 +244,27 @@ internal static class ProtoStateBuilder
 	// Python 侧不再自己推断 legal actions,直接消费 sim 的权威字段。
 	// ================================================================
 
-	public static byte[] BuildCombatStateResponse(PipeMethod method, CombatTrainingStateSnapshot snapshot)
+	public static byte[] BuildCombatStateResponse(BridgeMethod method, CombatTrainingStateSnapshot snapshot)
 	{
 		GameState state = BuildCombatGameStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", state.CalculateSize());
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
 			Method = method,
-			Status = PipeStatus.Ok,
-			State = new PipeStatePayload { State = state },
+			Status = BridgeStatus.Ok,
+			State = new BridgeStatePayload { State = state },
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildCombatStepResponse(CombatTrainingStepResult result, CombatTrainingStateSnapshot snapshot)
+	public static byte[] BuildCombatActResponse(CombatTrainingStepResult result, CombatTrainingStateSnapshot snapshot)
 	{
 		GameState state = BuildCombatGameStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", state.CalculateSize());
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.CombatStep,
-			Status = result.Accepted ? PipeStatus.Ok : PipeStatus.RejectedAction,
-			Step = new PipeStepPayload
+			Method = BridgeMethod.CombatAct,
+			Status = result.Accepted ? BridgeStatus.Ok : BridgeStatus.RejectedAction,
+			Act = new BridgeActPayload
 			{
 				Accepted = result.Accepted,
 				Error = result.Error ?? "",
@@ -287,11 +288,11 @@ internal static class ProtoStateBuilder
 		string requestedDevice,
 		bool fellBackToCpu)
 	{
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.LoadOrtModel,
-			Status = PipeStatus.Ok,
-			LoadOrtModel = new PipeLoadOrtModelResult
+			Method = BridgeMethod.LoadOrtModel,
+			Status = BridgeStatus.Ok,
+			LoadOrtModel = new BridgeLoadOrtModelResult
 			{
 				Loaded = loaded,
 				HasValueOutput = hasValueOutput,
@@ -317,11 +318,11 @@ internal static class ProtoStateBuilder
 		FullRunSimulationStateSnapshot finalSnapshot)
 	{
 		GameState state = BuildStateMessage(finalSnapshot);
-		return new PipeResponseEnvelope
+		return new BridgeResponseEnvelope
 		{
-			Method = PipeMethod.RunCombatLocal,
-			Status = PipeStatus.Ok,
-			RunCombatLocal = new PipeRunCombatLocalResult
+			Method = BridgeMethod.RunCombatLocal,
+			Status = BridgeStatus.Ok,
+			RunCombatLocal = new BridgeRunCombatLocalResult
 			{
 				CombatSteps = combatSteps,
 				ElapsedMs = elapsedMs,
@@ -338,33 +339,12 @@ internal static class ProtoStateBuilder
 
 	public static GameState BuildStateMessage(FullRunSimulationStateSnapshot snapshot)
 	{
-		return BuildProtoStateMessage(snapshot);
+		return BridgeGameStateBuilder.FromFullRunSnapshot(snapshot);
 	}
 
 	private static GameState BuildCombatGameStateMessage(CombatTrainingStateSnapshot snapshot)
 	{
-		Player? runtimePlayer = TryResolveActiveCombatPlayer();
-		GameState gs = new GameState
-		{
-			StateType = DetectCombatStateType(snapshot),
-			Terminal = snapshot.IsEpisodeDone,
-			RunOutcome = snapshot.IsEpisodeDone
-				? (snapshot.Victory == true ? "victory" : (snapshot.Victory == false ? "defeat" : ""))
-				: "",
-			EncounterId = snapshot.EncounterId ?? "",
-			Run = new RunInfo(),
-		};
-
-		if (snapshot.Player != null || runtimePlayer != null)
-		{
-			// combat-only proto 也要暴露完整 player build。否则上游会把
-			// “deck/relics 为空”误判成 build 没有真正应用到 sim。
-			gs.Player = BuildCombatPlayerState(runtimePlayer, snapshot);
-		}
-
-		gs.Battle = BuildBattleState(snapshot, runtimePlayer);
-		PopulateCombatLegalActions(gs, snapshot);
-		return gs;
+		return BridgeGameStateBuilder.FromCombatSnapshot(snapshot);
 	}
 
 	private static Player? TryResolveActiveCombatPlayer()
@@ -780,11 +760,28 @@ internal static class ProtoStateBuilder
 				TargetType = MapTargetTypeString(card.TargetType),
 				IsUpgraded = card.IsUpgraded,
 				CanPlay = card.CanPlay,
-				RequiresTarget = card.RequiresTarget
+				RequiresTarget = card.RequiresTarget,
+				// 2026-04-24 动态信息：sim 内部已算好的实时描述，LLM 直接读用
+				Description = card.Description ?? ""
 			};
 			foreach (uint tid in card.ValidTargetIds)
 			{
 				hc.ValidTargetIds.Add((int)tid);
+			}
+			if (card.PreviewDamagePerTarget != null)
+			{
+				foreach (KeyValuePair<uint, int> kv in card.PreviewDamagePerTarget)
+				{
+					hc.PreviewDamagePerTarget[(int)kv.Key] = kv.Value;
+				}
+			}
+			hc.PreviewBlock = card.PreviewBlock;
+			if (card.Keywords != null)
+			{
+				foreach (string kw in card.Keywords)
+				{
+					if (!string.IsNullOrEmpty(kw)) hc.Keywords.Add(kw);
+				}
 			}
 			bs.Hand.Add(hc);
 		}

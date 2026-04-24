@@ -1,0 +1,33 @@
+# STS2AI/llm 专用依赖。本文件只在 STS2AI/llm/.venv311 里安装，不要污染全局 Python。
+# 目标 Python：3.11 或 3.12（unsloth 官方验证范围）。
+# 目标 GPU：CUDA 12.x（RTX 5070 Ti 需要 cu121 / cu124；RTX 5070 Ti 的 sm_120 还比较新，
+# 实际安装时按 unsloth README 的 pip 命令拉 wheel，这里只列逻辑依赖）。
+
+# --- 核心微调 ---
+unsloth>=2026.3.0
+unsloth_zoo
+transformers>=4.48
+peft>=0.14
+trl>=0.14
+accelerate>=0.34
+bitsandbytes>=0.45
+datasets>=2.20
+sentencepiece
+protobuf
+
+# --- 训练辅助 ---
+tomli; python_version<"3.11"
+pydantic>=2.6
+tqdm
+
+# --- 推理辅助 ---
+# vllm 可选，SFT 阶段不必；如果后面要跑 self-play 再考虑
+# vllm>=0.7
+
+# --- 与本仓库其它部分兼容 ---
+# 不强制锁 torch 版本，unsloth 的安装脚本会拉合适的 cuda wheel
+# torch==2.4.0+cu124
+
+# --- 可选分析 ---
+matplotlib
+pandas

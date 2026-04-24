@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace Godot;
@@ -71,7 +73,79 @@ public static class GD
 
 public static partial class ProjectSettings
 {
-    public static string GlobalizePath(string path) => path.Replace("res://", AppDomain.CurrentDomain.BaseDirectory).Replace("user://", OS.GetUserDataDir());
+    private static string? _resourceRoot;
+
+    public static string GlobalizePath(string path)
+    {
+        if (path.StartsWith("res://", StringComparison.Ordinal))
+        {
+            string relativePath = path.Substring("res://".Length).Replace('/', Path.DirectorySeparatorChar);
+            return Path.GetFullPath(Path.Combine(ResolveResourceRoot(), relativePath));
+        }
+
+        if (path.StartsWith("user://", StringComparison.Ordinal))
+        {
+            string relativePath = path.Substring("user://".Length).Replace('/', Path.DirectorySeparatorChar);
+            return Path.GetFullPath(Path.Combine(OS.GetUserDataDir(), relativePath));
+        }
+
+        return path;
+    }
+
+    private static string ResolveResourceRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(_resourceRoot))
+        {
+            return _resourceRoot;
+        }
+
+        foreach (string candidate in EnumerateResourceRootCandidates())
+        {
+            if (LooksLikeGodotProjectRoot(candidate))
+            {
+                _resourceRoot = Path.GetFullPath(candidate);
+                return _resourceRoot;
+            }
+        }
+
+        foreach (string candidate in EnumerateResourceRootCandidates())
+        {
+            if (Directory.Exists(Path.Combine(candidate, "localization")))
+            {
+                _resourceRoot = Path.GetFullPath(candidate);
+                return _resourceRoot;
+            }
+        }
+
+        _resourceRoot = AppDomain.CurrentDomain.BaseDirectory;
+        return _resourceRoot;
+    }
+
+    private static IEnumerable<string> EnumerateResourceRootCandidates()
+    {
+        string? envRoot = Environment.GetEnvironmentVariable("STS2_REPO_ROOT");
+        if (!string.IsNullOrWhiteSpace(envRoot))
+        {
+            yield return envRoot;
+        }
+
+        foreach (string start in new[] { AppDomain.CurrentDomain.BaseDirectory, Environment.CurrentDirectory })
+        {
+            DirectoryInfo? directory = new DirectoryInfo(start);
+            while (directory != null)
+            {
+                yield return directory.FullName;
+                directory = directory.Parent;
+            }
+        }
+    }
+
+    private static bool LooksLikeGodotProjectRoot(string path)
+    {
+        return File.Exists(Path.Combine(path, "project.godot"))
+            && Directory.Exists(Path.Combine(path, "localization"));
+    }
+
     public static Variant GetSetting(string path, Variant defaultValue = default) => defaultValue;
     public static bool HasSetting(string path) => false;
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from game_bridge.session.build_spec import BuildSpecPy, CardSpecPy, PotionSpecPy, RelicSpecPy
-from game_bridge.session.combat import CombatSession
+from game_bridge.session import create_game_session
 from game_bridge.sim import launch_headless_sim, static_consistency_report
 
 _CARD_SPEC_RE = re.compile(r"^(?P<card_id>[^+@]+?)(?:[+@](?P<upgrade>\d+))?$")
@@ -129,7 +129,10 @@ def _run_combat(args: argparse.Namespace) -> None:
     build = _load_build_seed(args)
     build_payload = None if build is None else build.to_sim_dict()
 
-    with CombatSession(
+    with create_game_session(
+        mode="combat",
+        transport="pipe_proto",
+        backend="sim",
         port=args.port,
         auto_launch=True,
         connect_timeout_s=args.ready_timeout,

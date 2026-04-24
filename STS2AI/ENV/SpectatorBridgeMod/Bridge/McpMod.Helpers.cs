@@ -5,8 +5,11 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Godot;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 
 namespace STS2_MCP;
@@ -15,8 +18,153 @@ public static partial class McpMod
 {
     private static string? SafeGetCardDescription(CardModel card, PileType pile = PileType.Hand)
     {
-        try { return StripRichTextTags(card.GetDescriptionForPile(pile)).Replace("\n", " "); }
+        try
+        {
+            RefreshCardPreview(card, null);
+            return StripRichTextTags(card.GetDescriptionForPile(pile)).Replace("\n", " ");
+        }
         catch { return SafeGetText(() => card.Description)?.Replace("\n", " "); }
+    }
+
+    private static void RefreshCardPreview(CardModel card, Creature? target)
+    {
+        try
+        {
+            card.UpdateDynamicVarPreview(CardPreviewMode.Normal, target, card.DynamicVars);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            EnchantmentModel? enchantment = card.Enchantment;
+            if (enchantment != null)
+            {
+                card.UpdateDynamicVarPreview(CardPreviewMode.Normal, target, enchantment.DynamicVars);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static Dictionary<int, int> BuildPreviewDamagePerTarget(CardModel card, IReadOnlyList<uint> validTargetIds)
+    {
+        var result = new Dictionary<int, int>();
+        if (!HasAnyPreviewVar(card, "Damage", "CalculatedDamage", "OstyDamage"))
+        {
+            return result;
+        }
+
+        CombatState? combatState = CombatManager.Instance?.DebugOnlyGetState();
+        if (combatState == null)
+        {
+            return result;
+        }
+
+        foreach (uint targetId in validTargetIds)
+        {
+            Creature? target = null;
+            try
+            {
+                target = combatState.GetCreature(targetId);
+            }
+            catch
+            {
+            }
+            if (target == null)
+            {
+                continue;
+            }
+            RefreshCardPreview(card, target);
+            int? damage = GetFirstPreviewValue(card, "Damage", "CalculatedDamage", "OstyDamage");
+            if (damage.HasValue)
+            {
+                result[(int)targetId] = Math.Max(0, damage.Value);
+            }
+        }
+        RefreshCardPreview(card, null);
+        return result;
+    }
+
+    private static int GetPreviewBlock(CardModel card)
+    {
+        if (!HasAnyPreviewVar(card, "Block", "CalculatedBlock"))
+        {
+            return 0;
+        }
+        RefreshCardPreview(card, null);
+        return Math.Max(0, GetFirstPreviewValue(card, "Block", "CalculatedBlock") ?? 0);
+    }
+
+    private static List<uint> ResolveCardPreviewTargetIds(CardModel card)
+    {
+        var result = new List<uint>();
+        CombatState? combatState = CombatManager.Instance?.DebugOnlyGetState();
+        Creature? owner = card.Owner?.Creature;
+        if (combatState == null || owner == null)
+        {
+            return result;
+        }
+
+        foreach (Creature creature in combatState.Creatures)
+        {
+            if (!creature.CombatId.HasValue || !creature.IsAlive)
+            {
+                continue;
+            }
+            bool include = card.TargetType switch
+            {
+                TargetType.AnyEnemy or TargetType.AllEnemies or TargetType.RandomEnemy =>
+                    creature.Side != owner.Side,
+                TargetType.AllAllies =>
+                    creature.Side == owner.Side,
+                TargetType.Self or TargetType.Osty =>
+                    ReferenceEquals(creature, owner),
+                _ => false
+            };
+            if (include)
+            {
+                result.Add(creature.CombatId.Value);
+            }
+        }
+        return result;
+    }
+
+    private static bool CardRequiresTarget(CardModel card)
+    {
+        return card.TargetType is TargetType.AnyEnemy
+            or TargetType.AllEnemies
+            or TargetType.RandomEnemy
+            or TargetType.AllAllies
+            or TargetType.Self
+            or TargetType.Osty;
+    }
+
+    private static bool HasAnyPreviewVar(CardModel card, params string[] names)
+    {
+        foreach (string name in names)
+        {
+            if (card.DynamicVars.ContainsKey(name))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int? GetFirstPreviewValue(CardModel card, params string[] names)
+    {
+        DynamicVarSet vars = card.DynamicVars;
+        foreach (string name in names)
+        {
+            if (vars.TryGetValue(name, out DynamicVar? dynamicVar))
+            {
+                return (int)dynamicVar.PreviewValue;
+            }
+        }
+        return null;
     }
 
     internal static string? SafeGetText(Func<object?> getter)

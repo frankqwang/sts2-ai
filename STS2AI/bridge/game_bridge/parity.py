@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from game_bridge.session import create_full_run_session
+from game_bridge.session import create_game_session
 from game_bridge.session.state_semantics import normalize_run_outcome
 
 DEFAULT_PARITY_SEED = "123456"
@@ -475,15 +475,18 @@ def run_full_run_parity(
     effective_seed = _resolve_parity_seed(seed)
     replay_source = ReplayActionSource.from_jsonl(replay_file) if action_mode == "replay" else None
 
-    real_session = create_full_run_session(
+    real_session = create_game_session(
+        mode="full_run",
         base_url=real_base_url,
-        use_pipe=False,
+        transport="http_json",
+        backend="spectator",
         auto_launch=False,
     )
-    sim_session = create_full_run_session(
+    sim_session = create_game_session(
+        mode="full_run",
         port=sim_port,
-        use_pipe=True,
-        transport="proto",
+        transport="pipe_proto",
+        backend="sim",
         auto_launch=auto_launch_sim,
     )
     report: dict[str, Any] = {

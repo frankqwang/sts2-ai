@@ -1,7 +1,7 @@
 """game_bridge.transport — 统一 pipe 传输层。
 
 **唯一**的 pipe 连接管理设施。所有 session (combat / full-run) 和
-ProtoPipeClient / PipeBackedCombatTrainingClient 等 client 都走这里,
+GameSession 的 pipe transport 走这里,
 禁止任何模块自己造 pipe/reconnect/heartbeat/lock 轮子。
 
 模块分层:
@@ -24,7 +24,7 @@ from game_bridge.transport.pipe_transport import (
     TransportClosedError,
     TransportTimeoutError,
 )
-from game_bridge.transport.codec import JsonCodec, ProtocolCodec
+from game_bridge.transport.codec import ProtocolCodec
 from game_bridge.transport.connection import (
     PipeConnection,
     PipeConnectionConfig,
@@ -42,6 +42,5 @@ __all__ = [
     "TransportClosedError",
     "TransportTimeoutError",
     "ProtocolCodec",
-    "JsonCodec",
     "ProtoCodec",
 ]

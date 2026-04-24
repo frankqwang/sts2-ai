@@ -105,6 +105,12 @@ function Sync-SpectatorModArtifacts {
         Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $installDir $name) -Force
     }
 
+    Get-ChildItem -LiteralPath $resolvedSource -Filter "*.dll" |
+        Where-Object { $_.Name -ne "sts2_mcp_spectator.dll" } |
+        ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $installDir $_.Name) -Force
+        }
+
     $optionalFiles = @(
         "README.md"
     )
@@ -116,7 +122,6 @@ function Sync-SpectatorModArtifacts {
     }
 
     $staleFiles = @(
-        "sts2_mcp_spectator.deps.json",
         "sts2_mcp_spectator.pdb",
         "sts2_mcp_spectator.runtimeconfig.json"
     )
@@ -172,17 +177,17 @@ function Resolve-SingleplayerStateUrl {
 
     $normalized = [string]$ResolvedBaseUrl
     if ([string]::IsNullOrWhiteSpace($normalized)) {
-        return "http://127.0.0.1:15526/api/v1/singleplayer"
+        return "http://127.0.0.1:15526/api/game_bridge/rpc"
     }
 
     $normalized = $normalized.TrimEnd("/")
-    if ($normalized -match "/api/v1/singleplayer$") {
+    if ($normalized -match "/api/game_bridge/rpc$") {
         return $normalized
     }
-    if ($normalized -match "/api/v1$") {
-        return "$normalized/singleplayer"
+    if ($normalized -match "/api/game_bridge$") {
+        return "$normalized/rpc"
     }
-    return "$normalized/api/v1/singleplayer"
+    return "$normalized/api/game_bridge/rpc"
 }
 
 function Start-ProcessWithEnvironment {
@@ -341,11 +346,12 @@ function Get-TrainerState {
 
 function Get-SingleplayerState {
     param(
-        [string]$StateUrl = "http://127.0.0.1:15526/api/v1/singleplayer"
+        [string]$StateUrl = "http://127.0.0.1:15526/api/game_bridge/rpc"
     )
 
     try {
-        return Invoke-RestMethod -Uri $StateUrl -Method Get -TimeoutSec 2
+        $response = Invoke-RestMethod -Uri $StateUrl -Method Post -Body '{"method":"STATE"}' -ContentType "application/json" -TimeoutSec 2
+        return $response.state.state
     }
     catch {
         return $null
@@ -643,7 +649,7 @@ function Assert-CleanTrainerPort {
 
 function Assert-CleanSingleplayerPort {
     param(
-        [string]$StateUrl = "http://127.0.0.1:15526/api/v1/singleplayer",
+        [string]$StateUrl = "http://127.0.0.1:15526/api/game_bridge/rpc",
         [switch]$StopExistingGodot
     )
 
@@ -666,7 +672,7 @@ function Assert-CleanSingleplayerPort {
 
 function Wait-SingleplayerEndpoint {
     param(
-        [string]$StateUrl = "http://127.0.0.1:15526/api/v1/singleplayer",
+        [string]$StateUrl = "http://127.0.0.1:15526/api/game_bridge/rpc",
         [int]$Attempts = 60,
         [int]$DelayMilliseconds = 250
     )
@@ -684,7 +690,7 @@ function Wait-SingleplayerEndpoint {
 
 function Wait-SingleplayerRunStarted {
     param(
-        [string]$StateUrl = "http://127.0.0.1:15526/api/v1/singleplayer",
+        [string]$StateUrl = "http://127.0.0.1:15526/api/game_bridge/rpc",
         [int]$Attempts = 600,
         [int]$DelayMilliseconds = 250
     )

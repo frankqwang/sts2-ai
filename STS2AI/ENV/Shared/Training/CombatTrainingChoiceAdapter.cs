@@ -63,6 +63,12 @@ internal static class CombatTrainingChoiceSnapshotBuilder
 	{
 		combatState ??= CombatManager.Instance.DebugOnlyGetState();
 		int handIndex = explicitHandIndex ?? GetHandIndex(card);
+		List<uint> validTargetIds = GetValidTargetIds(card, combatState);
+		string description = CombatTrainingCardDescription.GetDescription(card, card.Pile?.Type ?? PileType.Hand);
+		Dictionary<uint, int> previewDamagePerTarget = combatState == null
+			? new Dictionary<uint, int>()
+			: CombatTrainingCardDescription.BuildPreviewDamagePerTarget(card, combatState, validTargetIds);
+		int previewBlock = CombatTrainingCardDescription.GetPreviewBlock(card);
 		return new CombatTrainingHandCardSnapshot
 		{
 			HandIndex = handIndex,
@@ -75,32 +81,20 @@ internal static class CombatTrainingChoiceSnapshotBuilder
 			TargetType = card.TargetType,
 			CanPlay = card.CanPlay(),
 			RequiresTarget = CardRequiresTarget(card),
-			ValidTargetIds = GetValidTargetIds(card, combatState),
+			ValidTargetIds = validTargetIds,
 			CardType = card.Type.ToString(),
-			Description = SafeCardDescription(card),
+			Description = description,
 			Keywords = SafeCardKeywords(card),
 			IsUpgraded = card.IsUpgraded,
-			GainsBlock = card.GainsBlock
+			GainsBlock = card.GainsBlock,
+			PreviewDamagePerTarget = previewDamagePerTarget,
+			PreviewBlock = previewBlock
 		};
 	}
 
 	private static string SafeCardDescription(CardModel card)
 	{
-		try
-		{
-			return card.GetDescriptionForPile(card.Pile?.Type ?? PileType.Hand);
-		}
-		catch
-		{
-			try
-			{
-				return card.Description.GetRawText();
-			}
-			catch
-			{
-				return string.Empty;
-			}
-		}
+		return CombatTrainingCardDescription.GetDescription(card, card.Pile?.Type ?? PileType.Hand);
 	}
 
 	private static List<string> SafeCardKeywords(CardModel card)
@@ -164,6 +158,9 @@ internal static class CombatTrainingChoiceSnapshotBuilder
 			StarCost = card.GetStarCostWithModifiers(),
 			TargetType = card.TargetType,
 			SourcePile = card.Pile?.Type.ToString() ?? PileType.None.ToString(),
+			Description = CombatTrainingCardDescription.GetDescription(card, card.Pile?.Type ?? PileType.None),
+			Keywords = SafeCardKeywords(card),
+			PreviewBlock = CombatTrainingCardDescription.GetPreviewBlock(card),
 			IsUpgraded = card.IsUpgraded,
 			IsUpgradable = card.IsUpgradable
 		};

@@ -146,11 +146,11 @@ def _kill_stale_headless_processes(*, port: int, host_path: Path) -> None:
 
 
 def _normalize_protocol(protocol: str) -> str:
-    """统一的 protocol 名归一化：只支持 json / proto。"""
+    """统一的 protocol 名归一化：只支持 proto。"""
     p = str(protocol).strip().lower()
     if p in {"proto", "protobuf"}:
         return "proto"
-    return "json"
+    raise ValueError("HeadlessSim Python launcher only supports protobuf pipe protocol.")
 
 
 def _build_launch_command(host_path: Path, protocol: str, port: int) -> list[str]:
@@ -162,12 +162,8 @@ def _build_launch_command(host_path: Path, protocol: str, port: int) -> list[str
 
 
 def _pipe_name_for_port(*, port: int, protocol: str) -> str:
-    normalized_protocol = _normalize_protocol(protocol)
-    if normalized_protocol == "proto":
-        pipe_suffix = f"sts2_mcts_proto_{port}"
-    else:
-        pipe_suffix = f"sts2_mcts_{port}"
-    return rf"\\.\pipe\{pipe_suffix}"
+    _normalize_protocol(protocol)
+    return rf"\\.\pipe\sts2_mcts_proto_{port}"
 
 
 def _wait_for_pipe_slot_windows(*, port: int, timeout_s: float, protocol: str) -> None:
@@ -192,7 +188,7 @@ def start_headless_sim(
     repo_root: str | Path = DEFAULT_REPO_ROOT,
     host_path: str | Path = DEFAULT_HOST_PATH,
     connect_timeout_s: float = 15.0,
-    protocol: str = "json",
+    protocol: str = "proto",
     extra_host_args: Iterable[str] | None = None,
     dll_path: str | Path | None = None,
 ) -> subprocess.Popen:
@@ -264,7 +260,7 @@ def stop_process(proc: subprocess.Popen | None) -> None:
             pass
 
 
-def _wait_until_ready(*, port: int, timeout_s: float, protocol: str = "json") -> None:
+def _wait_until_ready(*, port: int, timeout_s: float, protocol: str = "proto") -> None:
     if sys.platform == "win32":
         try:
             _wait_for_pipe_slot_windows(port=port, timeout_s=timeout_s, protocol=protocol)
@@ -277,13 +273,10 @@ def _wait_until_ready(*, port: int, timeout_s: float, protocol: str = "json") ->
         last_error = None
 
     deadline = time.monotonic() + timeout_s
-    protocol = str(protocol).strip().lower()
+    protocol = _normalize_protocol(protocol)
     # Linux/非 Windows 回退 probe:走 transport.PipeTransport.connect()(规范统一 bridge 层)。
-    # 2026-04-18:不再支持 bin 协议(手写二进制 wire 已废弃)。
     from game_bridge.transport.pipe_transport import PipeTransport
-    pipe_name = {
-        "proto": f"sts2_mcts_proto_{port}",
-    }.get(protocol, f"sts2_mcts_{port}")
+    pipe_name = f"sts2_mcts_proto_{port}"
     while time.monotonic() < deadline:
         try:
             t = PipeTransport(pipe_name)
@@ -305,7 +298,7 @@ def main() -> int:
     parser.add_argument("--host-path", type=Path, default=DEFAULT_HOST_PATH)
     parser.add_argument("--dll-path", type=Path, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--ready-timeout", type=float, default=15.0)
-    parser.add_argument("--protocol", choices=["json", "proto"], default="json")
+    parser.add_argument("--protocol", choices=["proto"], default="proto")
     args = parser.parse_args()
 
     proc = start_headless_sim(

@@ -199,9 +199,12 @@ class GameBridgeCombatRuntime:
         build: dict[str, Any] | None = None,
     ):
         _ensure_python_bridge_path()
-        from game_bridge.session import create_combat_session
+        from game_bridge.session import create_game_session
 
-        self._session = create_combat_session(
+        self._session = create_game_session(
+            mode="combat",
+            transport="pipe_proto",
+            backend="sim",
             port=port,
             auto_launch=auto_launch,
             connect_timeout_s=connect_timeout_s,
@@ -292,7 +295,7 @@ class GameBridgeCombatRuntime:
             action_index = resolved_index
         action = action_rows[action_index]
         session_step_started_at = time.perf_counter()
-        next_raw, _, _, _ = self._session.step(action)
+        next_raw, _, _, _ = self._session.act_gym(action)
         session_step_duration_s = time.perf_counter() - session_step_started_at
         transport_metrics = self._get_last_transport_metrics()
         convert_started_at = time.perf_counter()

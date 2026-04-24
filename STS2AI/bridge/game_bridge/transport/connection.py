@@ -5,7 +5,7 @@
   - Thread safety: 内置 RLock,所有 call 串行化(安全让多 thread 共享一个 conn)
   - 自动重连: call 遇 ConnectionError/TimeoutError → 重连 + fallback 重启 sim
   - 错误分类: ConnectionError / TransportTimeoutError / SimulatorApiError
-  - 协议编码: 4 字节长度前缀 + JSON / protobuf envelope payload
+  - 协议编码: 4 字节长度前缀 + protobuf envelope payload
 
 禁止任何上层模块自己重写连接/重连/锁/heartbeat 逻辑。heartbeat 走
 `transport.heartbeat.HealthMonitor`(用独立 PipeConnection 保活,不和业务共享)。
@@ -18,7 +18,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from game_bridge.transport.codec import JsonCodec, ProtocolCodec
+from game_bridge.transport.codec import ProtocolCodec
+from game_bridge.transport.proto_codec import ProtoCodec
 from game_bridge.transport.pipe_transport import (
     PipeTransport,
     TransportClosedError,
@@ -41,8 +42,8 @@ class SimulatorApiError(RuntimeError):
 class PipeConnectionConfig:
     """连接参数。"""
     port: int
-    pipe_name_prefix: str = "sts2_mcts"     # 最终 pipe 名 = prefix_{port}
-    protocol: str = "json"                  # "json" / "proto"
+    pipe_name_prefix: str = "sts2_mcts_proto"  # 最终 pipe 名 = sts2_mcts_proto_{port}
+    protocol: str = "proto"
     connect_timeout_s: float = 10.0
     default_call_timeout_s: float = 30.0
     write_timeout_ms: int = 10000
@@ -52,28 +53,24 @@ class PipeConnectionConfig:
     sim_launcher: Callable[[int], Any] | None = None  # 返回 sim 进程句柄;用于 auto_launch
     sim_stopper: Callable[[Any], None] | None = None  # 停 sim 进程(reconnect 失败时重启 sim)
     # 协议 codec:控制 encode_request / decode_response / handshake 字节语义。
-    # 留 None 时,按 `protocol` 字段自动选:json→JsonCodec,proto→需调用方显式传。
+    # 留 None 时默认使用 ProtoCodec。
     codec: ProtocolCodec | None = None
 
     @property
     def pipe_name(self) -> str:
-        # combat_training_env 以前用 sts2_mcts_{port} (JSON);保持兼容
-        p = self.protocol.lower()
-        if p == "proto":
-            return f"sts2_mcts_proto_{self.port}"
-        return f"{self.pipe_name_prefix}_{self.port}"
+        return f"sts2_mcts_proto_{self.port}"
 
     def resolve_codec(self) -> ProtocolCodec:
-        """选中有效 codec:显式传 > protocol 字段推断 > JsonCodec 兜底。"""
+        """选中有效 codec:显式传 > ProtoCodec。"""
         if self.codec is not None:
             return self.codec
-        return JsonCodec()
+        return ProtoCodec()
 
 
 class PipeConnection:
     """高层 pipe 连接。
 
-    使用 (最常见 json 协议):
+    使用:
         cfg = PipeConnectionConfig(port=17000, auto_launch=True, sim_launcher=...)
         conn = PipeConnection(cfg)
         conn.connect()
@@ -122,7 +119,7 @@ class PipeConnection:
                 self._transport.connect(
                     timeout_s=max(15.0, self.cfg.connect_timeout_s),
                 )
-            # 握手(json 协议:server 发 {"ok": true} 欢迎帧)
+            # 握手:server 发 protobuf handshake envelope 欢迎帧
             self._handshake()
             self._last_activity = time.monotonic()
 
@@ -150,7 +147,7 @@ class PipeConnection:
 
     def call(self, method: str, params: dict[str, Any] | None = None,
              *, timeout_s: float | None = None) -> dict[str, Any]:
-        """同步 RPC (JSON 协议);不带重连。失败抛 ConnectionError / TimeoutError / SimulatorApiError。"""
+        """同步 RPC;不带重连。失败抛 ConnectionError / TimeoutError / SimulatorApiError。"""
         if timeout_s is None:
             timeout_s = self.cfg.default_call_timeout_s
         timeout_ms = int(timeout_s * 1000)
@@ -239,8 +236,8 @@ class PipeConnection:
     def _handshake(self) -> None:
         """读 server 欢迎帧(可能为空或含版本信息)。
 
-        握手字节语义由 codec 决定:JsonCodec 期望 {"ok": true},ProtoCodec
-        期望 protobuf handshake envelope。任意错误在 codec 侧以 dict['error']
+        握手字节语义由 codec 决定:ProtoCodec 期望 protobuf handshake envelope。
+        任意错误在 codec 侧以 dict['error']
         上报,此处转换为 SimulatorApiError。
         """
         try:

@@ -26,7 +26,7 @@ def _terminal_reward(state: dict[str, Any]) -> float:
     return 0.0
 
 
-def _decode_search_mcts_payload(payload: "pb.PipeSearchCombatMctsResult") -> dict[str, Any]:
+def _decode_search_mcts_payload(payload: "pb.BridgeSearchCombatMctsResult") -> dict[str, Any]:
     result: dict[str, Any] = {
         "action_index": int(payload.action_index),
         "visit_counts": [int(v) for v in payload.visit_counts],
@@ -97,10 +97,18 @@ class ProtoCodec(ProtocolCodec):
 
     name = "proto"
 
+    def build_request_message(self, method: str, params: dict[str, Any] | None = None) -> "pb.BridgeRequestEnvelope":
+        req = pb.BridgeRequestEnvelope()
+        req.ParseFromString(self.encode_request(method, params or {}))
+        return req
+
+    def decode_response_message(self, response: "pb.BridgeResponseEnvelope") -> dict[str, Any]:
+        return self.decode_response(response.SerializeToString())
+
     def encode_request(self, method: str, params: dict[str, Any] | None) -> bytes:
         method = str(method).strip().lower()
         params = params or {}
-        req = pb.PipeRequestEnvelope()
+        req = pb.BridgeRequestEnvelope()
 
         if method == "reset":
             req.method = pb.RESET
@@ -116,15 +124,15 @@ class ProtoCodec(ProtocolCodec):
             req.method = pb.STATE
             return req.SerializeToString()
 
-        if method == "step":
-            req.method = pb.STEP
-            _apply_legal_action_to_proto(req.step.action, params)
+        if method == "act":
+            req.method = pb.ACT
+            _apply_legal_action_to_proto(req.act.action, params)
             return req.SerializeToString()
 
-        if method == "batch_step":
-            req.method = pb.BATCH_STEP
+        if method == "batch_act":
+            req.method = pb.BATCH_ACT
             for action in list(params.get("actions") or []):
-                _apply_legal_action_to_proto(req.batch_step.actions.add(), action or {})
+                _apply_legal_action_to_proto(req.batch_act.actions.add(), action or {})
             return req.SerializeToString()
 
         if method == "save_state":
@@ -245,9 +253,9 @@ class ProtoCodec(ProtocolCodec):
                 raise TypeError("combat_reset build must be a dict or None")
             return req.SerializeToString()
 
-        if method == "combat_step":
-            req.method = pb.COMBAT_STEP
-            _apply_legal_action_to_proto(req.combat_step.action, params)
+        if method == "combat_act":
+            req.method = pb.COMBAT_ACT
+            _apply_legal_action_to_proto(req.combat_act.action, params)
             return req.SerializeToString()
 
         if method == "combat_state":
@@ -257,10 +265,13 @@ class ProtoCodec(ProtocolCodec):
         raise ValueError(f"Unsupported proto pipe method: {method}")
 
     def decode_response(self, payload: bytes) -> dict[str, Any]:
-        resp = pb.PipeResponseEnvelope()
+        resp = pb.BridgeResponseEnvelope()
         resp.ParseFromString(payload)
 
-        if resp.status != pb.OK:
+        if resp.status != pb.OK and not (
+            resp.status == pb.REJECTED_ACTION
+            and resp.method in {pb.ACT, pb.BATCH_ACT, pb.COMBAT_ACT}
+        ):
             error_code = resp.error.error_code if resp.HasField("error") else None
             error_message = resp.error.error_message if resp.HasField("error") else f"proto request failed: status={resp.status}"
             return {
@@ -273,11 +284,11 @@ class ProtoCodec(ProtocolCodec):
         if resp.method in {pb.RESET, pb.STATE, pb.LOAD_STATE, pb.IMPORT_STATE, pb.COMBAT_RESET, pb.COMBAT_STATE}:
             return _parse_proto_state(resp.state.state)
 
-        if resp.method in {pb.STEP, pb.STEP_LOCAL_POLICY, pb.SKIP_COMBAT, pb.COMBAT_STEP}:
-            state = _parse_proto_state(resp.step.state)
+        if resp.method in {pb.ACT, pb.STEP_LOCAL_POLICY, pb.SKIP_COMBAT, pb.COMBAT_ACT}:
+            state = _parse_proto_state(resp.act.state)
             result = {
-                "accepted": bool(resp.step.accepted),
-                "error": str(resp.step.error or "") or None,
+                "accepted": bool(resp.act.accepted),
+                "error": str(resp.act.error or "") or None,
                 "state": state,
                 "reward": _terminal_reward(state),
                 "done": bool(state.get("terminal")),
@@ -290,12 +301,12 @@ class ProtoCodec(ProtocolCodec):
                 result["skipped"] = True
             return result
 
-        if resp.method == pb.BATCH_STEP:
-            state = _parse_proto_state(resp.batch_step.state)
+        if resp.method == pb.BATCH_ACT:
+            state = _parse_proto_state(resp.batch_act.state)
             return {
-                "accepted": bool(resp.batch_step.accepted),
-                "steps_executed": int(resp.batch_step.steps_executed),
-                "error": str(resp.batch_step.error or "") or None,
+                "accepted": bool(resp.batch_act.accepted),
+                "steps_executed": int(resp.batch_act.steps_executed),
+                "error": str(resp.batch_act.error or "") or None,
                 "state": state,
             }
 
@@ -357,7 +368,7 @@ class ProtoCodec(ProtocolCodec):
         raise RuntimeError(f"Unsupported proto response method: {resp.method}")
 
     def read_handshake(self, payload: bytes) -> dict[str, Any]:
-        resp = pb.PipeResponseEnvelope()
+        resp = pb.BridgeResponseEnvelope()
         resp.ParseFromString(payload)
         if resp.status != pb.OK or resp.method != pb.HANDSHAKE or not resp.HasField("handshake"):
             if resp.HasField("error"):

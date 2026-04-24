@@ -1,0 +1,26 @@
+{
+  "deck": [
+    {"id": "STRIKE_IRONCLAD"},
+    {"id": "STRIKE_IRONCLAD"},
+    {"id": "STRIKE_IRONCLAD"},
+    {"id": "DEFEND_IRONCLAD"},
+    {"id": "DEFEND_IRONCLAD"},
+    {"id": "DEFEND_IRONCLAD"},
+    {"id": "BASH"},
+    {"id": "POMMEL_STRIKE", "upgrade_level": 1},
+    {"id": "SETUP_STRIKE", "upgrade_level": 1},
+    {"id": "FORGOTTEN_RITUAL"},
+    {"id": "BLUDGEON", "upgrade_level": 1},
+    {"id": "CINDER", "upgrade_level": 1}
+  ],
+  "relics": [
+    {"id": "BURNING_BLOOD"},
+    {"id": "HAND_DRILL"},
+    {"id": "MINIATURE_CANNON"},
+    {"id": "SILVER_CRUCIBLE"}
+  ],
+  "current_hp": 70,
+  "max_hp": 80,
+  "max_energy": 3,
+  "gold": 125
+}

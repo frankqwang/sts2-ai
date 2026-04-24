@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from game_bridge.session import create_full_run_session
+from game_bridge.session import create_game_session
 from game_bridge.spectate.controller import SpectatorController
 from game_bridge.spectate.overlay import OverlayWriter
 from game_bridge.spectate.policy import ExternalPolicy, ManualPolicy, NullPolicy, ReplayPolicy
@@ -33,8 +33,8 @@ def main() -> None:
     parser.add_argument("--overlay-file", type=str, default="")
     parser.add_argument("--base-url", type=str, default="http://127.0.0.1:15526")
     parser.add_argument("--port", type=int, default=15527)
-    parser.add_argument("--use-pipe", action="store_true")
-    parser.add_argument("--transport", type=str, default="proto")
+    parser.add_argument("--transport", type=str, default="http_json")
+    parser.add_argument("--backend", choices=("spectator", "sim"), default="spectator")
     parser.add_argument("--auto-launch", action="store_true")
     parser.add_argument("--request-timeout-s", type=float, default=30.0)
     parser.add_argument("--ready-timeout-s", type=float, default=60.0)
@@ -50,9 +50,6 @@ def main() -> None:
     parser.add_argument("--step-delay", type=float, default=0.0)
     args = parser.parse_args()
 
-    if args.auto_launch and not args.use_pipe:
-        args.use_pipe = True
-
     resolved_repo_root = args.repo_root or None
     resolved_host_path = args.host_path or args.dll_path or None
 
@@ -65,13 +62,14 @@ def main() -> None:
     else:
         policy = NullPolicy()
 
-    session = create_full_run_session(
+    session = create_game_session(
+        mode="full_run",
         base_url=args.base_url,
         port=args.port,
-        use_pipe=args.use_pipe,
         transport=args.transport,
+        backend=args.backend,
         request_timeout_s=args.request_timeout_s,
-        ready_timeout_s=args.ready_timeout_s,
+        connect_timeout_s=args.ready_timeout_s,
         auto_launch=args.auto_launch,
         repo_root=resolved_repo_root,
         host_path=resolved_host_path,
@@ -88,8 +86,8 @@ def main() -> None:
             json.dumps(
                 {
                     "mode": args.mode,
-                    "use_pipe": bool(args.use_pipe),
                     "transport": args.transport,
+                    "backend": args.backend,
                     "auto_launch": bool(args.auto_launch),
                     "repo_root": str(Path(resolved_repo_root).resolve()) if resolved_repo_root else None,
                     "host_path": str(Path(resolved_host_path).resolve()) if resolved_host_path else None,

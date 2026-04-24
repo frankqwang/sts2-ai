@@ -165,6 +165,10 @@ public sealed class CombatTrainingHandCardSnapshot
 
 	public bool GainsBlock { get; set; }
 
+	public Dictionary<uint, int> PreviewDamagePerTarget { get; set; } = new Dictionary<uint, int>();
+
+	public int PreviewBlock { get; set; }
+
 	public List<string> Keywords { get; set; } = new List<string>();
 }
 
@@ -253,6 +257,12 @@ public sealed class CombatTrainingSelectableCardSnapshot
 	public TargetType TargetType { get; set; }
 
 	public string SourcePile { get; set; } = "";
+
+	public string? Description { get; set; }
+
+	public List<string> Keywords { get; set; } = new List<string>();
+
+	public int PreviewBlock { get; set; }
 
 	public bool IsUpgraded { get; set; }
 

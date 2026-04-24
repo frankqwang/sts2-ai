@@ -17,6 +17,7 @@ using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Training;
+using STS2AI.Bridge.Runtime;
 
 namespace MegaCrit.Sts2.Core.Simulation;
 
@@ -655,7 +656,7 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			CombatTrainingStateSnapshot? combatState = snapshot.CachedCombatState;
 			if (combatState == null)
 			{
-				ICombatChoiceAdapter choiceAdapter = CombatTrainingEnvService.GetChoiceAdapter();
+				ICombatChoiceAdapter choiceAdapter = CombatTrainingChoiceAdapterResolver.Resolve();
 				bool isPlayPhase = CombatManager.Instance.IsPlayPhase;
 				bool playerActionsDisabled = CombatManager.Instance.PlayerActionsDisabled;
 				bool isActionQueueRunning = RunManager.Instance.IsInProgress && RunManager.Instance.ActionExecutor.IsRunning;
@@ -672,7 +673,7 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 					return actions;
 				}
 
-				combatState = CombatTrainingEnvService.BuildStateSnapshot();
+				combatState = BridgeCombatSnapshotBuilder.BuildStateSnapshot();
 				snapshot.CachedCombatState = combatState;
 			}
 			if (combatState == null)

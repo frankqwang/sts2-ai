@@ -13,7 +13,7 @@ PYTHON_ROOT = THIS_FILE.parents[1]
 if str(PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_ROOT))
 
-from game_bridge import SpectatorController, create_combat_session, create_full_run_session
+from game_bridge import SpectatorController, create_game_session
 from game_bridge.sim import DEFAULT_HOST_PATH, launch_headless_sim
 from game_bridge.spectate import NullPolicy, OverlayWriter, ReplayPolicy
 
@@ -124,10 +124,11 @@ def run_sim_launch_check(*, port: int) -> int:
 
 
 def run_full_run_state_check(*, port: int) -> int:
-    session = create_full_run_session(
+    session = create_game_session(
+        mode="full_run",
         port=port,
-        use_pipe=True,
-        transport="proto",
+        transport="pipe_proto",
+        backend="sim",
         auto_launch=True,
     )
     try:
@@ -139,10 +140,11 @@ def run_full_run_state_check(*, port: int) -> int:
 
 
 def run_full_run_reset_check(*, port: int) -> int:
-    session = create_full_run_session(
+    session = create_game_session(
+        mode="full_run",
         port=port,
-        use_pipe=True,
-        transport="proto",
+        transport="pipe_proto",
+        backend="sim",
         auto_launch=True,
     )
     try:
@@ -164,7 +166,10 @@ def run_full_run_reset_check(*, port: int) -> int:
 
 
 def run_combat_build_api_check(*, port: int) -> int:
-    session = create_combat_session(
+    session = create_game_session(
+        mode="combat",
+        transport="pipe_proto",
+        backend="sim",
         port=port,
         auto_launch=True,
     )
@@ -226,10 +231,11 @@ def run_combat_build_api_check(*, port: int) -> int:
 def run_real_spectate_null(*, output_dir: Path, port: int) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     overlay_path = output_dir / "real_overlay.json"
-    session = create_full_run_session(
+    session = create_game_session(
+        mode="full_run",
         port=port,
-        use_pipe=True,
-        transport="proto",
+        transport="pipe_proto",
+        backend="sim",
         auto_launch=True,
     )
     try:

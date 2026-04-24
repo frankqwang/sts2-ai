@@ -15,6 +15,11 @@
 
   <ItemGroup>
     <Compile Include="$(UpstreamRoot)\src\**\*.cs" />
+    <Compile Include="..\..\Shared\Runtime\*.cs" Link="ENV.Shared\Runtime\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Simulation\*.cs" Link="ENV.Shared\Simulation\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Training\*.cs" Link="ENV.Shared\Training\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Selection\*.cs" Link="ENV.Shared\Selection\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Shared\Legacy\*.cs" Link="ENV.Shared\Legacy\%(Filename)%(Extension)" />
     <Compile Include="$(UpstreamRoot)\--z__ReadOnlyArray.cs" />
     <Compile Include="$(UpstreamRoot)\--z__ReadOnlyList.cs" />
     <Compile Include="$(UpstreamRoot)\--z__ReadOnlySingleElementList.cs" />
@@ -118,20 +123,12 @@
     <Compile Include="..\SrcCompat\Source01032\Core\Models\Monsters\SlumberingBeetle.cs" Link="SrcCompat\SlumberingBeetle.cs" />
     <Compile Include="..\SrcCompat\Source01032\Core\Models\Monsters\Vantom.cs" Link="SrcCompat\Vantom.cs" />
     <Compile Include="..\SrcCompat\Source01032\Core\Models\Relics\Shuriken.cs" Link="SrcCompat\Shuriken.cs" />
-    <Compile Include="Training\CombatTrainingDtos.cs" Link="Training\CombatTrainingDtos.cs" />
     <Compile Include="Training\CombatTrainingActionType.cs" Link="Training\CombatTrainingActionType.cs" />
     <Compile Include="Training\CombatTrainingActionRequest.cs" Link="Training\CombatTrainingActionRequest.cs" />
     <Compile Include="Training\CombatTrainingResetRequest.cs" Link="Training\CombatTrainingResetRequest.cs" />
     <Compile Include="Training\CombatTrainingMode.cs" Link="Training\CombatTrainingMode.cs" />
-    <Compile Include="Training\CombatTrainingChoiceAdapter.cs" Link="Training\CombatTrainingChoiceAdapter.cs" />
-    <Compile Include="Training\CombatTrainingSimulatorChoiceBridge.cs" Link="Training\CombatTrainingSimulatorChoiceBridge.cs" />
     <Compile Include="Training\CombatTrainingEnvService.cs" Link="Training\CombatTrainingEnvService.cs" />
     <Compile Include="Training\CombatTrainingSession.cs" Link="Training\CombatTrainingSession.cs" />
-    <Compile Include="TestSupport\ICardSelectionPromptSelector.cs" Link="TestSupport\ICardSelectionPromptSelector.cs" />
-    <Compile Include="TestSupport\IHandSelectionCardSelector.cs" Link="TestSupport\IHandSelectionCardSelector.cs" />
-    <Compile Include="TestSupport\IRewardSelectionPromptSelector.cs" Link="TestSupport\IRewardSelectionPromptSelector.cs" />
-    <Compile Include="TestSupport\ICardRewardPromptSelector.cs" Link="TestSupport\ICardRewardPromptSelector.cs" />
-    <Compile Include="TestSupport\IRelicSelectionPromptSelector.cs" Link="TestSupport\IRelicSelectionPromptSelector.cs" />
     <Compile Include="..\SrcCompat\Source01032\Core\Saves\Runs\SerializablePlayerCombatState.cs" Link="Saves\SerializablePlayerCombatState.cs" />
     <Compile Include="..\SrcCompat\Source01032\Core\Saves\Runs\SerializableCreatureState.cs" Link="Saves\SerializableCreatureState.cs" />
 
@@ -142,7 +139,6 @@
     <Compile Include="Program.cs" Link="HeadlessSim\Program.cs" />
     <Compile Include="Program.Pipe.cs" Link="HeadlessSim\Program.Pipe.cs" />
     <Compile Include="Program.Proto.cs" Link="HeadlessSim\Program.Proto.cs" />
-    <Compile Include="Program.Json.cs" Link="HeadlessSim\Program.Json.cs" />
     <Compile Include="Program.StepSupport.cs" Link="HeadlessSim\Program.StepSupport.cs" />
     <Compile Include="..\GodotSharpStub\src\**\*.cs" Link="GodotSharpStub\%(RecursiveDir)%(Filename)%(Extension)" />
 

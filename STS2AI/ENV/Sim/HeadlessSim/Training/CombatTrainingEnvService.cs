@@ -560,6 +560,9 @@ public sealed class CombatTrainingEnvService
 	{
 		int handIndex = explicitHandIndex ?? GetHandIndex(card);
 		List<uint> validTargetIds = GetValidTargetIds(card, combatState);
+		string description = CombatTrainingCardDescription.GetDescription(card, card.Pile?.Type ?? PileType.Hand);
+		Dictionary<uint, int> previewDamagePerTarget = CombatTrainingCardDescription.BuildPreviewDamagePerTarget(card, combatState, validTargetIds);
+		int previewBlock = CombatTrainingCardDescription.GetPreviewBlock(card);
 		return new CombatTrainingHandCardSnapshot
 		{
 			HandIndex = handIndex,
@@ -575,9 +578,11 @@ public sealed class CombatTrainingEnvService
 			RequiresTarget = CardRequiresTarget(card),
 			ValidTargetIds = validTargetIds,
 			CardType = card.Type.ToString(),
-			Description = SafeCardDescription(card),
+			Description = description,
 			Keywords = SafeCardKeywords(card),
-			GainsBlock = card.GainsBlock
+			GainsBlock = card.GainsBlock,
+			PreviewDamagePerTarget = previewDamagePerTarget,
+			PreviewBlock = previewBlock
 		};
 	}
 
@@ -595,21 +600,7 @@ public sealed class CombatTrainingEnvService
 
 	private static string SafeCardDescription(CardModel card)
 	{
-		try
-		{
-			return card.GetDescriptionForPile(card.Pile?.Type ?? PileType.Hand);
-		}
-		catch
-		{
-			try
-			{
-				return card.Description.GetRawText();
-			}
-			catch
-			{
-				return string.Empty;
-			}
-		}
+		return CombatTrainingCardDescription.GetDescription(card, card.Pile?.Type ?? PileType.Hand);
 	}
 
 	private static List<string> SafeCardKeywords(CardModel card)

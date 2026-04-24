@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from game_bridge.session import create_combat_session, create_full_run_session
+from game_bridge.session import create_game_session
 
 
 def main() -> None:
@@ -15,8 +15,8 @@ def main() -> None:
     parser.add_argument("--kind", choices=("combat", "full_run"), default="full_run")
     parser.add_argument("--port", type=int, default=15527)
     parser.add_argument("--base-url", type=str, default="http://127.0.0.1:15526")
-    parser.add_argument("--transport", type=str, default="proto")
-    parser.add_argument("--use-pipe", action="store_true")
+    parser.add_argument("--transport", type=str, default="pipe_proto")
+    parser.add_argument("--backend", choices=("sim", "spectator"), default="sim")
     parser.add_argument("--auto-launch", action="store_true")
     parser.add_argument("--repo-root", type=str, default="")
     parser.add_argument("--host-path", type=str, default="")
@@ -26,17 +26,14 @@ def main() -> None:
     parser.add_argument("--seed", type=str, default="")
     args = parser.parse_args()
 
-    if args.auto_launch and not args.use_pipe and args.kind == "full_run":
-        args.use_pipe = True
-
     resolved_repo_root = args.repo_root or None
     resolved_host_path = args.host_path or args.dll_path or None
     print(
         json.dumps(
             {
                 "kind": args.kind,
-                "use_pipe": bool(args.use_pipe),
                 "transport": args.transport,
+                "backend": args.backend,
                 "auto_launch": bool(args.auto_launch),
                 "repo_root": str(Path(resolved_repo_root).resolve()) if resolved_repo_root else None,
                 "host_path": str(Path(resolved_host_path).resolve()) if resolved_host_path else None,
@@ -47,7 +44,10 @@ def main() -> None:
     )
 
     if args.kind == "combat":
-        with create_combat_session(
+        with create_game_session(
+            mode="combat",
+            transport=args.transport,
+            backend=args.backend,
             port=args.port,
             auto_launch=args.auto_launch,
             repo_root=resolved_repo_root,
@@ -59,11 +59,12 @@ def main() -> None:
                 seed=args.seed or None,
             )
     else:
-        session = create_full_run_session(
+        session = create_game_session(
+            mode="full_run",
             port=args.port,
             base_url=args.base_url,
-            use_pipe=args.use_pipe,
             transport=args.transport,
+            backend=args.backend,
             auto_launch=args.auto_launch,
             repo_root=resolved_repo_root,
             host_path=resolved_host_path,

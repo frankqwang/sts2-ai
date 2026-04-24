@@ -1,9 +1,7 @@
-using System;
+﻿using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.IO.Pipes;
-using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Simulation;
@@ -12,8 +10,7 @@ using STS2AI.Bridge;
 namespace HeadlessSim;
 
 // Pipe server + named-pipe transport helpers.
-// See Program.Proto.cs / Program.Json.cs for the per-protocol request handlers
-// that this layer dispatches to.
+// This layer only frames protobuf bytes; request routing lives in Program.Proto.cs.
 internal static partial class Program
 {
 	private static async Task RunPipeServerAsync(FullRunTrainingEnvService service, HostOptions options)
@@ -73,24 +70,14 @@ internal static partial class Program
 		{
 			using (pipe)
 			{
-				if (options.Protocol == HostProtocol.Proto)
-				{
-					await WritePipeMessageAsync(
-						pipe,
-						ProtoStateBuilder.BuildErrorResponse(
-							PipeMethod.Handshake,
-							PipeStatus.ProtocolError,
-							"simulator_busy",
-							"The simulator runtime is already owned by another active pipe session."),
-						cancellationToken);
-				}
-				else
-				{
-					await WritePipeMessageAsync(
-						pipe,
-						SerializePipeError("simulator_busy", "The simulator runtime is already owned by another active pipe session."),
-						cancellationToken);
-				}
+				await WritePipeMessageAsync(
+					pipe,
+					ProtoStateBuilder.BuildErrorResponse(
+						BridgeMethod.Handshake,
+						BridgeStatus.ProtocolError,
+						"simulator_busy",
+						"The simulator runtime is already owned by another active pipe session."),
+					cancellationToken);
 			}
 			return;
 		}
@@ -99,14 +86,7 @@ internal static partial class Program
 		{
 			using (pipe)
 			{
-				if (options.Protocol == HostProtocol.Proto)
-				{
-					await WritePipeMessageAsync(pipe, ProtoStateBuilder.BuildHandshakeResponse(), cancellationToken);
-				}
-				else
-				{
-					await WritePipeMessageAsync(pipe, JsonSerializer.Serialize(new { ok = true }, JsonOptions), cancellationToken);
-				}
+				await WritePipeMessageAsync(pipe, ProtoStateBuilder.BuildHandshakeResponse(), cancellationToken);
 
 				while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
 				{
@@ -116,59 +96,32 @@ internal static partial class Program
 						break;
 					}
 
-					if (options.Protocol == HostProtocol.Proto)
+					byte[] responseBytes;
+					try
 					{
-						byte[] responseBytes;
-						try
-						{
-							using CancellationTokenSource requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-							requestCts.CancelAfter(options.RequestTimeout);
-							responseBytes = await ProcessProtoRequestAsync(service, requestBytes).WaitAsync(requestCts.Token);
-						}
-						catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-						{
-							responseBytes = ProtoStateBuilder.BuildErrorResponse(
-								SafeParseMethod(requestBytes),
-								PipeStatus.ProtocolError,
-								"request_timeout",
-								$"Request processing timed out after {options.RequestTimeout.TotalSeconds:F0}s");
-						}
-						catch (Exception ex)
-						{
-							Console.Error.WriteLine($"HeadlessSim: proto request error method={SafeParseMethod(requestBytes)}: {ex}");
-							responseBytes = ProtoStateBuilder.BuildErrorResponse(
-								SafeParseMethod(requestBytes),
-								GetProtoPipeErrorStatus(ex),
-								GetStructuredErrorCode(ex) ?? "internal_error",
-								ex.Message);
-						}
-
-						await WritePipeMessageAsync(pipe, responseBytes, cancellationToken);
+						using CancellationTokenSource requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+						requestCts.CancelAfter(options.RequestTimeout);
+						responseBytes = await ProcessProtoRequestAsync(service, requestBytes).WaitAsync(requestCts.Token);
 					}
-					else
+					catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 					{
-						string requestJson = Encoding.UTF8.GetString(requestBytes);
-						string responseJson;
-						try
-						{
-							using CancellationTokenSource requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-							requestCts.CancelAfter(options.RequestTimeout);
-							responseJson = await ProcessPipeRequestAsync(service, requestJson).WaitAsync(requestCts.Token);
-						}
-						catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-						{
-							responseJson = SerializePipeError(
-								"request_timeout",
-								$"Request processing timed out after {options.RequestTimeout.TotalSeconds:F0}s");
-						}
-						catch (Exception ex)
-						{
-							Console.Error.WriteLine($"HeadlessSim: json request error request={requestJson}: {ex}");
-							responseJson = SerializePipeError(GetStructuredErrorCode(ex) ?? "internal_error", ex.Message);
-						}
-
-						await WritePipeMessageAsync(pipe, responseJson, cancellationToken);
+						responseBytes = ProtoStateBuilder.BuildErrorResponse(
+							SafeParseMethod(requestBytes),
+							BridgeStatus.ProtocolError,
+							"request_timeout",
+							$"Request processing timed out after {options.RequestTimeout.TotalSeconds:F0}s");
 					}
+					catch (Exception ex)
+					{
+						Console.Error.WriteLine($"HeadlessSim: proto request error method={SafeParseMethod(requestBytes)}: {ex}");
+						responseBytes = ProtoStateBuilder.BuildErrorResponse(
+							SafeParseMethod(requestBytes),
+							GetProtoBridgeErrorStatus(ex),
+							GetStructuredErrorCode(ex) ?? "internal_error",
+							ex.Message);
+					}
+
+					await WritePipeMessageAsync(pipe, responseBytes, cancellationToken);
 				}
 			}
 		}
@@ -186,12 +139,6 @@ internal static partial class Program
 		{
 			sessions.Release(sessionId);
 		}
-	}
-
-	private static async Task<string?> ReadPipeMessageAsync(Stream stream, TimeSpan readTimeout, CancellationToken cancellationToken)
-	{
-		byte[]? payload = await ReadPipeMessageBytesAsync(stream, readTimeout, cancellationToken);
-		return payload == null ? null : Encoding.UTF8.GetString(payload);
 	}
 
 	private static async Task<byte[]?> ReadPipeMessageBytesAsync(Stream stream, TimeSpan readTimeout, CancellationToken cancellationToken)
@@ -251,12 +198,6 @@ internal static partial class Program
 		}
 
 		return offset;
-	}
-
-	private static async Task WritePipeMessageAsync(Stream stream, string payload, CancellationToken cancellationToken)
-	{
-		byte[] body = Encoding.UTF8.GetBytes(payload);
-		await WritePipeMessageAsync(stream, body, cancellationToken);
 	}
 
 	private static async Task WritePipeMessageAsync(Stream stream, byte[] body, CancellationToken cancellationToken)

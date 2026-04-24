@@ -40,6 +40,7 @@ using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
 using MegaCrit.Sts2.Core.Multiplayer;
+using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Simulation;
@@ -259,7 +260,8 @@ public static partial class McpMod
 
         // Bypass NGame.StartNewSingleplayerRun so spectator can force a fully
         // unlocked run while still using the shared singleplayer launch flow.
-        var acts = ActModel.GetRandomList(seed, UnlockState.all, isMultiplayer: false)
+        var runRng = new Rng((uint)StringHelper.GetDeterministicHashCode(seed));
+        var acts = ActModel.GetRandomList(runRng, UnlockState.all, isMultiplayer: false)
             .Select(static act => act.ToMutable())
             .ToList();
         Player player = Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId);
@@ -267,6 +269,7 @@ public static partial class McpMod
             new List<Player> { player },
             acts,
             Array.Empty<ModifierModel>(),
+            GameMode.Standard,
             ascension,
             seed);
         SimulationBuildSupport.ApplyToPlayerIfRequested(player, build);
@@ -361,6 +364,7 @@ public static partial class McpMod
             new List<Player> { Player.CreateForNewRun(character, UnlockState.all, NetSingleplayerGameService.defaultNetId) },
             ActModel.GetDefaultList().Select(static act => act.ToMutable()).ToList(),
             Array.Empty<ModifierModel>(),
+            GameMode.Standard,
             ascension,
             seed);
         Player player = runState.Players.First();

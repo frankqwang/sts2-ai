@@ -117,6 +117,12 @@ message HandCard {
   bool can_play = 9;
   bool requires_target = 10;
   repeated int32 valid_target_ids = 11;
+  // 2026-04-24 新增：sim 内部已经算好的真实/动态信息（考虑 buff/遗物后的效果）
+  string description = 12;        // card.GetDescriptionForPile(Hand)，含当前状态修饰
+  repeated string keywords = 13;  // 卡牌关键字（Attack, Ethereal 等）
+  // 每个合法目标对应的实际伤害预览（含玩家力量/虚弱 + 敌人脆弱）
+  map<int32, int32> preview_damage_per_target = 14;
+  int32 preview_block = 15;        // 本次打出对玩家的实际 block（含敏捷/脆弱）
 }
 
 message Enemy {
@@ -354,14 +360,14 @@ message CombatStepRequest {
   LegalAction action = 1;
 }
 
-// --- Proto pipe envelope ---
+// --- Bridge RPC envelope ---
 
-enum PipeMethod {
+enum BridgeMethod {
   HANDSHAKE = 0;
   RESET = 1;
   STATE = 2;
-  STEP = 3;
-  BATCH_STEP = 4;
+  ACT = 3;
+  BATCH_ACT = 4;
   SAVE_STATE = 5;
   LOAD_STATE = 6;
   DELETE_STATE = 7;
@@ -375,66 +381,67 @@ enum PipeMethod {
   SKIP_COMBAT = 15;
   SEARCH_COMBAT_MCTS = 16;
   COMBAT_RESET = 17;
-  COMBAT_STEP = 18;
+  COMBAT_ACT = 18;
   COMBAT_STATE = 19;
   SAVE_SEARCH_STATE = 20;
 }
 
-enum PipeStatus {
+enum BridgeStatus {
   OK = 0;
   REJECTED_ACTION = 1;
   SIMULATOR_ERROR = 2;
   PROTOCOL_ERROR = 3;
+  UNSUPPORTED_BACKEND = 4;
 }
 
-message PipeHandshake {
+message BridgeHandshake {
   uint32 protocol_version = 1;
   string build_git_sha = 2;
   string schema_id = 3;
 }
 
-message PipeResetPayload {
+message BridgeResetPayload {
   string character_id = 1;
   string seed = 2;
   int32 ascension_level = 3;
   string build_json = 4;
 }
 
-message PipeActionPayload {
+message BridgeActionPayload {
   LegalAction action = 1;
 }
 
-message PipeBatchActionPayload {
+message BridgeBatchActionPayload {
   repeated LegalAction actions = 1;
 }
 
-message PipeStateIdRequest {
+message BridgeStateIdRequest {
   string state_id = 1;
 }
 
-message PipePathRequest {
+message BridgePathRequest {
   string path = 1;
 }
 
-message PipeExportStateRequest {
+message BridgeExportStateRequest {
   string path = 1;
   string state_id = 2;
 }
 
-message PipeDeleteStateRequest {
+message BridgeDeleteStateRequest {
   bool clear_all = 1;
   string state_id = 2;
 }
 
-message PipeLoadOrtModelRequest {
+message BridgeLoadOrtModelRequest {
   string path = 1;
 }
 
-message PipeRunCombatLocalRequest {
+message BridgeRunCombatLocalRequest {
   int32 max_steps = 1;
 }
 
-message PipeSearchCombatMctsRequest {
+message BridgeSearchCombatMctsRequest {
   int32 num_simulations = 1;
   float c_puct = 2;
   float dirichlet_alpha = 3;
@@ -447,70 +454,70 @@ message PipeSearchCombatMctsRequest {
   bool enable_debug_trace = 10;
 }
 
-message PipeRequestEnvelope {
-  PipeMethod method = 1;
+message BridgeRequestEnvelope {
+  BridgeMethod method = 1;
   oneof payload {
-    PipeResetPayload reset = 2;
-    PipeActionPayload step = 3;
-    PipeBatchActionPayload batch_step = 4;
-    PipeExportStateRequest export_state = 5;
-    PipeStateIdRequest load_state = 6;
-    PipePathRequest import_state = 7;
-    PipeDeleteStateRequest delete_state = 8;
-    PipeLoadOrtModelRequest load_ort_model = 9;
-    PipeRunCombatLocalRequest run_combat_local = 10;
-    PipeSearchCombatMctsRequest search_combat_mcts = 11;
+    BridgeResetPayload reset = 2;
+    BridgeActionPayload act = 3;
+    BridgeBatchActionPayload batch_act = 4;
+    BridgeExportStateRequest export_state = 5;
+    BridgeStateIdRequest load_state = 6;
+    BridgePathRequest import_state = 7;
+    BridgeDeleteStateRequest delete_state = 8;
+    BridgeLoadOrtModelRequest load_ort_model = 9;
+    BridgeRunCombatLocalRequest run_combat_local = 10;
+    BridgeSearchCombatMctsRequest search_combat_mcts = 11;
     CombatResetRequest combat_reset = 12;
-    CombatStepRequest combat_step = 13;
+    CombatStepRequest combat_act = 13;
   }
 }
 
-message PipeError {
+message BridgeError {
   string error_code = 1;
   string error_message = 2;
 }
 
-message PipeStatePayload {
+message BridgeStatePayload {
   GameState state = 1;
 }
 
-message PipeStepPayload {
+message BridgeActPayload {
   bool accepted = 1;
   string error = 2;
   GameState state = 3;
 }
 
-message PipeBatchStepPayload {
+message BridgeBatchActPayload {
   bool accepted = 1;
   int32 steps_executed = 2;
   string error = 3;
   GameState state = 4;
 }
 
-message PipeSaveStateResult {
+message BridgeSaveStateResult {
   string state_id = 1;
   int32 cache_size = 2;
 }
 
-message PipeExportStateResult {
+message BridgeExportStateResult {
   string path = 1;
   int32 cache_size = 2;
 }
 
-message PipeDeleteStateResult {
+message BridgeDeleteStateResult {
   bool deleted = 1;
   int32 cache_size = 2;
 }
 
-message PipePerfStatsResult {
+message BridgePerfStatsResult {
   string json_payload = 1;
 }
 
-message PipeResetPerfStatsResult {
+message BridgeResetPerfStatsResult {
   bool reset = 1;
 }
 
-message PipeLoadOrtModelResult {
+message BridgeLoadOrtModelResult {
   bool loaded = 1;
   bool has_value_output = 2;
   bool has_deck_inputs = 3;
@@ -521,7 +528,7 @@ message PipeLoadOrtModelResult {
   bool fell_back_to_cpu = 8;
 }
 
-message PipeRunCombatLocalResult {
+message BridgeRunCombatLocalResult {
   int32 combat_steps = 1;
   float elapsed_ms = 2;
   float get_snapshot_ms = 3;
@@ -533,7 +540,7 @@ message PipeRunCombatLocalResult {
   GameState state = 9;
 }
 
-message PipeSearchCombatMctsResult {
+message BridgeSearchCombatMctsResult {
   int32 action_index = 1;
   repeated int32 visit_counts = 2;
   repeated float visit_probs = 3;
@@ -565,22 +572,22 @@ message PipeSearchCombatMctsResult {
   string debug_trace_json = 29;
 }
 
-message PipeResponseEnvelope {
-  PipeMethod method = 1;
-  PipeStatus status = 2;
+message BridgeResponseEnvelope {
+  BridgeMethod method = 1;
+  BridgeStatus status = 2;
   oneof payload {
-    PipeHandshake handshake = 3;
-    PipeStatePayload state = 4;
-    PipeStepPayload step = 5;
-    PipeBatchStepPayload batch_step = 6;
-    PipeSaveStateResult save_state = 7;
-    PipeExportStateResult export_state = 8;
-    PipeDeleteStateResult delete_state = 9;
-    PipePerfStatsResult perf_stats = 10;
-    PipeResetPerfStatsResult reset_perf_stats = 11;
-    PipeLoadOrtModelResult load_ort_model = 12;
-    PipeRunCombatLocalResult run_combat_local = 13;
-    PipeSearchCombatMctsResult search_combat_mcts = 14;
-    PipeError error = 15;
+    BridgeHandshake handshake = 3;
+    BridgeStatePayload state = 4;
+    BridgeActPayload act = 5;
+    BridgeBatchActPayload batch_act = 6;
+    BridgeSaveStateResult save_state = 7;
+    BridgeExportStateResult export_state = 8;
+    BridgeDeleteStateResult delete_state = 9;
+    BridgePerfStatsResult perf_stats = 10;
+    BridgeResetPerfStatsResult reset_perf_stats = 11;
+    BridgeLoadOrtModelResult load_ort_model = 12;
+    BridgeRunCombatLocalResult run_combat_local = 13;
+    BridgeSearchCombatMctsResult search_combat_mcts = 14;
+    BridgeError error = 15;
   }
 }

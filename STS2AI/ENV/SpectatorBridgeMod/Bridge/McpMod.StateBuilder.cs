@@ -498,6 +498,9 @@ public static partial class McpMod
         else if (card.CurrentStarCost >= 0)
             starCostDisplay = card.GetStarCostWithModifiers().ToString();
 
+        List<uint> validTargetIds = ResolveCardPreviewTargetIds(card);
+        Dictionary<int, int> previewDamage = BuildPreviewDamagePerTarget(card, validTargetIds);
+
         return new Dictionary<string, object?>
         {
             ["index"] = index,
@@ -509,6 +512,10 @@ public static partial class McpMod
             ["description"] = SafeGetCardDescription(card),
             ["target_type"] = card.TargetType.ToString(),
             ["can_play"] = unplayableReason == UnplayableReason.None,
+            ["requires_target"] = CardRequiresTarget(card),
+            ["valid_target_ids"] = validTargetIds.Select(static id => (int)id).ToList(),
+            ["preview_damage_per_target"] = previewDamage,
+            ["preview_block"] = GetPreviewBlock(card),
             ["unplayable_reason"] = unplayableReason != UnplayableReason.None ? unplayableReason.ToString() : null,
             ["is_upgraded"] = card.IsUpgraded,
             ["keywords"] = BuildHoverTips(card.HoverTips)

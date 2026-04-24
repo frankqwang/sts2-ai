@@ -221,6 +221,11 @@ def _convert_hand_card(hc: pb.HandCard, fallback_index: int) -> dict[str, Any]:
         card_type = ""
     if rarity == "unknown":
         rarity = ""
+    # 2026-04-24 新增：sim 直出的动态真实信息
+    description = hc.description or ""
+    keywords = list(hc.keywords) if hc.keywords else []
+    preview_damage = dict(hc.preview_damage_per_target) if hc.preview_damage_per_target else {}
+    preview_block = hc.preview_block
     return {
         "index": fallback_index,  # 用调用方传入的序号，避免 proto3 零值歧义
         "id": card_id,
@@ -235,6 +240,10 @@ def _convert_hand_card(hc: pb.HandCard, fallback_index: int) -> dict[str, Any]:
         "can_play": hc.can_play,
         "requires_target": hc.requires_target,
         "valid_target_ids": list(hc.valid_target_ids),
+        "description": description,
+        "keywords": keywords,
+        "preview_damage_per_target": preview_damage,
+        "preview_block": preview_block,
     }
 
 

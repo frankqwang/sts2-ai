@@ -20,7 +20,6 @@ namespace HeadlessSim;
 
 internal enum HostProtocol
 {
-	Json,
 	Proto,
 }
 
@@ -28,8 +27,7 @@ internal enum HostProtocol
 // files by concern:
 //
 //   Program.Pipe.cs       named-pipe server and read/write framing
-//   Program.Proto.cs      proto request router + every ProcessProto* handler
-//   Program.Json.cs       JSON request router + handlers + catalog/api builders
+//   Program.Proto.cs      protobuf request router + every ProcessProto* handler
 //   Program.StepSupport.cs full-run step decision-state advancement helper
 //
 // All partials are the same `internal static partial class Program`, so private
@@ -86,6 +84,7 @@ internal static partial class Program
 		UserDataPathProvider.IsRunningModded = false;
 		SaveManager saveManager = SaveManager.Instance;
 		saveManager.InitSettingsDataForTest();
+		EnsureLocalizationInitialized();
 		ModelDb.Init();
 		ModelIdSerializationCache.Init();
 		ModelDb.InitIds();
@@ -94,13 +93,23 @@ internal static partial class Program
 		saveManager.InitPrefsDataForTest();
 	}
 
-	private static async Task ExportCardRuntimeTextsAsync(string outputPath, IReadOnlyList<string> locales)
+	private static void EnsureLocalizationInitialized()
 	{
 		if (LocManager.Instance == null)
 		{
 			LocManager.Initialize();
 		}
 
+		string locale = Environment.GetEnvironmentVariable("STS2_HEADLESS_LOCALE")?.Trim().ToLowerInvariant() ?? "";
+		if (string.IsNullOrWhiteSpace(locale))
+		{
+			locale = "zhs";
+		}
+		LocManager.Instance.SetLanguage(locale);
+	}
+
+	private static async Task ExportCardRuntimeTextsAsync(string outputPath, IReadOnlyList<string> locales)
+	{
 		List<CardRuntimeTextRecord> rows = new List<CardRuntimeTextRecord>();
 		List<CardModel> cards = ModelDb.AllCards.OrderBy((CardModel c) => c.Id.Entry, StringComparer.OrdinalIgnoreCase).ToList();
 		foreach (string locale in locales)
@@ -150,8 +159,7 @@ internal static partial class Program
 	}
 
 	// Maps exception type / ErrorCode property to a structured error code string.
-	// Used by both pipe transport (wrapping handler exceptions) and the JSON
-	// error serializer.
+	// Used by the pipe transport when wrapping handler exceptions.
 	private static string? GetStructuredErrorCode(Exception exception)
 	{
 		if (exception is JsonException)
@@ -179,7 +187,7 @@ internal static partial class Program
 	{
 		public int Port { get; private set; } = 15527;
 
-		public HostProtocol Protocol { get; private set; } = HostProtocol.Json;
+		public HostProtocol Protocol { get; private set; } = HostProtocol.Proto;
 
 		public TimeSpan ReadTimeout { get; private set; } = TimeSpan.FromSeconds(60);
 
@@ -189,9 +197,7 @@ internal static partial class Program
 
 		public IReadOnlyList<string> ExportLocales { get; private set; } = new[] { "eng", "zhs" };
 
-		public string PipeName => Protocol == HostProtocol.Proto
-			? $"sts2_mcts_proto_{Port}"
-			: $"sts2_mcts_{Port}";
+		public string PipeName => $"sts2_mcts_proto_{Port}";
 
 		public static HostOptions Parse(IEnumerable<string> args)
 		{
@@ -217,11 +223,12 @@ internal static partial class Program
 						string protocol = values[i + 1].Trim().ToLowerInvariant();
 						options.Protocol = protocol switch
 						{
-							"json" => HostProtocol.Json,
+							"json" => throw new InvalidOperationException(
+								"--protocol json 已下线。HeadlessSim 只支持 protobuf pipe，请用 --protocol proto。"),
 							"bin" or "binary" => throw new InvalidOperationException(
 								"--protocol binary (手写二进制 wire) 已废弃。请用 --protocol proto。"),
 							"proto" or "protobuf" => HostProtocol.Proto,
-							_ => throw new InvalidOperationException($"Unknown protocol '{values[i + 1]}'. Expected 'json' or 'proto'.")
+							_ => throw new InvalidOperationException($"Unknown protocol '{values[i + 1]}'. Expected 'proto'.")
 						};
 						i++;
 						break;

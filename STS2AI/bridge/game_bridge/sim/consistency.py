@@ -10,24 +10,24 @@ from game_bridge.session.state_semantics import is_actionable_combat_state, is_c
 def static_consistency_report() -> dict[str, Any]:
     checks = [
         {
-            "area": "full_run/http_v2",
+            "area": "full_run/http_json",
             "status": "supported",
-            "details": "支持 state/reset/step/batch_step/save/load/import/export/delete_state。",
+            "details": "通过 HTTP protobuf JSON RPC 支持 state/reset/act。",
         },
         {
             "area": "full_run/pipe_proto",
             "status": "supported",
-            "details": "支持 reset/state/step/batch_step/save/load/import/export/delete/perf/local_ort/mcts。",
+            "details": "支持 reset/state/act/batch_act/save/load/import/export/delete/perf/local_ort/mcts。",
         },
         {
             "area": "combat/pipe_proto",
             "status": "supported",
-            "details": "支持 combat_reset/combat_state/combat_step，并以 sim legal_actions 为权威来源。",
+            "details": "支持 combat_reset/combat_state/combat_act，并以 sim legal_actions 为权威来源。",
         },
         {
             "area": "catalog/proto_pipe",
             "status": "missing",
-            "details": "proto pipe 仍缺 game_catalog/combat_catalog opcode，当前依赖 sqlite 或 json RPC fallback。",
+            "details": "proto pipe 仍缺 game_catalog/combat_catalog opcode，当前依赖 sqlite fallback。",
         },
         {
             "area": "full_run/http_local_ort",
@@ -50,7 +50,7 @@ def static_consistency_report() -> dict[str, Any]:
         "next_actions": [
             "为 proto pipe 增加 game_catalog/combat_catalog opcode，去掉 catalog 层对 sqlite 的主路径依赖。",
             "补 live sim vs 原游戏的逐 screen 回归脚本，覆盖 map/event/shop/rest/card_select/combat_rewards。",
-            "把 reset/step 的 failure code 与 screen invariant 输出到统一诊断报告，而不是只在异常对象上挂属性。",
+            "把 reset/act 的 failure code 与 screen invariant 输出到统一诊断报告，而不是只在异常对象上挂属性。",
         ],
     }
 
