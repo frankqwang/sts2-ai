@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-- 当前项目主题只保留两块：`STS2AI/Python/game_bridge` 与 `STS2AI/Python/data/skada`。
+- 当前项目主题只保留两块：`STS2AI/bridge/game_bridge` 与 `STS2AI/data/skada`。
 - 旧的训练主线、networkV2、离线 ranking、teacher/diagnostics 等说明视为过时，不再作为默认上下文。
 
 ## 通用协作规范
@@ -21,7 +21,7 @@
 
 ## 目录约定
 
-- `STS2AI/Python/game_bridge`：bridge、session、spectate、sim 相关 Python 代码。
-- `STS2AI/Python/data/skada`：skada 抓取、明细构建、覆盖率扫描等数据脚本。
+- `STS2AI/bridge/game_bridge`：bridge、session、spectate、sim 相关 Python 代码。
+- `STS2AI/data/skada`：skada 抓取、明细构建、覆盖率扫描等数据脚本。
 - `STS2AI/Artifacts`：运行产物、日志、临时输出。
 - `STS2AI/Docs`：项目文档。

@@ -11,7 +11,7 @@
 
 用法:
     python -m data.skada.scan_runs_victory_coverage \
-        --dir STS2AI/Python/data/skada/runs_victory/details
+        --dir STS2AI/data/skada/runs_victory/details
 """
 from __future__ import annotations
 
@@ -238,7 +238,7 @@ def print_report(report: dict) -> None:
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dir", type=Path,
-                   default=Path("STS2AI/Python/data/skada/runs_victory/details"))
+                   default=Path("STS2AI/data/skada/runs_victory/details"))
     p.add_argument("--max-files", type=int, default=None,
                    help="最多扫前 N 个 shard(测试用)")
     p.add_argument("--json-out", type=Path, default=None)

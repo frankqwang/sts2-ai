@@ -15,7 +15,7 @@
 
 # ① 增量爬 victory（只拉最近 3 天新增的）
 #   sort=created_at desc + stop-on-known，daemon 自动在扫到全已知 run_id 的页时退出
-cd STS2AI/Python/data/skada
+cd STS2AI/data/skada
 KDL_TPS_HOST=sXXX.kdltps.com KDL_TPS_PORT=15818 \
 KDL_TPS_USERNAME=... KDL_TPS_PASSWORD=... KDL_TPS_BACKUP_HOST=sXXX.kdltps.com \
 python crawl_skada_runs_daemon.py \

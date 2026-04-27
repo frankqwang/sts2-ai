@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """构建 skada combat replay case 索引。
 
-入口放在 `zero/replay` 下，避免训练相关脚本散落到 `STS2AI/Python`。
+入口放在 `zero/replay` 下，避免训练相关脚本散落到已废弃的旧 Python 根目录。
 这份脚本只负责：
 - 过滤 skada runs
 - 还原每场战斗开局 build
