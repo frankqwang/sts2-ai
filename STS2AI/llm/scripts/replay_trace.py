@@ -85,7 +85,7 @@ def summarize_user(user_msg: str) -> str:
         m = _PLAYER_LINE.match(line)
         if m:
             hp, block, energy = m.group(1), m.group(2), m.group(3)
-    enemies = [ln.strip() for ln in user_msg.splitlines() if ln.strip().startswith("id=")]
+    enemies = [ln.strip() for ln in user_msg.splitlines() if ln.strip().startswith("enemy")]
     hand = [ln.strip() for ln in user_msg.splitlines() if ln.strip().startswith("[") and "cost=" in ln]
     return (
         f"encounter={encounter} hp={hp} block={block} energy={energy} "
@@ -96,6 +96,7 @@ def summarize_user(user_msg: str) -> str:
 def render_step(entry: dict, *, style: Styler, full: bool, raw_only: bool) -> str:
     step = entry.get("step", "?")
     gen_ms = entry.get("gen_ms", 0.0)
+    action_mode = entry.get("action_mode", "index")
     decoded = entry.get("decoded", {})
     chosen = entry.get("chosen_action", {})
     enabled_count = entry.get("enabled_count", "?")
@@ -115,6 +116,7 @@ def render_step(entry: dict, *, style: Styler, full: bool, raw_only: bool) -> st
     header_parts = [
         style.bold(f"[step {step:>3}]"),
         f"gen={gen_ms/1000:.1f}s",
+        f"mode={action_mode}",
         f"legal={enabled_count}",
         f"idx={action_idx} {status_icon}",
     ]
@@ -135,7 +137,7 @@ def render_step(entry: dict, *, style: Styler, full: bool, raw_only: bool) -> st
     # LLM 原始输出
     if raw:
         # 标出 JSON 部分
-        json_match = re.search(r"\{[^{}]*\"action_index\"[^{}]*\}", raw)
+        json_match = re.search(r"\{[^{}]*(?:\"action_index\"|\"action\")[^{}]*\}", raw)
         if json_match:
             pre = raw[: json_match.start()].rstrip()
             json_str = raw[json_match.start() : json_match.end()]

@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from llm.metrics import summarize_sft_run, write_json  # noqa: E402
 from llm.paths import BASE_MODEL_ID, DATASETS_ROOT, SFT_ROOT, setup_runtime  # noqa: E402
 
 
@@ -104,6 +105,14 @@ def main() -> None:
             tokenize=False,
             add_generation_prompt=False,
         )
+        # Qwen3/3.5 template may insert an empty thinking block in supervised
+        # examples when thinking is disabled. Strip it so the SFT target stays
+        # clean. NOTE: if your dataset contains REAL thinking content
+        # (<think>actual reasoning</think>), do NOT strip it.
+        text = text.replace(
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+            "<|im_start|>assistant\n",
+        )
         return {"text": text}
 
     train_ds = Dataset.from_list(train_rows).map(_to_text, remove_columns=None)
@@ -172,6 +181,15 @@ def main() -> None:
             ensure_ascii=False,
             indent=2,
         )
+
+    metrics = summarize_sft_run(
+        run_root,
+        dataset_dir=dataset_dir,
+        result_metrics=result.metrics,
+        log_history=list(trainer.state.log_history),
+    )
+    write_json(run_root / "metrics.json", metrics)
+    print(f"[sft] metrics -> {run_root / 'metrics.json'}")
 
     print(f"[sft] done. adapter at: {adapter_dir}")
 

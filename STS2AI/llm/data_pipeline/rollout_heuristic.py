@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -34,9 +35,19 @@ for p in (_STS2AI_ROOT, _BRIDGE_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from llm.data_pipeline.encounter_pool import ACT1_POOL, EncounterSpec
+from llm.data_pipeline.encounter_pool import (
+    ACT1_POOL,
+    ACT1_WINNABLE_POOL,
+    EncounterSpec,
+)
 from llm.data_pipeline.heuristic_teacher import pick_action
-from llm.data_pipeline.state_renderer import render_state_text
+from llm.data_pipeline.action_decoder import format_structured_action_json
+from llm.data_pipeline.state_renderer import (
+    can_render_structured_actions,
+    render_state_text,
+    render_structured_action_state_text,
+)
+from llm.metrics import summarize_dataset_dir, write_json
 from llm.paths import DATASETS_ROOT, ensure_dirs
 from llm.prompts import load_system_prompt
 
@@ -55,8 +66,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-subdir", type=str, default="heuristic_act1_v0")
     p.add_argument("--eval-ratio", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=20260424)
+    p.add_argument("--pool", choices=("winnable", "all"), default="winnable",
+                   help="winnable=默认稳定胜局池；all=包含旧的全量探测池。")
     p.add_argument("--encounter-filter", type=str, default="",
                    help="只跑 encounter_id 含此子串的")
+    p.add_argument("--keep-outcomes", type=str, default="",
+                   help="逗号分隔的 outcome 白名单，例如 victory。为空则保留全部 episode。")
+    p.add_argument("--action-mode", choices=("index", "structured"),
+                   default=os.environ.get("STS2_LLM_ACTION_MODE", "index"),
+                   help="index=旧 action_index 标签；structured=实验性 action/hand_index/target_id 标签。")
     return p.parse_args()
 
 
@@ -66,6 +84,8 @@ class EpisodeRecord:
     outcome: str
     steps: int
     duration_s: float
+    kept_samples: int = 0
+    discarded_samples: int = 0
     reason_samples: list[str] = field(default_factory=list)
 
 
@@ -96,12 +116,23 @@ def _build_sft_sample(
     system_prompt: str,
     *,
     encounter_id: str = "",
+    action_mode: str = "index",
 ) -> dict[str, Any]:
-    user_msg = render_state_text(state, legal, encounter_id=encounter_id)
-    assistant_msg = json.dumps(
-        {"action_index": int(chosen_index), "reason": reason[:80]},
-        ensure_ascii=False,
+    resolved_action_mode = (
+        "structured"
+        if action_mode == "structured" and can_render_structured_actions(legal)
+        else "index"
     )
+    if resolved_action_mode == "structured":
+        user_msg = render_structured_action_state_text(state, legal, encounter_id=encounter_id)
+        chosen_action = legal[chosen_index] if 0 <= chosen_index < len(legal) else {}
+        assistant_msg = format_structured_action_json(chosen_action, reason)
+    else:
+        user_msg = render_state_text(state, legal, encounter_id=encounter_id)
+        assistant_msg = json.dumps(
+            {"action_index": int(chosen_index), "reason": reason[:80]},
+            ensure_ascii=False,
+        )
     return {
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -111,6 +142,7 @@ def _build_sft_sample(
         "meta": {
             "encounter_id": encounter_id or str((state.get("battle") or {}).get("encounter_id") or ""),
             "state_type": str(state.get("state_type") or ""),
+            "action_mode": resolved_action_mode,
         },
     }
 
@@ -122,11 +154,13 @@ def run_rollout(
     max_steps: int,
     port_base: int,
     seed: int,
+    keep_outcomes: set[str] | None = None,
+    action_mode: str = "index",
 ) -> tuple[list[dict[str, Any]], list[EpisodeRecord]]:
     rng = random.Random(seed)
     samples: list[dict[str, Any]] = []
     episodes: list[EpisodeRecord] = []
-    system_prompt = load_system_prompt()
+    system_prompt = load_system_prompt("structured" if action_mode == "structured" else "index")
 
     for enc_idx, spec in enumerate(encounters):
         port = port_base + enc_idx
@@ -137,6 +171,7 @@ def run_rollout(
             step_count = 0
             outcome = "unknown"
             reason_samples: list[str] = []
+            episode_samples: list[dict[str, Any]] = []
             try:
                 try:
                     state = session.reset(
@@ -162,7 +197,7 @@ def run_rollout(
                     if is_actionable_combat_state(state):
                         decision = pick_action(state, legal_enabled)
                         chosen_raw = legal_enabled[decision.action_index]
-                        samples.append(
+                        episode_samples.append(
                             _build_sft_sample(
                                 state,
                                 legal_enabled,
@@ -170,6 +205,7 @@ def run_rollout(
                                 decision.reason,
                                 system_prompt,
                                 encounter_id=spec.encounter_id,
+                                action_mode=action_mode,
                             )
                         )
                         if len(reason_samples) < 3:
@@ -208,18 +244,26 @@ def run_rollout(
                     pass
 
             duration = time.monotonic() - episode_started
+            keep_episode = not keep_outcomes or outcome in keep_outcomes
+            kept_samples = len(episode_samples) if keep_episode else 0
+            discarded_samples = 0 if keep_episode else len(episode_samples)
+            if keep_episode:
+                samples.extend(episode_samples)
             episodes.append(
                 EpisodeRecord(
                     encounter_id=spec.encounter_id,
                     outcome=outcome,
                     steps=step_count,
                     duration_s=round(duration, 2),
+                    kept_samples=kept_samples,
+                    discarded_samples=discarded_samples,
                     reason_samples=reason_samples,
                 )
             )
             print(
                 f"[rollout][{spec.encounter_id}][ep{ep_idx}] "
-                f"outcome={outcome} steps={step_count} duration={duration:.1f}s samples_total={len(samples)}"
+                f"outcome={outcome} steps={step_count} duration={duration:.1f}s "
+                f"kept={kept_samples} discarded={discarded_samples} samples_total={len(samples)}"
             )
 
     return samples, episodes
@@ -232,14 +276,25 @@ def main() -> None:
     out_dir = DATASETS_ROOT / args.out_subdir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pool = ACT1_POOL
+    pool_name = args.pool
+    pool = ACT1_WINNABLE_POOL if pool_name == "winnable" else ACT1_POOL
     if args.encounter_filter:
         needle = args.encounter_filter.lower()
-        pool = [p for p in ACT1_POOL if needle in p.encounter_id.lower()]
+        pool = [p for p in pool if needle in p.encounter_id.lower()]
     if not pool:
         raise SystemExit("no encounters matched filter")
 
-    print(f"[rollout] pool size={len(pool)} episodes_per={args.episodes_per_encounter} out={out_dir}")
+    print(
+        f"[rollout] pool size={len(pool)} episodes_per={args.episodes_per_encounter} "
+        f"action_mode={args.action_mode} out={out_dir}"
+    )
+    keep_outcomes = {
+        part.strip()
+        for part in str(args.keep_outcomes or "").split(",")
+        if part.strip()
+    }
+    if keep_outcomes:
+        print(f"[rollout] keeping outcomes: {sorted(keep_outcomes)}")
 
     samples, episodes = run_rollout(
         pool,
@@ -247,11 +302,15 @@ def main() -> None:
         max_steps=args.max_steps,
         port_base=args.port_base,
         seed=args.seed,
+        keep_outcomes=keep_outcomes or None,
+        action_mode=args.action_mode,
     )
+    if not samples:
+        raise SystemExit("rollout produced no kept samples; relax --keep-outcomes or increase episodes")
 
     rng = random.Random(args.seed)
     rng.shuffle(samples)
-    eval_n = max(1, int(len(samples) * args.eval_ratio))
+    eval_n = max(1, int(len(samples) * args.eval_ratio)) if len(samples) > 1 else 0
     eval_samples = samples[:eval_n]
     train_samples = samples[eval_n:]
 
@@ -271,11 +330,15 @@ def main() -> None:
         "run_id": uuid.uuid4().hex,
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "pool": [{"encounter_id": p.encounter_id, "tag": p.tag} for p in pool],
+        "pool_name": pool_name,
         "episodes_per_encounter": args.episodes_per_encounter,
         "total_episodes": len(episodes),
         "total_samples": len(samples),
         "train_size": len(train_samples),
         "eval_size": len(eval_samples),
+        "keep_outcomes": sorted(keep_outcomes),
+        "action_mode": args.action_mode,
+        "discarded_samples": sum(ep.discarded_samples for ep in episodes),
         "outcomes": outcome_counts,
         "episodes": [
             {
@@ -283,16 +346,20 @@ def main() -> None:
                 "outcome": ep.outcome,
                 "steps": ep.steps,
                 "duration_s": ep.duration_s,
+                "kept_samples": ep.kept_samples,
+                "discarded_samples": ep.discarded_samples,
                 "reason_samples": ep.reason_samples,
             }
             for ep in episodes
         ],
     }
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json(out_dir / "metrics.json", {"kind": "dataset", **summarize_dataset_dir(out_dir)})
 
     print(f"\n[rollout] total_samples={len(samples)} train={len(train_samples)} eval={len(eval_samples)}")
     print(f"[rollout] outcome counts: {outcome_counts}")
     print(f"[rollout] meta -> {out_dir / 'meta.json'}")
+    print(f"[rollout] metrics -> {out_dir / 'metrics.json'}")
 
 
 if __name__ == "__main__":

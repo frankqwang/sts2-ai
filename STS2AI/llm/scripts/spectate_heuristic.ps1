@@ -8,6 +8,7 @@ param(
     [int]$McpPort = 15526,
     [string]$Resolution = "1600x900",
     [string]$CharacterId = "IRONCLAD",
+    [string]$SessionMode = "",
     [string]$Seed = "",
     [int]$Floor = 0,
     [double]$RequestTimeoutSeconds = 120.0,
@@ -56,8 +57,18 @@ if ($godotExe -match "_console\.exe$") {
 $pythonExe = Resolve-PythonExe -ExplicitPath $PythonExe
 $resolvedBaseUrl = Resolve-BaseUrl -BaseUrl $BaseUrl -McpPort $McpPort
 $singleplayerStateUrl = Resolve-SingleplayerStateUrl -ResolvedBaseUrl $resolvedBaseUrl
-$spectatorModSource = Join-Path $sts2aiRoot "ENV\Spectator\SpectatorBridgeMod\bin\Debug\net9.0"
+$spectatorModSource = Join-Path $sts2aiRoot "ENV\SpectatorBridgeMod\bin\Debug\net9.0"
 $spectatorModInstallDir = Sync-SpectatorModArtifacts -SourceDir $spectatorModSource -GodotExe $godotExe
+$resolvedSessionMode = if (-not [string]::IsNullOrWhiteSpace($SessionMode)) {
+    $SessionMode
+} elseif (-not [string]::IsNullOrWhiteSpace($EncounterId)) {
+    "combat"
+} else {
+    "full_run"
+}
+if ($resolvedSessionMode -ne "full_run" -and $resolvedSessionMode -ne "combat") {
+    throw "SessionMode must be full_run or combat, got: $resolvedSessionMode"
+}
 
 $resolvedAppDataRoot = if ([string]::IsNullOrWhiteSpace($AppDataRoot)) {
     Join-Path $runRoot "appdata"
@@ -76,6 +87,7 @@ $overlayFile = Join-Path $runRoot "live_overlay.json"
 $pythonStdout = Join-Path $logDir "spectate.stdout.log"
 $pythonStderr = Join-Path $logDir "spectate.stderr.log"
 $manifestPath = Join-Path $runRoot "manifest.json"
+$metricsPath = Join-Path $runRoot "metrics.json"
 
 $manifest = [ordered]@{
     generated_at = (Get-Date).ToUniversalTime().ToString("o")
@@ -86,6 +98,7 @@ $manifest = [ordered]@{
     mcp_port = $McpPort
     resolution = $Resolution
     character_id = $CharacterId
+    session_mode = $resolvedSessionMode
     seed = $(if ([string]::IsNullOrWhiteSpace($Seed)) { $null } else { $Seed })
     floor = $(if ($Floor -gt 0) { $Floor } else { $null })
     request_timeout_s = $RequestTimeoutSeconds
@@ -97,6 +110,7 @@ $manifest = [ordered]@{
     python_exe = $pythonExe
     appdata_root = $resolvedAppDataRoot
     overlay_file = $overlayFile
+    metrics_file = $metricsPath
     stdout_log = $pythonStdout
     stderr_log = $pythonStderr
 }
@@ -113,7 +127,8 @@ $godotArgs = @(
     "--windowed",
     "--resolution", $Resolution,
     "--mcp-instant",
-    "--mcp-port", [string]$McpPort
+    "--mcp-port", [string]$McpPort,
+    "--mcp-decision-overlay-file", $overlayFile
 )
 if (-not $isSteamExe) {
     $godotArgs += @("--path", $repoRoot)
@@ -124,6 +139,7 @@ if (-not $isSteamExe) {
 $pythonArgs = @(
     "-m", "game_bridge.spectate.cli",
     "--mode", "external",
+    "--session-mode", $resolvedSessionMode,
     "--external-policy", "llm.inference.heuristic_policy:select_action",
     "--overlay-file", $overlayFile,
     "--base-url", $resolvedBaseUrl,
@@ -194,6 +210,17 @@ try {
 
     $spectateProc.WaitForExit()
     $exitCode = [int]$spectateProc.ExitCode
+    $metricsScript = Join-Path $llmRoot "scripts\summarize_metrics.py"
+    & $pythonExe $metricsScript `
+        --spectate-run-dir $runRoot `
+        --spectate-stdout $pythonStdout `
+        --manifest $manifestPath `
+        --out $metricsPath
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Metrics      : $metricsPath" -ForegroundColor Cyan
+    } else {
+        Write-Warning "metrics summary failed with code $LASTEXITCODE"
+    }
     if ($exitCode -ne 0) {
         throw "spectate cli exited with code $exitCode. See $pythonStderr"
     }

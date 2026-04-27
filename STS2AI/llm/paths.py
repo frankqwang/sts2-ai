@@ -12,9 +12,11 @@ STS2AI_ROOT = LLM_ROOT.parent
 REPO_ROOT = STS2AI_ROOT.parent
 
 ARTIFACTS_ROOT = STS2AI_ROOT / "Artifacts" / "llm"
+RUNS_ROOT = ARTIFACTS_ROOT / "runs"
 DATASETS_ROOT = ARTIFACTS_ROOT / "datasets"
 SFT_ROOT = ARTIFACTS_ROOT / "sft"
 GRPO_ROOT = ARTIFACTS_ROOT / "grpo"
+EVALS_ROOT = ARTIFACTS_ROOT / "evals"
 LOGS_ROOT = ARTIFACTS_ROOT / "logs"
 # unsloth 运行时会把 patch 后的 TRL trainer 写到 `./unsloth_compiled_cache/`。
 # 统一把所有入口 chdir 到 RUNTIME_CWD，避免污染仓库根。
@@ -28,7 +30,7 @@ QWEN_CACHE_DIR = HF_CACHE_ROOT / "models--Qwen--Qwen3-4B-Instruct-2507"
 
 
 def ensure_dirs() -> None:
-    for path in (ARTIFACTS_ROOT, DATASETS_ROOT, SFT_ROOT, GRPO_ROOT, LOGS_ROOT, RUNTIME_CWD):
+    for path in (ARTIFACTS_ROOT, RUNS_ROOT, DATASETS_ROOT, SFT_ROOT, GRPO_ROOT, EVALS_ROOT, LOGS_ROOT, RUNTIME_CWD):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -48,6 +50,7 @@ __all__ = [
     "ARTIFACTS_ROOT",
     "BASE_MODEL_ID",
     "DATASETS_ROOT",
+    "EVALS_ROOT",
     "GRPO_ROOT",
     "HF_CACHE_ROOT",
     "LLM_ROOT",
@@ -55,6 +58,7 @@ __all__ = [
     "QWEN_CACHE_DIR",
     "REPO_ROOT",
     "RUNTIME_CWD",
+    "RUNS_ROOT",
     "SFT_ROOT",
     "STS2AI_ROOT",
     "ensure_dirs",

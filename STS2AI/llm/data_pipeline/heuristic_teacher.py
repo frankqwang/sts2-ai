@@ -1,11 +1,11 @@
-"""基于规则的启发式老师（Ironclad 优先版）。
+"""Rule-based heuristic teacher for SFT rollout.
 
 关键适配点（2026-04-24 实测）：
 - legal_actions 里 `action`/`type` = "play_card"；`card_id` 就在 action 里，不必回查手牌
 - `card_index` = 手牌 index；`target_id` 是 int
 - enemy.`target_id` 是 int；`intent_type` 大写（Attack / Defend / Buff 等）
 - enemy powers 用 `id` 不是 `power_id`
-- 手牌 state 里没有 damage_now/block_now，从 `card_effects.lookup_effect` 查表
+- 手牌 state 里优先使用 `preview_damage_per_target` / `preview_block`
 """
 from __future__ import annotations
 
@@ -134,8 +134,66 @@ def _hand_card_for_action(action: dict[str, Any], state: dict[str, Any]) -> dict
     return {}
 
 
+def _preview_damage_for_target(card: dict[str, Any], target_id: int | str | None) -> float | None:
+    preview = card.get("preview_damage_per_target")
+    if not isinstance(preview, dict) or target_id is None:
+        return None
+    keys: list[Any] = [target_id, str(target_id)]
+    try:
+        keys.append(int(target_id))
+    except (TypeError, ValueError):
+        pass
+    for key in keys:
+        value = preview.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _preview_block(card: dict[str, Any]) -> float | None:
+    value = card.get("preview_block")
+    if value in (None, "", 0):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _exhaust_pile_count(state: dict[str, Any]) -> int:
+    battle = _as_dict(state.get("battle"))
+    top_player = _as_dict(state.get("player"))
+    battle_player = _as_dict(battle.get("player"))
+    raw = _pick(
+        battle,
+        "exhaust_pile_count",
+        default=_pick(
+            battle_player,
+            "exhaust_pile_count",
+            default=_pick(top_player, "exhaust_pile_count", default=None),
+        ),
+    )
+    if raw in (None, ""):
+        raw = len(_as_list(battle.get("exhaust_pile_cards")))
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 @dataclass(slots=True, frozen=True)
 class TeacherDecision:
+    action_index: int
+    score: float
+    reason: str
+
+
+@dataclass(slots=True, frozen=True)
+class TeacherActionScore:
     action_index: int
     score: float
     reason: str
@@ -156,8 +214,9 @@ def _score_play_card(
     target_id = _pick(action, "target_id", "target", default=None)
     target = _find_target(enemies, target_id)
 
-    dmg = effective_damage(card_id, is_upgraded=is_upgraded)
-    blk = effective_block(card_id, is_upgraded=is_upgraded)
+    base_dmg = effective_damage(card_id, is_upgraded=is_upgraded)
+    base_blk = effective_block(card_id, is_upgraded=is_upgraded)
+    blk = _preview_block(card_from_hand) or base_blk
     eff = lookup_effect(card_id, is_upgraded=is_upgraded)
 
     score = 0.0
@@ -168,6 +227,8 @@ def _score_play_card(
     defensive_mode = hp_ratio < 0.35 or need_block > 0.5 * max(1.0, player_max_hp)
 
     # 攻击
+    preview_actual = _preview_damage_for_target(card_from_hand, target_id)
+    dmg = preview_actual if preview_actual is not None else base_dmg
     if dmg > 0:
         effective_target = target
         if effective_target is None and enemies:
@@ -175,17 +236,22 @@ def _score_play_card(
             if alive:
                 effective_target = min(alive, key=lambda e: e.hp)
         if effective_target is not None:
-            actual = dmg
-            if effective_target.vulnerable:
-                actual *= 1.5
-            actual -= effective_target.block
-            actual = max(0.0, actual)
+            if preview_actual is not None:
+                actual = preview_actual
+            else:
+                actual = dmg
+                if effective_target.vulnerable:
+                    actual *= 1.5
+                actual -= effective_target.block
+                actual = max(0.0, actual)
             score += 1.0 + actual * 0.25
             if actual >= effective_target.hp:
                 score += 6.0  # 点杀单位极高优先级
-                reasons.append(f"点杀 {effective_target.name}({actual:.0f}≥{effective_target.hp:.0f})")
+                reasons.append(
+                    f"lethal {effective_target.name}: damage={actual:.0f} target_hp={effective_target.hp:.0f}"
+                )
             else:
-                reasons.append(f"打 {effective_target.name} {actual:.0f}")
+                reasons.append(f"damage {effective_target.name}: damage={actual:.0f}")
             # 打攻击 intent 的怪，减压
             if "ATTACK" in effective_target.intent and effective_target.incoming_damage > 0:
                 score += 0.6
@@ -193,13 +259,13 @@ def _score_play_card(
         if eff.is_aoe:
             alive_n = sum(1 for e in enemies if e.alive)
             score += 0.8 * alive_n
-            reasons.append(f"AOE×{alive_n}")
+            reasons.append(f"area damage targets={alive_n}")
 
     # 防御
     if blk > 0:
         if need_block > 0:
             score += 1.5 + min(need_block, blk) * 0.4
-            reasons.append(f"补 {min(need_block, blk):.0f} 挡")
+            reasons.append(f"gain block={min(need_block, blk):.0f}")
         else:
             score += 0.3  # 没压力时小加分
         if defensive_mode:
@@ -213,23 +279,32 @@ def _score_play_card(
         if effective_target is not None and effective_target.alive:
             if eff.applies_vulnerable and not effective_target.vulnerable and effective_target.hp > 8:
                 score += 2.5 + 0.05 * effective_target.hp
-                reasons.append(f"脆弱→{effective_target.name}")
+                reasons.append(f"apply vulnerable to {effective_target.name}")
             if eff.applies_weak and not effective_target.weak and "ATTACK" in effective_target.intent:
                 score += 1.5
-                reasons.append(f"虚弱→{effective_target.name}")
+                reasons.append(f"apply weak to {effective_target.name}")
+
+    # Energy / setup skills
+    if card_id == "FORGOTTEN_RITUAL":
+        if _exhaust_pile_count(state) > 0:
+            score += 4.0
+            reasons.append("gain energy=3 after Exhaust")
+        else:
+            score += 0.2
+            reasons.append("requires Exhaust before energy gain")
 
     # Power
     if eff.is_power:
         score += 2.0
-        reasons.append(f"上 {card_id}")
+        reasons.append(f"play power {card_id}")
 
     if score == 0.0 and dmg == 0 and blk == 0:
         # 未知卡 fallback
         score = 0.5
-        reasons.append(f"打未知卡 {card_id}")
+        reasons.append(f"play unknown card {card_id}")
 
     if not reasons:
-        reasons.append(f"打 {card_id}")
+        reasons.append(f"play {card_id}")
 
     return score, "; ".join(reasons)
 
@@ -246,20 +321,20 @@ def _score_end_turn(
         for a in legal_actions
     )
     if not has_playable:
-        return 6.0, "没有可打的牌，结束回合"
+        return 6.0, "no playable cards"
     if energy <= 0:
-        return 4.0, "能量耗尽，结束回合"
-    return -0.5 - energy * 2.5, f"浪费 {energy:.0f} 点能量 end_turn"
+        return 4.0, "no energy left"
+    return -0.5 - energy * 2.5, f"would waste {energy:.0f} energy"
 
 
-def pick_action(state: dict[str, Any], legal_actions: list[dict[str, Any]]) -> TeacherDecision:
+def score_actions(state: dict[str, Any], legal_actions: list[dict[str, Any]]) -> list[TeacherActionScore]:
     enabled = [
         (index, action)
         for index, action in enumerate(legal_actions)
         if isinstance(action, dict) and action.get("is_enabled") is not False
     ]
     if not enabled:
-        return TeacherDecision(action_index=0, score=0.0, reason="no_enabled_actions")
+        return []
 
     top_player = _as_dict(state.get("player"))
     battle = _as_dict(state.get("battle"))
@@ -273,9 +348,7 @@ def pick_action(state: dict[str, Any], legal_actions: list[dict[str, Any]]) -> T
     enemies = _enumerate_enemies(state)
     incoming = _resolve_incoming_total(enemies, player_weak=player_weak)
 
-    best_index = enabled[0][0]
-    best_score = float("-inf")
-    best_reason = "default"
+    scored: list[TeacherActionScore] = []
 
     for raw_index, action in enabled:
         atype = str(_pick(action, "action", "action_type", "type", default="")).lower()
@@ -286,13 +359,18 @@ def pick_action(state: dict[str, Any], legal_actions: list[dict[str, Any]]) -> T
         elif atype == "end_turn":
             score, reason = _score_end_turn(state, legal_actions)
         else:
-            score, reason = 0.3, f"兜底选 {atype or 'action'}"
-        if score > best_score:
-            best_score = score
-            best_index = raw_index
-            best_reason = reason
+            score, reason = 0.3, f"fallback {atype or 'action'}"
+        scored.append(TeacherActionScore(action_index=raw_index, score=float(score), reason=reason))
 
-    return TeacherDecision(action_index=best_index, score=float(best_score), reason=best_reason)
+    return sorted(scored, key=lambda item: item.score, reverse=True)
 
 
-__all__ = ["TeacherDecision", "pick_action"]
+def pick_action(state: dict[str, Any], legal_actions: list[dict[str, Any]]) -> TeacherDecision:
+    scored = score_actions(state, legal_actions)
+    if not scored:
+        return TeacherDecision(action_index=0, score=0.0, reason="no_enabled_actions")
+    best = scored[0]
+    return TeacherDecision(action_index=best.action_index, score=float(best.score), reason=best.reason)
+
+
+__all__ = ["TeacherActionScore", "TeacherDecision", "pick_action", "score_actions"]

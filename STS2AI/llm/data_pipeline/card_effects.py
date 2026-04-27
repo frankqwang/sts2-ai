@@ -57,7 +57,7 @@ _IRONCLAD_CARDS: dict[str, CardEffect] = {
     "JUGGERNAUT": CardEffect(is_power=True),
     # STS2 新卡 / smoke build 里出现过的
     "CINDER": CardEffect(base_damage=8, upg_damage=11),
-    "FORGOTTEN_RITUAL": CardEffect(is_power=True),
+    "FORGOTTEN_RITUAL": CardEffect(),
     "SETUP_STRIKE": CardEffect(base_damage=6, upg_damage=8),
     "HEAVY_FORGE": CardEffect(base_damage=10, upg_damage=14),
 }

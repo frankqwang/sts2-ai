@@ -1,10 +1,13 @@
 param(
     [switch]$StopExistingGodot,
     [string]$AdapterDir = "",
+    [string]$CombatAdapterDir = "",
+    [string]$NonCombatAdapterDir = "",
     [string]$BaseModelId = "Qwen/Qwen3-4B-Instruct-2507",
     [int]$MaxNewTokens = 256,
     [double]$Temperature = 0.0,
-    [int]$FallbackIndex = 0,
+    [ValidateSet("index", "structured")]
+    [string]$ActionMode = "index",
     [string]$BuildFile = "",
     [string]$EncounterId = "",
     [string]$GodotExe = "",
@@ -13,6 +16,7 @@ param(
     [int]$McpPort = 15526,
     [string]$Resolution = "1600x900",
     [string]$CharacterId = "IRONCLAD",
+    [string]$SessionMode = "",
     [string]$Seed = "",
     [int]$Floor = 0,
     [double]$RequestTimeoutSeconds = 180.0,
@@ -51,6 +55,21 @@ if (-not (Test-Path -LiteralPath $AdapterDir)) {
     throw "LoRA adapter dir not found: $AdapterDir. Train SFT first."
 }
 $AdapterDir = (Resolve-Path -LiteralPath $AdapterDir).Path
+if ([string]::IsNullOrWhiteSpace($CombatAdapterDir)) {
+    $CombatAdapterDir = $AdapterDir
+}
+if (-not [string]::IsNullOrWhiteSpace($CombatAdapterDir)) {
+    if (-not (Test-Path -LiteralPath $CombatAdapterDir)) {
+        throw "Combat LoRA adapter dir not found: $CombatAdapterDir"
+    }
+    $CombatAdapterDir = (Resolve-Path -LiteralPath $CombatAdapterDir).Path
+}
+if (-not [string]::IsNullOrWhiteSpace($NonCombatAdapterDir)) {
+    if (-not (Test-Path -LiteralPath $NonCombatAdapterDir)) {
+        throw "Non-combat LoRA adapter dir not found: $NonCombatAdapterDir"
+    }
+    $NonCombatAdapterDir = (Resolve-Path -LiteralPath $NonCombatAdapterDir).Path
+}
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $runRoot = if ([string]::IsNullOrWhiteSpace($OutputDir)) {
@@ -76,8 +95,18 @@ if ($godotExe -match "_console\.exe$") {
 }
 $resolvedBaseUrl = Resolve-BaseUrl -BaseUrl $BaseUrl -McpPort $McpPort
 $singleplayerStateUrl = Resolve-SingleplayerStateUrl -ResolvedBaseUrl $resolvedBaseUrl
-$spectatorModSource = Join-Path $sts2aiRoot "ENV\Spectator\SpectatorBridgeMod\bin\Debug\net9.0"
+$spectatorModSource = Join-Path $sts2aiRoot "ENV\SpectatorBridgeMod\bin\Debug\net9.0"
 $spectatorModInstallDir = Sync-SpectatorModArtifacts -SourceDir $spectatorModSource -GodotExe $godotExe
+$resolvedSessionMode = if (-not [string]::IsNullOrWhiteSpace($SessionMode)) {
+    $SessionMode
+} elseif (-not [string]::IsNullOrWhiteSpace($EncounterId)) {
+    "combat"
+} else {
+    "full_run"
+}
+if ($resolvedSessionMode -ne "full_run" -and $resolvedSessionMode -ne "combat") {
+    throw "SessionMode must be full_run or combat, got: $resolvedSessionMode"
+}
 
 $resolvedAppDataRoot = if ([string]::IsNullOrWhiteSpace($AppDataRoot)) {
     Join-Path $runRoot "appdata"
@@ -97,20 +126,25 @@ $traceFile = Join-Path $runRoot "step_trace.jsonl"
 $pythonStdout = Join-Path $logDir "spectate.stdout.log"
 $pythonStderr = Join-Path $logDir "spectate.stderr.log"
 $manifestPath = Join-Path $runRoot "manifest.json"
+$metricsPath = Join-Path $runRoot "metrics.json"
 
 $manifest = [ordered]@{
     generated_at = (Get-Date).ToUniversalTime().ToString("o")
     policy = "llm_qwen3_4b_lora"
     adapter_dir = $AdapterDir
+    combat_adapter_dir = $(if ([string]::IsNullOrWhiteSpace($CombatAdapterDir)) { $null } else { $CombatAdapterDir })
+    non_combat_adapter_dir = $(if ([string]::IsNullOrWhiteSpace($NonCombatAdapterDir)) { $null } else { $NonCombatAdapterDir })
     base_model = $BaseModelId
     max_new_tokens = $MaxNewTokens
     temperature = $Temperature
+    action_mode = $ActionMode
     build_file = $(if ([string]::IsNullOrWhiteSpace($resolvedBuildFile)) { $null } else { $resolvedBuildFile })
     encounter_id = $(if ([string]::IsNullOrWhiteSpace($EncounterId)) { $null } else { $EncounterId })
     base_url = $resolvedBaseUrl
     mcp_port = $McpPort
     resolution = $Resolution
     character_id = $CharacterId
+    session_mode = $resolvedSessionMode
     seed = $(if ([string]::IsNullOrWhiteSpace($Seed)) { $null } else { $Seed })
     floor = $(if ($Floor -gt 0) { $Floor } else { $null })
     max_steps = $MaxSteps
@@ -120,6 +154,7 @@ $manifest = [ordered]@{
     appdata_root = $resolvedAppDataRoot
     overlay_file = $overlayFile
     trace_file = $traceFile
+    metrics_file = $metricsPath
     stdout_log = $pythonStdout
     stderr_log = $pythonStderr
 }
@@ -136,7 +171,8 @@ $godotArgs = @(
     "--windowed",
     "--resolution", $Resolution,
     "--mcp-instant",
-    "--mcp-port", [string]$McpPort
+    "--mcp-port", [string]$McpPort,
+    "--mcp-decision-overlay-file", $overlayFile
 )
 if (-not $isSteamExe) {
     $godotArgs += @("--path", $repoRoot)
@@ -144,10 +180,21 @@ if (-not $isSteamExe) {
 
 # llm_policy.py 会读这些 env
 $env:STS2_LLM_ADAPTER_DIR = $AdapterDir
+if (-not [string]::IsNullOrWhiteSpace($CombatAdapterDir)) {
+    $env:STS2_LLM_COMBAT_ADAPTER_DIR = $CombatAdapterDir
+} else {
+    Remove-Item Env:\STS2_LLM_COMBAT_ADAPTER_DIR -ErrorAction SilentlyContinue
+}
+if (-not [string]::IsNullOrWhiteSpace($NonCombatAdapterDir)) {
+    $env:STS2_LLM_NON_COMBAT_ADAPTER_DIR = $NonCombatAdapterDir
+} else {
+    Remove-Item Env:\STS2_LLM_NON_COMBAT_ADAPTER_DIR -ErrorAction SilentlyContinue
+}
 $env:STS2_LLM_BASE_MODEL = $BaseModelId
 $env:STS2_LLM_MAX_NEW_TOKENS = [string]$MaxNewTokens
 $env:STS2_LLM_TEMPERATURE = ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.##}", $Temperature))
-$env:STS2_LLM_FALLBACK_INDEX = [string]$FallbackIndex
+$env:STS2_LLM_ACTION_MODE = $ActionMode
+$env:STS2_LLM_SIMPLE_GATE = "1"
 $env:STS2_LLM_TRACE_PATH = $traceFile
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
@@ -163,6 +210,7 @@ if ($existingPyPath -and ($existingPyPath -notlike "*$sts2aiRoot*")) {
 $pythonArgs = @(
     "-m", "game_bridge.spectate.cli",
     "--mode", "external",
+    "--session-mode", $resolvedSessionMode,
     "--external-policy", "llm.inference.llm_policy:select_action",
     "--overlay-file", $overlayFile,
     "--base-url", $resolvedBaseUrl,
@@ -216,6 +264,8 @@ try {
 
     Write-Host "Launched LLM spectator PID=$($spectateProc.Id)" -ForegroundColor Green
     Write-Host "AdapterDir   : $AdapterDir"
+    Write-Host "Combat LoRA  : $CombatAdapterDir"
+    Write-Host "Noncombat LoRA: $NonCombatAdapterDir"
     Write-Host "RunRoot      : $runRoot"
     Write-Host "Manifest     : $manifestPath"
     Write-Host "Trace (JSONL): $traceFile" -ForegroundColor Cyan
@@ -228,6 +278,18 @@ try {
 
     $spectateProc.WaitForExit()
     $exitCode = [int]$spectateProc.ExitCode
+    $metricsScript = Join-Path $llmRoot "scripts\summarize_metrics.py"
+    & $PythonExe $metricsScript `
+        --spectate-run-dir $runRoot `
+        --trace $traceFile `
+        --spectate-stdout $pythonStdout `
+        --manifest $manifestPath `
+        --out $metricsPath
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Metrics      : $metricsPath" -ForegroundColor Cyan
+    } else {
+        Write-Warning "metrics summary failed with code $LASTEXITCODE"
+    }
     if ($exitCode -ne 0) {
         throw "spectate cli exited with code $exitCode. See $pythonStderr"
     }

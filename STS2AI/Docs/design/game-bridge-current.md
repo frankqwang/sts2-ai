@@ -49,13 +49,8 @@ Python 和 JSON 层不得替换 `{Damage:diff()}` 这类模板。Python 只消�
 
 zero 自己的 RL runtime 可以保留 `step(action_index)`，但内部必须调用 `GameSession.act`。
 
-## 已归档文档
+## 已删除旧文档
 
-以下文档记录的是旧链路或中间方案，已经移入 `archive/2026-04-24/`：
+旧 visible HTTP v2 观战指引、旧 sim/spectator 统一分析方案、旧 LLM 微调交接、旧 zero 主线与单 case 实验说明已经删除。
 
-- old visible HTTP v2 观战指引。
-- old sim/spectator 统一分析方案。
-- old LLM 微调中间计划与交接。
-- old zero 主线与单 case 实验说明。
-
-这些文档只作历史参考，不再作为当前实现依据。
+当前实现只以本文、仓库根 README、`STS2AI/Docs/README.md` 和 `STS2AI/Docs/llm-self-train-loop.md` 为文档依据。
