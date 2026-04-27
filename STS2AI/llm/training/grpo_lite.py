@@ -56,8 +56,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-dir", type=str, required=True)
     parser.add_argument("--adapter-dir", type=str, default=None, help="warm-start adapter（通常是 SFT 产物）")
     parser.add_argument("--max-seq-length", type=int, default=1024)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--grad-accum", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--grad-accum", type=int, default=8)
     parser.add_argument("--num-epochs", type=int, default=2)
     parser.add_argument("--max-steps", type=int, default=-1, help=">0 时覆盖 epoch 步数，用于短跑基准测试")
     parser.add_argument("--save-steps", type=int, default=0, help=">0 时按 steps 保存 checkpoint，否则按 epoch 保存")
@@ -77,6 +77,8 @@ def parse_args() -> argparse.Namespace:
                         help="对 advantage 做温度缩放：weight = advantage / temp。>1 更保守，<1 更激进。")
     parser.add_argument("--advantage-clamp", type=float, default=3.0,
                         help="advantage 裁剪上下界，防止异常样本炸梯度。")
+    parser.add_argument("--allow-zero-advantage-fallback", action="store_true",
+                        help="允许所有 advantage<=0 时退化为全量 SFT；默认直接失败，避免静默训练坏信号。")
     parser.add_argument("--kl-penalty-coef", type=float, default=0.01,
                         help="KL 惩罚系数（相对 base model）。0 表示不惩罚。")
     parser.add_argument(
@@ -248,8 +250,13 @@ def main() -> None:
     print(f"[grpo] advantage range: [{min(advantages):.2f}, {max(advantages):.2f}]  mean={sum(advantages)/len(advantages):.3f}")
     filtered_train_rows = [row for row in train_rows if float(row.get("advantage", 0.0)) > 0.0]
     if not filtered_train_rows:
+        if not args.allow_zero_advantage_fallback:
+            raise SystemExit(
+                "[grpo] no positive-advantage rows; refusing to fall back to all rows. "
+                "Fix rollout advantage generation or pass --allow-zero-advantage-fallback for explicit SFT."
+            )
         filtered_train_rows = train_rows
-        print("[grpo] no positive-advantage rows; falling back to all rows")
+        print("[grpo] no positive-advantage rows; explicit fallback to all rows")
     else:
         print(f"[grpo] keeping positive-advantage rows: {len(filtered_train_rows)}/{len(train_rows)}")
 

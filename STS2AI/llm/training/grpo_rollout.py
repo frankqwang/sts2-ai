@@ -1165,10 +1165,19 @@ def main() -> None:
     for enc_id, eps in grouped.items():
         rewards = [ep.reward["total"] for ep in eps]
         mean_r = sum(rewards) / len(rewards)
-        std_r = (sum((r - mean_r) ** 2 for r in rewards) / max(1, len(rewards))) ** 0.5
-        std_r = max(std_r, 1e-6)
+        raw_std_r = (sum((r - mean_r) ** 2 for r in rewards) / max(1, len(rewards))) ** 0.5
+        std_r = max(raw_std_r, 1e-6)
+        use_absolute_advantage = len(eps) < 2 or raw_std_r < 1e-6
         for ep in eps:
-            advantage = (ep.reward["total"] - mean_r) / std_r
+            if use_absolute_advantage:
+                # With one rollout per exact Skada reset case, relative advantage is
+                # always zero. Use the shaped episode reward so victories remain
+                # trainable and failed/invalid combats are filtered by GRPO-lite.
+                advantage = ep.reward["total"]
+                advantage_mode = "absolute_reward"
+            else:
+                advantage = (ep.reward["total"] - mean_r) / std_r
+                advantage_mode = "relative_group_zscore"
             # 把 episode 中每个 step 都展开成一条训练样本
             for step in ep.steps:
                 if not step.trainable:
@@ -1187,6 +1196,10 @@ def main() -> None:
                         "outcome": ep.outcome,
                         "episode_reward": ep.reward["total"],
                         "advantage": round(advantage, 4),
+                        "advantage_mode": advantage_mode,
+                        "advantage_group_size": len(eps),
+                        "advantage_group_reward_mean": round(mean_r, 4),
+                        "advantage_group_reward_std": round(raw_std_r, 4),
                         "policy_generated_attempts": sum(len(step.attempts) for step in ep.steps),
                         "policy_invalid_output": ep.invalid_output,
                         "action_quality_flags": step.quality_flags,

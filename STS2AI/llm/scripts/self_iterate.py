@@ -47,12 +47,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parse-retries", type=int, default=1)
     parser.add_argument("--allow-json-like-rollout", action="store_true")
     parser.add_argument("--num-epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--grad-accum", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--grad-accum", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--max-seq-length", type=int, default=2048)
     parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--no-thinking", action="store_true")
+    parser.add_argument("--kimi-teacher", action="store_true", help="rollout 后调用 Kimi 复盘 hard combats 并产出 teacher gold 样本。")
+    parser.add_argument("--kimi-limit-episodes", type=int, default=20, help="本轮最多送 Kimi 复盘的 combat 数；0 表示不限。")
+    parser.add_argument("--kimi-max-api-calls", type=int, default=20, help="本轮 Kimi API 调用硬上限；-1 表示不限。")
+    parser.add_argument("--kimi-model", type=str, default=os.environ.get("KIMI_MODEL", "kimi-k2.6"))
+    parser.add_argument("--kimi-base-url", type=str, default=os.environ.get("KIMI_BASE_URL", "https://api.moonshot.cn/v1"))
+    parser.add_argument("--kimi-api-key-env", type=str, default="MOONSHOT_API_KEY")
+    parser.add_argument("--kimi-max-tokens", type=int, default=4096)
+    parser.add_argument("--kimi-thinking", choices=["disabled", "enabled"], default="disabled")
+    parser.add_argument("--kimi-timeout-s", type=float, default=180.0)
+    parser.add_argument("--kimi-sleep-s", type=float, default=0.2)
+    parser.add_argument("--kimi-max-decision-state-chars", type=int, default=7000)
+    parser.add_argument("--kimi-damage-turns", type=int, default=2)
+    parser.add_argument("--kimi-min-confidence", type=float, default=0.75)
+    parser.add_argument("--kimi-min-review-ok-rate", type=float, default=0.5)
+    parser.add_argument("--kimi-min-teacher-rows", type=int, default=0)
+    parser.add_argument("--kimi-fail-on-quality-gate", action="store_true")
+    parser.add_argument("--kimi-dry-run", action="store_true")
+    parser.add_argument("--kimi-append-experience", action="store_true")
+    parser.add_argument("--train-from-pool-after-teacher", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--pool-train-target-size", type=int, default=5000)
+    parser.add_argument("--pool-gold-min-ratio", type=float, default=0.15)
     parser.add_argument(
         "--grpo-loss-scope",
         choices=["full_text", "assistant"],
@@ -124,6 +145,32 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def _metrics(path: Path) -> dict[str, Any]:
     return _read_json(path) if path.exists() else {}
+
+
+def _dataset_rows(summary_path: Path) -> int:
+    if not summary_path.exists():
+        return 0
+    summary = _read_json(summary_path)
+    try:
+        return int(summary.get("rows") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _teacher_review_gate(summary: dict[str, Any], *, min_review_ok_rate: float, min_teacher_rows: int) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    dry_run = bool(summary.get("dry_run"))
+    if dry_run:
+        return True, reasons
+    episode_count = int(summary.get("episode_count") or 0)
+    reviews_ok = int(summary.get("reviews_ok") or 0)
+    labels = int(summary.get("labels") or 0)
+    ok_rate = reviews_ok / max(1, episode_count)
+    if episode_count > 0 and ok_rate + 1e-12 < min_review_ok_rate:
+        reasons.append(f"Kimi review ok rate {ok_rate:.3f} < {min_review_ok_rate:.3f}")
+    if labels < min_teacher_rows:
+        reasons.append(f"Kimi labels {labels} < required {min_teacher_rows}")
+    return not reasons, reasons
 
 
 def _avg_reward(metrics: dict[str, Any]) -> float:
@@ -315,6 +362,9 @@ def main() -> None:
     candidate_run_dir = GRPO_ROOT / candidate_name
     candidate_adapter = candidate_run_dir / "adapter"
     audit_dir = ARTIFACTS_ROOT / "reviews" / f"{run_name}_rollout_audit"
+    kimi_review_dir = ARTIFACTS_ROOT / "reviews" / f"{run_name}_kimi_teacher"
+    teacher_dataset_dir = DATASETS_ROOT / f"{run_name}_kimi_teacher"
+    pool_training_dataset_dir = DATASETS_ROOT / f"{run_name}_managed_pool_train"
 
     py = str(Path(args.python_exe or _default_python_exe()).resolve())
     if not Path(py).exists():
@@ -374,20 +424,41 @@ def main() -> None:
         "--source-name", run_name,
     ]
 
-    train_cmd = [
-        py, "-m", "llm.training.grpo_lite",
-        "--adapter-dir", str(current_adapter),
-        "--dataset-dir", str(dataset_dir),
-        "--run-name", candidate_name,
-        "--num-epochs", str(args.num_epochs),
-        "--batch-size", str(args.batch_size),
-        "--grad-accum", str(args.grad_accum),
-        "--lr", str(args.lr),
-        "--max-seq-length", str(args.max_seq_length),
-        "--loss-scope", args.grpo_loss_scope,
+    kimi_review_cmd = [
+        py, "-m", "llm.scripts.run_kimi_combat_review_batch",
+        "--trace", str(dataset_dir / "step_trace.jsonl"),
+        "--out-dir", str(kimi_review_dir),
+        "--limit-episodes", str(args.kimi_limit_episodes),
+        "--max-api-calls", str(args.kimi_max_api_calls),
+        "--model", args.kimi_model,
+        "--base-url", args.kimi_base_url,
+        "--api-key-env", args.kimi_api_key_env,
+        "--max-tokens", str(args.kimi_max_tokens),
+        "--thinking", args.kimi_thinking,
+        "--timeout-s", str(args.kimi_timeout_s),
+        "--sleep-s", str(args.kimi_sleep_s),
+        "--max-decision-state-chars", str(args.kimi_max_decision_state_chars),
+        "--damage-turns", str(args.kimi_damage_turns),
     ]
-    if args.load_in_4bit:
-        train_cmd.append("--load-in-4bit")
+    if args.kimi_dry_run:
+        kimi_review_cmd.append("--dry-run")
+
+    def _train_cmd(train_dataset_dir: Path) -> list[str]:
+        cmd = [
+            py, "-m", "llm.training.grpo_lite",
+            "--adapter-dir", str(current_adapter),
+            "--dataset-dir", str(train_dataset_dir),
+            "--run-name", candidate_name,
+            "--num-epochs", str(args.num_epochs),
+            "--batch-size", str(args.batch_size),
+            "--grad-accum", str(args.grad_accum),
+            "--lr", str(args.lr),
+            "--max-seq-length", str(args.max_seq_length),
+            "--loss-scope", args.grpo_loss_scope,
+        ]
+        if args.load_in_4bit:
+            cmd.append("--load-in-4bit")
+        return cmd
 
     current_eval_cmd = [
         py, "-m", "llm.eval.policy_eval",
@@ -424,6 +495,13 @@ def main() -> None:
         "candidate_adapter": str(candidate_adapter),
         "current_eval_metrics": str(ARTIFACTS_ROOT / "evals" / current_eval_name / "metrics.json"),
         "candidate_eval_metrics": str(ARTIFACTS_ROOT / "evals" / candidate_eval_name / "metrics.json"),
+        "kimi_review_summary": str(kimi_review_dir / "summary.json") if args.kimi_teacher else None,
+        "teacher_dataset_summary": str(teacher_dataset_dir / "summary.json") if args.kimi_teacher else None,
+        "pool_training_dataset_summary": (
+            str(pool_training_dataset_dir / "summary.json")
+            if args.kimi_teacher and args.train_from_pool_after_teacher
+            else None
+        ),
         "args": vars(args),
         "python_exe": py,
         "commands": {
@@ -431,7 +509,8 @@ def main() -> None:
             "rollout_audit": audit_cmd,
             "pool_ingest_dataset": pool_ingest_dataset_cmd,
             "pool_ingest_audit": pool_ingest_audit_cmd,
-            "train": train_cmd,
+            "kimi_review": kimi_review_cmd if args.kimi_teacher else None,
+            "train": _train_cmd(dataset_dir),
             "current_eval": current_eval_cmd,
             "candidate_eval": candidate_eval_cmd,
         },
@@ -439,16 +518,8 @@ def main() -> None:
     }
     _write_json(run_root / "manifest.json", manifest)
 
-    steps = [
-        ("rollout", rollout_cmd),
-        ("rollout_audit", audit_cmd),
-        ("pool_ingest_dataset", pool_ingest_dataset_cmd),
-        ("pool_ingest_audit", pool_ingest_audit_cmd),
-        ("train", train_cmd),
-        ("current_eval", current_eval_cmd),
-        ("candidate_eval", candidate_eval_cmd),
-    ]
-    for label, cmd in steps:
+    def _run_step(label: str, cmd: list[str]) -> None:
+        manifest.setdefault("commands", {})[label] = cmd
         code = _run(
             cmd,
             cwd=Path(__file__).resolve().parents[2],
@@ -467,6 +538,96 @@ def main() -> None:
             manifest["failed_step"] = label
             _write_json(run_root / "manifest.json", manifest)
             raise SystemExit(code)
+
+    for label, cmd in [
+        ("rollout", rollout_cmd),
+        ("rollout_audit", audit_cmd),
+        ("pool_ingest_dataset", pool_ingest_dataset_cmd),
+        ("pool_ingest_audit", pool_ingest_audit_cmd),
+    ]:
+        _run_step(label, cmd)
+
+    train_dataset_dir = dataset_dir
+    teacher_rows = 0
+    if args.kimi_teacher:
+        _run_step("kimi_review", kimi_review_cmd)
+        if not args.dry_run:
+            kimi_summary_path = kimi_review_dir / "summary.json"
+            kimi_summary = _metrics(kimi_summary_path)
+            gate_passed, gate_reasons = _teacher_review_gate(
+                kimi_summary,
+                min_review_ok_rate=args.kimi_min_review_ok_rate,
+                min_teacher_rows=args.kimi_min_teacher_rows,
+            )
+            manifest["kimi_teacher_gate"] = {
+                "passed": gate_passed,
+                "reasons": gate_reasons,
+                "summary": str(kimi_summary_path),
+                "reviews_ok": int(kimi_summary.get("reviews_ok") or 0),
+                "labels": int(kimi_summary.get("labels") or 0),
+                "api_calls_before": kimi_summary.get("api_calls_before"),
+                "api_calls_after": kimi_summary.get("api_calls_after"),
+                "status_counts": kimi_summary.get("status_counts") or {},
+                "parse_counts": kimi_summary.get("parse_counts") or {},
+            }
+            _write_json(run_root / "manifest.json", manifest)
+            if not gate_passed and args.kimi_fail_on_quality_gate:
+                manifest["status"] = "failed"
+                manifest["failed_step"] = "kimi_teacher_gate"
+                _write_json(run_root / "manifest.json", manifest)
+                raise SystemExit(2)
+
+            review_paths = [str(path) for path in (kimi_summary.get("review_paths") or [])]
+            episode_paths = [str(path) for path in (kimi_summary.get("episode_input_paths") or [])]
+            if review_paths and len(review_paths) == len(episode_paths):
+                teacher_dataset_cmd = [
+                    py, "-m", "llm.scripts.build_teacher_dataset",
+                    "--out-dir", str(teacher_dataset_dir),
+                    "--min-confidence", str(args.kimi_min_confidence),
+                    "--seed", str(args.seed),
+                ]
+                if args.kimi_append_experience:
+                    teacher_dataset_cmd.append("--append-experience")
+                for review_path, episode_path in zip(review_paths, episode_paths):
+                    teacher_dataset_cmd += ["--review", review_path, "--episode-input", episode_path]
+                _run_step("kimi_teacher_dataset", teacher_dataset_cmd)
+                teacher_rows = _dataset_rows(teacher_dataset_dir / "summary.json")
+                manifest["kimi_teacher_dataset_rows"] = teacher_rows
+                _write_json(run_root / "manifest.json", manifest)
+                if teacher_rows > 0:
+                    pool_ingest_teacher_cmd = [
+                        py, "-m", "llm.scripts.manage_dataset_pool",
+                        "ingest-dataset",
+                        "--dataset-dir", str(teacher_dataset_dir),
+                        "--source-name", f"{run_name}:kimi_teacher",
+                    ]
+                    _run_step("pool_ingest_kimi_teacher", pool_ingest_teacher_cmd)
+            else:
+                manifest["kimi_teacher_dataset_rows"] = 0
+                manifest.setdefault("warnings", []).append(
+                    "Kimi produced no matching review_paths/episode_input_paths; teacher dataset skipped."
+                )
+                _write_json(run_root / "manifest.json", manifest)
+
+            if teacher_rows > 0 and args.train_from_pool_after_teacher:
+                materialize_cmd = [
+                    py, "-m", "llm.scripts.manage_dataset_pool",
+                    "materialize",
+                    "--out-dir", str(pool_training_dataset_dir),
+                    "--target-size", str(args.pool_train_target_size),
+                    "--gold-min-ratio", str(args.pool_gold_min_ratio),
+                    "--seed", str(args.seed),
+                ]
+                _run_step("pool_materialize_train", materialize_cmd)
+                train_dataset_dir = pool_training_dataset_dir
+
+    train_cmd = _train_cmd(train_dataset_dir)
+    manifest["training_dataset_dir"] = str(train_dataset_dir)
+    manifest.setdefault("commands", {})["train"] = train_cmd
+    _write_json(run_root / "manifest.json", manifest)
+    _run_step("train", train_cmd)
+    _run_step("current_eval", current_eval_cmd)
+    _run_step("candidate_eval", candidate_eval_cmd)
 
     if args.dry_run:
         manifest["status"] = "dry_run"

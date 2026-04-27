@@ -113,6 +113,55 @@ python -m llm.scripts.mine_offline_preferences `
 
 这个阶段的原则是宁可少修，也不要把不确定的策略判断写成硬标签。比如 `dangerous_end_turn` 只统计，不自动生成修复动作。
 
+## Kimi Teacher 标注
+
+Kimi 只用于高价值 hard combat，不随机烧预算。入口：
+
+```powershell
+$env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
+$env:MOONSHOT_API_KEY="..."
+python -m llm.scripts.run_kimi_combat_review_batch `
+  --trace STS2AI\Artifacts\llm\datasets\<rollout_dataset>\step_trace.jsonl `
+  --limit-episodes 20 `
+  --max-api-calls 20 `
+  --max-tokens 4096 `
+  --thinking disabled
+```
+
+输入选择逻辑：按失败、invalid、掉血回合、质量 flags 排序，默认复盘整场战斗，但 prompt 聚焦前 2 回合、中期 2 回合、最后 2 回合和高掉血回合。每个 episode 都会落：
+
+- `episode_input.json`：送给 Kimi 的结构化 combat 摘要。
+- `prompt_messages.json`：实际 API messages，不含密钥。
+- `kimi_raw_response.json`：原始返回。
+- `turn_order_review.json`：解析成功的 JSON review。
+- `teacher_turn_labels.jsonl`：Kimi 给出的候选训练标签。
+
+输出不会直接训练。必须再经过：
+
+```powershell
+python -m llm.scripts.build_teacher_dataset `
+  --review <turn_order_review.json> `
+  --episode-input <episode_input.json> `
+  --min-confidence 0.75 `
+  --out-dir STS2AI\Artifacts\llm\datasets\<teacher_dataset>
+```
+
+`build_teacher_dataset` 会用原始 prompt 里的 `legal_actions` 做本地验证：非法 action、低置信度、无法匹配 step 的标签全部丢弃；默认还会把 Kimi 的长 reason 改写成短的 deterministic reason，避免把错误算术或长篇复盘训练进 4B。
+
+`self_iterate.py --kimi-teacher` 已经把这段接入单轮飞轮：
+
+```text
+rollout -> audit -> pool ingest -> Kimi review -> teacher dataset -> gold ingest
+        -> materialize gold/silver pool -> train candidate -> eval -> promotion gate
+```
+
+API 预算控制：
+
+- `--kimi-limit-episodes` 控制本轮最多复盘多少场。
+- `--kimi-max-api-calls` 是本轮新增调用上限，不受历史 usage 影响。
+- `--skip-episode-id` 可跳过已标注 combat，续跑时避免重复花钱。
+- usage 记录在 `STS2AI/Artifacts/llm/kimi_usage/usage.jsonl`，只记录状态、耗时和 token usage，不记录密钥。
+
 ## 同局面多次推理
 
 复杂卡牌配合不适合继续堆写死规则。对 hard case 可以让模型在同一个局面上多次独立推理，再让模型只基于当前局面和候选理由做自我复审：

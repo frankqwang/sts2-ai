@@ -262,7 +262,8 @@ def main() -> int:
         status = "running"
         for group_index, group in enumerate(batch_rows):
             custom_id = str(group.get("custom_id") or f"group-{group_index:04d}")
-            if args.max_api_calls >= 0 and calls_after >= args.max_api_calls:
+            calls_used = max(0, calls_after - calls_before)
+            if args.max_api_calls >= 0 and calls_used >= args.max_api_calls:
                 status = "api_budget_exceeded"
                 group_summaries.append({"custom_id": custom_id, "status": status})
                 break
@@ -382,7 +383,10 @@ def main() -> int:
         "api_calls_before": calls_before,
         "api_calls_after": calls_after,
         "api_calls_used": max(0, calls_after - calls_before),
-        "api_calls_remaining": args.max_api_calls - calls_after if args.max_api_calls >= 0 else None,
+        "api_calls_remaining": (
+            max(0, args.max_api_calls - max(0, calls_after - calls_before))
+            if args.max_api_calls >= 0 else None
+        ),
         "review_count": len(all_reviews),
         "valid_label_count": len(valid_labels),
         "invalid_review_count": len(invalid_reviews),

@@ -47,12 +47,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default=os.environ.get("KIMI_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--api-key-env", default="MOONSHOT_API_KEY")
     parser.add_argument("--usage-path", default=str(DEFAULT_USAGE_PATH))
-    parser.add_argument("--max-tokens", "--max-completion-tokens", dest="max_tokens", type=int, default=2048)
+    parser.add_argument("--max-tokens", "--max-completion-tokens", dest="max_tokens", type=int, default=4096)
     parser.add_argument("--thinking", choices=["disabled", "enabled"], default="disabled")
     parser.add_argument("--timeout-s", type=float, default=180.0)
     parser.add_argument("--sleep-s", type=float, default=0.0)
     parser.add_argument("--max-decision-state-chars", type=int, default=7000)
     parser.add_argument("--damage-turns", type=int, default=2)
+    parser.add_argument("--skip-episode-id", action="append", default=[], help="episode_id to skip, for continuing a reviewed batch.")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -144,7 +145,11 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = _read_jsonl(trace_path)
     grouped = _group_episodes(rows)
-    episode_ids = sorted(grouped, key=lambda key: _episode_score(grouped[key]), reverse=True)
+    skip_episode_ids = {str(value) for value in args.skip_episode_id}
+    episode_ids = [
+        key for key in sorted(grouped, key=lambda key: _episode_score(grouped[key]), reverse=True)
+        if key not in skip_episode_ids
+    ]
     if args.limit_episodes > 0:
         episode_ids = episode_ids[: args.limit_episodes]
 
@@ -167,6 +172,7 @@ def main() -> int:
         "dry_run": bool(args.dry_run),
         "focus_policy": "milestone",
         "damage_turns": args.damage_turns,
+        "skip_episode_ids": sorted(skip_episode_ids),
     }
     _write_json(out_dir / "manifest.json", manifest)
 
@@ -207,9 +213,10 @@ def main() -> int:
         error = ""
         review: dict[str, Any] | None = None
         if not args.dry_run and key:
-            if args.max_api_calls >= 0 and calls_after >= args.max_api_calls:
+            calls_used = max(0, calls_after - calls_before)
+            if args.max_api_calls >= 0 and calls_used >= args.max_api_calls:
                 status = "api_budget_exceeded"
-                error = f"Kimi API budget exceeded: {calls_after}/{args.max_api_calls} recorded calls"
+                error = f"Kimi API budget exceeded for this run: {calls_used}/{args.max_api_calls} calls"
             else:
                 calls_after += 1
                 try:
@@ -269,6 +276,11 @@ def main() -> int:
         **manifest,
         "api_calls_before": calls_before,
         "api_calls_after": calls_after,
+        "api_calls_used": max(0, calls_after - calls_before),
+        "api_calls_remaining": (
+            max(0, args.max_api_calls - max(0, calls_after - calls_before))
+            if args.max_api_calls >= 0 else None
+        ),
         "labels": len(labels_all),
         "reviews_ok": status_counts.get("ok", 0),
         "status_counts": {key: int(value) for key, value in status_counts.items()},

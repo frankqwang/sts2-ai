@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--base-url", default=os.environ.get("KIMI_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--api-key-env", default="MOONSHOT_API_KEY")
-    parser.add_argument("--max-tokens", "--max-completion-tokens", dest="max_tokens", type=int, default=2048)
+    parser.add_argument("--max-tokens", "--max-completion-tokens", dest="max_tokens", type=int, default=4096)
     parser.add_argument("--thinking", choices=["disabled", "enabled"], default="disabled")
     parser.add_argument("--timeout-s", type=float, default=120.0)
     parser.add_argument("--max-decision-state-chars", type=int, default=7000)
@@ -451,6 +451,9 @@ def build_messages(episode: dict[str, Any], *, prompt_style: str = "compact", th
         "Use only the listed legal_actions in each state; do not invent actions.\n"
         "If the original sequence is reasonable, say so. If not, identify the exact step and better legal action_index.\n"
         "Pay special attention to visible lethal, Vulnerable/BASH before follow-up attacks, energy spending, block vs incoming damage, and draw/setup order.\n"
+        "Keep the output compact: at most 2 issues per reviewed turn, at most 8 usable_training_labels, "
+        "and each explanation string under 80 Chinese characters or 25 English words. "
+        "Do not copy legal_actions or combat_trace text into the output.\n"
         f"{final_instruction}\n\n"
         "output_schema:\n"
         f"{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
@@ -612,9 +615,10 @@ def main() -> int:
     calls_before = count_recorded_api_calls(usage_path)
     calls_after = calls_before
     if not args.dry_run and key:
-        if args.max_api_calls >= 0 and calls_before >= args.max_api_calls:
+        calls_used = max(0, calls_after - calls_before)
+        if args.max_api_calls >= 0 and calls_used >= args.max_api_calls:
             status = "api_budget_exceeded"
-            error = f"Kimi API budget exceeded: {calls_before}/{args.max_api_calls} recorded calls"
+            error = f"Kimi API budget exceeded for this run: {calls_used}/{args.max_api_calls} calls"
         else:
             attempted = False
             usage_status = "not_started"
@@ -666,7 +670,11 @@ def main() -> int:
         "status": status,
         "api_calls_before": calls_before,
         "api_calls_after": calls_after,
-        "api_calls_remaining": max(0, args.max_api_calls - calls_after) if args.max_api_calls >= 0 else None,
+        "api_calls_used": max(0, calls_after - calls_before),
+        "api_calls_remaining": (
+            max(0, args.max_api_calls - max(0, calls_after - calls_before))
+            if args.max_api_calls >= 0 else None
+        ),
         "latency_ms": round(latency_ms, 1),
         "parse_status": parse_status,
         "error": error,
