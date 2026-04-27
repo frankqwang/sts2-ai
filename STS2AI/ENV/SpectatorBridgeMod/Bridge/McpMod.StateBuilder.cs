@@ -41,8 +41,9 @@ using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Simulation;
+using MegaCrit.Sts2.Core.Training;
 using MegaCrit.Sts2.Core.Models.Characters;
-using MegaCrit.Sts2.Core.Models;
 
 namespace STS2_MCP;
 
@@ -50,6 +51,198 @@ public static partial class McpMod
 {
     // Internal accessors for SpectatorApiStateBuilder (Dict → DTO conversion layer)
     internal static Dictionary<string, object?> BuildGameStateForApi() => BuildGameState();
+
+    private static void SyncVisibleBridgeChoiceSelections(FullRunSimulationChoiceBridge bridge)
+    {
+        if (NMapScreen.Instance is { IsOpen: true })
+        {
+            bridge.ClearVisibleSelections();
+            return;
+        }
+
+        var overlay = NOverlayStack.Instance?.Peek();
+        if (overlay is NRewardsScreen rewardsScreen)
+        {
+            HashSet<NRewardButton> skippedButtons = GetSkippedRewardButtons(rewardsScreen);
+            List<Reward> rewards = FindAll<NRewardButton>(rewardsScreen)
+                .Where(button => button.Reward != null && button.IsEnabled && !skippedButtons.Contains(button))
+                .Select(static button => button.Reward!)
+                .ToList();
+            bool canProceed = FindFirst<NProceedButton>(rewardsScreen)?.IsEnabled ?? false;
+            bridge.SetVisibleRewardSelection(rewards, canProceed);
+            return;
+        }
+
+        if (overlay is NCardRewardSelectionScreen cardScreen)
+        {
+            List<CardCreationResult> options = FindAllSortedByPosition<NCardHolder>(cardScreen)
+                .Where(static holder => holder.CardModel != null)
+                .Select(static holder => new CardCreationResult(holder.CardModel!))
+                .ToList();
+            bool canSkip = FindAll<NCardRewardAlternativeButton>(cardScreen).Count > 0;
+            bridge.SetVisibleCardRewardSelection(options, canSkip);
+            return;
+        }
+
+        if (overlay is NCardGridSelectionScreen gridSelectionScreen)
+        {
+            bridge.SetVisibleCardSelection(BuildVisibleCardSelectionSnapshot(gridSelectionScreen));
+            return;
+        }
+
+        if (overlay is NChooseACardSelectionScreen chooseCardScreen)
+        {
+            bridge.SetVisibleCardSelection(BuildVisibleChooseCardSelectionSnapshot(chooseCardScreen));
+            return;
+        }
+
+        bridge.ClearVisibleSelections();
+    }
+
+    private static CombatTrainingCardSelectionSnapshot BuildVisibleCardSelectionSnapshot(NCardGridSelectionScreen screen)
+    {
+        List<CardModel> selectedCards = GetSelectedCards(screen);
+        TryGetCardSelectorPrefs(screen, out CardSelectorPrefs prefs);
+        string mode = screen switch
+        {
+            NDeckTransformSelectScreen => "Transform",
+            NDeckUpgradeSelectScreen => "UpgradeSelect",
+            NDeckCardSelectScreen => "DeckGeneric",
+            NSimpleCardSelectScreen => "SimpleSelect",
+            _ => screen.GetType().Name
+        };
+
+        List<(int Index, CardModel Card)> allCards = FindAllSortedByPosition<NGridCardHolder>(screen)
+            .Select(static (holder, index) => (Index: index, Card: holder.CardModel))
+            .Where(static entry => entry.Card != null)
+            .Select(static entry => (entry.Index, entry.Card!))
+            .ToList();
+
+        bool selectionWithinQuota = selectedCards.Count >= prefs.MinSelect && selectedCards.Count <= prefs.MaxSelect;
+        bool canConfirm = selectionWithinQuota && HasEnabledSelectionConfirm(screen);
+        bool canCancel = prefs.Cancelable || HasEnabledSelectionCancel(screen);
+
+        return new CombatTrainingCardSelectionSnapshot
+        {
+            ChoiceAdapterKind = "spectator_ui",
+            IsBackendAvailable = true,
+            Mode = mode,
+            PromptText = GetCardSelectionPromptText(screen),
+            MinSelect = prefs.MinSelect,
+            MaxSelect = prefs.MaxSelect,
+            CanConfirm = canConfirm,
+            Cancelable = canCancel,
+            SelectableCards = allCards
+                .Where(entry => !ContainsCardReference(selectedCards, entry.Card))
+                .Select(entry => CombatTrainingChoiceSnapshotBuilder.BuildSelectableCardSnapshot(entry.Card, entry.Index))
+                .ToList(),
+            SelectedCards = allCards
+                .Where(entry => ContainsCardReference(selectedCards, entry.Card))
+                .Select(entry => CombatTrainingChoiceSnapshotBuilder.BuildSelectableCardSnapshot(entry.Card, entry.Index))
+                .ToList()
+        };
+    }
+
+    private static CombatTrainingCardSelectionSnapshot BuildVisibleChooseCardSelectionSnapshot(NChooseACardSelectionScreen screen)
+    {
+        List<(int Index, CardModel Card)> cards = FindAllSortedByPosition<NGridCardHolder>(screen)
+            .Select(static (holder, index) => (Index: index, Card: holder.CardModel))
+            .Where(static entry => entry.Card != null)
+            .Select(static entry => (entry.Index, entry.Card!))
+            .ToList();
+
+        return new CombatTrainingCardSelectionSnapshot
+        {
+            ChoiceAdapterKind = "spectator_ui",
+            IsBackendAvailable = true,
+            Mode = "ChooseCard",
+            PromptText = "Choose a card.",
+            MinSelect = 0,
+            MaxSelect = 1,
+            CanConfirm = false,
+            Cancelable = HasChooseCardSkip(screen),
+            SelectableCards = cards
+                .Select(entry => CombatTrainingChoiceSnapshotBuilder.BuildSelectableCardSnapshot(entry.Card, entry.Index))
+                .ToList()
+        };
+    }
+
+    private static string GetCardSelectionPromptText(NCardGridSelectionScreen screen)
+    {
+        var bottomLabel = screen.GetNodeOrNull("%BottomLabel");
+        if (bottomLabel == null)
+        {
+            return "";
+        }
+        var textVariant = bottomLabel.Get("text");
+        return textVariant.VariantType != Godot.Variant.Type.Nil
+            ? StripRichTextTags(textVariant.AsString())
+            : "";
+    }
+
+    private static bool HasEnabledSelectionConfirm(NCardGridSelectionScreen screen)
+    {
+        foreach (var containerName in new[] { "%UpgradeSinglePreviewContainer", "%UpgradeMultiPreviewContainer", "%EnchantSinglePreviewContainer", "%EnchantMultiPreviewContainer", "%PreviewContainer" })
+        {
+            var container = screen.GetNodeOrNull<Godot.Control>(containerName);
+            if (container?.Visible != true)
+            {
+                continue;
+            }
+            var confirm = container.GetNodeOrNull<NConfirmButton>("Confirm")
+                          ?? container.GetNodeOrNull<NConfirmButton>("%PreviewConfirm");
+            if (confirm?.IsEnabled == true)
+            {
+                return true;
+            }
+        }
+
+        var mainConfirm = screen.GetNodeOrNull<NConfirmButton>("Confirm")
+                          ?? screen.GetNodeOrNull<NConfirmButton>("%Confirm");
+        return mainConfirm?.IsEnabled == true
+            || FindAll<NConfirmButton>(screen).Any(static button => button.IsEnabled && button.IsVisibleInTree());
+    }
+
+    private static bool HasEnabledSelectionCancel(NCardGridSelectionScreen screen)
+    {
+        var closeButton = screen.GetNodeOrNull<NBackButton>("%Close");
+        if (closeButton?.IsEnabled == true)
+        {
+            return true;
+        }
+
+        foreach (var containerName in new[] { "%UpgradeSinglePreviewContainer", "%UpgradeMultiPreviewContainer", "%EnchantSinglePreviewContainer", "%EnchantMultiPreviewContainer", "%PreviewContainer" })
+        {
+            var container = screen.GetNodeOrNull<Godot.Control>(containerName);
+            if (container?.Visible != true)
+            {
+                continue;
+            }
+            var cancel = container.GetNodeOrNull<NBackButton>("Cancel")
+                         ?? container.GetNodeOrNull<NBackButton>("%PreviewCancel");
+            if (cancel?.IsEnabled == true)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool HasChooseCardSkip(NChooseACardSelectionScreen screen)
+    {
+        var skipButton = screen.GetNodeOrNull<NClickableControl>("SkipButton");
+        return skipButton?.IsEnabled == true && skipButton.Visible;
+    }
+
+    private static HashSet<NRewardButton> GetSkippedRewardButtons(NRewardsScreen rewardsScreen)
+    {
+        FieldInfo? field = typeof(NRewardsScreen).GetField("_skippedRewardButtons", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (field?.GetValue(rewardsScreen) is not IEnumerable<Control> skipped)
+        {
+            return new HashSet<NRewardButton>();
+        }
+        return skipped.OfType<NRewardButton>().ToHashSet();
+    }
 
     private static Dictionary<string, object?> BuildGameState()
     {

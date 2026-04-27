@@ -88,11 +88,13 @@ internal static partial class Program
 			throw new InvalidOperationException("act request missing payload.");
 		}
 		FullRunSimulationActionRequest action = BuildFullRunSimulationActionRequest(requestEnvelope.Act.Action);
+		int historyOffset = BridgeCombatHistoryDelta.CaptureOffset();
 		(FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot) =
 			await ExecuteFullRunStepAsync(service, cache, action, autoAdvanceToDecisionState: true);
+		List<SettlementEvent> settlementEvents = BridgeCombatHistoryDelta.CaptureSince(historyOffset);
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildActResponse(BridgeMethod.Act, result, snapshot);
+			return ProtoStateBuilder.BuildActResponse(BridgeMethod.Act, result, snapshot, settlementEvents);
 		}
 	}
 
@@ -107,14 +109,16 @@ internal static partial class Program
 			.Select(BuildFullRunSimulationActionRequest)
 			.ToList();
 		FullRunSimulationBatchStepResult result;
+		int historyOffset = BridgeCombatHistoryDelta.CaptureOffset();
 		using (FullRunSimulationDiagnostics.Measure("request.batch_act.runtime_ms"))
 		{
 			result = await service.BatchStepAsync(actions);
 		}
+		List<SettlementEvent> settlementEvents = BridgeCombatHistoryDelta.CaptureSince(historyOffset);
 		FullRunSimulationStateSnapshot snapshot = result.State ?? GetSnapshot(service, cache);
 		using (FullRunSimulationDiagnostics.Measure("request.proto_encode_ms"))
 		{
-			return ProtoStateBuilder.BuildBatchActResponse(result, snapshot);
+			return ProtoStateBuilder.BuildBatchActResponse(result, snapshot, settlementEvents);
 		}
 	}
 
@@ -204,10 +208,12 @@ internal static partial class Program
 	private static async Task<byte[]> ProcessProtoSkipCombatAsync(
 		FullRunTrainingEnvService service, RequestStateCache cache)
 	{
+		int historyOffset = BridgeCombatHistoryDelta.CaptureOffset();
 		FullRunSimulationStepResult skipResult = await service.StepAsync(
 			new FullRunSimulationActionRequest { Action = "skip_combat" });
+		List<SettlementEvent> settlementEvents = BridgeCombatHistoryDelta.CaptureSince(historyOffset);
 		FullRunSimulationStateSnapshot snapshot = skipResult.State ?? GetSnapshot(service, cache);
-		return ProtoStateBuilder.BuildActResponse(BridgeMethod.SkipCombat, skipResult, snapshot);
+		return ProtoStateBuilder.BuildActResponse(BridgeMethod.SkipCombat, skipResult, snapshot, settlementEvents);
 	}
 
 	// ================================================================
@@ -260,12 +266,14 @@ internal static partial class Program
 				"action_decode_error", exc.Message);
 		}
 		CombatTrainingStepResult result;
+		int historyOffset = BridgeCombatHistoryDelta.CaptureOffset();
 		using (FullRunSimulationDiagnostics.Measure("request.combat_act.runtime_ms"))
 		{
 			result = await CombatTrainingEnvService.Instance.StepAsync(action);
 		}
+		List<SettlementEvent> settlementEvents = BridgeCombatHistoryDelta.CaptureSince(historyOffset);
 		CombatTrainingStateSnapshot snapshot = result.State ?? CombatTrainingEnvService.Instance.GetState();
-		return ProtoStateBuilder.BuildCombatActResponse(result, snapshot);
+		return ProtoStateBuilder.BuildCombatActResponse(result, snapshot, settlementEvents);
 	}
 
 	private static byte[] ProcessProtoCombatState()
@@ -530,9 +538,11 @@ internal static partial class Program
 			CardIndex = la.CardIndex,
 			Value = la.Label,
 		};
+		int historyOffset = BridgeCombatHistoryDelta.CaptureOffset();
 		FullRunSimulationStepResult result = await service.StepAsync(action);
 		FullRunSimulationStateSnapshot nextSnapshot = result.State ?? GetSnapshot(service, cache);
-		return ProtoStateBuilder.BuildActResponse(BridgeMethod.StepLocalPolicy, result, nextSnapshot);
+		List<SettlementEvent> settlementEvents = BridgeCombatHistoryDelta.CaptureSince(historyOffset);
+		return ProtoStateBuilder.BuildActResponse(BridgeMethod.StepLocalPolicy, result, nextSnapshot, settlementEvents);
 	}
 
 	private static async Task<byte[]> ProcessProtoRunCombatLocalAsync(

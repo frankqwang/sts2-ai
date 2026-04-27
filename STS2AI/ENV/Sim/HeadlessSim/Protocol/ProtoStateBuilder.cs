@@ -77,38 +77,49 @@ internal static class ProtoStateBuilder
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildActResponse(BridgeMethod method, FullRunSimulationStepResult result, FullRunSimulationStateSnapshot snapshot)
+	public static byte[] BuildActResponse(
+		BridgeMethod method,
+		FullRunSimulationStepResult result,
+		FullRunSimulationStateSnapshot snapshot,
+		IEnumerable<SettlementEvent>? settlementEvents = null)
 	{
 		GameState state = BuildStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
+		BridgeActPayload payload = new BridgeActPayload
+		{
+			Accepted = result.Accepted,
+			Error = result.Error ?? "",
+			State = state,
+		};
+		AddSettlementEvents(payload.SettlementEvents, settlementEvents);
 		return new BridgeResponseEnvelope
 		{
 			Method = method,
 			Status = result.Accepted ? BridgeStatus.Ok : BridgeStatus.RejectedAction,
-			Act = new BridgeActPayload
-			{
-				Accepted = result.Accepted,
-				Error = result.Error ?? "",
-				State = state,
-			},
+			Act = payload,
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildBatchActResponse(FullRunSimulationBatchStepResult result, FullRunSimulationStateSnapshot snapshot)
+	public static byte[] BuildBatchActResponse(
+		FullRunSimulationBatchStepResult result,
+		FullRunSimulationStateSnapshot snapshot,
+		IEnumerable<SettlementEvent>? settlementEvents = null)
 	{
 		GameState state = BuildStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.state_bytes", state.CalculateSize());
+		BridgeBatchActPayload payload = new BridgeBatchActPayload
+		{
+			Accepted = result.Accepted,
+			StepsExecuted = Math.Max(0, result.StepsExecuted),
+			Error = result.Error ?? "",
+			State = state,
+		};
+		AddSettlementEvents(payload.SettlementEvents, settlementEvents);
 		return new BridgeResponseEnvelope
 		{
 			Method = BridgeMethod.BatchAct,
 			Status = result.Accepted ? BridgeStatus.Ok : BridgeStatus.RejectedAction,
-			BatchAct = new BridgeBatchActPayload
-			{
-				Accepted = result.Accepted,
-				StepsExecuted = Math.Max(0, result.StepsExecuted),
-				Error = result.Error ?? "",
-				State = state,
-			},
+			BatchAct = payload,
 		}.ToByteArray();
 	}
 
@@ -256,21 +267,37 @@ internal static class ProtoStateBuilder
 		}.ToByteArray();
 	}
 
-	public static byte[] BuildCombatActResponse(CombatTrainingStepResult result, CombatTrainingStateSnapshot snapshot)
+	public static byte[] BuildCombatActResponse(
+		CombatTrainingStepResult result,
+		CombatTrainingStateSnapshot snapshot,
+		IEnumerable<SettlementEvent>? settlementEvents = null)
 	{
 		GameState state = BuildCombatGameStateMessage(snapshot);
 		FullRunSimulationDiagnostics.Increment("proto.combat_state_bytes", state.CalculateSize());
+		BridgeActPayload payload = new BridgeActPayload
+		{
+			Accepted = result.Accepted,
+			Error = result.Error ?? "",
+			State = state,
+		};
+		AddSettlementEvents(payload.SettlementEvents, settlementEvents);
 		return new BridgeResponseEnvelope
 		{
 			Method = BridgeMethod.CombatAct,
 			Status = result.Accepted ? BridgeStatus.Ok : BridgeStatus.RejectedAction,
-			Act = new BridgeActPayload
-			{
-				Accepted = result.Accepted,
-				Error = result.Error ?? "",
-				State = state,
-			},
+			Act = payload,
 		}.ToByteArray();
+	}
+
+	private static void AddSettlementEvents(
+		Google.Protobuf.Collections.RepeatedField<SettlementEvent> target,
+		IEnumerable<SettlementEvent>? events)
+	{
+		if (events == null)
+		{
+			return;
+		}
+		target.Add(events);
 	}
 
 	public static byte[] BuildStatePayload(FullRunSimulationStateSnapshot snapshot)
@@ -438,6 +465,10 @@ internal static class ProtoStateBuilder
 						Action = "select_hand_card",
 						Index = card.HandIndex,
 						CardIndex = card.HandIndex,
+						TargetId = -1,
+						Col = -1,
+						Row = -1,
+						Slot = -1,
 						CardId = card.Id ?? "",
 						Label = card.Title ?? card.Id ?? "",
 					});
@@ -445,11 +476,11 @@ internal static class ProtoStateBuilder
 			}
 			if (hs.CanConfirm)
 			{
-				gs.LegalActions.Add(new LegalAction { Action = "confirm_selection", Label = "Confirm" });
+				gs.LegalActions.Add(NonIndexedAction("confirm_selection", "Confirm"));
 			}
 			if (hs.Cancelable)
 			{
-				gs.LegalActions.Add(new LegalAction { Action = "cancel_selection", Label = "Cancel" });
+				gs.LegalActions.Add(NonIndexedAction("cancel_selection", "Cancel"));
 			}
 			return;
 		}
@@ -466,6 +497,10 @@ internal static class ProtoStateBuilder
 						Action = "select_card_option",
 						Index = opt.ChoiceIndex,
 						CardIndex = opt.ChoiceIndex,
+						TargetId = -1,
+						Col = -1,
+						Row = -1,
+						Slot = -1,
 						CardId = opt.Id ?? "",
 						Label = opt.Title ?? opt.Id ?? "",
 					});
@@ -473,11 +508,11 @@ internal static class ProtoStateBuilder
 			}
 			if (cs.CanConfirm)
 			{
-				gs.LegalActions.Add(new LegalAction { Action = "confirm_selection", Label = "Confirm" });
+				gs.LegalActions.Add(NonIndexedAction("confirm_selection", "Confirm"));
 			}
 			if (cs.Cancelable)
 			{
-				gs.LegalActions.Add(new LegalAction { Action = "cancel_selection", Label = "Cancel" });
+				gs.LegalActions.Add(NonIndexedAction("cancel_selection", "Cancel"));
 			}
 			return;
 		}
@@ -507,6 +542,9 @@ internal static class ProtoStateBuilder
 						CardId = cardId,
 						Label = label,
 						TargetId = (int)tid,
+						Col = -1,
+						Row = -1,
+						Slot = -1,
 					});
 				}
 			}
@@ -519,14 +557,30 @@ internal static class ProtoStateBuilder
 					CardIndex = card.HandIndex,
 					CardId = cardId,
 					Label = label,
+					TargetId = -1,
+					Col = -1,
+					Row = -1,
+					Slot = -1,
 				});
 			}
 		}
 		if (snapshot.CanEndTurn)
 		{
-			gs.LegalActions.Add(new LegalAction { Action = "end_turn", Label = "End Turn" });
+			gs.LegalActions.Add(NonIndexedAction("end_turn", "End Turn"));
 		}
 	}
+
+	private static LegalAction NonIndexedAction(string action, string label) => new LegalAction
+	{
+		Action = action,
+		Index = -1,
+		CardIndex = -1,
+		TargetId = -1,
+		Col = -1,
+		Row = -1,
+		Slot = -1,
+		Label = label
+	};
 
 	// ================================================================
 	// Core: snapshot → protobuf GameState → byte[]

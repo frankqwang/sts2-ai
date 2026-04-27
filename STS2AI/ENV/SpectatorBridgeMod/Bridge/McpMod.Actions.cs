@@ -33,6 +33,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Potions;
+using MegaCrit.Sts2.Core.Events;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
@@ -670,14 +671,36 @@ public static partial class McpMod
 
     private static Dictionary<string, object?> ExecuteChooseEventOption(Dictionary<string, JsonElement> data)
     {
-        var uiRoom = NEventRoom.Instance;
-        if (uiRoom == null)
-            return Error("Event room is not open");
-
         if (!data.TryGetValue("index", out var indexElem))
             return Error("Missing 'index' (event option index)");
 
         int index = indexElem.GetInt32();
+
+        if (RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is EventRoom eventRoom)
+        {
+            EventModel localEvent = eventRoom.LocalMutableEvent;
+            if (!localEvent.IsFinished
+                && index >= 0
+                && index < localEvent.CurrentOptions.Count)
+            {
+                EventOption option = localEvent.CurrentOptions[index];
+                if (option.IsLocked)
+                    return Error($"Event option index {index} is locked");
+
+                string runtimeTitle = SafeGetText(() => option.Title) ?? "option";
+                RunManager.Instance.EventSynchronizer.ChooseLocalOption(index);
+
+                return new Dictionary<string, object?>
+                {
+                    ["status"] = "ok",
+                    ["message"] = $"Choosing event option: {runtimeTitle}"
+                };
+            }
+        }
+
+        var uiRoom = NEventRoom.Instance;
+        if (uiRoom == null)
+            return Error("Event room is not open");
 
         var buttons = FindAll<NEventOptionButton>(uiRoom).ToList();
 
@@ -828,23 +851,38 @@ public static partial class McpMod
             return Error("Missing 'index' (reward index)");
 
         int index = indexElem.GetInt32();
+        TryGetJsonString(data, "label", out string requestedLabel);
+        if (string.IsNullOrWhiteSpace(requestedLabel))
+            TryGetJsonString(data, "value", out requestedLabel);
+        TryGetJsonString(data, "reward_key", out string requestedRewardKey);
+        TryGetJsonString(data, "reward_type", out string requestedRewardType);
 
-        var enabledButtons = FindAll<NRewardButton>(rewardsScreen)
-            .Where(b => b.IsEnabled && b.Reward != null)
+        var rewardButtons = FindAll<NRewardButton>(rewardsScreen)
+            .Where(b => b.Reward != null)
             .ToList();
 
-        if (index < 0 || index >= enabledButtons.Count)
-            return Error($"Reward index {index} out of range (screen has {enabledButtons.Count} claimable rewards)");
+        NRewardButton? button = FindRewardButtonByRequest(
+            rewardButtons,
+            requestedRewardKey,
+            requestedLabel,
+            requestedRewardType);
 
-        var button = enabledButtons[index];
+        if (button == null)
+        {
+            if (index < 0 || index >= rewardButtons.Count)
+                return Error($"Reward index {index} out of range (screen has {rewardButtons.Count} rewards)");
+            button = rewardButtons[index];
+        }
+
         var reward = button.Reward!;
-        string rewardDesc = GetRewardTypeName(reward);
-        if (reward is GoldReward g)
-            rewardDesc = $"gold ({g.Amount})";
-        else if (reward is PotionReward p)
-            rewardDesc = $"potion ({SafeGetText(() => p.Potion?.Title)})";
-        else if (reward is CardReward)
-            rewardDesc = "card (opens card selection)";
+        var runState = RunManager.Instance.DebugOnlyGetState();
+        var player = runState != null ? LocalContext.GetMe(runState) : null;
+        if (!button.IsEnabled)
+            return Error($"Requested reward is not enabled: {DescribeRewardForAction(reward)}");
+        if (!IsRewardClaimable(reward, player, out string? claimBlockReason))
+            return Error($"Requested reward is not claimable: {DescribeRewardForAction(reward)} ({claimBlockReason ?? "blocked"})");
+
+        string rewardDesc = DescribeRewardForAction(reward);
 
         button.ForceClick();
 
@@ -853,6 +891,93 @@ public static partial class McpMod
             ["status"] = "ok",
             ["message"] = $"Claiming reward: {rewardDesc}"
         };
+    }
+
+    private static NRewardButton? FindRewardButtonByRequest(
+        List<NRewardButton> rewardButtons,
+        string requestedRewardKey,
+        string requestedLabel,
+        string requestedRewardType)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedRewardKey))
+        {
+            var byKey = rewardButtons.FirstOrDefault(b =>
+                b.Reward != null
+                && string.Equals(BuildRewardKey(b.Reward), requestedRewardKey, StringComparison.OrdinalIgnoreCase));
+            if (byKey != null)
+                return byKey;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedLabel))
+        {
+            var byLabel = rewardButtons.FirstOrDefault(b =>
+                b.Reward != null
+                && RewardMatchesRequestedLabel(b.Reward, requestedLabel));
+            if (byLabel != null)
+                return byLabel;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedRewardType))
+        {
+            var byType = rewardButtons.FirstOrDefault(b =>
+                b.Reward != null
+                && string.Equals(GetRewardTypeName(b.Reward), requestedRewardType, StringComparison.OrdinalIgnoreCase));
+            if (byType != null)
+                return byType;
+        }
+
+        return null;
+    }
+
+    private static bool RewardMatchesRequestedLabel(Reward reward, string requestedLabel)
+    {
+        string requested = NormalizeRewardMatchText(requestedLabel);
+        string description = NormalizeRewardMatchText(SafeGetText(() => reward.Description));
+        if (!string.IsNullOrWhiteSpace(description) && requested == description)
+            return true;
+
+        if (reward is CardReward && (requested.Contains("card") || requested.Contains("牌")))
+            return true;
+        if (reward is PotionReward potionReward)
+        {
+            string potionName = NormalizeRewardMatchText(SafeGetText(() => potionReward.Potion?.Title));
+            string potionId = NormalizeRewardMatchText(potionReward.Potion?.Id.Entry);
+            return (!string.IsNullOrWhiteSpace(potionName) && requested.Contains(potionName))
+                || (!string.IsNullOrWhiteSpace(potionId) && requested.Contains(potionId))
+                || requested.Contains("potion")
+                || requested.Contains("药水");
+        }
+        if (reward is GoldReward goldReward)
+        {
+            return requested.Contains("gold")
+                || requested.Contains("金币")
+                || requested.Contains(goldReward.Amount.ToString());
+        }
+
+        return requested.Contains(GetRewardTypeName(reward).Replace("_", string.Empty));
+    }
+
+    private static string NormalizeRewardMatchText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+        var chars = text
+            .Where(c => !char.IsWhiteSpace(c) && !char.IsPunctuation(c) && !char.IsSymbol(c))
+            .Select(char.ToLowerInvariant)
+            .ToArray();
+        return new string(chars);
+    }
+
+    private static string DescribeRewardForAction(Reward reward)
+    {
+        string rewardDesc = GetRewardTypeName(reward);
+        if (reward is GoldReward g)
+            rewardDesc = $"gold ({g.Amount})";
+        else if (reward is PotionReward p)
+            rewardDesc = $"potion ({SafeGetText(() => p.Potion?.Title)})";
+        else if (reward is CardReward)
+            rewardDesc = "card (opens card selection)";
+        return rewardDesc;
     }
 
     private static Dictionary<string, object?> ExecuteSelectCardReward(Dictionary<string, JsonElement> data)
@@ -955,10 +1080,18 @@ public static partial class McpMod
         // Try treasure room
         var treasureUI = FindFirst<NTreasureRoom>(
             ((Godot.SceneTree)Godot.Engine.GetMainLoop()).Root);
+        if (treasureUI != null && TryOpenTreasureChest(treasureUI, out var treasureMessage))
+        {
+            return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = treasureMessage };
+        }
         if (treasureUI != null && treasureUI.ProceedButton.IsEnabled)
         {
             treasureUI.ProceedButton.ForceClick();
             return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Proceeding from treasure room" };
+        }
+        if (treasureUI != null)
+        {
+            return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Treasure room is settling" };
         }
 
         return Error("No proceed button available or enabled");
@@ -980,6 +1113,13 @@ public static partial class McpMod
 
             return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Closing shop inventory" };
         }
+
+        var treasureUI = FindFirst<NTreasureRoom>(
+            ((Godot.SceneTree)Godot.Engine.GetMainLoop()).Root);
+        if (treasureUI != null && TryOpenTreasureChest(treasureUI, out var treasureMessage))
+            return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = treasureMessage };
+        if (treasureUI != null && !treasureUI.ProceedButton.IsEnabled)
+            return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Treasure room is settling" };
 
         if (NEventRoom.Instance is { } eventRoom)
         {
@@ -1011,6 +1151,27 @@ public static partial class McpMod
             return true;
         }
 
+        return false;
+    }
+
+    private static bool TryOpenTreasureChest(NTreasureRoom treasureUI, out string message)
+    {
+        var relicCollection = treasureUI.GetNodeOrNull<NTreasureRoomRelicCollection>("%RelicCollection");
+        if (relicCollection?.Visible == true)
+        {
+            message = "";
+            return false;
+        }
+
+        var chestButton = treasureUI.GetNodeOrNull<NClickableControl>("Chest");
+        if (chestButton is { IsEnabled: true })
+        {
+            chestButton.ForceClick();
+            message = "Opening treasure chest";
+            return true;
+        }
+
+        message = "";
         return false;
     }
 
@@ -1459,7 +1620,11 @@ public static partial class McpMod
 
         var relicCollection = treasureUI.GetNodeOrNull<NTreasureRoomRelicCollection>("%RelicCollection");
         if (relicCollection?.Visible != true)
-            return Error("Relic collection is not visible — chest may not be opened yet");
+        {
+            if (TryOpenTreasureChest(treasureUI, out var treasureMessage))
+                return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = treasureMessage };
+            return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Treasure room is settling" };
+        }
 
         if (!data.TryGetValue("index", out var indexElem))
             return Error("Missing 'index' (relic index)");

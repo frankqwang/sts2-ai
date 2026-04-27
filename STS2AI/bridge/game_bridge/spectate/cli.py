@@ -35,6 +35,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=15527)
     parser.add_argument("--transport", type=str, default="http_json")
     parser.add_argument("--backend", choices=("spectator", "sim"), default="spectator")
+    parser.add_argument("--session-mode", choices=("full_run", "combat"), default="full_run")
     parser.add_argument("--auto-launch", action="store_true")
     parser.add_argument("--request-timeout-s", type=float, default=30.0)
     parser.add_argument("--ready-timeout-s", type=float, default=60.0)
@@ -63,7 +64,7 @@ def main() -> None:
         policy = NullPolicy()
 
     session = create_game_session(
-        mode="full_run",
+        mode=args.session_mode,
         base_url=args.base_url,
         port=args.port,
         transport=args.transport,
@@ -88,6 +89,7 @@ def main() -> None:
                     "mode": args.mode,
                     "transport": args.transport,
                     "backend": args.backend,
+                    "session_mode": args.session_mode,
                     "auto_launch": bool(args.auto_launch),
                     "repo_root": str(Path(resolved_repo_root).resolve()) if resolved_repo_root else None,
                     "host_path": str(Path(resolved_host_path).resolve()) if resolved_host_path else None,

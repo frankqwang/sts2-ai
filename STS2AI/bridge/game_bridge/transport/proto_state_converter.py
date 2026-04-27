@@ -146,12 +146,18 @@ def _convert_legal_action(a: pb.LegalAction) -> dict[str, Any]:
     所以 >=0 的判断是正确的（0 是合法 index）。
     """
     action_name = a.action or "other"
+    card_index = a.card_index if a.card_index >= 0 else None
+    target_id = a.target_id if a.target_id >= 0 else None
+    if action_name in {"end_turn", "confirm_selection", "cancel_selection"}:
+        card_index = None
+        target_id = None
+
     action = {
         "action": action_name,
         "type": action_name,
         "index": a.index if a.index >= 0 else None,
-        "card_index": a.card_index if a.card_index >= 0 else None,
-        "target_id": a.target_id if a.target_id >= 0 else None,
+        "card_index": card_index,
+        "target_id": target_id,
         "col": a.col if a.col >= 0 else None,
         "row": a.row if a.row >= 0 else None,
         "slot": a.slot if a.slot >= 0 else None,
@@ -425,7 +431,7 @@ def _convert_combat_rewards(cr: pb.CombatRewardsState, player: dict[str, Any]) -
             "index": i,
             "type": item.type or "unknown",
             "label": item.label or item.type or "unknown",
-            "id": None,
+            "id": item.id or None,
             "reward_key": None,
             "reward_source": None,
             "claimable": item.claimable,
@@ -504,7 +510,8 @@ def _decorate_action_labels(state: dict[str, Any]) -> None:
         action_name = str(action.get("action") or "")
         index = action.get("index")
         card_index = action.get("card_index")
-        label = action_name
+        existing_label = str(action.get("label") or "").strip()
+        label = existing_label or action_name
 
         if action_name == "choose_map_node":
             opt = _get_indexed_item(map_options, index)
@@ -516,13 +523,16 @@ def _decorate_action_labels(state: dict[str, Any]) -> None:
             rc = _get_indexed_item(reward_cards, index)
             label = str((rc or {}).get("id") or action_name)
         elif action_name in {"select_card", "combat_select_card", "select_card_option"}:
-            label = str(
-                (_get_indexed_item(card_select_cards, index)
-                 or _get_indexed_item(hand_cards, card_index)
-                 or _get_indexed_item(hand_cards, index)
-                 or {}).get("id")
-                or action_name
-            )
+            if existing_label and existing_label.lower() != action_name:
+                label = existing_label
+            else:
+                label = str(
+                    (_get_indexed_item(card_select_cards, index)
+                     or _get_indexed_item(hand_cards, card_index)
+                     or _get_indexed_item(hand_cards, index)
+                     or {}).get("id")
+                    or action_name
+                )
         elif action_name == "play_card":
             label = str(
                 (_get_indexed_item(hand_cards, card_index)

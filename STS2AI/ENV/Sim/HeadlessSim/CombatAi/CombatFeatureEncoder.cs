@@ -134,8 +134,8 @@ internal sealed class CombatVocab
 	public static CombatVocab Load(string onnxPath, string? vocabPath)
 	{
 		CombatVocab vocab = new CombatVocab();
-		string? repoVocabPath = ResolvePythonDataFile("vocab.json");
-		string? repoCardTagsPath = ResolvePythonDataFile("card_tags.json");
+		string? repoVocabPath = ResolveBridgeDataFile("vocab.json");
+		string? repoCardTagsPath = ResolveBridgeDataFile("card_tags.json");
 
 		List<string> vocabCandidates = new();
 		if (!string.IsNullOrWhiteSpace(vocabPath))
@@ -164,7 +164,7 @@ internal sealed class CombatVocab
 		{
 			throw new InvalidOperationException(
 				$"Failed to load combat vocab for ONNX model '{onnxPath}'. " +
-				"Expected vocab_mapping.json next to the model or STS2AI/Python/vocab.json in the repo.");
+				"Expected vocab_mapping.json next to the model or STS2AI/bridge/data/vocab.json in the repo.");
 		}
 
 		return vocab;
@@ -334,12 +334,12 @@ internal sealed class CombatVocab
 		return value;
 	}
 
-	private static string? ResolvePythonDataFile(string fileName)
+	private static string? ResolveBridgeDataFile(string fileName)
 	{
 		DirectoryInfo? cursor = new DirectoryInfo(AppContext.BaseDirectory);
 		while (cursor != null)
 		{
-			string candidate = Path.Combine(cursor.FullName, "STS2AI", "Python", fileName);
+			string candidate = Path.Combine(cursor.FullName, "STS2AI", "bridge", "data", fileName);
 			if (File.Exists(candidate))
 			{
 				return candidate;

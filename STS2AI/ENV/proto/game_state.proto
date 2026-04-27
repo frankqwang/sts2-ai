@@ -288,6 +288,48 @@ message LegalAction {
   string card_id = 9;
 }
 
+// --- Action settlement events ---
+
+message SettlementEvent {
+  string type = 1;                 // "card_play_started"/"damage_received"/"power_received"/...
+  int32 sequence = 2;              // 当前 delta 内的顺序，从 0 开始
+  int32 round_number = 3;
+  string turn_side = 4;            // game enum string, lower-case
+
+  string actor_id = 5;             // player character id / monster id
+  int32 actor_combat_id = 6;       // monster combat id; player 或未知为 0
+  bool actor_is_player = 7;
+
+  string target_id = 8;            // player character id / monster id
+  int32 target_combat_id = 9;      // monster combat id; player 或未知为 0
+  bool target_is_player = 10;
+  repeated string target_ids = 11;
+  repeated int32 target_combat_ids = 12;
+
+  string card_id = 13;             // played/drawn/discarded/exhausted/generated card id
+  string source_card_id = 14;      // damage/power source card when available
+  string power_id = 15;
+  string potion_id = 16;
+  string orb_id = 17;
+  string move_id = 18;
+
+  int32 amount_int = 19;           // block/energy/stars/summon/card count 等整数效果
+  double amount_value = 20;        // power 层数等可能为 decimal 的效果
+  int32 blocked_damage = 21;
+  int32 unblocked_damage = 22;
+  int32 total_damage = 23;
+  int32 overkill_damage = 24;
+  bool target_killed = 25;
+
+  int32 energy_spent = 26;
+  int32 stars_spent = 27;
+  int32 card_play_index = 28;
+  int32 card_play_count = 29;
+  bool is_auto_play = 30;
+
+  string description = 31;         // 游戏 CombatHistoryEntry.HumanReadableString
+}
+
 // --- gRPC Service ---
 
 service GameBridge {
@@ -485,6 +527,7 @@ message BridgeActPayload {
   bool accepted = 1;
   string error = 2;
   GameState state = 3;
+  repeated SettlementEvent settlement_events = 4;
 }
 
 message BridgeBatchActPayload {
@@ -492,6 +535,7 @@ message BridgeBatchActPayload {
   int32 steps_executed = 2;
   string error = 3;
   GameState state = 4;
+  repeated SettlementEvent settlement_events = 5;
 }
 
 message BridgeSaveStateResult {

@@ -267,6 +267,7 @@ class GameSession(PipeSnapshotMixin):
         )
         self._current_state: dict[str, Any] = {}
         self._last_step_info: dict[str, Any] | None = None
+        self._last_settlement_events: list[dict[str, Any]] = []
 
     def close(self) -> None:
         self._transport.close()
@@ -316,9 +317,13 @@ class GameSession(PipeSnapshotMixin):
 
     def act(self, action: dict[str, Any] | pb.LegalAction, *, timeout_s: float | None = None) -> dict[str, Any]:
         self._last_step_info = None
+        self._last_settlement_events = []
         params = _legal_action_to_dict(action)
         method = "combat_act" if self.mode == "combat" else "act"
         result = self._call(method, params, timeout_s=timeout_s)
+        events = result.get("settlement_events") if isinstance(result, dict) else None
+        if isinstance(events, list):
+            self._last_settlement_events = [dict(item) for item in events if isinstance(item, dict)]
         if not bool(result.get("accepted", True)):
             self._raise_rejected_action(result)
         state = result.get("state") if isinstance(result, dict) else None
@@ -327,11 +332,14 @@ class GameSession(PipeSnapshotMixin):
         info = result.get("info")
         if isinstance(info, dict):
             self._last_step_info = dict(info)
+            self._last_step_info["settlement_events"] = list(self._last_settlement_events)
         self._current_state = dict(state)
         return self.current_state
 
     def batch_act(self, actions: list[dict[str, Any]], *, timeout_s: float | None = None) -> dict[str, Any]:
         result = self._call("batch_act", {"actions": actions}, timeout_s=timeout_s)
+        events = result.get("settlement_events") if isinstance(result, dict) else None
+        self._last_settlement_events = [dict(item) for item in events if isinstance(item, dict)] if isinstance(events, list) else []
         if not bool(result.get("accepted", True)):
             self._raise_rejected_action(result)
         state = result.get("state")
@@ -347,6 +355,7 @@ class GameSession(PipeSnapshotMixin):
             "accepted": True,
             "state_type": state.get("state_type"),
             "run_outcome": normalize_run_outcome(state.get("run_outcome")) or None,
+            "settlement_events": self.last_settlement_events,
         }
         return state, _terminal_reward(state), done, info
 
@@ -435,6 +444,10 @@ class GameSession(PipeSnapshotMixin):
     def last_step_info(self) -> dict[str, Any] | None:
         return dict(self._last_step_info) if isinstance(self._last_step_info, dict) else None
 
+    @property
+    def last_settlement_events(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in self._last_settlement_events]
+
     def get_last_transport_metrics(self) -> dict[str, Any]:
         return dict(self._transport.last_call_metrics)
 
@@ -462,6 +475,10 @@ class GameSession(PipeSnapshotMixin):
         if isinstance(info, dict):
             self._last_step_info = dict(info)
             setattr(error, "step_info", dict(info))
+        events = result.get("settlement_events")
+        if isinstance(events, list):
+            self._last_settlement_events = [dict(item) for item in events if isinstance(item, dict)]
+            setattr(error, "settlement_events", self.last_settlement_events)
         raise error
 
 

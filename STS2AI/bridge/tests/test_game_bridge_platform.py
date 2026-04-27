@@ -377,6 +377,22 @@ def test_bridge_envelope_round_trips_through_protobuf_json_mapping():
         act=pb.BridgeActPayload(
             accepted=True,
             state=pb.GameState(state_type="monster", terminal=False),
+            settlement_events=[
+                pb.SettlementEvent(
+                    type="damage_received",
+                    sequence=0,
+                    round_number=1,
+                    turn_side="player",
+                    actor_id="IRONCLAD",
+                    actor_is_player=True,
+                    target_id="CULTIST",
+                    target_combat_id=1,
+                    unblocked_damage=8,
+                    total_damage=8,
+                    source_card_id="BASH",
+                    description="Rd 1 (Player turn): IRONCLAD dealt 8 damage to CULTIST.",
+                )
+            ],
         ),
     )
     response_json = json_format.MessageToJson(response)
@@ -386,3 +402,47 @@ def test_bridge_envelope_round_trips_through_protobuf_json_mapping():
 
     assert decoded["accepted"] is True
     assert decoded["state"]["state_type"] == "monster"
+    assert decoded["settlement_events"][0]["type"] == "damage_received"
+    assert decoded["settlement_events"][0]["unblocked_damage"] == 8
+    assert decoded["info"]["settlement_events"][0]["source_card_id"] == "BASH"
+
+
+def test_game_session_act_records_last_settlement_events():
+    class _FakeTransport:
+        transport_name = "pipe_proto"
+
+        @property
+        def last_call_metrics(self):
+            return {}
+
+        def close(self):
+            return None
+
+        def call(self, method, params=None, *, timeout_s=None):
+            assert method == "act"
+            return {
+                "accepted": True,
+                "state": {"state_type": "monster", "terminal": False},
+                "settlement_events": [
+                    {
+                        "type": "power_received",
+                        "target_id": "CULTIST",
+                        "power_id": "VULNERABLE",
+                        "amount_value": 2.0,
+                    }
+                ],
+                "info": {"state_type": "monster"},
+            }
+
+    session = object.__new__(GameSession)
+    session.mode = "full_run"
+    session._transport = _FakeTransport()
+    session._current_state = {}
+    session._last_step_info = None
+    session._last_settlement_events = []
+
+    state = session.act({"action": "play_card", "card_index": 0, "target_id": 1})
+
+    assert state["state_type"] == "monster"
+    assert session.last_settlement_events[0]["power_id"] == "VULNERABLE"
+    assert session.last_step_info["settlement_events"][0]["amount_value"] == 2.0

@@ -67,6 +67,65 @@ def _decode_search_mcts_payload(payload: "pb.BridgeSearchCombatMctsResult") -> d
     return result
 
 
+def _decode_settlement_event(event: "pb.SettlementEvent") -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "type": str(event.type),
+        "sequence": int(event.sequence),
+        "round_number": int(event.round_number),
+    }
+    if event.turn_side:
+        result["turn_side"] = str(event.turn_side)
+    if event.actor_id:
+        result["actor_id"] = str(event.actor_id)
+        result["actor_combat_id"] = int(event.actor_combat_id)
+        result["actor_is_player"] = bool(event.actor_is_player)
+    if event.target_id:
+        result["target_id"] = str(event.target_id)
+        result["target_combat_id"] = int(event.target_combat_id)
+        result["target_is_player"] = bool(event.target_is_player)
+    if event.target_ids:
+        result["target_ids"] = [str(value) for value in event.target_ids]
+    if event.target_combat_ids:
+        result["target_combat_ids"] = [int(value) for value in event.target_combat_ids]
+
+    for key, value in (
+        ("card_id", event.card_id),
+        ("source_card_id", event.source_card_id),
+        ("power_id", event.power_id),
+        ("potion_id", event.potion_id),
+        ("orb_id", event.orb_id),
+        ("move_id", event.move_id),
+        ("description", event.description),
+    ):
+        if value:
+            result[key] = str(value)
+
+    for key, value in (
+        ("amount_int", event.amount_int),
+        ("blocked_damage", event.blocked_damage),
+        ("unblocked_damage", event.unblocked_damage),
+        ("total_damage", event.total_damage),
+        ("overkill_damage", event.overkill_damage),
+        ("energy_spent", event.energy_spent),
+        ("stars_spent", event.stars_spent),
+        ("card_play_index", event.card_play_index),
+        ("card_play_count", event.card_play_count),
+    ):
+        if int(value) != 0:
+            result[key] = int(value)
+    if float(event.amount_value) != 0.0:
+        result["amount_value"] = float(event.amount_value)
+    if event.target_killed:
+        result["target_killed"] = True
+    if event.is_auto_play:
+        result["is_auto_play"] = True
+    return result
+
+
+def _decode_settlement_events(events: Any) -> list[dict[str, Any]]:
+    return [_decode_settlement_event(event) for event in events]
+
+
 def _apply_legal_action_to_proto(target: "pb.LegalAction", action: dict[str, Any]) -> None:
     if isinstance(action, pb.LegalAction):
         target.CopyFrom(action)
@@ -286,15 +345,18 @@ class ProtoCodec(ProtocolCodec):
 
         if resp.method in {pb.ACT, pb.STEP_LOCAL_POLICY, pb.SKIP_COMBAT, pb.COMBAT_ACT}:
             state = _parse_proto_state(resp.act.state)
+            settlement_events = _decode_settlement_events(resp.act.settlement_events)
             result = {
                 "accepted": bool(resp.act.accepted),
                 "error": str(resp.act.error or "") or None,
                 "state": state,
+                "settlement_events": settlement_events,
                 "reward": _terminal_reward(state),
                 "done": bool(state.get("terminal")),
                 "info": {
                     "state_type": state.get("state_type"),
                     "run_outcome": state.get("run_outcome"),
+                    "settlement_events": settlement_events,
                 },
             }
             if resp.method == pb.SKIP_COMBAT:
@@ -308,6 +370,7 @@ class ProtoCodec(ProtocolCodec):
                 "steps_executed": int(resp.batch_act.steps_executed),
                 "error": str(resp.batch_act.error or "") or None,
                 "state": state,
+                "settlement_events": _decode_settlement_events(resp.batch_act.settlement_events),
             }
 
         if resp.method in {pb.SAVE_STATE, pb.SAVE_SEARCH_STATE}:

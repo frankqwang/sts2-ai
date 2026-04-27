@@ -632,13 +632,17 @@ public static class BridgeGameStateBuilder
 						Action = "select_hand_card",
 						Index = card.HandIndex,
 						CardIndex = card.HandIndex,
+						TargetId = -1,
+						Col = -1,
+						Row = -1,
+						Slot = -1,
 						CardId = card.Id ?? "",
 						Label = string.IsNullOrEmpty(card.Title) ? card.Id ?? "" : card.Title
 					});
 				}
 			}
-			if (hs.CanConfirm) gs.LegalActions.Add(new LegalAction { Action = "confirm_selection", Label = "Confirm" });
-			if (hs.Cancelable) gs.LegalActions.Add(new LegalAction { Action = "cancel_selection", Label = "Cancel" });
+			if (hs.CanConfirm) gs.LegalActions.Add(NonIndexedAction("confirm_selection", "Confirm"));
+			if (hs.Cancelable) gs.LegalActions.Add(NonIndexedAction("cancel_selection", "Cancel"));
 			return;
 		}
 		if (snapshot.IsCardSelectionActive && snapshot.CardSelection != null)
@@ -653,13 +657,17 @@ public static class BridgeGameStateBuilder
 						Action = "select_card_option",
 						Index = card.ChoiceIndex,
 						CardIndex = card.ChoiceIndex,
+						TargetId = -1,
+						Col = -1,
+						Row = -1,
+						Slot = -1,
 						CardId = card.Id ?? "",
 						Label = string.IsNullOrEmpty(card.Title) ? card.Id ?? "" : card.Title
 					});
 				}
 			}
-			if (cs.CanConfirm) gs.LegalActions.Add(new LegalAction { Action = "confirm_selection", Label = "Confirm" });
-			if (cs.Cancelable) gs.LegalActions.Add(new LegalAction { Action = "cancel_selection", Label = "Cancel" });
+			if (cs.CanConfirm) gs.LegalActions.Add(NonIndexedAction("confirm_selection", "Confirm"));
+			if (cs.Cancelable) gs.LegalActions.Add(NonIndexedAction("cancel_selection", "Cancel"));
 			return;
 		}
 		foreach (CombatTrainingHandCardSnapshot card in snapshot.Hand)
@@ -676,7 +684,10 @@ public static class BridgeGameStateBuilder
 						CardIndex = card.HandIndex,
 						CardId = card.Id ?? "",
 						Label = string.IsNullOrEmpty(card.Title) ? card.Id ?? "" : card.Title,
-						TargetId = (int)targetId
+						TargetId = (int)targetId,
+						Col = -1,
+						Row = -1,
+						Slot = -1
 					});
 				}
 			}
@@ -688,12 +699,28 @@ public static class BridgeGameStateBuilder
 					Index = card.HandIndex,
 					CardIndex = card.HandIndex,
 					CardId = card.Id ?? "",
-					Label = string.IsNullOrEmpty(card.Title) ? card.Id ?? "" : card.Title
+					Label = string.IsNullOrEmpty(card.Title) ? card.Id ?? "" : card.Title,
+					TargetId = -1,
+					Col = -1,
+					Row = -1,
+					Slot = -1
 				});
 			}
 		}
-		if (snapshot.CanEndTurn) gs.LegalActions.Add(new LegalAction { Action = "end_turn", Label = "End Turn" });
+		if (snapshot.CanEndTurn) gs.LegalActions.Add(NonIndexedAction("end_turn", "End Turn"));
 	}
+
+	private static LegalAction NonIndexedAction(string action, string label) => new LegalAction
+	{
+		Action = action,
+		Index = -1,
+		CardIndex = -1,
+		TargetId = -1,
+		Col = -1,
+		Row = -1,
+		Slot = -1,
+		Label = label
+	};
 
 	private static string DetectCombatStateType(CombatTrainingStateSnapshot snapshot)
 	{

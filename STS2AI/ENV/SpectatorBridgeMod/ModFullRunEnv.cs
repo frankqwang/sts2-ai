@@ -1185,11 +1185,18 @@ public static partial class McpMod
         {
             if (!string.IsNullOrWhiteSpace(enabledKey) && !GetBool(item, enabledKey, defaultValue: true))
                 continue;
+            if (actionName == "claim_reward" && !GetBool(item, "claimable", defaultValue: true))
+                continue;
             var action = new Dictionary<string, object?>
             {
                 ["action"] = actionName,
                 ["index"] = GetInt(item, "index", -1)
             };
+            if (TryGetString(item, "label", out string label)) action["label"] = label;
+            else if (TryGetString(item, "description", out string description)) action["label"] = description;
+            else if (TryGetString(item, "type", out string itemType)) action["label"] = itemType;
+            if (TryGetString(item, "reward_key", out string rewardKey)) action["reward_key"] = rewardKey;
+            if (TryGetString(item, "type", out string rewardType)) action["reward_type"] = rewardType;
             // Forward col/row for map nodes (needed for parity with Sim legal actions)
             if (item.TryGetValue("col", out object? col) && col != null) action["col"] = col;
             if (item.TryGetValue("row", out object? row) && row != null) action["row"] = row;

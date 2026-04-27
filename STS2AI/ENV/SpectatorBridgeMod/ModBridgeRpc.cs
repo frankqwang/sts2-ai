@@ -9,6 +9,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Simulation;
 using MegaCrit.Sts2.Core.Training;
@@ -118,6 +120,7 @@ public static partial class McpMod
             : envelope.Act.Action;
         Dictionary<string, JsonElement> parsed = BuildActionPayload(actionPayload);
         GameState beforeState = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult();
+        int historyOffset = RunOnMainThread(BridgeCombatHistoryDelta.CaptureOffset).GetAwaiter().GetResult();
         string action = actionPayload.Action ?? "";
         string? stepInfoCode = null;
         bool accepted;
@@ -184,35 +187,43 @@ public static partial class McpMod
         }
 
         GameState gameState = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult();
+        List<SettlementEvent> settlementEvents = RunOnMainThread(
+            () => BridgeCombatHistoryDelta.CaptureSince(historyOffset)).GetAwaiter().GetResult();
+		BridgeActPayload payload = new BridgeActPayload
+		{
+			Accepted = accepted,
+			Error = accepted ? "" : (actionError ?? stepInfoCode ?? ""),
+			State = gameState,
+		};
+        payload.SettlementEvents.Add(settlementEvents);
         return new BridgeResponseEnvelope
         {
             Method = responseMethod,
             Status = accepted ? BridgeStatus.Ok : BridgeStatus.RejectedAction,
-            Act = new BridgeActPayload
-            {
-                Accepted = accepted,
-                Error = actionError ?? stepInfoCode ?? "",
-                State = gameState,
-            }
+            Act = payload,
         };
     }
 
     private static BridgeResponseEnvelope ProcessBridgeSkipCombat()
     {
+        int historyOffset = RunOnMainThread(BridgeCombatHistoryDelta.CaptureOffset).GetAwaiter().GetResult();
         Dictionary<string, object?> beforeState = RunOnMainThread(BuildVisibleFullRunEnvState).GetAwaiter().GetResult();
         string stateType = GetStateType(beforeState);
         if (stateType != "monster" && stateType != "elite" && stateType != "boss" && stateType != "combat")
         {
+            BridgeActPayload notInCombatPayload = new BridgeActPayload
+            {
+                Accepted = true,
+                Error = "not_in_combat",
+                State = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult(),
+            };
+            notInCombatPayload.SettlementEvents.Add(
+                RunOnMainThread(() => BridgeCombatHistoryDelta.CaptureSince(historyOffset)).GetAwaiter().GetResult());
             return new BridgeResponseEnvelope
             {
                 Method = BridgeMethod.SkipCombat,
                 Status = BridgeStatus.Ok,
-                Act = new BridgeActPayload
-                {
-                    Accepted = true,
-                    Error = "not_in_combat",
-                    State = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult(),
-                }
+                Act = notInCombatPayload,
             };
         }
 
@@ -230,16 +241,19 @@ public static partial class McpMod
         {
         }
 
+        BridgeActPayload payload = new BridgeActPayload
+        {
+            Accepted = true,
+            Error = "combat_skipped",
+            State = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult(),
+        };
+        payload.SettlementEvents.Add(
+            RunOnMainThread(() => BridgeCombatHistoryDelta.CaptureSince(historyOffset)).GetAwaiter().GetResult());
         return new BridgeResponseEnvelope
         {
             Method = BridgeMethod.SkipCombat,
             Status = BridgeStatus.Ok,
-            Act = new BridgeActPayload
-            {
-                Accepted = true,
-                Error = "combat_skipped",
-                State = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult(),
-            }
+            Act = payload,
         };
     }
 
@@ -258,22 +272,61 @@ public static partial class McpMod
 
     private static GameState BuildBridgeGameState()
     {
+        if (!ShouldForceEnglishBridgeText())
+        {
+            return BuildBridgeGameStateCore();
+        }
+
+        LocManager? loc = LocManager.Instance;
+        if (loc == null || string.Equals(loc.Language, "eng", StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildBridgeGameStateCore();
+        }
+
+        loc.StartOverridingLanguageAsEnglish();
+        try
+        {
+            return BuildBridgeGameStateCore();
+        }
+        finally
+        {
+            loc.StopOverridingLanguageAsEnglish();
+        }
+    }
+
+    private static bool ShouldForceEnglishBridgeText()
+    {
+        string raw = Environment.GetEnvironmentVariable("STS2_BRIDGE_FORCE_ENGLISH_TEXT") ?? "1";
+        return !string.Equals(raw.Trim(), "0", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(raw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static GameState BuildBridgeGameStateCore()
+    {
         CombatTrainingStateSnapshot? combatSnapshot = null;
         if (CombatManager.Instance.IsInProgress || CombatManager.Instance.DebugOnlyGetState() != null)
         {
             combatSnapshot = BridgeCombatSnapshotBuilder.BuildStateSnapshot();
         }
 
+        FullRunSimulationChoiceBridge bridge = FullRunSimulationChoiceBridge.Instance;
+        SyncVisibleBridgeChoiceSelections(bridge);
+
         FullRunSimulationStateSnapshot snapshot = FullRunSimulationStateBuilder.Build(
             RunManager.Instance.DebugOnlyGetState(),
-            FullRunSimulationChoiceBridge.Instance,
+            bridge,
             isPureSimulator: false,
             backendKind: "spectator",
             coverageTier: "visible",
-            forceMapView: false,
+            forceMapView: IsSpectatorMapViewOpen(),
             cachedCombatState: combatSnapshot);
 
         return BridgeGameStateBuilder.FromFullRunSnapshot(snapshot);
+    }
+
+    private static bool IsSpectatorMapViewOpen()
+    {
+        return NMapScreen.Instance is { IsOpen: true };
     }
 
     private static string GetBridgeGameStateSignature(GameState state)
@@ -381,7 +434,8 @@ public static partial class McpMod
                 bool settled = !string.IsNullOrEmpty(state.StateType)
                     && state.StateType != "unknown"
                     && state.StateType != "menu"
-                    && state.StateType != "loading";
+                    && state.StateType != "loading"
+                    && IsBridgeStepStateSettled(state);
                 bool actionable = state.Terminal || state.LegalActions.Count > 0;
 
                 if (settled && actionable && stablePolls >= 2 && !IsBridgeEventDialogueOnly(state))
@@ -403,7 +457,7 @@ public static partial class McpMod
 
     private static bool IsBridgeStepStateSettled(GameState state)
     {
-        if (IsActionExecutorBusy())
+        if (RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult())
         {
             return false;
         }
@@ -419,7 +473,8 @@ public static partial class McpMod
         {
             return true;
         }
-        return !IsCombatPresentationBusy() && HasBridgeCombatInputSnapshotReady(state);
+        bool presentationBusy = RunOnMainThread(() => IsCombatPresentationBusy()).GetAwaiter().GetResult();
+        return !presentationBusy && HasBridgeCombatInputSnapshotReady(state);
     }
 
     private static bool IsBridgeResetStateReady(GameState state)
@@ -556,8 +611,8 @@ public static partial class McpMod
         var raw = new Dictionary<string, object?>
         {
             ["action"] = action.Action ?? "",
-            ["timeout_ms"] = 2000,
-            ["poll_delay_ms"] = 25,
+            ["timeout_ms"] = 8000,
+            ["poll_delay_ms"] = 50,
         };
         if (action.Index >= 0) raw["index"] = action.Index;
         if (action.CardIndex >= 0) raw["card_index"] = action.CardIndex;
@@ -565,7 +620,12 @@ public static partial class McpMod
         if (action.Col >= 0) raw["col"] = action.Col;
         if (action.Row >= 0) raw["row"] = action.Row;
         if (action.Slot >= 0) raw["slot"] = action.Slot;
-        if (!string.IsNullOrWhiteSpace(action.Label)) raw["value"] = action.Label;
+        if (!string.IsNullOrWhiteSpace(action.Label))
+        {
+            raw["label"] = action.Label;
+            raw["value"] = action.Label;
+        }
+        if (!string.IsNullOrWhiteSpace(action.CardId)) raw["card_id"] = action.CardId;
         return ToJsonElementDictionary(raw);
     }
 

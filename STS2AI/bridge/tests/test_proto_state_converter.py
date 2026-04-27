@@ -3,14 +3,14 @@
 构造 proto GameState 消息 → game_state_to_dict() → 验证输出 dict 格式
 是 V2 训练的规范 state 形状(历史上对齐过已删除的 binary_pipe_client 输出)。
 
-运行: cd STS2AI/Python && python -m pytest tests/test_proto_state_converter.py -v
+运行: cd STS2AI/bridge && python -m pytest tests/test_proto_state_converter.py -v
 """
 from __future__ import annotations
 
 import sys
 import os
 
-# 确保 STS2AI/Python 在 sys.path 中
+# 确保 STS2AI/bridge 在 sys.path 中
 _python_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _python_root not in sys.path:
     sys.path.insert(0, _python_root)
@@ -653,6 +653,15 @@ class TestProto3ZeroValues:
         d = game_state_to_dict(gs)
         assert "card_id" not in d["legal_actions"][0]
 
+    def test_end_turn_proto_defaults_do_not_become_hand_index(self):
+        """proto3 默认 0 不能让 end_turn 看起来绑定了 hand[0]。"""
+        gs = _make_game_state("monster")
+        la = gs.legal_actions.add()
+        la.action = "end_turn"
+        d = game_state_to_dict(gs)
+        assert d["legal_actions"][0]["card_index"] is None
+        assert d["legal_actions"][0]["target_id"] is None
+
 
 # ======================================================================
 # Tests — CardSelect / RelicSelect / Treasure
@@ -681,6 +690,28 @@ class TestCardSelect:
         assert len(d["card_select"]["cards"]) == 1
         assert len(d["card_select"]["selected_cards"]) == 1
         assert d["card_select"]["cards"][0]["id"] == "Strike"
+
+    def test_card_select_preserves_operation_label(self):
+        gs = _make_game_state("card_select")
+        c = gs.card_select.cards.add()
+        c.id = "BASH"
+        c.cost = 2
+        c.card_type = "ATTACK"
+        la = gs.legal_actions.add()
+        la.action = "select_card"
+        la.index = 0
+        la.card_index = 0
+        la.target_id = -1
+        la.col = -1
+        la.row = -1
+        la.slot = -1
+        la.card_id = "BASH"
+        la.label = "remove_card BASH"
+
+        d = game_state_to_dict(gs)
+
+        assert d["legal_actions"][0]["label"] == "remove_card BASH"
+        assert d["legal_actions"][0]["card_id"] == "BASH"
 
 
 class TestRelicSelect:

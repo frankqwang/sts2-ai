@@ -81,6 +81,8 @@ internal sealed class CombatTrainingSimulatorChoiceBridge : ICombatChoiceAdapter
 
 	public bool IsSelectionActive => _pendingSelection != null;
 
+	public bool CanUseNormalCombatActions => true;
+
 	public bool RequiresFrameSync => false;
 
 	public void Reset()

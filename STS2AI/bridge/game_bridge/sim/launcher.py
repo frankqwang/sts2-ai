@@ -140,6 +140,8 @@ def _kill_stale_headless_processes(*, port: int, host_path: Path) -> None:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except Exception:
         pass

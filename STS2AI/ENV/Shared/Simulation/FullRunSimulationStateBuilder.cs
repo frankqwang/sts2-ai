@@ -474,6 +474,7 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 		{
 			return actions;
 		}
+		string selectionPurpose = GetCardSelectionPurpose(selection);
 		int maxSelect = selection.MaxSelect;
 		int selectedCount = selection.SelectedCards.Count;
 		bool previewShowing = SelectionActionSemantics.IsQuotaReached(selectedCount, maxSelect) && selection.CanConfirm;
@@ -491,7 +492,8 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 					Action = "select_card",
 					Index = card.ChoiceIndex,
 					CardIndex = card.ChoiceIndex,
-					Label = card.Title,
+					CardId = card.Id,
+					Label = BuildCardSelectionActionLabel(selectionPurpose, card),
 					IsSupported = true
 				});
 			}
@@ -501,7 +503,7 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			actions.Add(new FullRunSimulationLegalAction
 			{
 				Action = "confirm_selection",
-				Label = "Confirm",
+				Label = string.IsNullOrWhiteSpace(selectionPurpose) ? "Confirm" : $"confirm {selectionPurpose}",
 				IsSupported = true
 			});
 		}
@@ -510,11 +512,39 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 			actions.Add(new FullRunSimulationLegalAction
 			{
 				Action = "cancel_selection",
-				Label = "Cancel",
+				Label = string.IsNullOrWhiteSpace(selectionPurpose) ? "Cancel" : $"cancel {selectionPurpose}",
 				IsSupported = true
 			});
 		}
 		return actions;
+	}
+
+	private static string BuildCardSelectionActionLabel(string purpose, CombatTrainingSelectableCardSnapshot card)
+	{
+		string id = string.IsNullOrWhiteSpace(card.Id) ? card.Title : card.Id;
+		if (string.IsNullOrWhiteSpace(purpose))
+		{
+			return string.IsNullOrWhiteSpace(card.Title) ? id : card.Title;
+		}
+		return $"{purpose} {id}";
+	}
+
+	private static string GetCardSelectionPurpose(CombatTrainingCardSelectionSnapshot selection)
+	{
+		string text = $"{selection.Mode} {selection.PromptText}".ToLowerInvariant();
+		if (text.Contains("remove") || text.Contains("purge") || text.Contains("delete") || text.Contains("移除") || text.Contains("删除"))
+		{
+			return "remove_card";
+		}
+		if (text.Contains("transform") || text.Contains("转化") || text.Contains("变化") || text.Contains("变换"))
+		{
+			return "transform_card";
+		}
+		if (text.Contains("upgrade") || text.Contains("升级") || text.Contains("强化"))
+		{
+			return "upgrade_card";
+		}
+		return string.Empty;
 	}
 
 	private static List<FullRunSimulationLegalAction> BuildRelicSelectLegalActions(FullRunPendingRelicSelectionSnapshot? relicSelection)
@@ -667,7 +697,7 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 				// During enemy turns and queued action execution, many state polls only need to
 				// know there are no combat actions available. Avoid building a full combat snapshot
 				// unless a hand/card selector is active or the player can actually act.
-				if (!choiceAdapter.IsSelectionActive && (!isPlayPhase || playerActionsDisabled || isActionQueueRunning))
+				if (!choiceAdapter.IsSelectionActive && (!isPlayPhase || playerActionsDisabled || isActionQueueRunning || !choiceAdapter.CanUseNormalCombatActions))
 				{
 					FullRunSimulationDiagnostics.Increment("combat_legal_actions.fast_empty_return");
 					return actions;

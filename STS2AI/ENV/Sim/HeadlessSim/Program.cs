@@ -103,7 +103,7 @@ internal static partial class Program
 		string locale = Environment.GetEnvironmentVariable("STS2_HEADLESS_LOCALE")?.Trim().ToLowerInvariant() ?? "";
 		if (string.IsNullOrWhiteSpace(locale))
 		{
-			locale = "zhs";
+			locale = "eng";
 		}
 		LocManager.Instance.SetLanguage(locale);
 	}

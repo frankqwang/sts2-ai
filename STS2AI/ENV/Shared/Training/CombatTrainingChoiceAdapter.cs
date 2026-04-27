@@ -23,6 +23,8 @@ public interface ICombatChoiceAdapter
 
 	bool IsSelectionActive { get; }
 
+	bool CanUseNormalCombatActions { get; }
+
 	bool RequiresFrameSync { get; }
 
 	CombatTrainingHandSelectionSnapshot? BuildHandSelectionSnapshot(CombatState? combatState);
@@ -195,6 +197,8 @@ internal sealed class UiCombatChoiceAdapter : ICombatChoiceAdapter
 	public string BackendKind => "ui";
 
 	public bool IsSelectionActive => _hand.IsInCardSelection;
+
+	public bool CanUseNormalCombatActions => !_hand.InCardPlay && _hand.CurrentMode == NPlayerHand.Mode.Play;
 
 	public bool RequiresFrameSync => true;
 

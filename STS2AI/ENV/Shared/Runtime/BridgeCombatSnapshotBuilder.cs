@@ -47,7 +47,7 @@ public static class BridgeCombatSnapshotBuilder
 			RoundNumber = combatState?.RoundNumber ?? 0,
 			CurrentSide = combatState?.CurrentSide ?? CombatSide.Player,
 			IsPlayPhase = CombatManager.Instance.IsPlayPhase,
-			PlayerActionsDisabled = CombatManager.Instance.PlayerActionsDisabled,
+			PlayerActionsDisabled = CombatManager.Instance.PlayerActionsDisabled || !choiceAdapter.CanUseNormalCombatActions,
 			IsActionQueueRunning = RunManager.Instance.IsInProgress && RunManager.Instance.ActionExecutor.IsRunning,
 			IsHandSelectionActive = false,
 			IsCardSelectionActive = false
@@ -86,6 +86,7 @@ public static class BridgeCombatSnapshotBuilder
 		snapshot.CanEndTurn = CombatManager.Instance.IsInProgress
 			&& CombatManager.Instance.IsPlayPhase
 			&& !choiceAdapter.IsSelectionActive
+			&& choiceAdapter.CanUseNormalCombatActions
 			&& !CombatManager.Instance.IsPlayerReadyToEndTurn(player);
 		return snapshot;
 	}

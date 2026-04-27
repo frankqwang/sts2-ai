@@ -109,7 +109,40 @@ function Sync-SpectatorModArtifacts {
         Where-Object { $_.Name -ne "sts2_mcp_spectator.dll" } |
         ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $installDir $_.Name) -Force
+            # STS2 loads mod DLLs into the default AssemblyLoadContext. Some
+            # dependency probes use the game executable directory, not the mod
+            # subdirectory, so mirror runtime dependencies there as well.
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path (Split-Path -Parent $GodotExe) $_.Name) -Force
+            $repoManagedDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "..\.godot\mono\temp\bin\Debug"
+            $repoManagedDir = [System.IO.Path]::GetFullPath($repoManagedDir)
+            if (Test-Path -LiteralPath $repoManagedDir) {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $repoManagedDir $_.Name) -Force
+            }
         }
+
+    $protobufDll = Join-Path $resolvedSource "Google.Protobuf.dll"
+    if (Test-Path -LiteralPath $protobufDll) {
+        # STS2 calls Assembly.GetTypes() before mod initializers run. Since the
+        # spectator mod contains generated protobuf types, preload protobuf as a
+        # dependency mod so the default AssemblyLoadContext can resolve it.
+        $protobufModId = "Google.Protobuf"
+        $protobufModDir = Join-Path (Split-Path -Parent $installDir) $protobufModId
+        New-Item -ItemType Directory -Force -Path $protobufModDir | Out-Null
+        Copy-Item -LiteralPath $protobufDll -Destination (Join-Path $protobufModDir "$protobufModId.dll") -Force
+        $protobufManifest = [ordered]@{
+            id = $protobufModId
+            name = "Google Protobuf"
+            author = "Google"
+            description = "Runtime dependency for STS2 MCP Spectator."
+            version = "3.28.3"
+            has_pck = $false
+            has_dll = $true
+            affects_gameplay = $false
+        }
+        $protobufManifest |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath (Join-Path $protobufModDir "$protobufModId.json") -Encoding utf8
+    }
 
     $optionalFiles = @(
         "README.md"

@@ -229,25 +229,33 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 
 	private PendingRelicSelection? _pendingRelicSelection;
 
+	private FullRunPendingRewardSelectionSnapshot? _visibleRewardSelection;
+
+	private FullRunPendingCardRewardSnapshot? _visibleCardRewardSelection;
+
+	private CombatTrainingCardSelectionSnapshot? _visibleCardSelection;
+
 	private FullRunSimulationChoiceBridge()
 	{
 	}
 
 	public string BackendKind => "full_run_simulator";
 
-	public bool IsSelectionActive => _pendingCardSelection != null || _pendingRewardSelection != null || _pendingCardRewardSelection != null || _pendingRelicSelection != null;
+	public bool IsSelectionActive => _pendingCardSelection != null || _pendingRewardSelection != null || _pendingCardRewardSelection != null || _pendingRelicSelection != null || _visibleRewardSelection != null || _visibleCardRewardSelection != null || _visibleCardSelection != null;
+
+	public bool CanUseNormalCombatActions => true;
 
 	public bool RequiresFrameSync => false;
 
-	public bool IsRewardSelectionActive => _pendingRewardSelection != null;
+	public bool IsRewardSelectionActive => _pendingRewardSelection != null || _visibleRewardSelection != null;
 
-	public bool IsCardRewardSelectionActive => _pendingCardRewardSelection != null;
+	public bool IsCardRewardSelectionActive => _pendingCardRewardSelection != null || _visibleCardRewardSelection != null;
 
 	public bool IsRelicSelectionActive => _pendingRelicSelection != null;
 
 	public bool IsHandSelectionActive => _pendingCardSelection?.IsHandSelection == true;
 
-	public bool IsCardSelectionActive => _pendingCardSelection != null && !_pendingCardSelection.IsHandSelection;
+	public bool IsCardSelectionActive => (_pendingCardSelection != null && !_pendingCardSelection.IsHandSelection) || _visibleCardSelection != null;
 
 	public bool IsCardOrHandSelectionActive => _pendingCardSelection != null;
 
@@ -261,6 +269,43 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		_pendingCardRewardSelection = null;
 		_pendingRelicSelection?.CompletionSource.TrySetResult(null);
 		_pendingRelicSelection = null;
+		ClearVisibleSelections();
+	}
+
+	public void SetVisibleRewardSelection(IReadOnlyList<Reward> rewards, bool canProceed)
+	{
+		_visibleRewardSelection = new FullRunPendingRewardSelectionSnapshot
+		{
+			CanProceed = canProceed,
+			Rewards = rewards.ToList()
+		};
+		_visibleCardRewardSelection = null;
+		_visibleCardSelection = null;
+	}
+
+	public void SetVisibleCardRewardSelection(IReadOnlyList<CardCreationResult> options, bool canSkip)
+	{
+		_visibleCardRewardSelection = new FullRunPendingCardRewardSnapshot
+		{
+			CanSkip = canSkip,
+			Options = options.ToList()
+		};
+		_visibleRewardSelection = null;
+		_visibleCardSelection = null;
+	}
+
+	public void SetVisibleCardSelection(CombatTrainingCardSelectionSnapshot selection)
+	{
+		_visibleCardSelection = selection;
+		_visibleRewardSelection = null;
+		_visibleCardRewardSelection = null;
+	}
+
+	public void ClearVisibleSelections()
+	{
+		_visibleRewardSelection = null;
+		_visibleCardRewardSelection = null;
+		_visibleCardSelection = null;
 	}
 
 	public void RegisterHandSelection(IEnumerable<CardModel> options, CardSelectorPrefs prefs, string mode)
@@ -306,7 +351,7 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		PendingCardSelection? selection = _pendingCardSelection;
 		if (selection == null || selection.IsHandSelection)
 		{
-			return null;
+			return _visibleCardSelection;
 		}
 		return new CombatTrainingCardSelectionSnapshot
 		{
@@ -328,7 +373,7 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		PendingRewardSelection? selection = _pendingRewardSelection;
 		if (selection == null)
 		{
-			return null;
+			return _visibleRewardSelection;
 		}
 		return new FullRunPendingRewardSelectionSnapshot
 		{
@@ -342,7 +387,7 @@ internal sealed class FullRunSimulationChoiceBridge : ICombatChoiceAdapter, IHan
 		PendingCardRewardSelection? selection = _pendingCardRewardSelection;
 		if (selection == null)
 		{
-			return null;
+			return _visibleCardRewardSelection;
 		}
 		return new FullRunPendingCardRewardSnapshot
 		{
