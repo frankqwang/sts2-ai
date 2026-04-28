@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$StopExistingGodot,
     [string]$AdapterDir = "",
     [string]$CombatAdapterDir = "",
@@ -29,7 +29,7 @@ param(
 )
 
 # 和 spectate_heuristic.ps1 同构，只把 external-policy 换成 LLM，
-# 并把 Python 默认值强制为 unsloth studio venv（4bit 加载 Qwen 需要）。
+# 并把 Python 默认值指向项目内 LLM venv（4bit / FA2 / xformers 运行时）。
 
 $ErrorActionPreference = "Stop"
 
@@ -40,12 +40,18 @@ $bridgeScripts = Join-Path $sts2aiRoot "bridge\scripts"
 $commonScript = Join-Path $bridgeScripts "trainer_common.ps1"
 . $commonScript
 
-# LLM 推理必须走 unsloth studio 3.13 venv
+# LLM 推理默认走项目内加速 venv；仍可用 -PythonExe 或 STS2_LLM_PYTHON_EXE 覆盖。
 if ([string]::IsNullOrWhiteSpace($PythonExe)) {
-    $PythonExe = "C:\Users\Administrator\.unsloth\studio\unsloth_studio\Scripts\python.exe"
+    $PythonExe = Join-Path $llmRoot ".venv311\Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $PythonExe)) {
+        $PythonExe = "C:\Users\Administrator\.unsloth\studio\unsloth_studio\Scripts\python.exe"
+    }
+}
+if ((-not ([string]::IsNullOrWhiteSpace($env:STS2_LLM_PYTHON_EXE))) -and (Test-Path -LiteralPath $env:STS2_LLM_PYTHON_EXE)) {
+    $PythonExe = $env:STS2_LLM_PYTHON_EXE
 }
 if (-not (Test-Path -LiteralPath $PythonExe)) {
-    throw "LLM spectate needs unsloth studio python: $PythonExe (not found)"
+    throw "LLM spectate python not found: $PythonExe. Pass -PythonExe or set STS2_LLM_PYTHON_EXE."
 }
 
 if ([string]::IsNullOrWhiteSpace($AdapterDir)) {
@@ -58,13 +64,13 @@ $AdapterDir = (Resolve-Path -LiteralPath $AdapterDir).Path
 if ([string]::IsNullOrWhiteSpace($CombatAdapterDir)) {
     $CombatAdapterDir = $AdapterDir
 }
-if (-not [string]::IsNullOrWhiteSpace($CombatAdapterDir)) {
+if (-not ([string]::IsNullOrWhiteSpace($CombatAdapterDir))) {
     if (-not (Test-Path -LiteralPath $CombatAdapterDir)) {
         throw "Combat LoRA adapter dir not found: $CombatAdapterDir"
     }
     $CombatAdapterDir = (Resolve-Path -LiteralPath $CombatAdapterDir).Path
 }
-if (-not [string]::IsNullOrWhiteSpace($NonCombatAdapterDir)) {
+if (-not ([string]::IsNullOrWhiteSpace($NonCombatAdapterDir))) {
     if (-not (Test-Path -LiteralPath $NonCombatAdapterDir)) {
         throw "Non-combat LoRA adapter dir not found: $NonCombatAdapterDir"
     }
@@ -82,7 +88,7 @@ $logDir = Join-Path $runRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $resolvedBuildFile = ""
-if (-not [string]::IsNullOrWhiteSpace($BuildFile)) {
+if (-not ([string]::IsNullOrWhiteSpace($BuildFile))) {
     $resolvedBuildFile = (Resolve-Path -LiteralPath $BuildFile).Path
 }
 
@@ -97,9 +103,9 @@ $resolvedBaseUrl = Resolve-BaseUrl -BaseUrl $BaseUrl -McpPort $McpPort
 $singleplayerStateUrl = Resolve-SingleplayerStateUrl -ResolvedBaseUrl $resolvedBaseUrl
 $spectatorModSource = Join-Path $sts2aiRoot "ENV\SpectatorBridgeMod\bin\Debug\net9.0"
 $spectatorModInstallDir = Sync-SpectatorModArtifacts -SourceDir $spectatorModSource -GodotExe $godotExe
-$resolvedSessionMode = if (-not [string]::IsNullOrWhiteSpace($SessionMode)) {
+$resolvedSessionMode = if (-not ([string]::IsNullOrWhiteSpace($SessionMode))) {
     $SessionMode
-} elseif (-not [string]::IsNullOrWhiteSpace($EncounterId)) {
+} elseif (-not ([string]::IsNullOrWhiteSpace($EncounterId))) {
     "combat"
 } else {
     "full_run"
@@ -180,12 +186,12 @@ if (-not $isSteamExe) {
 
 # llm_policy.py 会读这些 env
 $env:STS2_LLM_ADAPTER_DIR = $AdapterDir
-if (-not [string]::IsNullOrWhiteSpace($CombatAdapterDir)) {
+if (-not ([string]::IsNullOrWhiteSpace($CombatAdapterDir))) {
     $env:STS2_LLM_COMBAT_ADAPTER_DIR = $CombatAdapterDir
 } else {
     Remove-Item Env:\STS2_LLM_COMBAT_ADAPTER_DIR -ErrorAction SilentlyContinue
 }
-if (-not [string]::IsNullOrWhiteSpace($NonCombatAdapterDir)) {
+if (-not ([string]::IsNullOrWhiteSpace($NonCombatAdapterDir))) {
     $env:STS2_LLM_NON_COMBAT_ADAPTER_DIR = $NonCombatAdapterDir
 } else {
     Remove-Item Env:\STS2_LLM_NON_COMBAT_ADAPTER_DIR -ErrorAction SilentlyContinue
@@ -220,16 +226,16 @@ $pythonArgs = @(
     "--max-steps", [string]$MaxSteps,
     "--step-delay", ([string]::Format([System.Globalization.CultureInfo]::InvariantCulture, "{0:0.00}", $StepDelay))
 )
-if (-not [string]::IsNullOrWhiteSpace($Seed)) {
+if (-not ([string]::IsNullOrWhiteSpace($Seed))) {
     $pythonArgs += @("--seed", $Seed)
 }
 if ($Floor -gt 0) {
     $pythonArgs += @("--floor", [string]$Floor)
 }
-if (-not [string]::IsNullOrWhiteSpace($EncounterId)) {
+if (-not ([string]::IsNullOrWhiteSpace($EncounterId))) {
     $pythonArgs += @("--encounter-id", $EncounterId)
 }
-if (-not [string]::IsNullOrWhiteSpace($resolvedBuildFile)) {
+if (-not ([string]::IsNullOrWhiteSpace($resolvedBuildFile))) {
     $pythonArgs += @("--build-file", $resolvedBuildFile)
 }
 

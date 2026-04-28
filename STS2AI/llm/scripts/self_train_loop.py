@@ -25,13 +25,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from llm.paths import ARTIFACTS_ROOT, RUNS_ROOT, ensure_dirs
+from llm.paths import ARTIFACTS_ROOT, RUNS_ROOT, ensure_dirs, resolve_default_python_exe
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--current-adapter", type=str, required=True)
-    parser.add_argument("--python-exe", type=str, default="", help="默认使用 unsloth studio venv。")
+    parser.add_argument("--python-exe", type=str, default="", help="默认使用 STS2_LLM_PYTHON_EXE 或 STS2AI/llm/.venv311。")
     parser.add_argument("--run-name", type=str, default="")
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument(
@@ -84,13 +84,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _default_python_exe() -> str:
-    env_value = os.environ.get("STS2_LLM_PYTHON_EXE", "").strip()
-    if env_value:
-        return env_value
-    unsloth_python = Path.home() / ".unsloth" / "studio" / "unsloth_studio" / "Scripts" / "python.exe"
-    if unsloth_python.exists():
-        return str(unsloth_python)
-    return sys.executable
+    return str(resolve_default_python_exe())
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

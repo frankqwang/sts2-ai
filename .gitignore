@@ -28,6 +28,7 @@ unsloth_compiled_cache
 /STS2AI/ENV/Sim/Host/bin/
 /STS2AI/Python/STS2AI
 STS2AI/Artifacts
+STS2AI/llm/.venv*/
 
 STS2AI\Python\data\skada\runs
 STS2AI/Python/data/skada/runs

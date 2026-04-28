@@ -23,7 +23,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from llm.paths import LLM_ROOT, REPO_ROOT, RUNS_ROOT, STS2AI_ROOT, ensure_dirs
+from llm.paths import LLM_ROOT, REPO_ROOT, RUNS_ROOT, STS2AI_ROOT, ensure_dirs, resolve_default_python_exe
 
 
 RUN_LINE_RE = re.compile(r"\brun:\s+.*?\bact=(\d+)\s+floor=(\d+|\?)", re.IGNORECASE)
@@ -73,13 +73,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _default_python_exe() -> str:
-    env_value = os.environ.get("STS2_LLM_PYTHON_EXE", "").strip()
-    if env_value:
-        return env_value
-    unsloth_python = Path.home() / ".unsloth" / "studio" / "unsloth_studio" / "Scripts" / "python.exe"
-    if unsloth_python.exists():
-        return str(unsloth_python)
-    return sys.executable
+    return str(resolve_default_python_exe())
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
