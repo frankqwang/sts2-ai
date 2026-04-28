@@ -75,17 +75,22 @@ message RelicInfo {
   int32 index = 1;
   string id = 2;
   string name = 3;
+  string description = 4;
 }
 
 message PotionInfo {
   int32 index = 1;
   string id = 2;
   string name = 3;
+  string description = 4;
 }
 
 message Power {
   string id = 1;
   int32 amount = 2;
+  string name = 3;
+  string description = 4;
+  repeated string keywords = 5;
 }
 
 // --- Battle ---
@@ -146,6 +151,8 @@ message Intent {
   int32 damage = 3;               // 单次伤害
   int32 total_damage = 4;         // 总伤害
   int32 hits = 5;                 // 攻击次数
+  string title = 6;
+  string description = 7;
 }
 
 // --- Map ---

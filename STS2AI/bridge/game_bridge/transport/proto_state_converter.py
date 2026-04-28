@@ -122,12 +122,9 @@ def _convert_player(p: pb.PlayerState) -> dict[str, Any]:
             "upgrades": 1 if c.is_upgraded else 0,
         })
 
-    relics = [{"index": i, "id": r.id, "name": r.id}
-              for i, r in enumerate(p.relics)]
-    potions = [{"index": i, "id": pt.id, "name": pt.id}
-               for i, pt in enumerate(p.potions)]
-    powers = [{"id": pw.id, "amount": pw.amount}
-              for pw in p.powers if pw.amount]
+    relics = [_convert_relic(i, r) for i, r in enumerate(p.relics)]
+    potions = [_convert_potion(i, pt) for i, pt in enumerate(p.potions)]
+    powers = [_convert_power(pw) for pw in p.powers if pw.amount]
 
     return {
         "hp": hp,
@@ -205,8 +202,7 @@ def _convert_battle(b: pb.BattleState, top_player: dict[str, Any]) -> dict[str, 
             "max_energy": b.max_energy,
             "stars": bp.stars,
         })
-        battle_player["powers"] = [{"id": pw.id, "amount": pw.amount}
-                                   for pw in bp.powers if pw.amount]
+        battle_player["powers"] = [_convert_power(pw) for pw in bp.powers if pw.amount]
 
     hand = []
     for i, hc in enumerate(b.hand):
@@ -272,7 +268,7 @@ def _convert_enemy(e: pb.Enemy) -> dict[str, Any]:
     """Enemy proto → 兼容 dict（含冗余别名字段）。"""
     enemy_id = e.id
     hp = e.hp
-    powers = [{"id": pw.id, "amount": pw.amount} for pw in e.powers if pw.amount]
+    powers = [_convert_power(pw) for pw in e.powers if pw.amount]
     intents = [_convert_intent(it) for it in e.intents]
 
     return {
@@ -301,13 +297,43 @@ def _convert_enemy(e: pb.Enemy) -> dict[str, Any]:
 
 
 def _convert_intent(it: pb.Intent) -> dict[str, Any]:
-    return {
+    result = {
         "type": it.type or "unknown",
         "label": it.label or it.type or "unknown",
         "damage": it.damage,
         "total_damage": it.total_damage,
         "hits": max(1, it.hits),
     }
+    if it.title:
+        result["title"] = it.title
+    if it.description:
+        result["description"] = it.description
+    return result
+
+
+def _convert_relic(index: int, relic: pb.RelicInfo) -> dict[str, Any]:
+    result = {"index": index, "id": relic.id, "name": relic.name or relic.id}
+    if relic.description:
+        result["description"] = relic.description
+    return result
+
+
+def _convert_potion(index: int, potion: pb.PotionInfo) -> dict[str, Any]:
+    result = {"index": index, "id": potion.id, "name": potion.name or potion.id}
+    if potion.description:
+        result["description"] = potion.description
+    return result
+
+
+def _convert_power(pw: pb.Power) -> dict[str, Any]:
+    result: dict[str, Any] = {"id": pw.id, "amount": pw.amount}
+    if pw.name:
+        result["name"] = pw.name
+    if pw.description:
+        result["description"] = pw.description
+    if pw.keywords:
+        result["keywords"] = list(pw.keywords)
+    return result
 
 
 # ===================================================================

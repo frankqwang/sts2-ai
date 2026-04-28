@@ -381,12 +381,26 @@ def render_enemies(state: dict[str, Any]) -> list[str]:
                 intent_str += f"x{hits}"
             intent_str += ")"
         powers = _fmt_powers(_as_list(enemy.get("powers")) or _as_list(enemy.get("buffs")))
+        intent_details = _fmt_intent_details(enemy)
         alive = bool(_pick(enemy, "is_alive", "alive", default=True))
         tag = "" if alive else " [dead]"
-        lines.append(
-            f"  enemy{target_id}: {eid} hp={hp}/{max_hp} block={block} intent={intent_str} powers={powers}{tag}"
-        )
+        detail_part = f" | {intent_details}" if intent_details else ""
+        lines.append(f"  enemy{target_id}: {eid} hp={hp}/{max_hp} block={block} intent={intent_str} powers={powers}{tag}{detail_part}")
     return lines
+
+
+def _fmt_intent_details(enemy: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for intent in _as_list(enemy.get("intents")):
+        if not isinstance(intent, dict):
+            continue
+        title = str(intent.get("title") or "").strip()
+        desc = _compact_inline_text(str(intent.get("description") or ""), max_chars=140)
+        if title and desc:
+            parts.append(f"{title}: {desc}")
+        elif desc:
+            parts.append(desc)
+    return "; ".join(part for part in parts if part)
 
 
 def _structured_play_hints(legal_actions: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:

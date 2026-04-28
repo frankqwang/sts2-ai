@@ -131,24 +131,28 @@ class TestPlayer:
 
     def test_player_relics_potions(self):
         p = _make_player(
-            relics=[{"index": 0, "id": "BurningBlood", "name": "BurningBlood"}],
-            potions=[{"index": 0, "id": "FirePotion", "name": "FirePotion"}],
+            relics=[{"index": 0, "id": "BurningBlood", "name": "BurningBlood", "description": "At end of combat, heal 6 HP."}],
+            potions=[{"index": 0, "id": "FirePotion", "name": "FirePotion", "description": "Deal 20 damage."}],
             max_potions=3,
         )
         gs = _make_game_state("map", player=p)
         d = game_state_to_dict(gs)
         assert len(d["player"]["relics"]) == 1
         assert d["player"]["relics"][0]["id"] == "BurningBlood"
+        assert d["player"]["relics"][0]["description"] == "At end of combat, heal 6 HP."
         assert len(d["player"]["potions"]) == 1
+        assert d["player"]["potions"][0]["description"] == "Deal 20 damage."
         assert d["player"]["max_potions"] == 3
 
     def test_player_powers(self):
         p = _make_player(
-            powers=[{"id": "STRENGTH_POWER", "amount": 2}],
+            powers=[{"id": "STRENGTH_POWER", "amount": 2, "name": "Strength", "description": "Increases attack damage."}],
         )
         gs = _make_game_state("map", player=p)
         d = game_state_to_dict(gs)
-        assert d["player"]["powers"] == [{"id": "STRENGTH_POWER", "amount": 2}]
+        assert d["player"]["powers"] == [
+            {"id": "STRENGTH_POWER", "amount": 2, "name": "Strength", "description": "Increases attack damage."}
+        ]
 
 
 # ======================================================================
@@ -174,6 +178,8 @@ class TestBattle:
         pw = bp.powers.add()
         pw.id = "STRENGTH_POWER"
         pw.amount = 2
+        pw.name = "Strength"
+        pw.description = "Increases attack damage."
         # hand
         hc = b.hand.add()
         hc.index = 0
@@ -205,9 +211,13 @@ class TestBattle:
         intent.damage = 11
         intent.total_damage = 11
         intent.hits = 1
+        intent.title = "Attack"
+        intent.description = "Deal 11 damage."
         epw = e.powers.add()
         epw.id = "STRENGTH_POWER"
         epw.amount = 3
+        epw.name = "Strength"
+        epw.description = "Increases attack damage."
         # piles
         b.draw_pile_cards.append("Strike")
         b.draw_pile_cards.append("Defend")
@@ -242,8 +252,8 @@ class TestBattle:
             _make_player(
                 deck=[{"index": 0, "id": "Strike", "name": "Strike", "cost": 1,
                        "card_type": "ATTACK", "rarity": "basic", "is_upgraded": False, "upgrades": 0}],
-                relics=[{"index": 0, "id": "BurningBlood", "name": "BurningBlood"}],
-                potions=[{"index": 0, "id": "FirePotion", "name": "FirePotion"}],
+                relics=[{"index": 0, "id": "BurningBlood", "name": "BurningBlood", "description": "At end of combat, heal 6 HP."}],
+                potions=[{"index": 0, "id": "FirePotion", "name": "FirePotion", "description": "Deal 20 damage."}],
             )
         )
         d = game_state_to_dict(gs)
@@ -251,7 +261,9 @@ class TestBattle:
         assert player["deck"][0]["id"] == "Strike"
         assert player["relics"][0]["id"] == "BurningBlood"
         assert player["potions"][0]["id"] == "FirePotion"
-        assert player["powers"] == [{"id": "STRENGTH_POWER", "amount": 2}]
+        assert player["relics"][0]["description"] == "At end of combat, heal 6 HP."
+        assert player["potions"][0]["description"] == "Deal 20 damage."
+        assert player["powers"][0]["description"] == "Increases attack damage."
         assert player is d["battle"]["player"]
 
     def test_hand_cards(self):
@@ -294,6 +306,9 @@ class TestBattle:
         assert e["intent_type"] == "attack"
         assert e["intent_damage"] == 11
         assert e["intent_hits"] == 1
+        assert e["powers"][0]["description"] == "Increases attack damage."
+        assert e["intents"][0]["title"] == "Attack"
+        assert e["intents"][0]["description"] == "Deal 11 damage."
 
     def test_piles(self):
         gs = self._make_combat_state()

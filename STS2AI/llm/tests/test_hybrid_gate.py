@@ -153,6 +153,27 @@ def test_optional_potion_only_choice_uses_potion_when_end_turn_is_lethal() -> No
     assert "urgent end_turn" in decision.reason
 
 
+def test_optional_potion_only_choice_uses_heart_of_iron_when_end_turn_is_lethal() -> None:
+    state = {
+        "player": {"hp": 5, "potions": [{"id": "HEART_OF_IRON"}]},
+        "battle": {
+            "player": {"block": 0},
+            "enemies": [{"intent_type": "Attack", "intent_damage": 16}],
+        },
+    }
+    decision = choose_simple_action(
+        state,
+        [
+            {"action": "use_potion", "slot": 0, "label": "HEART_OF_IRON"},
+            {"action": "end_turn"},
+        ],
+    )
+
+    assert decision is not None
+    assert decision.action_index == 0
+    assert "urgent end_turn" in decision.reason
+
+
 def test_optional_non_defensive_potion_does_not_override_end_turn() -> None:
     state = {
         "player": {"hp": 6, "potions": [{"id": "ASHWATER"}]},

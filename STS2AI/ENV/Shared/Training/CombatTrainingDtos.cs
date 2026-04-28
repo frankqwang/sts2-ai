@@ -119,6 +119,12 @@ public sealed class CombatTrainingIntentSnapshot
 {
 	public string IntentType { get; set; } = "";
 
+	public string Label { get; set; } = "";
+
+	public string Title { get; set; } = "";
+
+	public string Description { get; set; } = "";
+
 	public int Repeats { get; set; }
 
 	public int? Damage { get; set; }
@@ -131,6 +137,12 @@ public sealed class CombatTrainingPowerSnapshot
 	public string Id { get; set; } = "";
 
 	public int Amount { get; set; }
+
+	public string Name { get; set; } = "";
+
+	public string Description { get; set; } = "";
+
+	public List<string> Keywords { get; set; } = new List<string>();
 }
 
 public sealed class CombatTrainingHandCardSnapshot

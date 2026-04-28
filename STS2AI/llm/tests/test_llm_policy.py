@@ -436,6 +436,29 @@ def test_llm_policy_keeps_potions_for_urgent_lethal_threat(monkeypatch) -> None:
     assert adapter.stats["potion_actions_suppressed"] == 0
 
 
+def test_llm_policy_keeps_heart_of_iron_for_urgent_lethal_threat(monkeypatch) -> None:
+    monkeypatch.delenv("STS2_LLM_ALLOW_POTIONS", raising=False)
+    adapter = LlmExternalPolicyAdapter(adapter_dir=None)
+    state = {
+        "player": {"hp": 5, "potions": [{"id": "HEART_OF_IRON"}]},
+        "battle": {
+            "player": {"block": 0},
+            "enemies": [{"intent_type": "Attack", "intent_damage": 16}],
+        },
+    }
+
+    enabled = adapter._filter_optional_potion_actions(
+        [
+            {"action": "use_potion", "slot": 0, "label": "HEART_OF_IRON"},
+            {"action": "end_turn"},
+        ],
+        state,
+    )
+
+    assert [action["action"] for action in enabled] == ["use_potion", "end_turn"]
+    assert adapter.stats["potion_actions_suppressed"] == 0
+
+
 def test_llm_policy_suppresses_non_urgent_potions_during_urgent_threat(monkeypatch) -> None:
     monkeypatch.delenv("STS2_LLM_ALLOW_POTIONS", raising=False)
     adapter = LlmExternalPolicyAdapter(adapter_dir=None)

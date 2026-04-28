@@ -169,7 +169,8 @@ public static class BridgeGameStateBuilder
 			{
 				Index = ps.Relics.Count,
 				Id = relic.Id.Entry ?? "",
-				Name = SafeText(() => relic.Title, relic.Id.Entry ?? "")
+				Name = SafeText(() => relic.Title, relic.Id.Entry ?? ""),
+				Description = SafeFormatLocString(relic.DynamicDescription)
 			});
 		}
 		foreach (PotionModel? potion in player.PotionSlots)
@@ -179,7 +180,8 @@ public static class BridgeGameStateBuilder
 			{
 				Index = ps.Potions.Count,
 				Id = potion.Id.Entry ?? "",
-				Name = SafeText(() => potion.Title, potion.Id.Entry ?? "")
+				Name = SafeText(() => potion.Title, potion.Id.Entry ?? ""),
+				Description = SafeFormatLocString(potion.DynamicDescription)
 			});
 		}
 		if (useCombat)
@@ -187,7 +189,7 @@ public static class BridgeGameStateBuilder
 			ps.Stars = combat!.Player!.Stars;
 			foreach (CombatTrainingPowerSnapshot power in combat.Player.Powers.Where(static p => !string.IsNullOrEmpty(p.Id) && p.Amount != 0))
 			{
-				ps.Powers.Add(new Power { Id = power.Id, Amount = power.Amount });
+				ps.Powers.Add(BuildPower(power));
 			}
 		}
 		return ps;
@@ -213,7 +215,7 @@ public static class BridgeGameStateBuilder
 			ps.Powers.Clear();
 			foreach (CombatTrainingPowerSnapshot power in combat.Player.Powers.Where(static p => !string.IsNullOrEmpty(p.Id) && p.Amount != 0))
 			{
-				ps.Powers.Add(new Power { Id = power.Id, Amount = power.Amount });
+				ps.Powers.Add(BuildPower(power));
 			}
 		}
 		ps.DrawPileCount = combat.Piles?.Draw ?? ps.DrawPileCount;
@@ -392,17 +394,35 @@ public static class BridgeGameStateBuilder
 			e.Intents.Add(new Intent
 			{
 				Type = intent.IntentType ?? "unknown",
-				Label = intent.IntentType ?? "unknown",
+				Label = string.IsNullOrWhiteSpace(intent.Label) ? intent.IntentType ?? "unknown" : intent.Label,
 				Damage = perHitDamage,
 				TotalDamage = totalDamage,
-				Hits = repeats
+				Hits = repeats,
+				Title = intent.Title ?? "",
+				Description = intent.Description ?? ""
 			});
 		}
 		foreach (CombatTrainingPowerSnapshot power in enemy.Powers.Where(static p => !string.IsNullOrEmpty(p.Id) && p.Amount != 0))
 		{
-			e.Powers.Add(new Power { Id = power.Id, Amount = power.Amount });
+			e.Powers.Add(BuildPower(power));
 		}
 		return e;
+	}
+
+	private static Power BuildPower(CombatTrainingPowerSnapshot power)
+	{
+		Power result = new Power
+		{
+			Id = power.Id ?? "",
+			Amount = power.Amount,
+			Name = power.Name ?? "",
+			Description = power.Description ?? ""
+		};
+		foreach (string keyword in power.Keywords.Where(static value => !string.IsNullOrWhiteSpace(value)))
+		{
+			result.Keywords.Add(keyword);
+		}
+		return result;
 	}
 
 	private static void AddPileCards(Google.Protobuf.Collections.RepeatedField<string> target, List<string>? cardIds)

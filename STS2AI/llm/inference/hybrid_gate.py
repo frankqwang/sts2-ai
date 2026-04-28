@@ -113,6 +113,7 @@ def _current_turn_can_kill_player(state: dict[str, Any]) -> bool:
 _URGENT_POTION_IDS = {
     "FORTIFIER",
     "BLOCK_POTION",
+    "HEART_OF_IRON",
     "HEALTH_POTION",
     "REGEN_POTION",
 }

@@ -161,6 +161,81 @@ def test_render_legal_actions_shows_blocked_target_lethality() -> None:
     assert "damage=6 hp=4 block=5 hp_damage=1 lethal=false" in rendered
 
 
+def test_render_state_text_prefers_runtime_relic_and_potion_descriptions() -> None:
+    state = {
+        "run": {"act": 1, "floor": 9},
+        "player": {
+            "character": "IRONCLAD",
+            "hp": 5,
+            "max_hp": 80,
+            "relics": [
+                {
+                    "id": "WHETSTONE",
+                    "description": "Upon pickup, upgrade 2 random Attacks.",
+                }
+            ],
+            "potions": [
+                {
+                    "id": "HEART_OF_IRON",
+                    "description": "Gain 6 Metallicize.",
+                }
+            ],
+            "deck": [],
+        },
+        "battle": {"energy": 3, "max_energy": 3, "hand": [], "enemies": []},
+    }
+
+    rendered = render_state_text(state, [{"action": "end_turn"}])
+
+    assert "WHETSTONE | Upon pickup, upgrade 2 random Attacks." in rendered
+    assert "HEART_OF_IRON | Gain 6 Metallicize." in rendered
+
+
+def test_render_state_text_includes_runtime_power_and_intent_tooltips() -> None:
+    state = {
+        "run": {"act": 1, "floor": 17},
+        "player": {"character": "IRONCLAD", "hp": 4, "max_hp": 80, "deck": []},
+        "battle": {
+            "energy": 3,
+            "max_energy": 3,
+            "round_number": 17,
+            "hand": [],
+            "enemies": [
+                {
+                    "id": "WATERFALL_GIANT",
+                    "combat_id": 1,
+                    "hp": 999999971,
+                    "max_hp": 999999999,
+                    "block": 0,
+                    "next_move_id": "DeathBlow",
+                    "powers": [
+                        {
+                            "id": "STEAM_ERUPTION_POWER",
+                            "amount": 57,
+                            "description": "When this enemy dies, it explodes next turn for this much damage.",
+                        }
+                    ],
+                    "intents": [
+                        {
+                            "type": "DeathBlow",
+                            "label": "DeathBlow",
+                            "damage": 58,
+                            "hits": 1,
+                            "title": "Death Blow",
+                            "description": "Deal 58 damage at end of turn.",
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    rendered = render_state_text(state, [{"action": "end_turn"}])
+
+    assert "Death Blow: Deal 58 damage at end of turn." in rendered
+    assert "STEAM_ERUPTION_POWER: When this enemy dies, it explodes next turn for this much damage." in rendered
+
+
 def test_render_event_includes_body_and_option_text() -> None:
     state = {
         "run": {"act": 1, "floor": 1},

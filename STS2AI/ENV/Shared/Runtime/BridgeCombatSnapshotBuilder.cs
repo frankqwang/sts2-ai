@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -8,6 +9,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Potions;
+using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
@@ -202,6 +204,9 @@ public static class BridgeCombatSnapshotBuilder
 		CombatTrainingIntentSnapshot snapshot = new CombatTrainingIntentSnapshot
 		{
 			IntentType = intent.IntentType.ToString(),
+			Label = SafeIntentLabel(intent, owner, targets),
+			Title = SafeIntentTitle(intent, owner, targets),
+			Description = SafeIntentDescription(intent, owner, targets),
 			Repeats = 0
 		};
 		if (intent is AttackIntent attackIntent)
@@ -223,10 +228,104 @@ public static class BridgeCombatSnapshotBuilder
 			result.Add(new CombatTrainingPowerSnapshot
 			{
 				Id = power.Id.Entry,
-				Amount = power.Amount
+				Amount = power.Amount,
+				Name = SafeText(() => power.Title, power.Id.Entry),
+				Description = SafePowerDescription(power),
+				Keywords = SafePowerKeywords(power)
 			});
 		}
 		return result;
+	}
+
+	private static string SafeIntentLabel(AbstractIntent intent, Creature owner, IReadOnlyList<Creature> targets)
+	{
+		try
+		{
+			return CleanText(intent.GetIntentLabel(targets, owner).GetFormattedText());
+		}
+		catch
+		{
+			return intent.IntentType.ToString();
+		}
+	}
+
+	private static string SafeIntentTitle(AbstractIntent intent, Creature owner, IReadOnlyList<Creature> targets)
+	{
+		try
+		{
+			IHoverTip tip = intent.GetHoverTip(targets, owner);
+			if (tip is HoverTip hoverTip)
+			{
+				return CleanText(hoverTip.Title ?? "");
+			}
+		}
+		catch
+		{
+		}
+		return "";
+	}
+
+	private static string SafeIntentDescription(AbstractIntent intent, Creature owner, IReadOnlyList<Creature> targets)
+	{
+		try
+		{
+			IHoverTip tip = intent.GetHoverTip(targets, owner);
+			if (tip is HoverTip hoverTip)
+			{
+				return CleanText(hoverTip.Description ?? "");
+			}
+		}
+		catch
+		{
+		}
+		return "";
+	}
+
+	private static string SafePowerDescription(dynamic power)
+	{
+		try
+		{
+			string powerId = power.Id.ToString();
+			foreach (IHoverTip tip in power.HoverTips)
+			{
+				if (tip.Id != powerId) continue;
+				if (tip is not HoverTip hoverTip) continue;
+				string desc = CleanText(hoverTip.Description ?? "");
+				if (!string.IsNullOrWhiteSpace(desc)) return desc;
+			}
+		}
+		catch
+		{
+		}
+		return SafeText(() => power.SmartDescription, "");
+	}
+
+	private static List<string> SafePowerKeywords(dynamic power)
+	{
+		List<string> keywords = new();
+		try
+		{
+			string powerId = power.Id.ToString();
+			foreach (IHoverTip tip in power.HoverTips)
+			{
+				if (tip.Id == powerId) continue;
+				string title = "";
+				string description = "";
+				if (tip is HoverTip hoverTip)
+				{
+					title = CleanText(hoverTip.Title ?? "");
+					description = CleanText(hoverTip.Description ?? "");
+				}
+				if (!string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(description))
+				{
+					keywords.Add(string.IsNullOrWhiteSpace(description) ? title : $"{title}: {description}");
+				}
+			}
+		}
+		catch
+		{
+		}
+		return keywords;
 	}
 
 	private static List<CombatTrainingHandCardSnapshot> BuildHandSnapshot(Player player, CombatState combatState)
@@ -341,5 +440,25 @@ public static class BridgeCombatSnapshotBuilder
 		{
 			return fallback;
 		}
+	}
+
+	private static string SafeText(Func<object?> read, string fallback = "")
+	{
+		try
+		{
+			return CleanText(read()?.ToString() ?? fallback);
+		}
+		catch
+		{
+			return fallback;
+		}
+	}
+
+	private static string CleanText(string text)
+	{
+		if (string.IsNullOrWhiteSpace(text)) return "";
+		string stripped = Regex.Replace(text, "\\[/?[^\\]]+\\]", "");
+		stripped = stripped.Replace("\r", " ").Replace("\n", " ");
+		return Regex.Replace(stripped, "\\s+", " ").Trim();
 	}
 }
