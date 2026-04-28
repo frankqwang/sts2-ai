@@ -361,6 +361,39 @@ def test_render_card_reward_actions_include_candidate_details() -> None:
     assert "Block: damage shield that is usually lost at end of turn." in rendered
 
 
+def test_render_state_text_uses_choice_index_for_combat_card_select() -> None:
+    state = {
+        "run": {"act": 1, "floor": 11},
+        "player": {
+            "character": "IRONCLAD",
+            "hp": 21,
+            "max_hp": 84,
+            "block": 9,
+            "energy": 1,
+            "max_energy": 3,
+        },
+        "state_type": "card_select",
+        "card_select": {
+            "screen_type": "combat_select",
+            "cards": [
+                {"index": 0, "id": "HAVOC", "cost": 1, "type": "skill"},
+                {"index": 1, "id": "STRIKE_IRONCLAD", "cost": 1, "type": "attack"},
+            ],
+        },
+    }
+
+    rendered = render_state_text(
+        state,
+        [
+            {"action": "combat_select_card", "index": 0, "card_index": 0, "label": "Havoc"},
+            {"action": "combat_select_card", "index": 1, "card_index": 2, "label": "Strike"},
+        ],
+    )
+
+    assert "[1] combat_select_card card=STRIKE_IRONCLAD choice_idx=1 source_hand_idx=2" in rendered
+    assert "[1] combat_select_card card=Strike choice_idx=2" not in rendered
+
+
 def test_inject_experience_context_uses_review_lessons(tmp_path, monkeypatch) -> None:
     lessons = tmp_path / "lessons.jsonl"
     lessons.write_text(

@@ -371,6 +371,24 @@ def test_bridge_envelope_round_trips_through_protobuf_json_mapping():
     assert parsed_request.act.action.card_index == 1
     assert parsed_request.act.action.target_id == 2
 
+
+def test_proto_codec_uses_option_index_for_card_select_actions():
+    codec = ProtoCodec()
+    request = codec.build_request_message(
+        "act",
+        {
+            "action": "combat_select_card",
+            "index": 1,
+            "card_index": 2,
+            "label": "Strike",
+        },
+    )
+
+    assert request.method == pb.ACT
+    assert request.act.action.action == "combat_select_card"
+    assert request.act.action.index == 1
+    assert request.act.action.card_index == 1
+
     response = pb.BridgeResponseEnvelope(
         method=pb.ACT,
         status=pb.OK,

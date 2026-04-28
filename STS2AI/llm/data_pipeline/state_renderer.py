@@ -709,10 +709,14 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
     def select_card_detail(index: int, action: dict[str, Any]) -> str:
         atype = str(_pick(action, "action", "action_type", "type", default="?")).lower()
         card_id = str(_pick(action, "card_id", default="") or "").strip()
-        card_index = _pick(action, "card_index", "hand_index", "index", default=None)
+        choice_index = _pick(action, "index", "card_index", "hand_index", default=None)
+        source_card_index = _pick(action, "card_index", "hand_index", default=None)
         label = str(_pick(action, "label", default="") or "").strip()
         if not card_id:
-            card = _indexed_item(_as_list(card_select.get("cards")), card_index)
+            card = _indexed_item(_as_list(card_select.get("cards")), choice_index)
+            card_id = str(_pick(card or {}, "id", "card_id", default="") or "").strip()
+        if not card_id:
+            card = _indexed_item(_as_list(card_select.get("cards")), source_card_index)
             card_id = str(_pick(card or {}, "id", "card_id", default="") or "").strip()
         if not card_id and label:
             card_id = label.split()[-1]
@@ -722,8 +726,10 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
             extras.append(f"purpose={purpose}")
         if card_id:
             extras.append(f"card={card_id}")
-        if card_index is not None:
-            extras.append(f"choice_idx={card_index}")
+        if choice_index is not None:
+            extras.append(f"choice_idx={choice_index}")
+        if source_card_index not in (None, choice_index):
+            extras.append(f"source_hand_idx={source_card_index}")
         if purpose == "remove_card":
             upper = card_id.upper()
             if upper.startswith("STRIKE_") or upper.startswith("DEFEND_"):

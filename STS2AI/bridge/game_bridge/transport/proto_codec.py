@@ -130,11 +130,16 @@ def _apply_legal_action_to_proto(target: "pb.LegalAction", action: dict[str, Any
     if isinstance(action, pb.LegalAction):
         target.CopyFrom(action)
         return
-    target.action = str(action.get("action") or action.get("type") or "other")
+    action_name = str(action.get("action") or action.get("type") or "other")
+    target.action = action_name
     idx = action.get("index", action.get("hand_index"))
     if idx is not None:
         target.index = int(idx)
     ci = action.get("card_index", action.get("hand_index", action.get("index")))
+    if action_name in {"select_card", "select_card_option", "combat_select_card"} and idx is not None:
+        # Selection screens address cards by the option list index. Some states also
+        # carry the original hand index in card_index, which Godot rejects here.
+        ci = idx
     if ci is not None:
         target.card_index = int(ci)
     if action.get("target_id") is not None:
