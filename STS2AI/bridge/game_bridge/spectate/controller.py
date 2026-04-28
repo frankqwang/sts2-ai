@@ -34,12 +34,13 @@ class SpectatorController:
         floor: int | None = None,
         max_steps: int = 800,
     ) -> dict[str, Any]:
-        reset_kwargs: dict[str, Any] = {
-            "character_id": character_id,
-            "encounter_id": encounter_id,
-            "seed": seed,
-            "build": build,
-        }
+        reset_kwargs: dict[str, Any] = {"character_id": character_id}
+        if encounter_id is not None:
+            reset_kwargs["encounter_id"] = encounter_id
+        if seed is not None:
+            reset_kwargs["seed"] = seed
+        if build is not None:
+            reset_kwargs["build"] = build
         if floor is not None:
             reset_kwargs["floor"] = floor
         state = self.session.reset(**reset_kwargs)
