@@ -272,6 +272,24 @@ def test_rest_gate_heals_when_hp_is_low() -> None:
     assert "recover" in decision.reason
 
 
+def test_tablet_of_truth_safety_gate_stops_repeated_deciphering() -> None:
+    decision = choose_simple_action(
+        {
+            "state_type": "event",
+            "player": {"hp": 75, "max_hp": 77},
+            "event": {"event_id": "EVENT.TABLET_OF_TRUTH"},
+        },
+        [
+            {"action": "choose_event_option", "label": "Continue Deciphering"},
+            {"action": "choose_event_option", "label": "Give Up"},
+        ],
+    )
+
+    assert decision is not None
+    assert decision.action_index == 1
+    assert "Tablet of Truth" in decision.reason
+
+
 def test_upgrade_selection_gate_picks_high_impact_card() -> None:
     decision = choose_simple_action(
         {"state_type": "card_select"},

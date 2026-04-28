@@ -576,6 +576,40 @@ def _choose_rest_option_action(
     return None
 
 
+def _choose_event_safety_action(
+    state: dict[str, Any],
+    enabled: list[tuple[int, dict[str, Any]]],
+) -> SimplePolicyDecision | None:
+    event = _as_dict(state.get("event"))
+    event_name = str(_pick(event, "event_id", "id", "event_name", "name", default="")).upper()
+    if "TABLET_OF_TRUTH" not in event_name:
+        return None
+    options = [
+        (raw_index, action)
+        for raw_index, action in enabled
+        if _action_type(action) == "choose_event_option"
+    ]
+    if len(options) < 2:
+        return None
+
+    def label(action: dict[str, Any]) -> str:
+        return str(_pick(action, "label", "text", "id", default="")).strip().lower()
+
+    risky_tokens = ("continue", "keep", "deciphering", "losing everything")
+    if not any(any(token in label(action) for token in risky_tokens) for _, action in options):
+        return None
+    for raw_index, action in options:
+        text = label(action)
+        if any(token in text for token in ("give up", "smash", "leave")):
+            hp, _ = _player_hp_block(state)
+            max_hp = _player_max_hp(state)
+            return SimplePolicyDecision(
+                action_index=raw_index,
+                reason=f"event safety: stop Tablet of Truth max-HP loss at hp={hp:g}/{max_hp:g}",
+            )
+    return None
+
+
 def choose_simple_action(
     _state: dict[str, Any],
     legal_actions: list[dict[str, Any]],
@@ -621,6 +655,10 @@ def choose_simple_action(
     rest_decision = _choose_rest_option_action(_state, enabled)
     if rest_decision is not None:
         return rest_decision
+
+    event_safety_decision = _choose_event_safety_action(_state, enabled)
+    if event_safety_decision is not None:
+        return event_safety_decision
 
     if (
         "end_turn" in action_types
