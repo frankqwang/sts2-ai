@@ -269,6 +269,24 @@ def _action_damage(action: dict[str, Any]) -> float:
     return 0.0
 
 
+def _action_self_hp_loss(action: dict[str, Any], card: dict[str, Any]) -> float:
+    for key in ("self_hp_loss", "hp_loss", "self_damage"):
+        if action.get(key) in (None, ""):
+            continue
+        try:
+            return max(0.0, float(action.get(key)))
+        except (TypeError, ValueError):
+            continue
+    text = " ".join(
+        str(_pick(card, key, default="") or "")
+        for key in ("description", "desc", "text", "raw_description")
+    )
+    match = re.search(r"\bLose\s+(\d+)\s+HP\b", text, flags=re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return 0.0
+
+
 def _card_applies_weak(card: dict[str, Any]) -> bool:
     text = " ".join(
         str(card.get(key) or "")
@@ -315,6 +333,10 @@ def _survival_action_score(
     if card_index is None or card_index < 0 or card_index >= len(hand):
         return None
     card = hand[card_index]
+    hp, _ = _player_hp_block(state)
+    self_hp_loss = _action_self_hp_loss(action, card)
+    if self_hp_loss > 0 and hp - self_hp_loss <= 0:
+        return None
     added_block = max(_card_block(card), _action_block(action))
     mitigated_incoming = incoming
     target_id = _action_target_id(action)
@@ -330,7 +352,7 @@ def _survival_action_score(
                 mitigated_incoming = max(0.0, mitigated_incoming - target_incoming * 0.25)
     if added_block <= 0 and mitigated_incoming >= incoming:
         return None
-    hp_loss_after = max(0.0, mitigated_incoming - (block + added_block)) + _end_turn_hp_loss(state)
+    hp_loss_after = self_hp_loss + max(0.0, mitigated_incoming - (block + added_block)) + _end_turn_hp_loss(state)
     improvement = max(0.0, max(0.0, incoming - block) + _end_turn_hp_loss(state) - hp_loss_after)
     if improvement <= 0:
         return None

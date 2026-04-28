@@ -477,3 +477,37 @@ def test_survival_gate_uses_legal_action_block_when_card_preview_is_missing() ->
 
     assert decision is not None
     assert decision.action_index == 0
+
+
+def test_survival_gate_never_chooses_self_lethal_block() -> None:
+    state = {
+        "player": {"hp": 1, "max_hp": 87},
+        "battle": {
+            "energy": 3,
+            "player": {"block": 0},
+            "hand": [
+                {"id": "STRIKE_IRONCLAD", "preview_damage_per_target": {"1": 12}},
+                {"id": "DEFEND_IRONCLAD", "preview_block": 5},
+                {"id": "DEFEND_IRONCLAD", "preview_block": 5},
+                {"id": "BLOOD_WALL", "description": "Lose 2 HP. Gain 16 Block.", "preview_block": 16},
+            ],
+        },
+        "enemies": [
+            {"target_id": 1, "hp": 31, "block": 0, "intent_type": "Attack", "intent_damage": 25, "intent_hits": 1},
+        ],
+    }
+
+    decision = choose_survival_action(
+        state,
+        [
+            {"action": "play_card", "card_index": 0, "target_id": 1, "damage": 12},
+            {"action": "play_card", "card_index": 1, "target_id": -1, "block": 5},
+            {"action": "play_card", "card_index": 2, "target_id": -1, "block": 5},
+            {"action": "play_card", "card_index": 3, "target_id": -1, "block": 16, "self_hp_loss": 2},
+            {"action": "end_turn"},
+        ],
+    )
+
+    assert decision is not None
+    assert decision.action_index in {1, 2}
+    assert "BLOOD_WALL" not in decision.reason
