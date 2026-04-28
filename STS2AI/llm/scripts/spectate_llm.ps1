@@ -113,6 +113,9 @@ $resolvedSessionMode = if (-not ([string]::IsNullOrWhiteSpace($SessionMode))) {
 if ($resolvedSessionMode -ne "full_run" -and $resolvedSessionMode -ne "combat") {
     throw "SessionMode must be full_run or combat, got: $resolvedSessionMode"
 }
+if ([string]::IsNullOrWhiteSpace($Seed)) {
+    $Seed = "spectate_" + (Get-Date -Format "yyyyMMddHHmmss")
+}
 
 $resolvedAppDataRoot = if ([string]::IsNullOrWhiteSpace($AppDataRoot)) {
     Join-Path $runRoot "appdata"
