@@ -60,6 +60,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trace", action="append", default=[], help="step_trace.jsonl for local verified repairs.")
     parser.add_argument("--review", action="append", default=[], help="turn_order_review/codex review JSON.")
     parser.add_argument("--episode-input", action="append", default=[], help="matching episode_input.json for review labels.")
+    parser.add_argument(
+        "--review-root",
+        action="append",
+        default=[],
+        help="Directory containing per-episode turn_order_review.json and sibling episode_input.json files.",
+    )
     parser.add_argument("--reselect-results", action="append", default=[], help="review_reselect_actions results JSONL.")
     parser.add_argument("--kimi-labels", action="append", default=[], help="filtered Kimi valid/kept labels JSONL.")
     parser.add_argument(
@@ -108,6 +114,25 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _review_pairs_from_roots(roots: list[str]) -> list[tuple[Path, Path]]:
+    pairs: list[tuple[Path, Path]] = []
+    seen: set[tuple[Path, Path]] = set()
+    for raw_root in roots:
+        root = Path(raw_root).resolve()
+        if not root.exists():
+            continue
+        for review_path in sorted(root.rglob("turn_order_review.json")):
+            episode_path = review_path.with_name("episode_input.json")
+            if not episode_path.exists():
+                continue
+            key = (review_path.resolve(), episode_path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append(key)
+    return pairs
 
 
 def _user_hash(text: str) -> str:
@@ -757,12 +782,15 @@ def main() -> int:
         rows.extend(trace_rows)
         counters["trace_rule_rows"] += len(trace_rows)
 
+    review_inputs = [(Path(review).resolve(), Path(episode).resolve()) for review, episode in zip(args.review, args.episode_input)]
+    review_inputs.extend(_review_pairs_from_roots(args.review_root))
+
     if len(args.review) != len(args.episode_input):
         raise SystemExit("--review and --episode-input counts must match")
-    for review, episode in zip(args.review, args.episode_input):
+    for review_path, episode_path in review_inputs:
         review_rows, review_lessons = _rows_from_review(
-            Path(review).resolve(),
-            Path(episode).resolve(),
+            review_path,
+            episode_path,
             system_prompt=system_prompt,
             min_confidence=args.min_confidence,
         )
@@ -814,8 +842,9 @@ def main() -> int:
         "rule_counts": {key: int(value) for key, value in rule_counts.most_common()},
         "inputs": {
             "traces": [str(Path(path).resolve()) for path in args.trace],
-            "reviews": [str(Path(path).resolve()) for path in args.review],
-            "episode_inputs": [str(Path(path).resolve()) for path in args.episode_input],
+            "review_roots": [str(Path(path).resolve()) for path in args.review_root],
+            "reviews": [str(path) for path, _episode_path in review_inputs],
+            "episode_inputs": [str(episode_path) for _path, episode_path in review_inputs],
             "reselect_results": [str(Path(path).resolve()) for path in args.reselect_results],
             "kimi_labels": [str(Path(path).resolve()) for path in args.kimi_labels],
             "keep_kimi_reasons": bool(args.keep_kimi_reasons),

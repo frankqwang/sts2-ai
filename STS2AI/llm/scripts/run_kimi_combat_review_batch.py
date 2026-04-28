@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-decision-state-chars", type=int, default=7000)
     parser.add_argument("--damage-turns", type=int, default=2)
     parser.add_argument("--skip-episode-id", action="append", default=[], help="episode_id to skip, for continuing a reviewed batch.")
+    parser.add_argument("--skip-episode-id-file", action="append", default=[], help="UTF-8 text/JSON file with episode_id values to skip.")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -84,6 +85,30 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _read_skip_episode_ids(paths: list[str]) -> set[str]:
+    ids: set[str] = set()
+    for raw_path in paths:
+        path = Path(raw_path)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8-sig").strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, list):
+            ids.update(str(value) for value in payload if str(value).strip())
+        elif isinstance(payload, dict):
+            values = payload.get("episode_ids") or payload.get("skip_episode_ids") or []
+            if isinstance(values, list):
+                ids.update(str(value) for value in values if str(value).strip())
+        else:
+            ids.update(line.strip() for line in text.splitlines() if line.strip())
+    return ids
 
 
 def _group_episodes(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -146,6 +171,7 @@ def main() -> int:
     rows = _read_jsonl(trace_path)
     grouped = _group_episodes(rows)
     skip_episode_ids = {str(value) for value in args.skip_episode_id}
+    skip_episode_ids.update(_read_skip_episode_ids(args.skip_episode_id_file))
     episode_ids = [
         key for key in sorted(grouped, key=lambda key: _episode_score(grouped[key]), reverse=True)
         if key not in skip_episode_ids

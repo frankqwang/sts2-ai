@@ -585,11 +585,10 @@ def main() -> None:
                     "--out-dir", str(teacher_dataset_dir),
                     "--min-confidence", str(args.kimi_min_confidence),
                     "--seed", str(args.seed),
+                    "--review-root", str(kimi_review_dir),
                 ]
                 if args.kimi_append_experience:
                     teacher_dataset_cmd.append("--append-experience")
-                for review_path, episode_path in zip(review_paths, episode_paths):
-                    teacher_dataset_cmd += ["--review", review_path, "--episode-input", episode_path]
                 _run_step("kimi_teacher_dataset", teacher_dataset_cmd)
                 teacher_rows = _dataset_rows(teacher_dataset_dir / "summary.json")
                 manifest["kimi_teacher_dataset_rows"] = teacher_rows

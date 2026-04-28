@@ -12,6 +12,7 @@ from llm.scripts.kimi_review_turn_order import (
     response_content,
     select_episode_rows,
 )
+from llm.scripts.run_kimi_combat_review_batch import _read_skip_episode_ids
 
 
 def _row(episode_id: str, step: int, flags: list[str] | None = None) -> dict:
@@ -45,6 +46,15 @@ def test_select_episode_rows_picks_high_signal_episode() -> None:
     selected = select_episode_rows(rows)
 
     assert [row["episode_id"] for row in selected] == ["bad", "bad"]
+
+
+def test_read_skip_episode_ids_accepts_json_and_text(tmp_path) -> None:
+    json_path = tmp_path / "skip.json"
+    txt_path = tmp_path / "skip.txt"
+    json_path.write_text(json.dumps({"episode_ids": ["a", "b"]}), encoding="utf-8")
+    txt_path.write_text("c\n\n", encoding="utf-8")
+
+    assert _read_skip_episode_ids([str(json_path), str(txt_path)]) == {"a", "b", "c"}
 
 
 def test_build_episode_payload_and_messages_include_turn_order() -> None:

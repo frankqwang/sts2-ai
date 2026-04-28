@@ -7,6 +7,7 @@ from llm.scripts.build_teacher_dataset import (
     _candidate_from_trace_row,
     _dedupe_rows,
     _reason_repair_from_trace_row,
+    _review_pairs_from_roots,
     _rows_from_kimi_labels,
     _rows_from_review,
     _sample,
@@ -199,6 +200,19 @@ def test_rows_from_review_validates_teacher_labels(tmp_path) -> None:
     assert len(rows) == 1
     assert json.loads(rows[0]["messages"][-1]["content"])["action_index"] == 0
     assert len(lessons) == 1
+
+
+def test_review_pairs_from_root_finds_episode_siblings(tmp_path) -> None:
+    case_dir = tmp_path / "0000_case"
+    case_dir.mkdir()
+    review_path = case_dir / "turn_order_review.json"
+    episode_path = case_dir / "episode_input.json"
+    review_path.write_text("{}", encoding="utf-8")
+    episode_path.write_text("{}", encoding="utf-8")
+
+    pairs = _review_pairs_from_roots([str(tmp_path)])
+
+    assert pairs == [(review_path.resolve(), episode_path.resolve())]
 
 
 def test_dedupe_rows_keeps_single_user_action_pair() -> None:
