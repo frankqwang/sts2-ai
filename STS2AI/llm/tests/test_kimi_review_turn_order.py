@@ -48,6 +48,14 @@ def test_select_episode_rows_picks_high_signal_episode() -> None:
     assert [row["episode_id"] for row in selected] == ["bad", "bad"]
 
 
+def test_select_episode_rows_accepts_spectate_trace_without_episode_id() -> None:
+    rows = [_row("", 2), _row("", 0), _row("", 1)]
+
+    selected = select_episode_rows(rows)
+
+    assert [row["episode_step"] for row in selected] == [0, 1, 2]
+
+
 def test_read_skip_episode_ids_accepts_json_and_text(tmp_path) -> None:
     json_path = tmp_path / "skip.json"
     txt_path = tmp_path / "skip.txt"

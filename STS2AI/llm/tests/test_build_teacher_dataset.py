@@ -240,6 +240,53 @@ def test_rows_from_review_rejects_reason_action_mismatch(tmp_path) -> None:
     assert rows == []
 
 
+def test_rows_from_review_rejects_label_that_skips_attacking_lethal(tmp_path) -> None:
+    episode = {
+        "episode_id": "ep",
+        "turns": [{
+            "decisions": [{
+                "step": 65,
+                "chosen_action_index": 4,
+                "pre_decision_state": (
+                    "run: char=IRONCLAD round=4\n"
+                    "player: hp=29/80 block=0 energy=3/3 powers=-\n"
+                    "enemies:\n"
+                    "  enemy4: TWO_TAILED_RAT hp=21/21 block=0 intent=Debuff powers=-\n"
+                    "  enemy2: TWO_TAILED_RAT hp=2/20 block=0 intent=Attack(6) powers=-\n"
+                    "hand:\n"
+                    "  [3] SETUP_STRIKE cost=1 type=attack | Deal 7 damage. Gain 2 Strength this turn.\n"
+                    "  [4] BASH cost=2 type=attack | Deal 8 damage. Apply 2 Vulnerable.\n"
+                    "legal_actions:\n"
+                    "  SETUP_STRIKE hand[3]:\n"
+                    "    [4] target=enemy2 damage=7 hp=2 lethal=true\n"
+                    "  BASH hand[4]:\n"
+                    "    [6] target=enemy4 damage=8 hp=21 lethal=false\n"
+                    "  [9] end_turn\n"
+                ),
+            }]
+        }],
+    }
+    review = {
+        "episode_id": "ep",
+        "usable_training_labels": [
+            {
+                "step": 65,
+                "best_action_index": 6,
+                "reason_en": "Bash before Setup Strike wastes temporary strength",
+                "confidence": 0.9,
+            },
+        ],
+    }
+    episode_path = tmp_path / "episode_input.json"
+    review_path = tmp_path / "review.json"
+    episode_path.write_text(json.dumps(episode, ensure_ascii=False), encoding="utf-8")
+    review_path.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+
+    rows, _lessons = _rows_from_review(review_path, episode_path, system_prompt=load_system_prompt(), min_confidence=0.7)
+
+    assert rows == []
+
+
 def test_review_pairs_from_root_finds_episode_siblings(tmp_path) -> None:
     case_dir = tmp_path / "0000_case"
     case_dir.mkdir()

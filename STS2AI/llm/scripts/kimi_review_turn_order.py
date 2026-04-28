@@ -174,7 +174,7 @@ def select_episode_rows(rows: list[dict[str, Any]], episode_id: str = "") -> lis
             raise ValueError(f"episode_id not found: {episode_id}")
         return sorted(selected, key=lambda row: int(row.get("episode_step") or row.get("step") or 0))
     if not grouped:
-        raise ValueError("No episode_id values found in trace")
+        return sorted(rows, key=lambda row: int(row.get("episode_step") or row.get("step") or 0))
     selected_id = max(grouped, key=lambda key: _episode_signal_score(grouped[key]))
     return sorted(grouped[selected_id], key=lambda row: int(row.get("episode_step") or row.get("step") or 0))
 

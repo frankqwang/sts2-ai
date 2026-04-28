@@ -501,6 +501,20 @@ def _validate_label(user: str, action_index: int) -> tuple[bool, dict[str, Any] 
     return action is not None and not _is_end_turn(action), action
 
 
+def _preserves_visible_attacking_lethal(user: str, action: dict[str, Any]) -> bool:
+    actions = _legal_actions({"user_message": user})
+    enemies = _enemies(user)
+    attacking_lethals = [
+        candidate for candidate in _lethal_actions(actions, enemies)
+        if (enemies.get(str(candidate.get("target") or "")) or {}).get("attacking")
+    ]
+    if not attacking_lethals:
+        return True
+    selected_target = str(action.get("target") or "")
+    selected_enemy = enemies.get(selected_target) or {}
+    return bool(selected_enemy.get("attacking") and _is_lethal(action, enemies))
+
+
 def _rows_from_trace(trace_path: Path, *, system_prompt: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in _read_jsonl(trace_path):
@@ -567,6 +581,8 @@ def _rows_from_review(review_path: Path, episode_path: Path, *, system_prompt: s
         user = str(decision.get("pre_decision_state") or "")
         ok, action = _validate_label(user, action_index)
         if not ok:
+            continue
+        if not _preserves_visible_attacking_lethal(user, action):
             continue
         teacher_reason = str(label.get("reason_en") or label.get("reason") or "")
         if not _teacher_reason_matches_action(user, action, teacher_reason):
@@ -648,6 +664,8 @@ def _rows_from_reselect(path: Path, *, system_prompt: str) -> list[dict[str, Any
         ok, action = _validate_label(user, action_index)
         if not ok:
             continue
+        if not _preserves_visible_attacking_lethal(user, action):
+            continue
         out.append(_sample(
             user_message=user,
             action_index=action_index,
@@ -727,6 +745,8 @@ def _rows_from_kimi_labels(
             continue
         ok, action = _validate_label(user, int(action_index))
         if not ok:
+            continue
+        if not _preserves_visible_attacking_lethal(user, action):
             continue
         source = row.get("source") if isinstance(row.get("source"), dict) else {}
         reason = (
