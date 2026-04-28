@@ -243,6 +243,33 @@ def test_combat_card_selection_confirms_when_available() -> None:
     assert "confirm" in decision.reason
 
 
+def test_discovery_gate_ends_turn_when_safe_and_no_damage_actions() -> None:
+    decision = choose_simple_action(
+        {
+            "state_type": "monster",
+            "battle": {
+                "player": {"hp": 61, "block": 16},
+                "hand": [
+                    {"index": 0, "id": "DEFEND_IRONCLAD", "preview_block": 5},
+                    {"index": 1, "id": "DISCOVERY"},
+                    {"index": 2, "id": "DEFEND_IRONCLAD", "preview_block": 5},
+                ],
+                "enemies": [{"intent_type": "Attack", "intent_damage": 4, "intent_hits": 1}],
+            },
+        },
+        [
+            {"action": "play_card", "card_index": 0, "target_id": -1, "block": 5},
+            {"action": "play_card", "card_index": 1, "target_id": -1},
+            {"action": "play_card", "card_index": 2, "target_id": -1, "block": 5},
+            {"action": "end_turn"},
+        ],
+    )
+
+    assert decision is not None
+    assert decision.action_index == 3
+    assert "Discovery" in decision.reason
+
+
 def test_shop_gate_leaves_instead_of_repeated_purchase() -> None:
     decision = choose_simple_action(
         {"state_type": "shop"},
