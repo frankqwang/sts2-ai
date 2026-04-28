@@ -75,18 +75,37 @@ python -m llm.scripts.manage_dataset_pool materialize `
 
 非战斗 SFT 数据由 `STS2AI/data/skada/build_non_combat_sft_dataset.py` 从 Skada victory run 生成。
 
-当前 v2b 数据覆盖：
+当前基线数据集：
+
+```text
+STS2AI/Artifacts/llm/datasets/skada_non_combat_ironclad_v01032_card10k_v2h_fulltext_placeholders_20260428
+```
+
+覆盖：
 
 - `map_choice`
-- `card_reward`
+- `card_reward=10000`
 - `relic_select`
 - `rest_site_choice`
 - `shop_choice`
 
-当前 v2b adapter：
+说明：
+
+- 保留游戏原始卡牌、遗物、power 文案；不要再用手写简写替代。
+- 保留 Skada 离线占位符，例如 `{MaxHp}`、`{Energy:energyIcons()}`。
+- `current_plan` 只基于当前卡组；`winning_outcome_reference` 单独提供胜利局最终构筑参考，避免把终局方向误当作当前已经成型的体系。
+- 旧 v2d/v2e/v2f/v2g 是过渡数据，不作为正式训练输入。
+
+当前线上 non-combat adapter 仍是旧 v2b，尚未用 v2h 重新训练：
 
 ```text
 STS2AI/Artifacts/llm/sft/non_combat_skada_ironclad_v01032_2k_v2b_20260426/adapter
+```
+
+下一步先跑 Kimi 选卡标注，再训练新 non-combat LoRA。详细交接见：
+
+```text
+STS2AI/Docs/training-next-steps.md
 ```
 
 ## 常用入口

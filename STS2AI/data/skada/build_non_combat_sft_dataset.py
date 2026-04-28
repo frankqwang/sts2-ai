@@ -26,7 +26,6 @@ if str(_STS2AI_ROOT) not in sys.path:
     sys.path.insert(0, str(_STS2AI_ROOT))
 
 from llm.data_pipeline.card_effects import (  # noqa: E402
-    card_effect_hint,
     card_is_power,
     effective_block,
     effective_damage,
@@ -41,9 +40,6 @@ _CATALOG_DB = _STS2AI_ROOT / "data" / "game_wiki" / "game_catalog.sqlite"
 _ENG_RELICS_JSON = _REPO_ROOT / "localization" / "eng" / "relics.json"
 _MARKUP_RE = re.compile(r"\[/?(?:gold|yellow|red|blue|green|cyan|magenta|white|orange|purple)\]")
 _IMG_TAG_RE = re.compile(r"\[img\].*?\[/img\]")
-_PLACEHOLDER_RE = re.compile(r"\{[^{}]+\}")
-
-
 ROOM_NAMES = {
     "A": "Act Start",
     "B": "Boss",
@@ -183,10 +179,14 @@ class BuildState:
             return ", ".join(parts[:limit]) + f", ...(+{len(parts) - limit})"
         return ", ".join(parts)
 
-    def relic_line(self, *, limit: int = 24) -> str:
+    def relic_line(self, *, limit: int = 16, include_descriptions: bool = False) -> str:
         if not self.relics:
             return "-"
-        parts = list(self.relics)
+        parts = [
+            _relic_line(relic, include_description=include_descriptions)
+            if include_descriptions else relic
+            for relic in self.relics
+        ]
         if len(parts) > limit:
             return ", ".join(parts[:limit]) + f", ...(+{len(parts) - limit})"
         return ", ".join(parts)
@@ -257,6 +257,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--game-version", default="", help="Optional exact game_version filter.")
     parser.add_argument("--max-runs", type=int, default=0)
     parser.add_argument("--max-per-type", type=int, default=20000)
+    parser.add_argument(
+        "--max-per-type-overrides",
+        default="",
+        help=(
+            "Comma separated per decision cap overrides, for example "
+            "card_reward=10000,map_choice=2000. Types not listed use --max-per-type."
+        ),
+    )
     parser.add_argument("--eval-ratio", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=20260426)
     parser.add_argument(
@@ -266,6 +274,22 @@ def parse_args() -> argparse.Namespace:
         help="strategic_v2 adds visible build summaries and plan/reason labels; human_match keeps the old minimal labels.",
     )
     return parser.parse_args()
+
+
+def _parse_type_cap_overrides(raw: str) -> dict[str, int]:
+    overrides: dict[str, int] = {}
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise ValueError(f"invalid --max-per-type-overrides entry: {part!r}")
+        key, value = part.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"invalid empty decision type in override: {part!r}")
+        overrides[key] = int(value.strip())
+    return overrides
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -295,8 +319,8 @@ def _clean_text(text: str) -> str:
         return ""
     text = _IMG_TAG_RE.sub("", text)
     text = _MARKUP_RE.sub("", text)
+    text = text.replace("콘좆", "Energy")
     text = text.replace("\\n", " ").replace("\n", " ").replace("；", ";")
-    text = _PLACEHOLDER_RE.sub("?", text)
     return " ".join(text.split()).strip()
 
 
@@ -364,9 +388,8 @@ def _card_description(card_id: str) -> str:
         rendered = render_card_description(_card_base(card_id), desc, is_upgraded=_card_upgraded(card_id))
         rendered = _clean_text(rendered)
         if rendered:
-            return rendered[:180]
-    hint = card_effect_hint(_card_base(card_id), _card_upgraded(card_id))
-    return f"effect={hint}" if hint and hint != "-" else ""
+            return rendered
+    return ""
 
 
 @lru_cache(maxsize=1)
@@ -389,10 +412,8 @@ def _relic_texts() -> dict[str, dict[str, str]]:
 def _relic_line(relic_id: str, display: str | None = None, *, include_description: bool = True) -> str:
     rid = _clean_id(relic_id)
     texts = _relic_texts().get(rid) or {}
-    name = display or _clean_text(texts.get("title") or rid)
-    desc = _clean_text(texts.get("description") or "")
-    if len(desc) > 120:
-        desc = desc[:117].rstrip() + "..."
+    name = display or str(texts.get("title") or rid).strip()
+    desc = str(texts.get("description") or "").replace("\\n", " ").replace("\n", " ").strip()
     if not include_description:
         desc = ""
     return f"{rid} | {name}" + (f" | {desc}" if desc else "")
@@ -506,15 +527,154 @@ def _build_context_lines(record: dict[str, Any], build: BuildState, floor: dict[
 
 def _teacher_plan(record: dict[str, Any], build: BuildState, floor: dict[str, Any]) -> str:
     current = _profile_from(build.deck, build.relics)
-    final = _final_profile(record)
-    final_arch = final.archetype()
     needs = current.needs(floor=int(floor.get("floor") or 0)) or ["deck quality"]
-    if final.deck_size:
-        return (
-            f"Current plan: {current.archetype()}. Keep choices pointed toward {final_arch}; "
-            f"short-term priorities are {', '.join(needs[:3])}."
-        )
     return f"Current plan: {current.archetype()}. Short-term priorities are {', '.join(needs[:3])}."
+
+
+def _act_index_for_floor(floor_no: int) -> int:
+    if floor_no <= 0:
+        return 0
+    return max(0, (floor_no - 1) // 17)
+
+
+def _act_floor_bounds(floor_no: int) -> tuple[int, int]:
+    act = _act_index_for_floor(floor_no)
+    start = act * 17 + 1
+    return start, start + 16
+
+
+def _floor_no(row: dict[str, Any]) -> int:
+    try:
+        return int(row.get("floor") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _floor_timeline(record: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        row for row in _as_list(record.get("floor_timeline"))
+        if isinstance(row, dict)
+    ]
+
+
+def _boss_context_line(record: dict[str, Any], floor_no: int) -> str:
+    start, end = _act_floor_bounds(floor_no)
+    for row in _floor_timeline(record):
+        if not (start <= _floor_no(row) <= end):
+            continue
+        if str(row.get("room_type") or "").upper() != "B":
+            continue
+        combat = row.get("combat") if isinstance(row.get("combat"), dict) else {}
+        enc = _clean_id(combat.get("encounter")) or "UNKNOWN"
+        display = combat.get("encounter_display_name")
+        name = ""
+        if isinstance(display, dict):
+            name = str(display.get("en") or display.get("zh") or "").strip()
+        return f"boss: floor={row.get('floor')} encounter={enc}" + (f" name={name}" if name else "")
+    return "boss: unknown"
+
+
+def _route_ahead_line(record: dict[str, Any], floor_no: int, *, limit: int = 8) -> str:
+    act = _act_index_for_floor(floor_no)
+    local_floor = floor_no - act * 17
+    act_maps = [
+        act_map for act_map in _as_list(record.get("map_acts"))
+        if isinstance(act_map, dict) and int(act_map.get("act") or -1) == act
+    ]
+    if not act_maps:
+        return "route_ahead: unknown"
+    act_map = act_maps[0]
+    visited = [coord for coord in _as_list(act_map.get("visited_coords")) if isinstance(coord, list) and len(coord) >= 2]
+    nodes = {
+        tuple(node.get("coord") or []): node
+        for node in _as_list(act_map.get("nodes"))
+        if isinstance(node, dict) and isinstance(node.get("coord"), list)
+    }
+    current_idx = max(0, min(len(visited) - 1, local_floor - 1)) if visited else 0
+    future = visited[current_idx + 1: current_idx + 1 + limit]
+    parts: list[str] = []
+    for offset, coord in enumerate(future, 1):
+        node = nodes.get(tuple(coord)) or {}
+        parts.append(f"f+{offset}:{_room_name(node.get('type'))}@{list(coord)}")
+    boss = act_map.get("boss")
+    suffix = f"; boss_coord={boss}" if boss else ""
+    return "route_ahead: " + (", ".join(parts) if parts else "none") + suffix
+
+
+def _recent_combat_line(record: dict[str, Any], floor_no: int, *, limit: int = 3) -> str:
+    rows = [
+        row for row in _floor_timeline(record)
+        if _floor_no(row) < floor_no and isinstance(row.get("combat"), dict)
+    ][-limit:]
+    if not rows:
+        return "recent_combats: none"
+    parts: list[str] = []
+    for row in rows:
+        combat = row.get("combat") if isinstance(row.get("combat"), dict) else {}
+        hp_before = int(row.get("hp_before") or 0)
+        hp_after = int(row.get("hp_after") or 0)
+        parts.append(
+            f"f{row.get('floor')}:{_clean_id(combat.get('encounter'))} "
+            f"turns={combat.get('turns')} hp_delta={hp_after - hp_before} "
+            f"dmg_taken={combat.get('total_dmg_taken')}"
+        )
+    return "recent_combats: " + "; ".join(parts)
+
+
+def _next_risk_line(record: dict[str, Any], floor_no: int, *, limit: int = 6) -> str:
+    future = [
+        row for row in _floor_timeline(record)
+        if _floor_no(row) > floor_no
+    ][:limit]
+    if not future:
+        return "next_risk: none"
+    parts: list[str] = []
+    elite_before_rest = False
+    seen_rest = False
+    for row in future:
+        room = _room_name(row.get("room_type"))
+        if room == "Rest Site":
+            seen_rest = True
+        if room == "Elite" and not seen_rest:
+            elite_before_rest = True
+        combat = row.get("combat") if isinstance(row.get("combat"), dict) else {}
+        enc = _clean_id(combat.get("encounter"))
+        label = f"f{row.get('floor')}:{room}"
+        if enc:
+            label += f"/{enc}"
+        parts.append(label)
+    return f"next_risk: elite_before_rest={str(elite_before_rest).lower()}; " + ", ".join(parts)
+
+
+def _long_context_lines(record: dict[str, Any], floor: dict[str, Any]) -> list[str]:
+    floor_no = int(floor.get("floor") or 0)
+    return [
+        _boss_context_line(record, floor_no),
+        _route_ahead_line(record, floor_no),
+        _recent_combat_line(record, floor_no),
+        _next_risk_line(record, floor_no),
+        _final_outcome_line(record),
+    ]
+
+
+def _final_outcome_line(record: dict[str, Any]) -> str:
+    final = _final_profile(record)
+    deck_cards: list[str] = []
+    for entry in _as_list(record.get("final_deck")):
+        if not isinstance(entry, dict):
+            continue
+        cid = _clean_id(entry.get("card_id"))
+        if not cid:
+            continue
+        count = int(entry.get("count") or 1)
+        deck_cards.append(f"{cid}x{count}" if count > 1 else cid)
+        if len(deck_cards) >= 12:
+            break
+    return (
+        f"winning_outcome_reference: final_archetype={final.archetype()} "
+        f"final_key_cards={','.join(final.key_cards[:6]) if final.key_cards else 'none'} "
+        f"final_deck_head={','.join(deck_cards) if deck_cards else 'unknown'}"
+    )
 
 
 def _candidate_card_line(index: int, action: str, card_id: str, display: str) -> str:
@@ -641,9 +801,10 @@ def _base_lines(
             f"hp={build.hp}/{build.max_hp or '?'} gold={build.gold}"
         ),
         f"deck: {build.deck_line()}",
-        f"relics: {build.relic_line()}",
+        f"relics: {build.relic_line(include_descriptions=include_strategy)}",
     ]
     if include_strategy:
+        lines.extend(_long_context_lines(record, row))
         lines.extend(_build_context_lines(record, build, row))
     return lines
 
@@ -948,6 +1109,7 @@ def _rows_from_record(path: Path, line_no: int, split: str, record: dict[str, An
 def main() -> None:
     args = parse_args()
     rng = random.Random(args.seed)
+    type_cap_overrides = _parse_type_cap_overrides(args.max_per_type_overrides)
     out_dir = args.out_dir or (_STS2AI_ROOT / "Artifacts" / "llm" / "datasets" / f"skada_non_combat_{time.strftime('%Y%m%d-%H%M%S')}")
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -967,11 +1129,12 @@ def main() -> None:
             decision_type = str((row.get("meta") or {}).get("decision_type") or "")
             bucket = buckets.setdefault(decision_type, [])
             seen_counts[decision_type] += 1
-            if args.max_per_type <= 0 or len(bucket) < args.max_per_type:
+            cap = type_cap_overrides.get(decision_type, args.max_per_type)
+            if cap <= 0 or len(bucket) < cap:
                 bucket.append(row)
                 continue
             replacement_index = rng.randrange(seen_counts[decision_type])
-            if replacement_index < args.max_per_type:
+            if replacement_index < cap:
                 bucket[replacement_index] = row
         if args.max_runs > 0 and processed_runs >= args.max_runs:
             break

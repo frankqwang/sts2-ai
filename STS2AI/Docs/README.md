@@ -6,6 +6,7 @@
 
 - `design/game-bridge-current.md`：sim pipe protobuf 与 spectator HTTP protobuf JSON 的当前 bridge 架构。
 - `llm-self-train-loop.md`：LLM 战斗训练飞轮、rollout、audit、dataset pool、晋级门槛。
+- `training-next-steps.md`：当前训练优先级、非战斗数据、Kimi 标注、planner LoRA 交接计划。
 
 ## 当前代码主线
 

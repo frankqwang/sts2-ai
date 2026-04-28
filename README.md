@@ -89,10 +89,27 @@ python -m llm.scripts.manage_dataset_pool materialize `
 
 - 数据构建脚本：
   `STS2AI/data/skada/build_non_combat_sft_dataset.py`
-- 当前 v2b 数据集：
-  `STS2AI/Artifacts/llm/datasets/skada_non_combat_ironclad_v01032_2k_v2b_20260426`
-- 当前 v2b adapter：
+- 当前基线数据集：
+  `STS2AI/Artifacts/llm/datasets/skada_non_combat_ironclad_v01032_card10k_v2h_fulltext_placeholders_20260428`
+- 该数据集包含 `card_reward=10000`、其它非战斗类型各 `2000`；保留游戏原始占位符文案，如 `{MaxHp}`、`{Energy:energyIcons()}`。
+- 当前线上非战斗 adapter 仍是旧 v2b，尚未用 v2h 重新训练：
   `STS2AI/Artifacts/llm/sft/non_combat_skada_ironclad_v01032_2k_v2b_20260426/adapter`
+- Kimi 选卡标注脚本：
+  `STS2AI/data/skada/kimi_label_card_rewards.py`
+
+## 下一步优先级
+
+1. 先跑 Kimi 选卡标注，基于 `v2h_fulltext_placeholders` 抽 200 条高价值 `card_reward` 样本，产出简短 `plan/reason/action_scores`。
+2. 用 `v2h_fulltext_placeholders + Kimi card_reward gold` 训练新 non-combat LoRA，并做离线 card_reward slice eval。
+3. 把新 non-combat adapter 接入 fullrun，重点看 boss 前选卡、低血选卡、复杂构筑牌是否改善。
+4. 战斗侧先做 strategy/guide prompt builder，不急着训练 planner LoRA。把敌人机制、当前卡组打法、危险回合、药水策略写入 prompt。
+5. planner LoRA 放到第二阶段：先收集整回合 Kimi 复盘和高质量 rollout，再训练 `turn_plan`，执行时必须逐步重采样 legal_actions，不能盲批量执行 action_index。
+
+详细交接见：
+
+```text
+STS2AI/Docs/training-next-steps.md
+```
 
 ## 观战运行
 
@@ -117,5 +134,6 @@ STS2AI/Docs
 - `STS2AI/Docs/README.md`
 - `STS2AI/Docs/design/game-bridge-current.md`
 - `STS2AI/Docs/llm-self-train-loop.md`
+- `STS2AI/Docs/training-next-steps.md`
 
 旧 zero/replay 训练主线和 2026-04-24 交接文档已删除，不再作为当前实现依据。
