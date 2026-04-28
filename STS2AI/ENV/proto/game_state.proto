@@ -258,6 +258,9 @@ message CardSelectState {
   bool can_cancel = 4;
   repeated HandCard cards = 5;            // 可选卡牌
   repeated HandCard selected_cards = 6;   // 已选卡牌
+  string prompt = 7;              // UI 原始提示，说明这次选择要做什么
+  int32 min_select = 8;
+  int32 max_select = 9;
 }
 
 // --- Relic Select ---

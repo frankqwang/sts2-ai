@@ -85,6 +85,11 @@ public static class BridgeGameStateBuilder
 			case "elite":
 			case "boss":
 				gs.Battle = BuildBattleState(snapshot.CachedCombatState, player);
+				if (snapshot.CachedCombatState?.IsCardSelectionActive == true
+					&& snapshot.CachedCombatState.CardSelection != null)
+				{
+					gs.CardSelect = BuildCardSelectState(snapshot.CachedCombatState.CardSelection);
+				}
 				break;
 		}
 		return gs;
@@ -563,7 +568,10 @@ public static class BridgeGameStateBuilder
 			ScreenType = NormalizeCardSelectScreenType(selection?.Mode),
 			SelectedCount = selection?.SelectedCards.Count ?? 0,
 			CanConfirm = selection?.CanConfirm ?? false,
-			CanCancel = selection?.Cancelable ?? false
+			CanCancel = selection?.Cancelable ?? false,
+			Prompt = selection?.PromptText ?? "",
+			MinSelect = selection?.MinSelect ?? 0,
+			MaxSelect = selection?.MaxSelect ?? 0
 		};
 		if (selection == null) return cs;
 		bool quotaReached = selection.MaxSelect > 0 && selection.SelectedCards.Count >= selection.MaxSelect;

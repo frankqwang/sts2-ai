@@ -675,6 +675,9 @@ class TestCardSelect:
         cs.selected_count = 1
         cs.can_confirm = True
         cs.can_cancel = False
+        cs.prompt = "Choose a card to upgrade."
+        cs.min_select = 1
+        cs.max_select = 1
         c = cs.cards.add()
         c.id = "Strike"
         c.cost = 1
@@ -687,6 +690,9 @@ class TestCardSelect:
         assert "card_select" in d
         assert d["card_select"]["screen_type"] == "card_select"
         assert d["card_select"]["can_confirm"] is True
+        assert d["card_select"]["prompt"] == "Choose a card to upgrade."
+        assert d["card_select"]["min_select"] == 1
+        assert d["card_select"]["max_select"] == 1
         assert len(d["card_select"]["cards"]) == 1
         assert len(d["card_select"]["selected_cards"]) == 1
         assert d["card_select"]["cards"][0]["id"] == "Strike"
@@ -712,6 +718,38 @@ class TestCardSelect:
 
         assert d["legal_actions"][0]["label"] == "remove_card BASH"
         assert d["legal_actions"][0]["card_id"] == "BASH"
+
+    def test_combat_card_select_is_available_on_battle_state(self):
+        gs = TestBattle()._make_combat_state()
+        cs = gs.card_select
+        cs.screen_type = "SimpleSelect"
+        cs.prompt = "Choose a card."
+        cs.min_select = 0
+        cs.max_select = 1
+        c = cs.cards.add()
+        c.index = 0
+        c.id = "ANGER"
+        c.name = "Anger"
+        c.cost = 0
+        c.card_type = "ATTACK"
+        la = gs.legal_actions.add()
+        la.action = "combat_select_card"
+        la.index = 0
+        la.card_index = 0
+        la.card_id = "ANGER"
+        la.label = "Anger"
+        la.target_id = -1
+        la.col = -1
+        la.row = -1
+        la.slot = -1
+
+        d = game_state_to_dict(gs)
+
+        assert d["state_type"] == "monster"
+        assert d["card_select"]["prompt"] == "Choose a card."
+        assert d["battle"]["card_selection"]["selectable_cards"][0]["id"] == "ANGER"
+        assert d["legal_actions"][0]["label"] == "Anger"
+        assert d["legal_actions"][0]["card_id"] == "ANGER"
 
 
 class TestRelicSelect:

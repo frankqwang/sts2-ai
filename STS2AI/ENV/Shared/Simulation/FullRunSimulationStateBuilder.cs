@@ -727,7 +727,9 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 						actions.Add(new FullRunSimulationLegalAction
 						{
 							Action = "combat_select_card",
+							Index = card.HandIndex,
 							CardIndex = card.HandIndex,
+							CardId = card.Id,
 							Label = card.Title,
 							IsSupported = true
 						});
@@ -754,7 +756,9 @@ private static string ResolveStateType(RunState runState, AbstractRoom? currentR
 						actions.Add(new FullRunSimulationLegalAction
 						{
 							Action = "combat_select_card",
+							Index = card2.ChoiceIndex,
 							CardIndex = card2.ChoiceIndex,
+							CardId = card2.Id,
 							Label = card2.Title,
 							IsSupported = true
 						});

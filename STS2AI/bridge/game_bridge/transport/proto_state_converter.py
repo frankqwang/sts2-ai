@@ -74,6 +74,21 @@ def game_state_to_dict(gs: pb.GameState) -> dict[str, Any]:
         state["player"] = battle.get("player", player)
         state["enemies"] = battle.get("enemies", [])
         state["round_number_raw"] = battle.get("round_number_raw")
+        if gs.HasField("card_select"):
+            selection = _convert_card_select(gs.card_select, state["player"])
+            compact_selection = {
+                "prompt": selection.get("prompt"),
+                "mode": selection.get("screen_type"),
+                "min_select": selection.get("min_select"),
+                "max_select": selection.get("max_select"),
+                "can_confirm": selection.get("can_confirm"),
+                "can_cancel": selection.get("can_cancel"),
+                "selectable_cards": selection.get("cards") or [],
+                "selected_cards": selection.get("selected_cards") or [],
+            }
+            state["card_select"] = selection
+            state["card_selection"] = compact_selection
+            battle["card_selection"] = compact_selection
 
     _decorate_action_labels(state)
     return state
@@ -463,6 +478,9 @@ def _convert_card_select(cs: pb.CardSelectState, player: dict[str, Any]) -> dict
         "selected_count": cs.selected_count,
         "can_confirm": cs.can_confirm,
         "can_cancel": cs.can_cancel,
+        "prompt": cs.prompt or "",
+        "min_select": cs.min_select,
+        "max_select": cs.max_select,
         "cards": cards,
         "selected_cards": selected_cards,
         "player": player,

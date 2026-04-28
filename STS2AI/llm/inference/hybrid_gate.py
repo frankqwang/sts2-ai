@@ -203,30 +203,6 @@ def _action_target_id(action: dict[str, Any]) -> int | None:
         return None
 
 
-def _card_for_action(action: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-    card_index = _action_card_index(action)
-    if card_index is None:
-        return {}
-    for card in _iter_hand_cards(state):
-        try:
-            if int(_pick(card, "index", "hand_index", default=-1)) == card_index:
-                return card
-        except (TypeError, ValueError):
-            continue
-    hand = _iter_hand_cards(state)
-    if 0 <= card_index < len(hand):
-        return hand[card_index]
-    return {}
-
-
-def _action_card_id(action: dict[str, Any], state: dict[str, Any]) -> str:
-    raw = str(_pick(action, "card_id", "id", "label", default="")).strip()
-    if raw:
-        return raw.upper()
-    card = _card_for_action(action, state)
-    return str(_pick(card, "id", "card_id", "name", default="")).strip().upper()
-
-
 def _card_damage(card: dict[str, Any], target_id: int) -> float:
     preview = card.get("preview_damage_per_target")
     if not isinstance(preview, dict):
@@ -656,29 +632,6 @@ def _choose_event_safety_action(
     return None
 
 
-def _choose_unsupported_combat_setup_action(
-    state: dict[str, Any],
-    enabled: list[tuple[int, dict[str, Any]]],
-) -> SimplePolicyDecision | None:
-    state_type = str(state.get("state_type") or "").strip().lower().replace("-", "_")
-    if state_type != "monster":
-        return None
-    end_turn_index = next((raw_index for raw_index, action in enabled if _action_type(action) == "end_turn"), None)
-    if end_turn_index is None:
-        return None
-    if not any(_action_type(action) == "play_card" and _action_card_id(action, state) == "DISCOVERY" for _, action in enabled):
-        return None
-    hp, block = _player_hp_block(state)
-    if max(0.0, _incoming_damage(state) - block) + _end_turn_hp_loss(state) > 0:
-        return None
-    if any(_action_type(action) == "play_card" and _action_damage(action) > 0 for _, action in enabled):
-        return None
-    return SimplePolicyDecision(
-        action_index=end_turn_index,
-        reason=f"avoid unsupported Discovery branch when already safe: hp={hp:g} block={block:g}",
-    )
-
-
 def choose_simple_action(
     _state: dict[str, Any],
     legal_actions: list[dict[str, Any]],
@@ -728,10 +681,6 @@ def choose_simple_action(
     event_safety_decision = _choose_event_safety_action(_state, enabled)
     if event_safety_decision is not None:
         return event_safety_decision
-
-    unsupported_setup_decision = _choose_unsupported_combat_setup_action(_state, enabled)
-    if unsupported_setup_decision is not None:
-        return unsupported_setup_decision
 
     if (
         "end_turn" in action_types

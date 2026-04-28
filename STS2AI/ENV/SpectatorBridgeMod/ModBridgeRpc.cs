@@ -303,14 +303,26 @@ public static partial class McpMod
 
     private static GameState BuildBridgeGameStateCore()
     {
+        FullRunSimulationChoiceBridge bridge = FullRunSimulationChoiceBridge.Instance;
+        SyncVisibleBridgeChoiceSelections(bridge);
+
         CombatTrainingStateSnapshot? combatSnapshot = null;
         if (CombatManager.Instance.IsInProgress || CombatManager.Instance.DebugOnlyGetState() != null)
         {
             combatSnapshot = BridgeCombatSnapshotBuilder.BuildStateSnapshot();
+            if (CombatManager.Instance.IsInProgress)
+            {
+                CombatTrainingCardSelectionSnapshot? visibleCardSelection =
+                    bridge.BuildCardSelectionSnapshot(CombatManager.Instance.DebugOnlyGetState());
+                if (visibleCardSelection != null && visibleCardSelection.SelectableCards.Count > 0)
+                {
+                    combatSnapshot.CardSelection = visibleCardSelection;
+                    combatSnapshot.IsCardSelectionActive = true;
+                    combatSnapshot.PlayerActionsDisabled = true;
+                    combatSnapshot.CanEndTurn = false;
+                }
+            }
         }
-
-        FullRunSimulationChoiceBridge bridge = FullRunSimulationChoiceBridge.Instance;
-        SyncVisibleBridgeChoiceSelections(bridge);
 
         FullRunSimulationStateSnapshot snapshot = FullRunSimulationStateBuilder.Build(
             RunManager.Instance.DebugOnlyGetState(),
@@ -346,14 +358,13 @@ public static partial class McpMod
         while (DateTime.UtcNow <= deadline)
         {
             bool busy = RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult();
-            if (busy)
+            GameState state = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult();
+            lastState = state;
+            if (busy && !IsBridgeInputSelectionState(state))
             {
                 Thread.Sleep(delay);
                 continue;
             }
-
-            GameState state = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult();
-            lastState = state;
             if (IsBridgeEventDialogueOnly(state))
             {
                 AdvanceDialogueIfNeeded();
@@ -392,13 +403,13 @@ public static partial class McpMod
         while (DateTime.UtcNow <= deadline)
         {
             bool busy = RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult();
-            if (busy)
+            GameState state = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult();
+            if (busy && !IsBridgeInputSelectionState(state))
             {
                 Thread.Sleep(delay);
                 continue;
             }
 
-            GameState state = RunOnMainThread(BuildBridgeGameState).GetAwaiter().GetResult();
             string signature = GetBridgeGameStateSignature(state);
             if (!string.Equals(signature, previousSignature, StringComparison.Ordinal))
             {
@@ -457,7 +468,8 @@ public static partial class McpMod
 
     private static bool IsBridgeStepStateSettled(GameState state)
     {
-        if (RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult())
+        bool busy = RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult();
+        if (busy && !IsBridgeInputSelectionState(state))
         {
             return false;
         }
@@ -473,8 +485,25 @@ public static partial class McpMod
         {
             return true;
         }
+        if (IsBridgeInputSelectionState(state))
+        {
+            return state.LegalActions.Count > 0;
+        }
         bool presentationBusy = RunOnMainThread(() => IsCombatPresentationBusy()).GetAwaiter().GetResult();
         return !presentationBusy && HasBridgeCombatInputSnapshotReady(state);
+    }
+
+    private static bool IsBridgeInputSelectionState(GameState state)
+    {
+        if (state.StateType is "card_select" or "hand_select")
+        {
+            return state.LegalActions.Count > 0;
+        }
+
+        return state.LegalActions.Any(static action =>
+            action.Action is "select_card" or "select_card_option" or "select_hand_card"
+                or "combat_select_card" or "confirm_selection" or "combat_confirm_selection"
+                or "cancel_selection");
     }
 
     private static bool IsBridgeResetStateReady(GameState state)

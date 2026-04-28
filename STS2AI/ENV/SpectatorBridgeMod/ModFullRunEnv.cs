@@ -299,14 +299,13 @@ public static partial class McpMod
         while (DateTime.UtcNow <= deadline)
         {
             bool busy = RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult();
-            if (busy)
+            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+            lastState = state;
+            if (busy && !IsApiInputSelectionState(state))
             {
                 Thread.Sleep(delay);
                 continue;
             }
-
-            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
-            lastState = state;
             if (IsEventDialogueOnly(state))
             {
                 AdvanceDialogueIfNeeded();
@@ -340,16 +339,13 @@ public static partial class McpMod
 
         while (DateTime.UtcNow <= deadline)
         {
-            // Wait for action queue to finish, then snapshot state.
-            // Poll IsActionExecutorBusy on main thread — if busy, skip this poll
-            // and let the game continue processing. Only snapshot when idle.
             bool busy = RunOnMainThread(() => IsActionExecutorBusy()).GetAwaiter().GetResult();
-            if (busy)
+            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
+            if (busy && !IsApiInputSelectionState(state))
             {
                 Thread.Sleep(delay);
                 continue;
             }
-            FullRunApiState state = RunOnMainThread(BuildApiState).GetAwaiter().GetResult();
 
             string signature = GetApiStateSignature(state);
             if (!string.Equals(signature, previousSignature, StringComparison.Ordinal))
@@ -411,7 +407,8 @@ public static partial class McpMod
 
     private static bool IsStepStateSettled(FullRunApiState state)
     {
-        if (IsActionExecutorBusy())
+        bool busy = IsActionExecutorBusy();
+        if (busy && !IsApiInputSelectionState(state))
             return false;
 
         if (IsEventDialogueOnly(state))
@@ -422,7 +419,24 @@ public static partial class McpMod
         if (!IsCombatLike(state.state_type))
             return true;
 
+        if (IsApiInputSelectionState(state))
+            return (state.legal_actions?.Count ?? 0) > 0;
+
         return !IsCombatPresentationBusy() && HasCombatInputSnapshotReady(state);
+    }
+
+    private static bool IsApiInputSelectionState(FullRunApiState state)
+    {
+        if (state.state_type is "card_select" or "hand_select")
+            return (state.legal_actions?.Count ?? 0) > 0;
+
+        if (state.card_select != null || state.hand_select != null || state.card_selection != null || state.battle?.card_selection != null)
+            return (state.legal_actions?.Count ?? 0) > 0;
+
+        return state.legal_actions.Any(static action =>
+            action.action is "select_card" or "select_card_option" or "select_hand_card"
+                or "combat_select_card" or "confirm_selection" or "combat_confirm_selection"
+                or "cancel_selection");
     }
 
     private static bool IsResetStateReady(FullRunApiState state)
@@ -974,7 +988,10 @@ public static partial class McpMod
                     actions.Add(new Dictionary<string, object?>
                     {
                         ["action"] = "combat_select_card",
-                        ["card_index"] = cardIndex
+                        ["index"] = cardIndex,
+                        ["card_index"] = cardIndex,
+                        ["card_id"] = GetString(card, "id"),
+                        ["label"] = GetString(card, "name")
                     });
                 }
             }
@@ -1102,7 +1119,10 @@ public static partial class McpMod
                 actions.Add(new Dictionary<string, object?>
                 {
                     ["action"] = "combat_select_card",
-                    ["card_index"] = cardIndex
+                    ["index"] = cardIndex,
+                    ["card_index"] = cardIndex,
+                    ["card_id"] = GetString(card, "id"),
+                    ["label"] = GetString(card, "name")
                 });
             }
         }
