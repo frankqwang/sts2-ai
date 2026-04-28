@@ -568,10 +568,13 @@ def _rows_from_review(review_path: Path, episode_path: Path, *, system_prompt: s
         ok, action = _validate_label(user, action_index)
         if not ok:
             continue
+        teacher_reason = str(label.get("reason_en") or label.get("reason") or "")
+        if not _teacher_reason_matches_action(user, action, teacher_reason):
+            continue
         rows.append(_sample(
             user_message=user,
             action_index=action_index,
-            reason=str(label.get("reason_en") or "teacher corrected action"),
+            reason=_canonical_reason_from_action(user, action),
             meta={
                 "source": "turn_order_review",
                 "source_review": str(review_path),
@@ -581,6 +584,8 @@ def _rows_from_review(review_path: Path, episode_path: Path, *, system_prompt: s
                 "confidence": confidence,
                 "original_action_index": decision.get("chosen_action_index"),
                 "original_reason": decision.get("reason"),
+                "kimi_reason_en": teacher_reason,
+                "reason_source": "canonical_verified",
                 "teacher_action": action,
             },
             system_prompt=system_prompt,
@@ -679,6 +684,31 @@ def _canonical_reason_from_action(user: str, action: dict[str, Any] | None) -> s
         return "end turn"
     card_id = str(action.get("card_id") or "").strip()
     return f"play {card_id}" if card_id else "verified legal action"
+
+
+def _teacher_reason_matches_action(user: str, action: dict[str, Any] | None, reason: str) -> bool:
+    """Reject labels where Kimi's prose clearly points at a different action."""
+    if not action:
+        return False
+    text = reason.lower()
+    if not text:
+        return True
+    mentions_end_turn = "end turn" in text or "end_turn" in text
+    if mentions_end_turn and not _is_end_turn(action):
+        return False
+    if _is_end_turn(action) and any(token in text for token in ("play ", "attack", "damage", "lethal", "kill")):
+        return False
+    if "lethal" in text and not _is_lethal(action, _enemies(user)):
+        return False
+    if any(token in text for token in ("block", "defend")):
+        block = action.get("block")
+        if not isinstance(block, int) or block <= 0:
+            return False
+    if any(token in text for token in ("damage", "attack", "hit ", "kill")):
+        damage = action.get("damage")
+        if not isinstance(damage, int) or damage <= 0:
+            return False
+    return True
 
 
 def _rows_from_kimi_labels(

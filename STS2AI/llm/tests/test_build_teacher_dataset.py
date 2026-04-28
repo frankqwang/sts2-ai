@@ -199,7 +199,45 @@ def test_rows_from_review_validates_teacher_labels(tmp_path) -> None:
 
     assert len(rows) == 1
     assert json.loads(rows[0]["messages"][-1]["content"])["action_index"] == 0
+    assert json.loads(rows[0]["messages"][-1]["content"])["reason"] == "verified lethal on enemy1"
     assert len(lessons) == 1
+
+
+def test_rows_from_review_rejects_reason_action_mismatch(tmp_path) -> None:
+    episode = {
+        "episode_id": "ep",
+        "turns": [{
+            "decisions": [{
+                "step": 0,
+                "chosen_action_index": 1,
+                "pre_decision_state": (
+                    "run: char=IRONCLAD round=1\n"
+                    "player: hp=80/80 block=99 energy=1/3 powers=-\n"
+                    "enemies:\n"
+                    "  enemy1: CULTIST hp=30/30 block=0 intent=Attack(6) powers=-\n"
+                    "hand:\n"
+                    "  [0] BLOODLETTING cost=0 type=skill | Lose 3 HP. Gain 2 Energy.\n"
+                    "legal_actions:\n"
+                    "  [0] BLOODLETTING hand[0] target=self self_hp_loss=3 self_hp_after=77\n"
+                    "  [1] end_turn\n"
+                ),
+            }]
+        }],
+    }
+    review = {
+        "episode_id": "ep",
+        "usable_training_labels": [
+            {"step": 0, "best_action_index": 0, "reason_en": "End turn; already sufficient block", "confidence": 0.9},
+        ],
+    }
+    episode_path = tmp_path / "episode_input.json"
+    review_path = tmp_path / "review.json"
+    episode_path.write_text(json.dumps(episode, ensure_ascii=False), encoding="utf-8")
+    review_path.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+
+    rows, _lessons = _rows_from_review(review_path, episode_path, system_prompt=load_system_prompt(), min_confidence=0.7)
+
+    assert rows == []
 
 
 def test_review_pairs_from_root_finds_episode_siblings(tmp_path) -> None:
