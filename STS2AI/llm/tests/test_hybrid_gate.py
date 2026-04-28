@@ -484,3 +484,39 @@ def test_survival_gate_never_chooses_self_lethal_block() -> None:
     assert decision is not None
     assert decision.action_index in {1, 2}
     assert "BLOOD_WALL" not in decision.reason
+
+
+def test_survival_gate_takes_visible_setup_lethal_when_mitigation_remains() -> None:
+    state = {
+        "player": {"hp": 10, "max_hp": 88},
+        "battle": {
+            "energy": 3,
+            "player": {"block": 0},
+            "hand": [
+                {"id": "STRIKE_IRONCLAD", "cost": 1, "preview_damage_per_target": {"1": 6}},
+                {"id": "STRIKE_IRONCLAD", "cost": 1, "preview_damage_per_target": {"1": 6}},
+                {"id": "RAMPAGE", "cost": 1, "preview_damage_per_target": {"1": 9}},
+                {"id": "DEFEND_IRONCLAD", "cost": 1, "preview_block": 3},
+            ],
+        },
+        "enemies": [
+            {"target_id": 1, "hp": 8, "block": 0, "intent_type": "Summon"},
+            {"target_id": 2, "hp": 18, "block": 0, "intent_type": "Attack", "intent_damage": 6, "intent_hits": 1},
+            {"target_id": 3, "hp": 19, "block": 0, "intent_type": "Attack", "intent_damage": 6, "intent_hits": 1},
+        ],
+    }
+
+    decision = choose_survival_action(
+        state,
+        [
+            {"action": "play_card", "card_index": 0, "target_id": 1, "damage": 6},
+            {"action": "play_card", "card_index": 1, "target_id": 1, "damage": 6},
+            {"action": "play_card", "card_index": 2, "target_id": 1, "damage": 9, "lethal": True},
+            {"action": "play_card", "card_index": 3, "target_id": -1, "block": 3},
+            {"action": "end_turn"},
+        ],
+    )
+
+    assert decision is not None
+    assert decision.action_index == 2
+    assert "visible lethal" in decision.reason

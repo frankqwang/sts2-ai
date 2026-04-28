@@ -223,6 +223,18 @@ def _card_block(card: dict[str, Any]) -> float:
         return 0.0
 
 
+def _card_energy_cost(card: dict[str, Any], action: dict[str, Any]) -> float:
+    for source in (action, card):
+        for key in ("energy_cost", "cost_for_turn", "cost"):
+            if source.get(key) in (None, ""):
+                continue
+            try:
+                return max(0.0, float(source.get(key)))
+            except (TypeError, ValueError):
+                continue
+    return 0.0
+
+
 def _action_block(action: dict[str, Any]) -> float:
     for key in ("block", "preview_block", "gain_block"):
         if action.get(key) in (None, ""):
@@ -295,6 +307,46 @@ def _enemy_incoming_damage(enemy: dict[str, Any]) -> float:
     return damage * hits
 
 
+def _enemy_is_setup_threat(enemy: dict[str, Any]) -> bool:
+    intent = str(_pick(enemy, "intent_type", "next_move_id", "intent", default="")).upper()
+    return any(token in intent for token in ("SUMMON", "BUFF", "DEBUFF"))
+
+
+def _combat_energy(state: dict[str, Any]) -> float:
+    battle = _as_dict(state.get("battle"))
+    try:
+        return float(_pick(battle, "energy", "current_energy", default=0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _visible_lethal_candidate(
+    state: dict[str, Any],
+    action: dict[str, Any],
+) -> tuple[int, float, str, dict[str, Any], dict[str, Any]] | None:
+    if _action_type(action) != "play_card":
+        return None
+    hand = _iter_hand_cards(state)
+    card_index = _action_card_index(action)
+    target_id = _action_target_id(action)
+    if card_index is None or target_id is None or card_index < 0 or card_index >= len(hand):
+        return None
+    card = hand[card_index]
+    enemies = {_target_id(enemy, idx): enemy for idx, enemy in enumerate(_iter_enemies(state), start=1)}
+    enemy = enemies.get(target_id)
+    if not enemy:
+        return None
+    hp, _ = _player_hp_block(state)
+    self_hp_loss = _action_self_hp_loss(action, card)
+    if self_hp_loss > 0 and hp - self_hp_loss <= 0:
+        return None
+    visible_damage = max(_card_damage(card, target_id), _action_damage(action))
+    if action.get("lethal") is True or visible_damage >= _enemy_effective_hp(enemy) > 0:
+        card_id = str(_pick(card, "id", "card_id", "name", default="card"))
+        return target_id, visible_damage, card_id, card, enemy
+    return None
+
+
 def _survival_action_score(
     state: dict[str, Any],
     action: dict[str, Any],
@@ -362,6 +414,8 @@ def choose_survival_action(
         (index, action) for index, action in enumerate(legal_actions or [])
         if isinstance(action, dict) and action.get("is_enabled") is not False
     ]
+    hand = _iter_hand_cards(state)
+    energy = _combat_energy(state)
     candidates: list[tuple[float, float, int, str]] = []
     for raw_index, action in enabled:
         score = _survival_action_score(state, action, incoming=incoming, block=block)
@@ -371,6 +425,34 @@ def choose_survival_action(
         candidates.append((hp_loss_after, neg_improvement, raw_index, reason))
     if not candidates:
         return None
+    enabled_by_index = {raw_index: action for raw_index, action in enabled}
+    lethal_candidates: list[tuple[int, float, int, str, dict[str, Any], dict[str, Any]]] = []
+    for raw_index, action in enabled:
+        lethal = _visible_lethal_candidate(state, action)
+        if lethal is None:
+            continue
+        target_id, damage, card_id, card, enemy = lethal
+        lethal_candidates.append((raw_index, damage, target_id, card_id, card, enemy))
+    if lethal_candidates:
+        candidate_costs: list[tuple[int, float]] = []
+        for raw_index, action in enabled:
+            card_index = _action_card_index(action)
+            if card_index is None or card_index < 0 or card_index >= len(hand):
+                continue
+            score = _survival_action_score(state, action, incoming=incoming, block=block)
+            if score is None:
+                continue
+            candidate_costs.append((raw_index, _card_energy_cost(hand[card_index], action)))
+        for raw_index, damage, target_id, card_id, card, enemy in lethal_candidates:
+            enemy_incoming = _enemy_incoming_damage(enemy)
+            lethal_cost = _card_energy_cost(card, enabled_by_index.get(raw_index, {}))
+            can_still_mitigate = any(
+                other_index != raw_index and lethal_cost + other_cost <= energy
+                for other_index, other_cost in candidate_costs
+            )
+            if enemy_incoming > 0 or (_enemy_is_setup_threat(enemy) and can_still_mitigate):
+                reason = f"survival: take visible lethal on enemy{target_id} with {card_id}"
+                return SimplePolicyDecision(action_index=raw_index, reason=reason, route="heuristic_survival")
     _, _, raw_index, reason = min(candidates)
     return SimplePolicyDecision(action_index=raw_index, reason=reason, route="heuristic_survival")
 
