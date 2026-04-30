@@ -644,8 +644,9 @@ class _RolloutPolicy:
             f"Previous output: {raw_text[:240]}\n\n"
             f"{safety_hint}"
             'Return only one valid JSON object matching this schema: '
-            '{"action_index":0,"confidence":0.0,"reason":"..."}. '
+            '{"action_index":0,"confidence":0.0}. '
             "Do not output multiple objects, a list, or alternative candidates. "
+            "Do not include reason / extra keys — strategy text belongs to the planner model. "
             "No markdown, no comments, no extra text."
         )
         retry_messages = [
@@ -1293,11 +1294,16 @@ def rollout_episode(
                 decision = policy.select_action(state, legal_enabled)
                 if decision.invalid_output:
                     user_msg = decision.user_message or render_state_text(state, legal_enabled)
+                    # Combat policy assistant outputs only action_index +
+                    # confidence; reasoning text is the planner LoRA's job.
+                    # ``decision.fallback_reason`` is preserved on the
+                    # StepRecord for diagnostics but kept out of the SFT
+                    # message so we don't reintroduce reason supervision
+                    # via the back door.
                     assistant_msg = json.dumps(
                         {
                             "action_index": -1,
                             "confidence": decision.confidence,
-                            "reason": decision.fallback_reason or "invalid output",
                         },
                         ensure_ascii=False,
                         separators=(",", ":"),
@@ -1332,11 +1338,16 @@ def rollout_episode(
                     outcome = f"invalid_output:{decision.fallback_reason or 'unknown'}"
                     break
                 user_msg = decision.user_message or render_state_text(state, legal_enabled)
+                # Combat policy assistant outputs only action_index +
+                # confidence; reasoning is the planner LoRA's job. The
+                # model's own raw reason text (if any) is still kept on
+                # the StepRecord (``decision.reason`` /
+                # ``decision.raw_generation``) for trace inspection, just
+                # not promoted into the SFT supervision target.
                 assistant_msg = json.dumps(
                     {
                         "action_index": decision.action_index,
                         "confidence": decision.confidence,
-                        "reason": decision.reason[:200],
                     },
                     ensure_ascii=False,
                     separators=(",", ":"),

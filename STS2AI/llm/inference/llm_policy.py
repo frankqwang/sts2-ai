@@ -728,15 +728,17 @@ class LlmExternalPolicyAdapter:
         if action_mode == "structured":
             final_instruction = (
                 'Return only one JSON object such as '
-                '{"action":"play_card","hand_index":1,"target_id":2,"reason":"..."} '
-                'or {"action":"end_turn","reason":"..."}. '
-                "Do not use action_index. Do not output multiple objects, a list, or alternative candidates."
+                '{"action":"play_card","hand_index":1,"target_id":2} '
+                'or {"action":"end_turn"}. '
+                "Do not use action_index. Do not output multiple objects, a list, or alternative candidates. "
+                "Do not include reason / extra keys — strategy text belongs to the planner model."
             )
         else:
             final_instruction = (
                 'Return only one valid JSON object matching this schema: '
-                '{"action_index":0,"confidence":0.0,"reason":"..."}. '
+                '{"action_index":0,"confidence":0.0}. '
                 "Do not output multiple objects, a list, or alternative candidates. "
+                "Do not include reason / plan / extra keys — strategy text belongs to the planner model. "
                 "No markdown, no comments, no extra text."
             )
         safety_hint = ""

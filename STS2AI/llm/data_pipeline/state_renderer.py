@@ -1508,8 +1508,9 @@ class RenderedState:
         return self._to_user_message(
               action_heading="legal_actions:",
               return_line=(
-                'Return strict JSON only: {"action_index":N,"confidence":0.0,"reason":"..."} '
-                  "using one listed action_index. Do not output multiple objects or candidates."
+                'Return strict JSON only: {"action_index":N,"confidence":0.0} '
+                "using one listed action_index. Do not output multiple objects or candidates. "
+                "Do not include a reason / plan / extra keys — strategy text belongs to the planner model."
               ),
         )
 
@@ -1518,9 +1519,10 @@ class RenderedState:
             action_heading="commands:",
             return_line=(
                 "Return one JSON line using only commands and hand legality. "
-                'Targeted card schema: {"action":"play_card","hand_index":HAND,"target_id":ENEMY,"reason":"..."}. '
-                'Self/no-target schema: {"action":"play_card","hand_index":HAND,"reason":"..."}. '
-                'End turn schema: {"action":"end_turn","reason":"..."}.'
+                'Targeted card schema: {"action":"play_card","hand_index":HAND,"target_id":ENEMY}. '
+                'Self/no-target schema: {"action":"play_card","hand_index":HAND}. '
+                'End turn schema: {"action":"end_turn"}. '
+                "Do not include reason / extra keys — strategy text belongs to the planner model."
             ),
         )
 

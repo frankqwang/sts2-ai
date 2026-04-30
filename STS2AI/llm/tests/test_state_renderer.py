@@ -422,7 +422,10 @@ def test_render_structured_action_text_groups_targets_by_hand_card() -> None:
     assert "POMMEL_STRIKE cost=1 type=Attack legal_targets=enemy1,enemy2" in rendered
     assert "play_card hand[0] DEFEND_IRONCLAD" not in rendered
     assert "  [1] play hand[1] POMMEL_STRIKE -> enemy1" not in rendered
-    assert '{"action":"play_card","hand_index":HAND,"target_id":ENEMY,"reason":"..."}' in rendered
+    # combat 输出不再带 reason —— 推理是 planner LoRA 的 job, combat 只选 action
+    assert '{"action":"play_card","hand_index":HAND,"target_id":ENEMY}' in rendered
+    assert "Do not include reason" in rendered
+    assert '"reason"' not in rendered
     assert "Do not output `action_index`" not in rendered
 
 
