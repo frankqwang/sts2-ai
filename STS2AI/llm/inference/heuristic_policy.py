@@ -2,9 +2,6 @@
 
 观战 ps1 脚本里通过 `--external-policy llm.inference.heuristic_policy:select_action`
 把这里的 `select_action` 注入到 SpectatorController。
-
-和 `game_bridge.spectate.zero_external_policy:select_action` 完全同构，
-只不过底层决策是规则而不是神经网络。
 """
 from __future__ import annotations
 

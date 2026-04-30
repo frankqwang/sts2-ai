@@ -194,7 +194,7 @@ _NON_COMBAT_DECISION_TYPES = {
 
 
 class LlmExternalPolicyAdapter:
-    """和 `zero_external_policy.ZeroExternalPolicyAdapter` 同构。
+    """LLM 外部策略适配器，用于 game_bridge.spectate 观战接口。
 
     简单强制动作直接返回；复杂决策首次按需加载模型，然后做：
         render state -> chat_template -> generate -> decode -> legal action

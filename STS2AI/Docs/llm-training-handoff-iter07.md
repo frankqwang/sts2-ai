@@ -1,7 +1,30 @@
 # LLM 训练交接 — iter07 系列（v1-v6） / 准备 v7
 
-更新时间：2026-04-30 10:50 Asia/Shanghai
+更新时间：2026-04-30 11:30 Asia/Shanghai
 作者：本轮 Claude（用户反复 review 后整理的现状）
+
+## D 路线（v6 设计）核心约束
+
+> **reason 只能由模型输出，禁止任何代码 / canonical 模板 / teacher 改写。**
+
+落地策略 = "**combat 不输出 reason，planner 输出 reason，先用 deepseek 蒸馏 planner，后续切 GRPO**"。
+
+| LoRA | inference 输出 | SFT label 来源 |
+|---|---|---|
+| **planner** | `{battle_objective, enemy_focus, ..., phase_plan}` | deepseek review 的 corrected planner_hint + phase_plan_zh （蒸馏）|
+| **combat** | `{action_index, confidence}` (**无 reason**) | 模型自己 rollout 的 action_index, 不带 reason |
+
+deepseek review 的 reason 字段（reason_en / corrected_reason）被严格限制到 **planner SFT pipeline + 诊断 meta**, 永远不进 combat assistant content.
+
+## 一夜的 commit history
+
+| commit | 内容 |
+|---|---|
+| 6ebbd36 | iter07 系列改造（teacher 重命名、sim 兜底、prompt 优化、boss idiom）|
+| ad2d416 | **Phase A**: combat policy 不再输出 reason |
+| 29b2f27 | **Phase B**: 删除所有 reason 重写代码 + mask_reason 机制 |
+| 6269301 | **Phase C**: planner SFT 增强（overall_score 过滤 + phase_plan 注入）|
+| (next)  | **数据清洗**: sanitize 旧 combat train.jsonl 脚本 |
 
 ## TL;DR — 4 轮启动失败的连环 bug 修复链 + 待办
 
