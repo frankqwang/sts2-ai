@@ -36,9 +36,9 @@ for p in (_STS2AI_ROOT, _BRIDGE_ROOT):
         sys.path.insert(0, str(p))
 
 from llm.data_pipeline.encounter_pool import (
-    ACT1_POOL,
-    ACT1_WINNABLE_POOL,
     EncounterSpec,
+    filter_encounter_pool,
+    load_skada_case_pool,
 )
 from llm.data_pipeline.heuristic_teacher import pick_action
 from llm.data_pipeline.action_decoder import format_structured_action_json
@@ -50,6 +50,7 @@ from llm.data_pipeline.state_renderer import (
 from llm.metrics import summarize_dataset_dir, write_json
 from llm.paths import DATASETS_ROOT, ensure_dirs
 from llm.prompts import load_system_prompt
+from llm.training.grpo_rollout import _inject_spec_context
 
 from game_bridge.session import create_game_session
 from game_bridge.session.state_semantics import (
@@ -66,8 +67,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-subdir", type=str, default="heuristic_act1_v0")
     p.add_argument("--eval-ratio", type=float, default=0.1)
     p.add_argument("--seed", type=int, default=20260424)
-    p.add_argument("--pool", choices=("winnable", "all"), default="winnable",
-                   help="winnable=默认稳定胜局池；all=包含旧的全量探测池。")
+    p.add_argument("--case-index", type=str, required=True, help="Skada single-combat cases.jsonl.")
+    p.add_argument("--case-character", type=str, default="IRONCLAD")
+    p.add_argument("--case-floor-min", type=int, default=1)
+    p.add_argument("--case-floor-max", type=int, default=17)
+    p.add_argument("--case-limit", type=int, default=0)
+    p.add_argument("--case-sample-seed", type=int, default=0)
+    p.add_argument("--case-sample-mode", choices=["file", "random", "stratified"], default="stratified")
+    p.add_argument("--include-lost-cases", action="store_true")
     p.add_argument("--encounter-filter", type=str, default="",
                    help="只跑 encounter_id 含此子串的")
     p.add_argument("--keep-outcomes", type=str, default="",
@@ -130,7 +137,7 @@ def _build_sft_sample(
     else:
         user_msg = render_state_text(state, legal, encounter_id=encounter_id)
         assistant_msg = json.dumps(
-            {"action_index": int(chosen_index), "reason": reason[:80]},
+            {"action_index": int(chosen_index), "reason": reason[:200]},
             ensure_ascii=False,
         )
     return {
@@ -180,6 +187,7 @@ def run_rollout(
                         build=spec.build,
                         seed=ep_seed,
                     )
+                    state = _inject_spec_context(state, spec, seed=ep_seed)
                 except Exception as exc:
                     outcome = f"reset_failed:{type(exc).__name__}"
                     print(f"[rollout][{spec.encounter_id}][ep{ep_idx}] RESET FAIL: {exc}")
@@ -230,6 +238,7 @@ def run_rollout(
                     else:
                         state = step_result
                         done = False
+                    state = _inject_spec_context(state, spec, seed=ep_seed)
 
                     step_count = step_idx + 1
                     if done:
@@ -276,13 +285,20 @@ def main() -> None:
     out_dir = DATASETS_ROOT / args.out_subdir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pool_name = args.pool
-    pool = ACT1_WINNABLE_POOL if pool_name == "winnable" else ACT1_POOL
-    if args.encounter_filter:
-        needle = args.encounter_filter.lower()
-        pool = [p for p in pool if needle in p.encounter_id.lower()]
+    pool = load_skada_case_pool(
+        args.case_index,
+        character_id=args.case_character,
+        floor_min=args.case_floor_min,
+        floor_max=args.case_floor_max,
+        won_only=not args.include_lost_cases,
+        limit=max(0, int(args.case_limit)),
+        sample_seed=int(args.case_sample_seed or args.seed),
+        sample_mode=args.case_sample_mode,
+    )
+    pool = filter_encounter_pool(pool, args.encounter_filter)
     if not pool:
         raise SystemExit("no encounters matched filter")
+    pool_name = f"skada:{Path(args.case_index).name}"
 
     print(
         f"[rollout] pool size={len(pool)} episodes_per={args.episodes_per_encounter} "

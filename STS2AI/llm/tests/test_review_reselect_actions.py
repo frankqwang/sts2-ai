@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from llm.scripts.analyze_action_ordering import _legal_actions
-from llm.scripts.review_reselect_actions import is_actionable_review_row, score_choice
+from llm.scripts.analysis.analyze_action_ordering import _legal_actions
+from llm.scripts.analysis.review_reselect_actions import is_actionable_review_row, score_choice
 
 
 def test_score_choice_rewards_fixing_visible_lethal() -> None:

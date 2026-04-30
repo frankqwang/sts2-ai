@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from llm.scripts.manage_dataset_pool import main as pool_main
+from llm.scripts.datasets.manage_dataset_pool import main as pool_main
 
 
 def _jsonl(path, rows):
@@ -10,7 +10,16 @@ def _jsonl(path, rows):
     path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
 
 
-def _row(action_index: int, *, source_kind: str = "self_rollout", advantage: float = 1.0, flags=None):
+def _row(
+    action_index: int,
+    *,
+    source_kind: str = "self_rollout",
+    advantage: float = 1.0,
+    flags=None,
+    outcome: str = "victory",
+    hp_lost: float = 0.0,
+    enemy_damage_progress: float = 1.0,
+):
     return {
         "messages": [
             {"role": "system", "content": "system"},
@@ -29,8 +38,14 @@ def _row(action_index: int, *, source_kind: str = "self_rollout", advantage: flo
         ],
         "meta": {
             "source_kind": source_kind,
-            "outcome": "victory",
+            "outcome": outcome,
             "advantage": advantage,
+            "hp_lost": hp_lost,
+            "enemy_damage_progress": enemy_damage_progress,
+            "episode_quality_summary": {
+                "hp_lost": hp_lost,
+                "enemy_damage_progress": enemy_damage_progress,
+            },
             "encounter_id": "CULTISTS_NORMAL",
             "encounter_tag": "skada_floor_03_normal",
             "action_quality_flags": flags or [],
@@ -118,3 +133,27 @@ def test_dataset_pool_ingests_audit_hardcases(tmp_path, monkeypatch) -> None:
     assert "combat_loss" in hardcases
     assert "needs_teacher" in hardcases
     assert "quarantine" in hardcases
+
+
+def test_dataset_pool_gates_self_rollout_by_hp_loss_and_enemy_progress(tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "pool"
+    dataset = tmp_path / "dataset"
+    _jsonl(dataset / "train.jsonl", [
+        _row(0, hp_lost=7.0),
+        _row(1, outcome="max_steps", enemy_damage_progress=0.72),
+        _row(2, outcome="max_steps", enemy_damage_progress=0.2),
+    ])
+    _jsonl(dataset / "eval.jsonl", [])
+
+    monkeypatch.setattr("sys.argv", [
+        "manage_dataset_pool",
+        "--pool-root", str(pool),
+        "ingest-dataset",
+        "--dataset-dir", str(dataset),
+    ])
+    assert pool_main() == 0
+
+    registry = (pool / "registry.jsonl").read_text(encoding="utf-8")
+    assert "high_hp_loss_rollout" in registry
+    assert "incomplete_high_enemy_progress" in registry
+    assert "incomplete_low_enemy_progress" in registry

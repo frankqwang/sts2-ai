@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from llm.data_pipeline.action_quality import (
     assess_action_quality,
     assess_action_quality_report,
@@ -238,3 +240,46 @@ def test_quality_summary_tracks_hp_and_speed_metrics() -> None:
     assert summary["hp_lost"] == 6
     assert summary["turns"] == 1
     assert summary["visible_damage_per_step"] == 6
+
+
+def test_summarize_quality_reports_ignores_reset_final_state_hp_rebound():
+    """sim 在败场可能把 final_state.player.hp 反弹到初始值；hp_lost 不能因此被算成 0。"""
+    # step 1: hp=30 (第一个决策步)
+    step_first = SimpleNamespace()
+    s1 = _state()
+    s1["player"]["hp"] = 30
+    step_first.state = s1
+    step_first.legal_actions = [{"action": "end_turn"}]
+    step_first.chosen_index = 0
+    step_first.quality_report = {"flags": [], "opportunities": {}, "misses": {}, "metrics": {}, "mechanism_score": 1.0}
+
+    # step 2: hp=12 (玩家已被打到残血)
+    step_last = SimpleNamespace()
+    s2 = _state()
+    s2["player"]["hp"] = 12
+    step_last.state = s2
+    step_last.legal_actions = [{"action": "end_turn"}]
+    step_last.chosen_index = 0
+    step_last.quality_report = {"flags": [], "opportunities": {}, "misses": {}, "metrics": {}, "mechanism_score": 1.0}
+
+    # final_state 报的 hp 反而比 step 末尾还高（典型 sim reset 信号）
+    rebound_final = _state()
+    rebound_final["player"]["hp"] = 80
+
+    summary = summarize_quality_reports([step_first, step_last], final_state=rebound_final)
+    # 关键：不能因为 final_state 反弹（80 > 12）就把 hp_lost 算成 0
+    # hp_start=30, hp_end 应该取 step_last 的 12（不是 final_state 的 80），hp_lost = 30 - 12 = 18
+    assert summary["hp_lost"] == 18
+
+
+def test_summarize_quality_reports_ignores_negative_chosen_index_for_turn_count():
+    """chosen_index=-1 (invalid_output) 不能被当作 end_turn 误数 turn_count。"""
+    step = SimpleNamespace()
+    step.state = _state()
+    # legal_actions 末尾恰好是 end_turn；负索引会取末尾
+    step.legal_actions = [{"action": "play_card"}, {"action": "end_turn"}]
+    step.chosen_index = -1  # invalid output
+    step.quality_report = {"flags": [], "opportunities": {}, "misses": {}, "metrics": {}, "mechanism_score": 1.0}
+
+    summary = summarize_quality_reports([step], final_state=None)
+    assert summary["turns"] == 0  # 不能误数为 1

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm.scripts.sample_kimi_teacher_candidates import (
+from llm.scripts.teacher.sample_kimi_teacher_candidates import (
     _feature_payload,
     _grouped_batch_requests,
     _messages,

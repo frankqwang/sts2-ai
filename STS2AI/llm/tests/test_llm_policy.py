@@ -363,6 +363,29 @@ def test_llm_policy_routes_combat_and_non_combat_adapters(tmp_path) -> None:
     assert adapter._adapter_key_for_state({"state_type": "monster"}, {"decision_type": "map_choice"}) == "non_combat"
 
 
+def test_llm_policy_loads_planner_hint_only_with_combat_adapter(tmp_path) -> None:
+    combat = tmp_path / "combat"
+    planner = tmp_path / "planner"
+    combat.mkdir()
+    planner.mkdir()
+
+    without_combat = LlmExternalPolicyAdapter._build_adapter_dirs(
+        single_adapter_dir=None,
+        combat_adapter_dir=None,
+        non_combat_adapter_dir=None,
+        planner_hint_adapter_dir=str(planner),
+    )
+    with_combat = LlmExternalPolicyAdapter._build_adapter_dirs(
+        single_adapter_dir=None,
+        combat_adapter_dir=str(combat),
+        non_combat_adapter_dir=None,
+        planner_hint_adapter_dir=str(planner),
+    )
+
+    assert without_combat == {}
+    assert with_combat == {"combat": str(combat.resolve()), "planner_hint": str(planner.resolve())}
+
+
 def test_llm_policy_hot_switches_loaded_adapter_without_reload() -> None:
     class FakeModel:
         def __init__(self) -> None:

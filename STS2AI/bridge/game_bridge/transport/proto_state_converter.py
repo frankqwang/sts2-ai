@@ -18,6 +18,15 @@ from typing import Any
 
 from game_bridge.generated import game_state_pb2 as pb
 from game_bridge.session.state_semantics import COMBAT_STATE_TYPES, normalize_run_outcome
+from game_bridge.transport.localization_resolver import (
+    resolve_relic_description,
+    resolve_relic_title,
+    resolve_potion_description,
+    resolve_potion_title,
+    resolve_power_description,
+    resolve_power_title,
+    resolve_intent_description,
+)
 
 
 # ===================================================================
@@ -42,6 +51,12 @@ def game_state_to_dict(gs: pb.GameState) -> dict[str, Any]:
         },
         "legal_actions": legal_actions,
     }
+    # Surface defense-in-depth fallback events so Python tools (rollout
+    # logger / build_teacher_dataset) can attribute "the bridge had to
+    # synthesize a skip" to the right state and root-cause it later.
+    fallback_reason = str(getattr(gs, "legal_actions_fallback_reason", "") or "")
+    if fallback_reason:
+        state["legal_actions_fallback_reason"] = fallback_reason
     if state_type != "game_over":
         state["player"] = player
 
@@ -85,6 +100,12 @@ def game_state_to_dict(gs: pb.GameState) -> dict[str, Any]:
                 "can_cancel": selection.get("can_cancel"),
                 "selectable_cards": selection.get("cards") or [],
                 "selected_cards": selection.get("selected_cards") or [],
+                # forward source-of-selection metadata so downstream renderers
+                # (state_renderer, planner_hint) don't have to re-parse the
+                # full selection dict
+                "trigger_card_id": selection.get("trigger_card_id") or "",
+                "source_pile_type": selection.get("source_pile_type") or "",
+                "selection_rules": selection.get("selection_rules") or [],
             }
             state["card_select"] = selection
             state["card_selection"] = compact_selection
@@ -306,31 +327,40 @@ def _convert_intent(it: pb.Intent) -> dict[str, Any]:
     }
     if it.title:
         result["title"] = it.title
-    if it.description:
-        result["description"] = it.description
+    # NOTE: sim 当前 description 字段经常是 LocString 占位符；resolver 会识别并 fallback 到
+    # localization/eng/intents.json 的真实文案；两者都失败才留空字段。
+    desc = resolve_intent_description(it.type or "", it.description if it.description else None)
+    if desc:
+        result["description"] = desc
     return result
 
 
 def _convert_relic(index: int, relic: pb.RelicInfo) -> dict[str, Any]:
-    result = {"index": index, "id": relic.id, "name": relic.name or relic.id}
-    if relic.description:
-        result["description"] = relic.description
+    name = resolve_relic_title(relic.id, relic.name) or relic.id
+    result = {"index": index, "id": relic.id, "name": name}
+    desc = resolve_relic_description(relic.id, relic.description if relic.description else None)
+    if desc:
+        result["description"] = desc
     return result
 
 
 def _convert_potion(index: int, potion: pb.PotionInfo) -> dict[str, Any]:
-    result = {"index": index, "id": potion.id, "name": potion.name or potion.id}
-    if potion.description:
-        result["description"] = potion.description
+    name = resolve_potion_title(potion.id, potion.name) or potion.id
+    result = {"index": index, "id": potion.id, "name": name}
+    desc = resolve_potion_description(potion.id, potion.description if potion.description else None)
+    if desc:
+        result["description"] = desc
     return result
 
 
 def _convert_power(pw: pb.Power) -> dict[str, Any]:
     result: dict[str, Any] = {"id": pw.id, "amount": pw.amount}
-    if pw.name:
-        result["name"] = pw.name
-    if pw.description:
-        result["description"] = pw.description
+    name = resolve_power_title(pw.id, pw.name) or pw.id
+    if name:
+        result["name"] = name
+    desc = resolve_power_description(pw.id, pw.description if pw.description else None)
+    if desc:
+        result["description"] = desc
     if pw.keywords:
         result["keywords"] = list(pw.keywords)
     return result
@@ -499,6 +529,12 @@ def _convert_card_reward(cr: pb.CardRewardState, player: dict[str, Any]) -> dict
 def _convert_card_select(cs: pb.CardSelectState, player: dict[str, Any]) -> dict[str, Any]:
     cards = [_convert_hand_card(c, i) for i, c in enumerate(cs.cards)]
     selected_cards = [_convert_hand_card(c, i) for i, c in enumerate(cs.selected_cards)]
+    # New schema fields (proto v ≥ adds trigger/pile/rules). getattr fallback
+    # keeps us forward-compatible with stale stubs / old sims that haven't
+    # been recompiled yet — older runs still produce a usable dict.
+    trigger_card_id = str(getattr(cs, "trigger_card_id", "") or "")
+    source_pile_type = str(getattr(cs, "source_pile_type", "") or "")
+    selection_rules = [str(rule) for rule in getattr(cs, "selection_rules", ()) if rule]
     return {
         "screen_type": cs.screen_type or "card_select",
         "selected_count": cs.selected_count,
@@ -509,6 +545,9 @@ def _convert_card_select(cs: pb.CardSelectState, player: dict[str, Any]) -> dict
         "max_select": cs.max_select,
         "cards": cards,
         "selected_cards": selected_cards,
+        "trigger_card_id": trigger_card_id,
+        "source_pile_type": source_pile_type,
+        "selection_rules": selection_rules,
         "player": player,
     }
 

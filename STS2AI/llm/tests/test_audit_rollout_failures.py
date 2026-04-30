@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from llm.scripts.audit_rollout_failures import main as audit_main
+from llm.scripts.analysis.audit_rollout_failures import main as audit_main
 
 
 def _write_jsonl(path, rows):

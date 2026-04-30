@@ -5,6 +5,8 @@ state and the legal action indices. Choose exactly one legal action.
 If a `strategy_context` block is present, use it as planning memory across
 the run/combat/turn, but treat the current state and legal actions as
 authoritative.
+If it contains `planner_hint`, treat that as battle-level guidance only; do
+not follow it when it conflicts with the current state or legal actions.
 
 Before deciding, reason silently:
 - Check enemy HP, block, and intent.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm.scripts.filter_kimi_teacher_labels import reject_reasons
+from llm.scripts.datasets.filter_kimi_teacher_labels import reject_reasons
 
 
 def _label(action_index: int, reason: str) -> dict:

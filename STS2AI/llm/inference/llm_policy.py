@@ -20,6 +20,11 @@
 - `STS2_LLM_TRACE_PATH`       每步 append 一条 JSONL 到这里，便于实时观察/回放
 - `STS2_LLM_ACTION_MODE`      默认 index；设 structured 让模型输出 action/hand_index/target_id
 - `STS2_LLM_STRATEGY_CONTEXT` 默认 1；注入 run/combat/turn 级策略上下文
+- `STS2_LLM_PLANNER_HINT_ADAPTER_DIR` planner-hint LoRA；输出战斗级提示，不执行动作
+- `STS2_LLM_PLANNER_HINT`     默认随 adapter 启用；设 0 禁用
+- `STS2_LLM_PLANNER_HINT_REFRESH` 默认 turn（每回合刷新）；可设 combat 退回整场战斗缓存（不推荐）
+- `STS2_LLM_GUIDE_RAG`        默认 1；给 planner-hint prompt 注入本地攻略 evidence
+- `STS2_LLM_GUIDE_LIMIT`      默认 4；每次最多召回攻略 evidence 条数
 """
 from __future__ import annotations
 
@@ -41,10 +46,19 @@ from llm.data_pipeline.action_decoder import (
 )
 from llm.data_pipeline.action_quality import assess_action_quality_report
 from llm.data_pipeline.heuristic_teacher import pick_action
+from llm.data_pipeline.guide_knowledge import render_retrieved_knowledge_for_state
 from llm.data_pipeline.state_renderer import (
     can_render_structured_actions,
     render_state_text,
     render_structured_action_state_text,
+)
+from llm.data_pipeline.planner_hint import (
+    DEFAULT_PLANNER_HINT_REFRESH,
+    PLANNER_HINT_REFRESH_CHOICES,
+    format_planner_hint,
+    parse_planner_hint_json,
+    planner_hint_cache_key,
+    render_planner_hint_user_message,
 )
 from llm.data_pipeline.strategy_context import StrategyMemory
 from llm.inference.hybrid_gate import choose_simple_action, choose_survival_action
@@ -204,10 +218,12 @@ class LlmExternalPolicyAdapter:
         single_adapter_dir = adapter_dir or os.environ.get("STS2_LLM_ADAPTER_DIR") or None
         combat_adapter_dir = combat_adapter_dir or os.environ.get("STS2_LLM_COMBAT_ADAPTER_DIR") or None
         non_combat_adapter_dir = non_combat_adapter_dir or os.environ.get("STS2_LLM_NON_COMBAT_ADAPTER_DIR") or None
+        planner_hint_adapter_dir = os.environ.get("STS2_LLM_PLANNER_HINT_ADAPTER_DIR") or None
         self._adapter_dirs = self._build_adapter_dirs(
             single_adapter_dir=single_adapter_dir,
             combat_adapter_dir=combat_adapter_dir,
             non_combat_adapter_dir=non_combat_adapter_dir,
+            planner_hint_adapter_dir=planner_hint_adapter_dir,
         )
         self._adapter_key_to_name: dict[str, str] = {}
         self._active_adapter_name: str | None = None
@@ -230,6 +246,30 @@ class LlmExternalPolicyAdapter:
         self._action_mode = _normalize_action_mode(os.environ.get("STS2_LLM_ACTION_MODE", "index"))
         self._strategy_context_enabled = _env_int("STS2_LLM_STRATEGY_CONTEXT", 1) == 1
         self._strategy_memory = StrategyMemory()
+        planner_raw = os.environ.get("STS2_LLM_PLANNER_HINT", "").strip().lower()
+        self._planner_hint_enabled = (
+            planner_raw not in {"0", "false", "off", "no"}
+            and "planner_hint" in self._adapter_dirs
+            and "combat" in self._adapter_dirs
+        )
+        self._planner_hint_refresh = os.environ.get(
+            "STS2_LLM_PLANNER_HINT_REFRESH", DEFAULT_PLANNER_HINT_REFRESH
+        ).strip().lower()
+        if planner_raw in {"turn", "per_turn"}:
+            self._planner_hint_refresh = "turn"
+        if self._planner_hint_refresh not in PLANNER_HINT_REFRESH_CHOICES:
+            self._planner_hint_refresh = DEFAULT_PLANNER_HINT_REFRESH
+        self._planner_hint_max_new_tokens = _env_int("STS2_LLM_PLANNER_HINT_MAX_NEW_TOKENS", 240)
+        self._planner_hint_temperature = _env_float("STS2_LLM_PLANNER_HINT_TEMPERATURE", 0.0)
+        self._planner_hint_required = _env_int("STS2_LLM_PLANNER_HINT_REQUIRED", 0) == 1
+        self._guide_required = _env_int("STS2_LLM_GUIDE_REQUIRED", 0) == 1
+        self._planner_hint_cache_key = ""
+        self._planner_hint_cache_text = ""
+        self._planner_hint_cache_knowledge: list[dict[str, Any]] = []
+        self._last_planner_hint = ""
+        self._last_planner_hint_status = "disabled"
+        self._last_planner_hint_raw = ""
+        self._last_retrieved_knowledge: list[dict[str, Any]] = []
         self._stats: dict[str, int] = {
             "calls": 0,
             "llm_calls": 0,
@@ -254,6 +294,9 @@ class LlmExternalPolicyAdapter:
             "structured_calls": 0,
             "structured_fallback_to_index": 0,
             "strategy_context_calls": 0,
+            "planner_hint_calls": 0,
+            "planner_hint_cache_hits": 0,
+            "planner_hint_failures": 0,
             "potion_actions_suppressed": 0,
             "adapter_switches": 0,
             "adapter_switch_failures": 0,
@@ -265,6 +308,7 @@ class LlmExternalPolicyAdapter:
         self._system_prompts = {
             "index": load_system_prompt("index"),
             "non_combat": load_system_prompt("non_combat"),
+            "planner_hint": load_system_prompt("planner_hint"),
             "structured": load_system_prompt("structured"),
         }
         self._model: Any | None = None
@@ -292,16 +336,21 @@ class LlmExternalPolicyAdapter:
         single_adapter_dir: str | None,
         combat_adapter_dir: str | None,
         non_combat_adapter_dir: str | None,
+        planner_hint_adapter_dir: str | None,
     ) -> dict[str, str]:
         single = cls._normalize_adapter_path(single_adapter_dir)
         combat = cls._normalize_adapter_path(combat_adapter_dir)
         non_combat = cls._normalize_adapter_path(non_combat_adapter_dir)
-        if combat or non_combat:
+        planner_hint = cls._normalize_adapter_path(planner_hint_adapter_dir)
+        if combat or non_combat or planner_hint:
             out: dict[str, str] = {}
-            if combat or single:
+            has_combat = bool(combat or single)
+            if has_combat:
                 out["combat"] = combat or single or ""
             if non_combat:
                 out["non_combat"] = non_combat
+            if planner_hint and has_combat:
+                out["planner_hint"] = planner_hint
             return {key: value for key, value in out.items() if value}
         return {"default": single} if single else {}
 
@@ -405,7 +454,14 @@ class LlmExternalPolicyAdapter:
     def reset_episode(self) -> None:
         self._last_decode = None
         self._step_counter = 0
-        self._strategy_memory.reset()
+        self._strategy_memory.reset_combat()
+        self._planner_hint_cache_key = ""
+        self._planner_hint_cache_text = ""
+        self._planner_hint_cache_knowledge = []
+        self._last_planner_hint = ""
+        self._last_planner_hint_status = "reset"
+        self._last_planner_hint_raw = ""
+        self._last_retrieved_knowledge = []
 
     def _write_trace(self, payload: dict[str, Any]) -> None:
         if self._trace_path is None:
@@ -424,16 +480,122 @@ class LlmExternalPolicyAdapter:
         self._stats["structured_fallback_to_index"] += 1
         return "index"
 
+    def _render_planner_hint_prompt(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[dict[str, Any]],
+    ) -> str:
+        self._ensure_model_loaded()
+        assert self._tokenizer is not None
+        knowledge_text, knowledge_entries = render_retrieved_knowledge_for_state(state)
+        self._last_retrieved_knowledge = knowledge_entries
+        user_msg = render_planner_hint_user_message(
+            state,
+            legal_actions,
+            memory=self._strategy_memory.planner_memory_text(state),
+            previous_hint=self._planner_hint_cache_text,
+            knowledge=knowledge_text,
+            require_knowledge=self._guide_required,
+        )
+        messages = [
+            {"role": "system", "content": self._system_prompts["planner_hint"]},
+            {"role": "user", "content": user_msg},
+        ]
+        kwargs: dict[str, Any] = {"tokenize": False, "add_generation_prompt": True}
+        if self._enable_thinking:
+            kwargs["enable_thinking"] = True
+        return self._tokenizer.apply_chat_template(messages, **kwargs)
+
+    def _planner_hint_for_state(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[dict[str, Any]],
+        *,
+        adapter_key: str,
+        allow_generate: bool,
+    ) -> str:
+        self._last_planner_hint = ""
+        self._last_planner_hint_raw = ""
+        self._last_retrieved_knowledge = []
+        if (
+            not allow_generate
+            or not self._planner_hint_enabled
+            or adapter_key != "combat"
+        ):
+            self._last_planner_hint_status = "disabled"
+            return ""
+
+        cache_key = planner_hint_cache_key(state, refresh=self._planner_hint_refresh)
+        if cache_key and cache_key == self._planner_hint_cache_key and self._planner_hint_cache_text:
+            self._stats["planner_hint_cache_hits"] += 1
+            self._last_planner_hint = self._planner_hint_cache_text
+            self._last_retrieved_knowledge = list(self._planner_hint_cache_knowledge)
+            self._last_planner_hint_status = "cache_hit"
+            return self._planner_hint_cache_text
+
+        planner_adapter_name = self._adapter_key_to_name.get("planner_hint") or "planner_hint"
+        try:
+            prompt_text = self._render_planner_hint_prompt(state, legal_actions)
+            self._activate_adapter(planner_adapter_name)
+            raw_text = self._generate(
+                prompt_text,
+                max_new_tokens=self._planner_hint_max_new_tokens,
+                temperature=self._planner_hint_temperature,
+                response_prefix="{",
+            )
+            hint_payload, status = parse_planner_hint_json(raw_text)
+        except Exception as exc:
+            self._stats["planner_hint_failures"] += 1
+            self._last_planner_hint_status = f"exception:{type(exc).__name__}"
+            if self._planner_hint_required:
+                raise
+            return ""
+
+        self._stats["planner_hint_calls"] += 1
+        self._last_planner_hint_raw = raw_text
+        self._last_planner_hint_status = status
+        if status != "ok" or hint_payload is None:
+            self._stats["planner_hint_failures"] += 1
+            if self._planner_hint_required:
+                raise RuntimeError(f"planner_hint_invalid:{status}")
+            return ""
+
+        hint_text = format_planner_hint(hint_payload)
+        if not hint_text:
+            self._stats["planner_hint_failures"] += 1
+            self._last_planner_hint_status = "empty_hint"
+            if self._planner_hint_required:
+                raise RuntimeError("planner_hint_empty")
+            return ""
+
+        self._planner_hint_cache_key = cache_key
+        self._planner_hint_cache_text = hint_text
+        self._planner_hint_cache_knowledge = list(self._last_retrieved_knowledge)
+        self._last_planner_hint = hint_text
+        return hint_text
+
     def _render_user_message(
         self,
         state: dict[str, Any],
         legal_actions: list[dict[str, Any]],
         *,
         action_mode: str,
+        adapter_key: str = "combat",
+        include_planner_hint: bool = True,
     ) -> str:
         strategy_context = ""
         if self._strategy_context_enabled:
-            strategy_context = self._strategy_memory.context_text(state, legal_actions)
+            planner_hint = self._planner_hint_for_state(
+                state,
+                legal_actions,
+                adapter_key=adapter_key,
+                allow_generate=include_planner_hint,
+            )
+            strategy_context = self._strategy_memory.context_text(
+                state,
+                legal_actions,
+                planner_hint=planner_hint,
+            )
             self._stats["strategy_context_calls"] += 1
         if action_mode == "structured":
             return render_structured_action_state_text(
@@ -518,7 +680,13 @@ class LlmExternalPolicyAdapter:
     ) -> str:
         self._ensure_model_loaded()
         assert self._tokenizer is not None
-        user_msg = self._render_user_message(state, legal_actions, action_mode=action_mode)
+        user_msg = self._render_user_message(
+            state,
+            legal_actions,
+            action_mode=action_mode,
+            adapter_key=adapter_key,
+            include_planner_hint=True,
+        )
         system_key = "non_combat" if adapter_key == "non_combat" else action_mode
         messages = [
             {"role": "system", "content": self._system_prompts[system_key]},
@@ -549,7 +717,13 @@ class LlmExternalPolicyAdapter:
     ) -> str:
         self._ensure_model_loaded()
         assert self._tokenizer is not None
-        user_msg = self._render_user_message(state, legal_actions, action_mode=action_mode)
+        user_msg = self._render_user_message(
+            state,
+            legal_actions,
+            action_mode=action_mode,
+            adapter_key=adapter_key,
+            include_planner_hint=True,
+        )
         system_key = "non_combat" if adapter_key == "non_combat" else action_mode
         if action_mode == "structured":
             final_instruction = (
@@ -594,24 +768,33 @@ class LlmExternalPolicyAdapter:
             kwargs["enable_thinking"] = True
         return self._tokenizer.apply_chat_template(messages, **kwargs)
 
-    def _generate(self, prompt_text: str) -> str:
+    def _generate(
+        self,
+        prompt_text: str,
+        *,
+        max_new_tokens: int | None = None,
+        temperature: float | None = None,
+        response_prefix: str | None = None,
+    ) -> str:
         import torch  # type: ignore
 
         self._ensure_model_loaded()
         assert self._model is not None
         assert self._tokenizer is not None
-        prompt_with_prefix = prompt_text + self._response_prefix
+        prefix = self._response_prefix if response_prefix is None else response_prefix
+        generation_temperature = self._temperature if temperature is None else temperature
+        prompt_with_prefix = prompt_text + prefix
         inputs = self._tokenizer(prompt_with_prefix, return_tensors="pt").to("cuda")
         with torch.inference_mode():
             outputs = self._model.generate(
                 **inputs,
-                max_new_tokens=self._max_new_tokens,
-                do_sample=self._temperature > 0,
-                temperature=self._temperature if self._temperature > 0 else 1.0,
+                max_new_tokens=max_new_tokens or self._max_new_tokens,
+                do_sample=generation_temperature > 0,
+                temperature=generation_temperature if generation_temperature > 0 else 1.0,
                 pad_token_id=self._tokenizer.eos_token_id,
             )
         generated_ids = outputs[0][inputs["input_ids"].shape[1]:]
-        return (self._response_prefix + self._tokenizer.decode(generated_ids, skip_special_tokens=True)).strip()
+        return (prefix + self._tokenizer.decode(generated_ids, skip_special_tokens=True)).strip()
 
     def select_action(
         self,
@@ -649,7 +832,13 @@ class LlmExternalPolicyAdapter:
                 "adapter_name": adapter_name,
                 "adapter_switch_ms": 0.0,
                 "gen_ms": 0.0,
-                "user_message": self._render_user_message(state, enabled, action_mode=action_mode),
+                "user_message": self._render_user_message(
+                    state,
+                    enabled,
+                    action_mode=action_mode,
+                    adapter_key=adapter_key,
+                    include_planner_hint=False,
+                ),
                 "raw_generation": "",
                 "attempts": [],
                 "invalid_output": False,
@@ -704,7 +893,13 @@ class LlmExternalPolicyAdapter:
                     "adapter_name": adapter_name,
                     "adapter_switch_ms": 0.0,
                     "gen_ms": 0.0,
-                    "user_message": self._render_user_message(state, enabled, action_mode=action_mode),
+                    "user_message": self._render_user_message(
+                        state,
+                        enabled,
+                        action_mode=action_mode,
+                        adapter_key=adapter_key,
+                        include_planner_hint=False,
+                    ),
                     "raw_generation": "",
                     "attempts": [],
                     "invalid_output": False,
@@ -766,7 +961,13 @@ class LlmExternalPolicyAdapter:
                     "adapter_name": adapter_name,
                     "adapter_switch_ms": 0.0,
                     "gen_ms": 0.0,
-                    "user_message": self._render_user_message(state, enabled, action_mode=action_mode),
+                    "user_message": self._render_user_message(
+                        state,
+                        enabled,
+                        action_mode=action_mode,
+                        adapter_key=adapter_key,
+                        include_planner_hint=False,
+                    ),
                     "raw_generation": "",
                     "attempts": [],
                     "invalid_output": False,
@@ -819,6 +1020,9 @@ class LlmExternalPolicyAdapter:
                 "prompt_tokens": prompt_tokens,
                 "max_seq_length": self._max_seq_length,
                 "user_message": user_msg,
+                "planner_hint": self._last_planner_hint,
+                "planner_hint_status": self._last_planner_hint_status,
+                "retrieved_knowledge": self._last_retrieved_knowledge,
                 "raw_generation": "",
                 "attempts": [],
                 "invalid_output": False,
@@ -1008,6 +1212,9 @@ class LlmExternalPolicyAdapter:
                     "recovery_reason": "heuristic_after_explanation_invalid",
                     "attempts": attempts,
                     "user_message": user_msg,
+                    "planner_hint": self._last_planner_hint,
+                    "planner_hint_status": self._last_planner_hint_status,
+                    "retrieved_knowledge": self._last_retrieved_knowledge,
                     "raw_generation": raw_text,
                     "decoded": self._decoded_payload(decoded),
                     "quality_flags": quality_flags,
@@ -1065,6 +1272,9 @@ class LlmExternalPolicyAdapter:
                     "recovery_reason": "last_resort_after_safety_rejection",
                     "attempts": attempts,
                     "user_message": user_msg,
+                    "planner_hint": self._last_planner_hint,
+                    "planner_hint_status": self._last_planner_hint_status,
+                    "retrieved_knowledge": self._last_retrieved_knowledge,
                     "raw_generation": raw_text,
                     "decoded": self._decoded_payload(decoded),
                     "quality_flags": quality_flags,
@@ -1093,6 +1303,9 @@ class LlmExternalPolicyAdapter:
                 "invalid_output": True,
                 "attempts": attempts,
                 "user_message": user_msg,
+                "planner_hint": self._last_planner_hint,
+                "planner_hint_status": self._last_planner_hint_status,
+                "retrieved_knowledge": self._last_retrieved_knowledge,
                 "raw_generation": raw_text,
                 "decoded": self._decoded_payload(decoded),
                 "chosen_action": None,
@@ -1141,6 +1354,9 @@ class LlmExternalPolicyAdapter:
             "adapter_switch_ms": round(adapter_switch_ms, 3),
             "gen_ms": round(gen_ms, 1),
             "user_message": user_msg,
+            "planner_hint": self._last_planner_hint,
+            "planner_hint_status": self._last_planner_hint_status,
+            "retrieved_knowledge": self._last_retrieved_knowledge,
             "raw_generation": raw_text,
             "attempts": attempts,
             "invalid_output": False,

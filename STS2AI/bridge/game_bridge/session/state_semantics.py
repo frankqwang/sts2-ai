@@ -17,7 +17,14 @@ _OUTCOME_ALIASES = {
     "failure": "defeat",
 }
 
-COMBAT_STATE_TYPES = frozenset({"monster", "elite", "boss", "hand_select"})
+# In-combat states. ``card_select`` covers the UI screens triggered by
+# HEADBUTT / ARMAMENTS / EXHUME / DUAL_WIELD / etc. — sim sets state_type to
+# ``card_select`` and clears the top-level ``enemies`` list (it's rendering a
+# pile-selection screen) but the fight is *not* over. Without including
+# ``card_select`` here, rollout's left_combat detector aborts every episode
+# that plays one of these trigger cards (observed: THE_KIN_BOSS 7-8 step
+# left_combat, LAGAVULIN_MATRIARCH same pattern).
+COMBAT_STATE_TYPES = frozenset({"monster", "elite", "boss", "hand_select", "card_select"})
 
 
 def lower_text(value: Any) -> str:
@@ -37,7 +44,12 @@ def is_actionable_combat_state(state: dict[str, Any] | None) -> bool:
     current_type = state_type(current)
     if current_type not in COMBAT_STATE_TYPES:
         return False
-    if current_type == "hand_select":
+    # hand_select / card_select are pile-pick UI screens (HEADBUTT, ARMAMENTS,
+    # EXHUME, DUAL_WIELD, …). The sim still expects an action — typically
+    # ``select_hand_card`` / ``select_card_option`` / ``confirm_selection`` —
+    # so we treat them as actionable combat steps even though the top-level
+    # ``enemies`` list is empty during these screens.
+    if current_type in {"hand_select", "card_select"}:
         return True
     if isinstance(current.get("card_selection"), dict):
         return True

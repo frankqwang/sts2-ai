@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm.scripts.run_kimi_teacher_candidate_reviews import (
+from llm.scripts.teacher.run_kimi_teacher_candidate_reviews import (
     _review_items,
     _validate_review,
 )

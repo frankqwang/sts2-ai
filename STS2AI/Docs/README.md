@@ -1,18 +1,18 @@
 # STS2AI Docs
 
-项目文档只保留当前维护中的实现说明。旧训练主线、旧观战入口、旧 zero/replay 实验交接已经删除，不再作为实现依据。
+当前有效项目文档集中放在本目录。根目录 `README.md` 只保留项目入口和当前优先级。
 
-## 当前有效文档
+## 当前主线
 
-- `design/game-bridge-current.md`：sim pipe protobuf 与 spectator HTTP protobuf JSON 的当前 bridge 架构。
-- `llm-self-train-loop.md`：LLM 战斗训练飞轮、rollout、audit、dataset pool、晋级门槛。
-- `training-next-steps.md`：当前训练优先级、非战斗数据、Kimi 标注、planner LoRA 交接计划。
+- `llm-training-handoff.md`：当前 LLM 训练流程交接、正在跑的 run、禁用项、评估口径和下一步。
+- `llm-self-train-loop.md`：LLM 自迭代、planner-hint、Guide RAG、评估门槛。
+- `training-next-steps.md`：训练交接、当前数据、下一步命令。
+- `llm-artifact-management.md`：LLM 产物目录、latest/current 管理约定。
+- `claude-cli-use.md`：本机 Claude CLI teacher 用法。
+- `design/game-bridge-current.md`：当前 game bridge 设计与范围。
 
-## 当前代码主线
+## 约定
 
-- `STS2AI/llm`：LLM prompt、推理、rollout、训练、评估、dataset pool。
-- `STS2AI/bridge/game_bridge`：bridge、session、spectate、sim 相关 Python 代码。
-- `STS2AI/data/skada`：Skada 抓取、明细构建、combat/non-combat 数据脚本。
-- `STS2AI/Artifacts/llm`：训练数据、评估、trace、adapter、长期 dataset pool 产物。
-
-新增项目文档请放在 `STS2AI/Docs`，不要散落在仓库根目录。
+- 临时实验笔记放到 `STS2AI/Artifacts` 对应 run 目录，不散落到仓库根目录。
+- 旧 `zero/replay/networkV2` 训练说明不再作为默认上下文。
+- LLM 脚本入口优先看 `STS2AI/llm/scripts/README.md`。

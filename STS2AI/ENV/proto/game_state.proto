@@ -31,6 +31,11 @@ message GameState {
   TreasureState treasure = 15;
   repeated LegalAction legal_actions = 20;
   string encounter_id = 21;
+  // Diagnostic: when the bridge had to synthesize legal_actions (e.g. an
+  // empty hand_select pile), this carries a short reason tag so Python /
+  // training can attribute the failure mode to the right card / state. Empty
+  // string when sim gave us a well-formed action set.
+  string legal_actions_fallback_reason = 22;
 }
 
 message RunInfo {
@@ -268,6 +273,20 @@ message CardSelectState {
   string prompt = 7;              // UI 原始提示，说明这次选择要做什么
   int32 min_select = 8;
   int32 max_select = 9;
+  // === 来源溯源（让 LLM 理解 select 不是孤立 step） ===
+  // 触发本次 select 的卡牌 id（如 "HEADBUTT" / "ARMAMENTS" / "DUAL_WIELD"）。
+  // sim 端 RegisterCardSelection / RegisterHandSelection 调用方必须传入；
+  // 旧 sim 未填则保持空串，Python 端启发式从 last_played_card 兜底。
+  string trigger_card_id = 10;
+  // 候选卡牌来源 pile：
+  //   "discard_pile" | "draw_pile" | "exhaust_pile" | "hand" | "transient" | ""
+  // transient 用于完全独立于已有 pile 的临时 card pool（如 HAVOC-style RNG）。
+  string source_pile_type = 11;
+  // 选择规则的语义标签集合（无需穷举，按需追加）：
+  //   "any" | "upgradable_only" | "attack_only" | "skill_only" | "power_only"
+  //   | "non_attack" | "by_cost"
+  // 用于 LLM 直接理解筛选条件，避免靠 prompt 文本 NLP。
+  repeated string selection_rules = 12;
 }
 
 // --- Relic Select ---

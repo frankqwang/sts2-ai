@@ -111,6 +111,7 @@ def _enemy_effective_hp(enemy: dict[str, Any]) -> float:
 
 def _incoming_damage(state: dict[str, Any]) -> float:
     total = 0.0
+    skipped = 0
     for enemy in _iter_enemies(state):
         intent = str(_pick(enemy, "intent_type", "next_move_id", "intent", default="")).upper()
         if "ATTACK" not in intent:
@@ -119,8 +120,18 @@ def _incoming_damage(state: dict[str, Any]) -> float:
             damage = float(_pick(enemy, "intent_damage", "move_base_damage", default=0) or 0)
             hits = max(1, int(_pick(enemy, "intent_hits", "move_hits", default=1) or 1))
         except (TypeError, ValueError):
+            # sim schema 漂移时静默跳过会让 dangerous_end_turn 漏判；
+            # 累计计数，调用侧后续可在 metrics 里记录。
+            skipped += 1
             continue
         total += damage * hits
+    if skipped:
+        # 暴露给调用者审计；不破坏现有签名。
+        try:
+            state.setdefault("_incoming_damage_skipped", 0)
+            state["_incoming_damage_skipped"] = int(state.get("_incoming_damage_skipped") or 0) + skipped
+        except Exception:
+            pass
     return total
 
 
@@ -498,15 +509,28 @@ def summarize_quality_reports(steps: list[Any], *, final_state: dict[str, Any] |
             chosen_index = step.get("chosen_index", chosen_index)
             legal_actions = step.get("legal_actions", legal_actions)
         try:
-            if isinstance(legal_actions, list) and chosen_index is not None:
+            # NOTE: chosen_index=-1 表示 invalid_output；Python 负索引会取末尾元素
+            # 而不是 IndexError，所以必须显式判 >=0，否则会把 invalid 步误数为 end_turn。
+            if (
+                isinstance(legal_actions, list)
+                and chosen_index is not None
+                and int(chosen_index) >= 0
+                and int(chosen_index) < len(legal_actions)
+            ):
                 action = legal_actions[int(chosen_index)]
                 if isinstance(action, dict) and _action_type(action) == "end_turn":
                     turn_count += 1
-        except (IndexError, TypeError, ValueError):
+        except (TypeError, ValueError):
             pass
 
+    # NOTE: sim 可能在战斗结束（玩家死/max_steps）时把 player.hp 重置回初始值，
+    # 这会导致 final_state 报的 hp 反而高于 steps 末尾的真实 hp，从而把 hp_lost 算成 0。
+    # 因此 final_state 仅在不大于 steps 末尾累加 hp_end 时才覆盖；否则保留 step 累加值。
     if final_state and isinstance(final_state, dict):
-        hp_end = _player_hp(final_state)
+        fs_hp = _player_hp(final_state)
+        if isinstance(fs_hp, (int, float)):
+            if hp_end is None or fs_hp <= float(hp_end):
+                hp_end = fs_hp
     hp_lost = max(0.0, (hp_start or 0.0) - (hp_end or hp_start or 0.0))
     total_opportunities = sum(opportunities.values())
     total_misses = sum(misses.values())

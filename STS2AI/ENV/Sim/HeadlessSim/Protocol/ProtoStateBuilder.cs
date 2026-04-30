@@ -474,11 +474,36 @@ internal static class ProtoStateBuilder
 					});
 				}
 			}
-			if (hs.CanConfirm)
+			bool emitConfirm = hs.CanConfirm;
+			bool emitCancel = hs.Cancelable;
+			// Defense-in-depth: src/Core's CardSelectCmd already early-returns
+			// for empty piles in vanilla flows, but mock/headless selectors or
+			// mod paths can still leave us in a hand_select state with zero
+			// selectable cards. In that case sim never auto-confirms, sends an
+			// empty legal_actions list, and bridge mis-classifies the step as
+			// left_combat. Synthesize a skip action so training never deadlocks;
+			// we attribute the synthesis via legal_actions_fallback_reason so
+			// downstream tools can grep how often each card hits this path.
+			if (hs.SelectableCards.Count == 0 && hs.SelectedCards.Count == 0)
+			{
+				if (hs.MinSelect <= 0 && !hs.CanConfirm)
+				{
+					emitConfirm = true;
+					gs.LegalActionsFallbackReason = "hand_select:empty_pile_auto_confirm";
+				}
+				else if (hs.MinSelect > 0 && !emitCancel)
+				{
+					// MinSelect>0 + empty pile is a degenerate state the
+					// vanilla game never produces; force cancel so we recover.
+					emitCancel = true;
+					gs.LegalActionsFallbackReason = "hand_select:empty_pile_force_cancel";
+				}
+			}
+			if (emitConfirm)
 			{
 				gs.LegalActions.Add(NonIndexedAction("confirm_selection", "Confirm"));
 			}
-			if (hs.Cancelable)
+			if (emitCancel)
 			{
 				gs.LegalActions.Add(NonIndexedAction("cancel_selection", "Cancel"));
 			}
@@ -506,11 +531,27 @@ internal static class ProtoStateBuilder
 					});
 				}
 			}
-			if (cs.CanConfirm)
+			bool emitConfirm = cs.CanConfirm;
+			bool emitCancel = cs.Cancelable;
+			// Same defense-in-depth as hand_select above.
+			if (cs.SelectableCards.Count == 0 && cs.SelectedCards.Count == 0)
+			{
+				if (cs.MinSelect <= 0 && !cs.CanConfirm)
+				{
+					emitConfirm = true;
+					gs.LegalActionsFallbackReason = "card_select:empty_pile_auto_confirm";
+				}
+				else if (cs.MinSelect > 0 && !emitCancel)
+				{
+					emitCancel = true;
+					gs.LegalActionsFallbackReason = "card_select:empty_pile_force_cancel";
+				}
+			}
+			if (emitConfirm)
 			{
 				gs.LegalActions.Add(NonIndexedAction("confirm_selection", "Confirm"));
 			}
-			if (cs.Cancelable)
+			if (emitCancel)
 			{
 				gs.LegalActions.Add(NonIndexedAction("cancel_selection", "Cancel"));
 			}
@@ -567,6 +608,18 @@ internal static class ProtoStateBuilder
 		if (snapshot.CanEndTurn)
 		{
 			gs.LegalActions.Add(NonIndexedAction("end_turn", "End Turn"));
+		}
+		// Defense-in-depth: combat play phase with no playable card AND
+		// CanEndTurn=false would leave bridge with empty legal_actions and
+		// trip left_combat. Vanilla STS always allows end_turn during the
+		// player phase, but mod / mock paths can momentarily disable it
+		// (e.g. while resolving a forced action). Synthesize end_turn so
+		// rollout never deadlocks; the reason field tells downstream tools
+		// this happened so we can investigate the root cause.
+		if (gs.LegalActions.Count == 0)
+		{
+			gs.LegalActions.Add(NonIndexedAction("end_turn", "End Turn"));
+			gs.LegalActionsFallbackReason = "combat_play:no_playable_force_end_turn";
 		}
 	}
 
@@ -654,7 +707,45 @@ internal static class ProtoStateBuilder
 				break;
 		}
 
+		// Defense-in-depth: if no state-specific path produced any legal action
+		// AND the episode isn't terminal, synthesize a state-appropriate skip /
+		// proceed so bridge never returns an empty action set. This is purely
+		// defensive — vanilla sim should always provide at least one action,
+		// but mock paths or rare degenerate boards have been observed to leak
+		// empty lists. The fallback reason field tells downstream tools which
+		// state mis-fired so we can root-cause.
+		if (gs.LegalActions.Count == 0 && !gs.Terminal && string.IsNullOrEmpty(gs.LegalActionsFallbackReason))
+		{
+			(string action, string label) fallback = ResolveDefaultExitAction(snapshot.StateType);
+			if (!string.IsNullOrEmpty(fallback.action))
+			{
+				gs.LegalActions.Add(NonIndexedAction(fallback.action, fallback.label));
+				gs.LegalActionsFallbackReason = $"{snapshot.StateType}:no_actions_force_{fallback.action}";
+			}
+		}
+
 		return gs;
+	}
+
+	private static (string action, string label) ResolveDefaultExitAction(string stateType)
+	{
+		// Match the action names downstream tools (Python adapters, training
+		// CLIs) already understand. When in doubt, ``proceed`` is the safe
+		// generic since every non-combat screen accepts it; specific
+		// skip-style actions are preferred where applicable so the model can
+		// learn the per-state convention.
+		return stateType switch
+		{
+			"map" => ("proceed", "Proceed"),
+			"card_reward" => ("skip_card_reward", "Skip"),
+			"relic_select" => ("skip_relic", "Skip"),
+			"treasure" => ("skip_treasure", "Skip"),
+			"combat_rewards" => ("proceed", "Proceed"),
+			"rest_site" => ("proceed", "Proceed"),
+			"event" => ("proceed", "Proceed"),
+			"shop" => ("leave_shop", "Leave"),
+			_ => ("", ""),
+		};
 	}
 
 	// ================================================================
@@ -1144,8 +1235,27 @@ internal static class ProtoStateBuilder
 			ScreenType = NormalizeCardSelectScreenType(selection?.Mode),
 			SelectedCount = selectedCount,
 			CanConfirm = canConfirm,
-			CanCancel = canCancel
+			CanCancel = canCancel,
+			// Surface select-source metadata so Python state_renderer can
+			// describe "because of HEADBUTT, choose from discard_pile" instead
+			// of relying on prompt text NLP.
+			SourcePileType = ResolveSourcePileTag(selectableCards, selectedCards),
+			// trigger_card_id is populated by RegisterCardSelection /
+			// RegisterHandSelection callers (HEADBUTT, ARMAMENTS, etc.).
+			// When a caller hasn't been updated yet, this stays empty and
+			// Python falls back to last_played_card_id heuristic.
+			TriggerCardId = selection?.TriggerCardId ?? "",
 		};
+		if (selection?.SelectionRules != null)
+		{
+			foreach (string rule in selection.SelectionRules)
+			{
+				if (!string.IsNullOrEmpty(rule))
+				{
+					cs.SelectionRules.Add(rule);
+				}
+			}
+		}
 		foreach (CombatTrainingSelectableCardSnapshot card in visibleCards)
 		{
 			cs.Cards.Add(new HandCard
@@ -1187,6 +1297,63 @@ internal static class ProtoStateBuilder
 			"ChooseCard" => "SimpleSelect",
 			null or "" => "card_select",
 			_ => mode
+		};
+	}
+
+	// Each candidate card knows its origin pile (SourcePile on
+	// CombatTrainingSelectableCardSnapshot). When all candidates agree we
+	// surface it as the canonical pile tag; otherwise we leave it empty so
+	// the LLM doesn't get a misleading "from=draw_pile" when the pool is
+	// actually mixed.
+	private static string ResolveSourcePileTag(
+		List<CombatTrainingSelectableCardSnapshot> selectable,
+		List<CombatTrainingSelectableCardSnapshot> selected)
+	{
+		string? canonical = null;
+		void Visit(string? raw)
+		{
+			if (string.IsNullOrEmpty(raw))
+			{
+				return;
+			}
+			string normalized = NormalizeSourcePile(raw!);
+			if (string.IsNullOrEmpty(normalized))
+			{
+				return;
+			}
+			if (canonical is null)
+			{
+				canonical = normalized;
+			}
+			else if (canonical != normalized)
+			{
+				canonical = ""; // mixed origin → unknown
+			}
+		}
+		foreach (var card in selectable)
+		{
+			Visit(card.SourcePile);
+			if (canonical == "") return "";
+		}
+		foreach (var card in selected)
+		{
+			Visit(card.SourcePile);
+			if (canonical == "") return "";
+		}
+		return canonical ?? "";
+	}
+
+	private static string NormalizeSourcePile(string raw)
+	{
+		// PileType enum names → snake_case used by Python state_renderer
+		return raw switch
+		{
+			"Draw" or "DrawPile" => "draw_pile",
+			"Discard" or "DiscardPile" => "discard_pile",
+			"Exhaust" or "ExhaustPile" => "exhaust_pile",
+			"Hand" => "hand",
+			"None" or "" => "",
+			_ => raw.ToLowerInvariant()
 		};
 	}
 

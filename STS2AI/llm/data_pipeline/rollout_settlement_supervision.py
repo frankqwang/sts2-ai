@@ -27,12 +27,13 @@ for _path in (_STS2AI_ROOT, _BRIDGE_ROOT):
 
 from game_bridge.session import create_game_session  # noqa: E402
 from game_bridge.session.state_semantics import is_actionable_combat_state, is_combat_state  # noqa: E402
-from llm.data_pipeline.encounter_pool import ACT1_WINNABLE_POOL, EncounterSpec  # noqa: E402
+from llm.data_pipeline.encounter_pool import EncounterSpec, filter_encounter_pool, load_skada_case_pool  # noqa: E402
 from llm.data_pipeline.heuristic_teacher import pick_action, score_actions  # noqa: E402
 from llm.data_pipeline.state_renderer import render_state_text  # noqa: E402
 from llm.metrics import summarize_dataset_dir, write_json  # noqa: E402
 from llm.paths import DATASETS_ROOT, ensure_dirs  # noqa: E402
 from llm.prompts import load_system_prompt  # noqa: E402
+from llm.training.grpo_rollout import _inject_spec_context  # noqa: E402
 
 
 @dataclass
@@ -55,6 +56,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260425)
     parser.add_argument("--out-subdir", type=str, default="")
     parser.add_argument("--encounter-filter", type=str, default="")
+    parser.add_argument("--case-index", type=str, required=True, help="Skada single-combat cases.jsonl.")
+    parser.add_argument("--case-character", type=str, default="IRONCLAD")
+    parser.add_argument("--case-floor-min", type=int, default=1)
+    parser.add_argument("--case-floor-max", type=int, default=17)
+    parser.add_argument("--case-limit", type=int, default=0)
+    parser.add_argument("--case-sample-seed", type=int, default=0)
+    parser.add_argument("--case-sample-mode", choices=["file", "random", "stratified"], default="stratified")
+    parser.add_argument("--include-lost-cases", action="store_true")
     parser.add_argument("--eval-ratio", type=float, default=0.1)
     parser.add_argument("--host-path", type=str, default="")
     parser.add_argument("--reason-max-chars", type=int, default=120)
@@ -180,7 +189,7 @@ def _teacher_action_scores(state: dict[str, Any], legal: list[dict[str, Any]]) -
         rows.append({
             "action_index": int(scored.action_index),
             "score": round(float(scored.score), 3),
-            "note": scored.reason[:80],
+            "note": scored.reason[:200],
         })
     return rows
 
@@ -292,6 +301,7 @@ def collect_dataset(
                     build=spec.build,
                     seed=ep_seed,
                 )
+                state = _inject_spec_context(state, spec, seed=ep_seed)
                 for step_idx in range(max_steps):
                     if len(samples) >= max_samples:
                         outcome = "max_samples"
@@ -316,6 +326,7 @@ def collect_dataset(
                         action_scores = _teacher_action_scores(state_before, legal)
 
                     next_state, _reward, done, info = session.act_gym(chosen)
+                    next_state = _inject_spec_context(next_state, spec, seed=ep_seed)
                     settlement_events = [
                         dict(event)
                         for event in (info.get("settlement_events") if isinstance(info, dict) else []) or []
@@ -399,10 +410,17 @@ def main() -> None:
     out_dir = DATASETS_ROOT / out_subdir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pool = ACT1_WINNABLE_POOL
-    if args.encounter_filter:
-        needle = args.encounter_filter.lower()
-        pool = [spec for spec in pool if needle in spec.encounter_id.lower()]
+    pool = load_skada_case_pool(
+        args.case_index,
+        character_id=args.case_character,
+        floor_min=args.case_floor_min,
+        floor_max=args.case_floor_max,
+        won_only=not args.include_lost_cases,
+        limit=max(0, int(args.case_limit)),
+        sample_seed=int(args.case_sample_seed or args.seed),
+        sample_mode=args.case_sample_mode,
+    )
+    pool = filter_encounter_pool(pool, args.encounter_filter)
     if not pool:
         raise SystemExit("no encounters matched filter")
 

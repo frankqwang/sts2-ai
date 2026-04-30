@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from llm.scripts.mine_offline_preferences import (
+from llm.scripts.datasets.mine_offline_preferences import (
     _visible_lethal_repair,
     main,
 )

@@ -111,11 +111,16 @@ def test_render_state_text_resolves_hand_description_placeholders() -> None:
     assert "FORGOTTEN_RITUAL cost=1 type=Skill upgraded=true | If you Exhausted a card this turn, gain 4 Energy. Exhaust." in rendered
     assert "DEFEND_IRONCLAD cost=1 type=Skill | Gain 5 Block." in rendered
     assert "block_preview=" not in rendered
-    assert "BURNING_BLOOD | heal 6 HP after combat." in rendered
-    assert "ARTIFACT_POWER: negates the next debuff, then loses 1 stack." in rendered
-    assert "VULNERABLE_POWER: takes 50% more attack damage" in rendered
-    assert "Exhaust: remove the card from combat." in rendered
-    assert "[0] BLUDGEON hand[0] target=enemy1 damage=42 hp=64 lethal=false" in rendered
+    # tooltip 来源改为 localization/eng/*.json（STS2 官方 i18n 文件，含占位符 {Heal}/{Amount}）
+    assert "BURNING_BLOOD | At the end of combat, heal" in rendered
+    # ARTIFACT_POWER 是 enemy power, 现在在 enemy 行下 inline 渲染（带 (amount) 标注），
+    # glossary 不再重复——这是去重优化, prompt 长度可省 ~19%
+    assert "ARTIFACT_POWER(2): Negates" in rendered
+    # VULNERABLE_POWER 是 player power, 仍在 glossary（player 行不 inline 描述）
+    assert "VULNERABLE_POWER: Receive" in rendered
+    assert "Exhaust: Removed until the end of combat." in rendered
+    assert "[0] BLUDGEON hand[0] target=enemy1 damage=42" in rendered
+    assert "hp=64 lethal=false" not in rendered
     assert "[1] DEFEND_IRONCLAD hand[3] target=self block=5" in rendered
     assert "[2] end_turn" in rendered
     assert "end_turn hand_idx=" not in rendered
@@ -158,7 +163,39 @@ def test_render_legal_actions_shows_blocked_target_lethality() -> None:
         [{"action": "play_card", "card_index": 0, "card_id": "STRIKE_IRONCLAD", "target_id": 1}],
     )
 
-    assert "damage=6 hp=4 block=5 hp_damage=1 lethal=false" in rendered
+    assert "damage=6 block=5 hp_damage=1" in rendered
+    assert "lethal=false" not in rendered
+
+
+def test_render_state_text_lists_all_pile_cards() -> None:
+    state = {
+        "run": {"act": 1, "floor": 6},
+        "player": {
+            "character": "IRONCLAD",
+            "hp": 70,
+            "max_hp": 80,
+            "gold": 125,
+            "deck": [],
+        },
+        "battle": {
+            "energy": 3,
+            "max_energy": 3,
+            "round_number": 2,
+            "hand": [],
+            "enemies": [],
+            "draw_pile_cards": ["BASH", "STRIKE_IRONCLAD"],
+            "discard_pile_cards": ["DEFEND_IRONCLAD", {"id": "POMMEL_STRIKE", "is_upgraded": True}],
+            "exhaust_pile_cards": ["SLIMED"],
+        },
+    }
+
+    rendered = render_state_text(state, [{"action": "end_turn"}])
+
+    assert "piles:" in rendered
+    assert "draw=2 discard=2 exhaust=1" in rendered
+    assert "draw_cards: BASH, STRIKE_IRONCLAD" in rendered
+    assert "discard_cards: DEFEND_IRONCLAD, POMMEL_STRIKE+" in rendered
+    assert "exhaust_cards: SLIMED" in rendered
 
 
 def test_render_state_text_prefers_runtime_relic_and_potion_descriptions() -> None:
@@ -233,7 +270,9 @@ def test_render_state_text_includes_runtime_power_and_intent_tooltips() -> None:
     rendered = render_state_text(state, [{"action": "end_turn"}])
 
     assert "Death Blow: Deal 58 damage at end of turn." in rendered
-    assert "STEAM_ERUPTION_POWER: When this enemy dies, it explodes next turn for this much damage." in rendered
+    # STEAM_ERUPTION_POWER 是 enemy power, glossary 去重后不再重复, 现在在 enemy 行下 inline 渲染
+    assert "STEAM_ERUPTION_POWER" in rendered
+    assert "When this enemy dies, it explodes next turn for this much damage." in rendered
 
 
 def test_render_event_includes_body_and_option_text() -> None:
@@ -294,8 +333,11 @@ def test_render_legal_actions_shows_self_hp_loss_preview() -> None:
         [{"action": "play_card", "card_index": 0, "card_id": "BLOODLETTING", "target_id": -1}],
     )
 
-    assert "CONSTRICT_POWER: lose HP at end of turn equal to its stack amount" in rendered
-    assert "FORTIFIER | gain Block equal to twice your current Block." in rendered
+    # localization/eng/powers.json CONSTRICT_POWER.smartDescription
+    assert "CONSTRICT_POWER:" in rendered
+    assert "end of your turn" in rendered or "end of turn" in rendered
+    # localization/eng/potions.json: FORTIFIER.description = "Triple your Block."
+    assert "FORTIFIER | Triple your Block." in rendered
     assert "[0] BLOODLETTING hand[0] target=self self_hp_loss=3 self_hp_after=6" in rendered
 
 
@@ -432,8 +474,9 @@ def test_render_card_reward_actions_include_candidate_details() -> None:
     assert '[0] select_card_reward card=BULLY cost=1 type=attack rarity=common keywords=Vulnerable | Deal 9 damage. Apply 1 Vulnerable.' in rendered
     assert '[1] select_card_reward card=BLOOD_WALL cost=2 type=skill rarity=uncommon keywords=Block | Gain 14 Block.' in rendered
     assert "select_card_reward card=BULLY hand_idx=0" not in rendered
-    assert "Vulnerable: target takes 50% more attack damage." in rendered
-    assert "Block: damage shield that is usually lost at end of turn." in rendered
+    # tooltip 来源：Vulnerable -> powers.json VULNERABLE_POWER；Block -> static_hover_tips.json BLOCK
+    assert "Vulnerable: Receive" in rendered
+    assert "Block: Until next turn, prevents damage." in rendered
 
 
 def test_render_state_text_uses_choice_index_for_combat_card_select() -> None:

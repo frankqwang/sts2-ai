@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from llm.scripts.compare_policy_eval import main
+from llm.scripts.analysis.compare_policy_eval import main
 
 
 def test_compare_policy_eval_writes_rejection(tmp_path, monkeypatch) -> None:

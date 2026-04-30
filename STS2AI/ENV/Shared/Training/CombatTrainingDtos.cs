@@ -248,6 +248,17 @@ public sealed class CombatTrainingCardSelectionSnapshot
 	public List<CombatTrainingSelectableCardSnapshot> SelectableCards { get; set; } = new List<CombatTrainingSelectableCardSnapshot>();
 
 	public List<CombatTrainingSelectableCardSnapshot> SelectedCards { get; set; } = new List<CombatTrainingSelectableCardSnapshot>();
+
+	// === Source-of-selection metadata (surfaced via proto v2) ===
+	// Card whose effect triggered this selection (e.g. "HEADBUTT", "ARMAMENTS",
+	// "DUAL_WIELD"). RegisterCardSelection / RegisterHandSelection callers
+	// must set this when the choice is card-driven; it stays empty for
+	// purely environmental selections (e.g. event-driven card removals).
+	public string TriggerCardId { get; set; } = "";
+
+	// Optional structured filter rules (e.g. ["upgradable_only"], ["attack_only"]).
+	// LLM uses these to know what's acceptable without parsing prompt text.
+	public List<string> SelectionRules { get; set; } = new List<string>();
 }
 
 public sealed class CombatTrainingSelectableCardSnapshot

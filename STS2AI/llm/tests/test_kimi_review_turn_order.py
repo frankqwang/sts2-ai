@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from llm.scripts.kimi_review_turn_order import (
+from llm.scripts.teacher.teacher_review_turn_order import (
     append_usage_record,
     build_episode_payload,
     build_messages,
@@ -10,9 +10,10 @@ from llm.scripts.kimi_review_turn_order import (
     count_recorded_api_calls,
     parse_review_json,
     response_content,
+    resolve_provider_model,
     select_episode_rows,
 )
-from llm.scripts.run_kimi_combat_review_batch import _read_skip_episode_ids
+from llm.scripts.teacher.run_kimi_combat_review_batch import _read_skip_episode_ids
 
 
 def _row(episode_id: str, step: int, flags: list[str] | None = None) -> dict:
@@ -72,6 +73,8 @@ def test_build_episode_payload_and_messages_include_turn_order() -> None:
 
     assert payload["turns"][0]["actions_played_in_order"] == ["[1] end_turn"]
     assert "visible lethal" in user
+    assert "planner_hint" in user
+    assert "must not contain action_index or an action sequence" in user
     assert "usable_training_labels" in user
 
 
@@ -114,6 +117,14 @@ def test_parse_kimi_response_content() -> None:
     assert parsed == {"overall_score": 8}
 
 
+def test_parse_claude_cli_response_content() -> None:
+    raw = {"provider": "claude_cli", "result": '```json\n{"overall_score": 9}\n```'}
+    parsed, status = parse_review_json(response_content(raw))
+
+    assert status == "ok"
+    assert parsed == {"overall_score": 9}
+
+
 def test_parse_final_json_block() -> None:
     parsed, status = parse_review_json('notes\n<FINAL_JSON>{"overall_score": 7}</FINAL_JSON>')
 
@@ -121,10 +132,45 @@ def test_parse_final_json_block() -> None:
     assert parsed == {"overall_score": 7}
 
 
-def test_kimi_usage_counter_counts_non_dry_run_calls(tmp_path) -> None:
+def test_usage_counter_counts_non_dry_run_calls(tmp_path) -> None:
     usage = tmp_path / "usage.jsonl"
+    append_usage_record(usage, {"provider": "deepseek", "dry_run": False, "call_count": 1})
     append_usage_record(usage, {"provider": "kimi", "dry_run": False, "call_count": 1})
     append_usage_record(usage, {"provider": "kimi", "dry_run": True, "call_count": 1})
     append_usage_record(usage, {"provider": "other", "dry_run": False, "call_count": 1})
+    append_usage_record(usage, {"provider": "claude_cli", "dry_run": False, "call_count": 2})
 
-    assert count_recorded_api_calls(usage) == 1
+    # Default counts every non-dry-run provider — right semantics for shared budgets.
+    assert count_recorded_api_calls(usage) == 5
+    assert count_recorded_api_calls(usage, provider="kimi") == 1
+    assert count_recorded_api_calls(usage, provider="deepseek") == 1
+    assert count_recorded_api_calls(usage, provider="claude_cli") == 2
+
+
+def test_provider_model_defaults() -> None:
+    assert resolve_provider_model("kimi", "") == "kimi-k2.6"
+    assert resolve_provider_model("claude_cli", "") == "claude-sonnet-4-6"
+
+
+def test_normalize_provider_accepts_deepseek_aliases() -> None:
+    from llm.scripts.teacher.teacher_review_turn_order import normalize_provider
+    assert normalize_provider("deepseek") == "deepseek"
+    assert normalize_provider("DEEPSEEK") == "deepseek"
+    assert normalize_provider("ds") == "deepseek"
+    assert normalize_provider("deepseek-v4-pro") == "deepseek"
+    assert normalize_provider("deepseek_v4") == "deepseek"
+
+
+def test_resolve_provider_defaults_for_deepseek() -> None:
+    from llm.scripts.teacher.teacher_review_turn_order import (
+        resolve_provider_model, resolve_provider_base_url, resolve_provider_api_key_env,
+    )
+    assert resolve_provider_model("deepseek", "") == "deepseek-v4-pro"
+    assert resolve_provider_model("deepseek", "custom-name") == "custom-name"
+    assert resolve_provider_base_url("deepseek", "") == "https://api.deepseek.com/v1"
+    assert resolve_provider_base_url("deepseek", "https://custom") == "https://custom"
+    assert resolve_provider_api_key_env("deepseek", "") == "DEEPSEEK_API_KEY"
+    assert resolve_provider_api_key_env("deepseek", "MY_KEY") == "MY_KEY"
+    # kimi / claude_cli fallback
+    assert resolve_provider_base_url("kimi", "") == "https://api.moonshot.cn/v1"
+    assert resolve_provider_api_key_env("kimi", "") == "MOONSHOT_API_KEY"

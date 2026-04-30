@@ -7,7 +7,7 @@
 
 - `spectate.ps1`
   - 旧 networkV2 可视化 wrapper，保留用于迁移参考
-  - 当前 LLM 观战请用 `STS2AI/llm/scripts/spectate_llm.ps1`
+  - 当前 LLM 观战请用 `STS2AI/llm/scripts/spectate/spectate_llm.ps1`
   - 录屏/日志落到 `STS2AI/Artifacts/recording/`
 - `trainer_common.ps1`
   - 公共 PowerShell 函数（`Resolve-CommandOrPath` 等），被 `spectate.ps1` source

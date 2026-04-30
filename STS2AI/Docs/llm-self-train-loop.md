@@ -1,35 +1,51 @@
 # LLM 自迭代训练循环
 
-目标：用真实 Skada combat reset case、严格审计、长期 dataset pool 和固定评估门槛，持续提升 combat adapter，直到 fullrun 稳定通过 Act 1。
+目标：用真实 Skada combat reset case、严格审计、长期 dataset pool 和固定评估门槛，持续提升 combat/planner adapters，直到 fullrun 稳定通过 Act 1。
+
+所有 combat reset 训练/评估入口都必须显式传 `--case-index` 指向 Skada `cases.jsonl`。旧的手工 Act1 pool 已删除，不再有 fallback。
 
 ## 循环结构
 
-1. 使用当前 combat adapter 在 Skada combat reset case 上 rollout。
-2. 记录 `step_trace.jsonl`、`episode_trace.jsonl`、`train.jsonl`、`eval.jsonl`、`meta.json`。
-3. `audit_rollout_failures` 抽出 invalid、defeat、left_combat、掉血回合、stderr 异常。
-4. `manage_dataset_pool ingest-dataset` 把训练样本分流到 `gold / silver / quarantine`。
-5. `manage_dataset_pool ingest-audit` 把失败和掉血回合写入 `hardcase`。
-6. `grpo_lite` 用 positive advantage 样本训练 candidate adapter。
-7. `policy_eval` 固定 seed 对比 current 和 candidate。
-8. promotion gate 比较胜率、reward、invalid、strict JSON、机制分数和分 encounter 回退。
-9. 通过则 candidate 成为下一轮 current；失败则保留原 current，并优先复盘 hardcase。
+有 planner-hint 之后，战斗飞轮按同轮协同训练：
+
+- `combat adapter`：负责每一步根据当前 `GameState` 和 `legal_actions` 输出单个动作。
+- `planner-hint adapter`：负责在战斗开始或每回合生成短策略 hint，替代旧 `strategy_context.plan`，但不直接执行动作。
+- 两者用同一批 rollout/teacher 反馈一起更新：teacher 一次复盘同时产动作标签和 battle-level planner 标签。
+
+单轮 combat 飞轮：
+
+1. 固定当前 `combat adapter C_t` 和当前 `planner-hint adapter P_t`。
+2. rollout 时先由 `P_t` 生成战斗级 hint，注入每一步 combat prompt；`C_t` 仍只输出当前步动作。
+3. 记录 `step_trace.jsonl`、`episode_trace.jsonl`、`train.jsonl`、`eval.jsonl`、`meta.json`，其中 step trace 会保留实际 prompt、planner hint 状态、动作质量 flags 和 `legal_actions`。
+4. `audit_rollout_failures` 抽出 invalid、left_combat、高掉血回合、低敌方推进、stderr 异常。
+5. `manage_dataset_pool ingest-dataset` 按非 boss 战质量分流：已结束战斗看净掉血，未结束/失败战斗看敌方血量推进，`victory` 只记录终止状态。
+6. `manage_dataset_pool ingest-audit` 把高掉血、未结束但高推进、低推进和协议错误写入 `hardcase`。
+7. Teacher 只复盘高价值 hard combat，产出两条标签流：
+   - 动作级 `teacher_turn_labels.jsonl`，进入 combat gold 数据。
+   - 战斗级 `planner_hint`，进入 planner-hint SFT 数据。
+8. `build_teacher_dataset` 用原始 `legal_actions` 校验动作标签，生成 combat teacher dataset 并写入长期 pool。
+9. `build_planner_hint_dataset` 生成 planner-hint SFT dataset。
+10. `grpo_lite` 用 materialized pool 训练 `combat candidate C_{t+1}`；训练 prompt 已包含 rollout 时的 planner hint。
+11. `sft_lora` 用本轮 planner-hint dataset 训练 `planner candidate P_{t+1}`。
+12. `policy_eval` 跑四格矩阵：`C_t/P_t`、`C_{t+1}/P_t`、`C_t/P_{t+1}`、`C_{t+1}/P_{t+1}`。
+13. quality gate 默认看 joint 组合 `C_{t+1}/P_{t+1}`；非 boss case 以掉血、敌方推进、动作质量为主，Boss/fullrun 才看胜负，通过则两个 adapter 一起进入下一轮。
 
 当前单轮编排入口：
 
 ```text
-STS2AI/llm/scripts/self_iterate.py
+STS2AI/llm/scripts/automation/self_iterate.py
 ```
 
 多轮 curriculum 入口：
 
 ```text
-STS2AI/llm/scripts/self_train_loop.py
+STS2AI/llm/scripts/automation/self_train_loop.py
 ```
 
 Act 1 闭环入口：
 
 ```text
-STS2AI/llm/scripts/train_until_act1_clear.py
+STS2AI/llm/scripts/automation/train_until_act1_clear.py
 ```
 
 ## 长期 Dataset Pool
@@ -43,36 +59,114 @@ STS2AI/Artifacts/llm/dataset_pool
 管理脚本：
 
 ```text
-STS2AI/llm/scripts/manage_dataset_pool.py
+STS2AI/llm/scripts/datasets/manage_dataset_pool.py
 ```
 
 样本分层：
 
 - `gold`：Kimi / teacher / manual verified 样本，优先训练。
-- `silver`：干净 rollout 正样本，用于扩量。
-- `hardcase`：defeat、invalid、left_combat、掉血回合，等待复盘。
-- `quarantine`：strict JSON 失败、危险动作、非正 advantage 等不允许直接训练的样本。
+- `silver`：干净 rollout 正样本；非 boss 战必须低净掉血，当前硬门槛 `hp_lost <= 4`。
+- `hardcase`：高掉血、未结束但敌方推进高、低敌方推进、invalid、left_combat，等待复盘。
+- `quarantine`：strict JSON 失败、危险动作、缺少 `hp_lost / enemy_damage_progress`、非正 advantage 等不允许直接训练的样本。
 
 常用命令：
 
 ```powershell
 $env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
-python -m llm.scripts.manage_dataset_pool report
-python -m llm.scripts.manage_dataset_pool materialize `
+python -m llm.scripts.datasets.manage_dataset_pool report
+python -m llm.scripts.datasets.manage_dataset_pool materialize `
   --out-dir STS2AI\Artifacts\llm\datasets\managed_combat_pool_latest `
   --target-size 5000 `
   --gold-min-ratio 0.15
 ```
 
-## 策略上下文
+## 策略上下文和 planner-hint
 
-`strategy_context` 是可审计的明文规划摘要，不依赖隐藏 thinking。它由当前真实 `GameState`、`legal_actions` 和很短的运行记忆确定性生成，并同时用于训练 rollout 和观战推理：
+`strategy_context` 是可审计的明文上下文，不依赖隐藏 thinking。当前主线只允许两类内容进入 combat prompt：
 
-- `memory`：上场战斗摘要、本战斗损血和最近动作、本回合最近动作。
-- `plan`：卡组形态、关键牌、遗物倾向、当前威胁、可见斩杀线或优先目标。
-- `turn`：本回合能量、主要目标和需要避免的明显错误。
+- `short_term / long_term`：本进程产生的动作记忆。它不是规则库，也不是把状态摘要改名成 memory。
+- `planner_hint`：由 planner-hint LoRA 生成的战斗级策略提示，使用 v2 schema。
 
-这块保持短文本，目标是补充“容易被单步 prompt 忘掉的上下文”，不是把攻略长文塞进每步输入。prompt 里会明确声明当前 state 和 legal actions 优先级更高，避免策略摘要覆盖实时局面。后续如果要接入额外 LLM planner、战斗复盘、或按 key card 检索攻略，优先复用这块上下文形状，而不是新建另一套 prompt。
+旧的 `memory / threat / target / turn / rule / plan` 规则段已经不再作为默认上下文。旧 planner 字段 `combat_plan / encounter_guide / defense_policy / resource_policy / potion_policy` 直接判 invalid，不做兼容映射。
+
+planner-hint LoRA 的输出不是动作序列，不包含 `action_index`，也不直接执行。当前 v2 schema：
+
+```json
+{
+  "battle_objective": "Use BASH to create a Vulnerable damage window.",
+  "enemy_focus": "Focus one CULTIST at a time.",
+  "deck_usage": "Use STRIKE_IRONCLAD follow-up to exploit Vulnerable.",
+  "risk_tradeoff": "Accept small HP loss only when it shortens future risk.",
+  "resource_timing": "Spend BASH when the debuff has a real attack payoff.",
+  "potion_stance": "Save potions unless they prevent a major HP swing.",
+  "kill_order": ["enemy1", "enemy2"],
+  "danger_notes": ["Do not split damage so both enemies keep scaling."]
+}
+```
+
+注入到 combat prompt 后渲染为：
+
+```text
+run: ...
+strategy_context:
+  short_term:
+    recent_actions: played BASH hand[2] -> enemy1
+  long_term: none
+  planner_hint:
+    battle_objective: Use BASH to create a Vulnerable damage window.
+    enemy_focus: Focus one CULTIST at a time.
+    kill_order: enemy1 -> enemy2
+
+player: ...
+...
+hand:
+  ...
+
+legal_actions:
+  [0] ...
+```
+
+combat adapter 仍然逐步读取当前 state 和 `legal_actions`，输出单个动作。当前 state、当前 `legal_actions` 和真实游戏执行结果永远高于 planner hint。`player:` 和 `legal_actions:` 前的空行是 prompt 格式的一部分，用于让 trace 更容易读，不改变字段语义。
+
+## Guide RAG
+
+外部攻略、人类先验和 teacher 复盘沉淀到本地 guide corpus：
+
+```text
+STS2AI/llm/knowledge/guide_corpus.jsonl
+```
+
+检索层只负责把相关证据块拼到 planner prompt 的 `retrieved_knowledge`，不直接生成规则，不替代 planner LoRA。当前可用环境变量：
+
+- `STS2_LLM_GUIDE_RAG=1`：启用 guide 检索，默认开启。
+- `STS2_LLM_GUIDE_LIMIT=4`：每次最多注入几条证据。
+- `STS2_LLM_GUIDE_REQUIRED=1`：没有检索证据时直接失败，用于训练/评估硬门槛。
+- `STS2_LLM_PLANNER_HINT_REQUIRED=1`：planner 失败、空 hint、invalid hint 时直接失败。
+
+硬校验入口：
+
+```powershell
+python -m llm.scripts.analysis.check_guide_corpus `
+  --corpus STS2AI\llm\knowledge\guide_corpus.jsonl
+
+python -m llm.scripts.analysis.eval_planner_hint_outputs `
+  --dataset STS2AI\Artifacts\llm\datasets\<planner_hint_dataset> `
+  --trace STS2AI\Artifacts\llm\datasets\<rollout_dataset>\step_trace.jsonl `
+  --require-knowledge
+```
+
+## 对齐主流训练和 Agent 框架的缺口
+
+当前已有：SFT/rollout trace、teacher provider 切换、combat/planner 联动训练、固定评估、可视化 trace、guide RAG 雏形。
+
+还缺的关键件：
+
+- 数据注册表：每个 dataset/adapter/eval 要有 manifest、父版本、schema 版本、corpus hash、teacher provider、训练参数和 promotion 结果。
+- 硬评估门槛：combat、planner、non-combat 三个 adapter 要有独立 eval 和 joint eval，失败数据进入 hardcase，不让脏样本继续训练。
+- Teacher QA：teacher 输出必须经过 schema、英文值、无动作字段、无旧字段、legal action 校验；不满足就重标，不做降级。
+- Preference/RM：现在主要是 SFT 和轻量 rollout，还缺系统化 preference pairs、reward model 或 DPO/ORPO/RFT 类流程。
+- Agent memory：现在只有短期动作 memory。真正需要的是 episodic memory、semantic guide memory、run-level build memory，并通过检索进入 planner prompt。
+- Guardrails 和 observability：需要把 invalid、stale legal action、planner failure、RAG miss、teacher parse fail 都作为可统计 gate，而不是日志里人工找。
 
 ## 动作质量指标
 
@@ -85,14 +179,14 @@ rollout/eval 会记录保守的动作质量 flags，先只做统计和样本 met
 
 每步会记录机会数和失误数，并汇总为：
 
-- `mechanism_score`：机制机会上的综合命中率，用于晋级门槛。
+- `mechanism_score`：机制机会上的综合命中率，用于质量门槛。
 - `sequence_score`：牌序/能量/可见斩杀处理。
 - `defense_score`：危险回合是否避免直接结束。
 - `hp_lost`：掉血控制。
 - `turns` / `steps_per_turn`：回合速度和动作序列长度。
 - `visible_damage_per_step`：可见输出节奏。
 
-这些指标不是替代胜率，而是避免模型在简单 eval 胜率打满后仍然靠侥幸或低质量路线晋级。
+非 boss 评估不把胜负当核心质量。已结束战斗主要看 `hp_lost`，未结束或失败战斗主要看 `enemy_damage_progress`，再结合动作质量和机制 flags。胜负只作为终止状态记录。
 
 ## 离线样本挖掘
 
@@ -100,7 +194,7 @@ rollout/eval 会记录保守的动作质量 flags，先只做统计和样本 met
 
 ```powershell
 $env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
-python -m llm.scripts.mine_offline_preferences `
+python -m llm.scripts.datasets.mine_offline_preferences `
   --dataset-dir STS2AI\Artifacts\llm\datasets\<rollout_dataset> `
   --include-eval
 ```
@@ -113,14 +207,20 @@ python -m llm.scripts.mine_offline_preferences `
 
 这个阶段的原则是宁可少修，也不要把不确定的策略判断写成硬标签。比如 `dangerous_end_turn` 只统计，不自动生成修复动作。
 
-## Kimi Teacher 标注
+## Teacher 标注（Kimi / Claude CLI）
 
-Kimi 只用于高价值 hard combat，不随机烧预算。入口：
+Teacher 只用于高价值 hard combat，不随机烧预算。底层 provider 可以切换：
+
+- `kimi`：走 Moonshot/Kimi API，适合实时小批量或后续 Batch。
+- `claude_cli`：走本地 `claude -p`，适合消耗 Claude 额度；需要按本机代理设置 `HTTP_PROXY/HTTPS_PROXY`。
+
+Kimi 实时入口：
 
 ```powershell
 $env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
 $env:MOONSHOT_API_KEY="..."
-python -m llm.scripts.run_kimi_combat_review_batch `
+python -m llm.scripts.teacher.run_kimi_combat_review_batch `
+  --provider kimi `
   --trace STS2AI\Artifacts\llm\datasets\<rollout_dataset>\step_trace.jsonl `
   --limit-episodes 20 `
   --max-api-calls 20 `
@@ -128,39 +228,94 @@ python -m llm.scripts.run_kimi_combat_review_batch `
   --thinking disabled
 ```
 
+Claude CLI 入口：
+
+```powershell
+$env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
+$env:HTTP_PROXY="http://127.0.0.1:7897"
+$env:HTTPS_PROXY="http://127.0.0.1:7897"
+python -m llm.scripts.teacher.run_kimi_combat_review_batch `
+  --provider claude_cli `
+  --model claude-sonnet-4-6 `
+  --claude-command claude `
+  --claude-proxy http://127.0.0.1:7897 `
+  --trace STS2AI\Artifacts\llm\datasets\<rollout_dataset>\step_trace.jsonl `
+  --out-dir STS2AI\Artifacts\llm\reviews\<review_run> `
+  --limit-episodes 20 `
+  --max-api-calls 20 `
+  --max-workers 2 `
+  --max-tokens 4096 `
+  --timeout-s 300 `
+  --skip-existing
+```
+
 输入选择逻辑：按失败、invalid、掉血回合、质量 flags 排序，默认复盘整场战斗，但 prompt 聚焦前 2 回合、中期 2 回合、最后 2 回合和高掉血回合。每个 episode 都会落：
 
 - `episode_input.json`：送给 Kimi 的结构化 combat 摘要。
 - `prompt_messages.json`：实际 API messages，不含密钥。
-- `kimi_raw_response.json`：原始返回。
+- `teacher_raw_response.json`：原始返回；同时写 provider 专属 raw 文件。
 - `turn_order_review.json`：解析成功的 JSON review。
 - `teacher_turn_labels.jsonl`：Kimi 给出的候选训练标签。
+
+`turn_order_review.json` 现在也要求包含顶层 `planner_hint`，用于训练战斗级 planner-hint LoRA：
+
+```powershell
+python -m llm.scripts.datasets.build_planner_hint_dataset `
+  --review-root STS2AI\Artifacts\llm\reviews\<review_run> `
+  --out-dir STS2AI\Artifacts\llm\datasets\planner_hint_<run>
+```
 
 输出不会直接训练。必须再经过：
 
 ```powershell
-python -m llm.scripts.build_teacher_dataset `
+python -m llm.scripts.datasets.build_teacher_dataset `
   --review <turn_order_review.json> `
   --episode-input <episode_input.json> `
   --min-confidence 0.75 `
   --out-dir STS2AI\Artifacts\llm\datasets\<teacher_dataset>
 ```
 
-`build_teacher_dataset` 会用原始 prompt 里的 `legal_actions` 做本地验证：非法 action、低置信度、无法匹配 step 的标签全部丢弃；默认还会把 Kimi 的长 reason 改写成短的 deterministic reason，避免把错误算术或长篇复盘训练进 4B。
+`build_teacher_dataset` 会用原始 prompt 里的 `legal_actions` 做本地验证：非法 action、低置信度、无法匹配 step 的标签全部丢弃；默认还会把 teacher 的长 reason 改写成短的 deterministic reason，避免把错误算术或长篇复盘训练进 4B。
 
-`self_iterate.py --kimi-teacher` 已经把这段接入单轮飞轮：
+`self_iterate.py --kimi-teacher` 已经把这段接入单轮飞轮。`--kimi-teacher` 现在只是开关名，实际 provider 由 `--teacher-provider` 决定：
 
 ```text
-rollout -> audit -> pool ingest -> Kimi review -> teacher dataset -> gold ingest
-        -> materialize gold/silver pool -> train candidate -> eval -> promotion gate
+rollout with planner -> audit -> pool ingest -> teacher review
+        -> combat teacher dataset -> gold ingest
+        -> planner-hint dataset
+        -> materialize gold/silver pool
+        -> train combat candidate + train planner candidate
+        -> eval C/P four-cell matrix -> joint quality gate
+```
+
+带 planner-hint 和 Claude CLI teacher 的单轮命令形状：
+
+```powershell
+python -m llm.scripts.automation.self_iterate `
+  --current-adapter STS2AI\Artifacts\llm\grpo\<combat_run>\adapter `
+  --planner-hint-adapter-dir STS2AI\Artifacts\llm\sft\<planner_hint_run>\adapter `
+  --planner-hint-refresh turn `
+  --case-index STS2AI\Assets\datasets\zero_skada_replay_cases\v0_103_2_a0_single_combat_v1\cases.jsonl `
+  --case-limit 4 `
+  --case-sample-mode stratified `
+  --co-train-planner `
+  --kimi-teacher `
+  --teacher-provider claude_cli `
+  --teacher-model claude-sonnet-4-6 `
+  --teacher-max-workers 2 `
+  --kimi-limit-episodes 20 `
+  --kimi-max-api-calls 20 `
+  --teacher-skip-existing
 ```
 
 API 预算控制：
 
 - `--kimi-limit-episodes` 控制本轮最多复盘多少场。
 - `--kimi-max-api-calls` 是本轮新增调用上限，不受历史 usage 影响。
-- `--skip-episode-id` 可跳过已标注 combat，续跑时避免重复花钱。
-- usage 记录在 `STS2AI/Artifacts/llm/kimi_usage/usage.jsonl`，只记录状态、耗时和 token usage，不记录密钥。
+- `--teacher-max-workers` 控制实时并发；Claude CLI 不建议一开始拉太高，先按 2 到 4 验稳定。
+- `--teacher-skip-existing` 默认开启，续跑时跳过已有 raw response / parsed review，避免重复计费。
+- `--skip-episode-id` 可跳过已标注 combat。
+- usage 记录在 `STS2AI/Artifacts/llm/kimi_usage/usage.jsonl`，会记录 provider、状态、耗时和 token usage，不记录密钥。
 
 ## 同局面多次推理
 
@@ -168,7 +323,7 @@ API 预算控制：
 
 ```powershell
 $env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
-python -m llm.scripts.sample_state_candidates `
+python -m llm.scripts.teacher.sample_state_candidates `
   --input-jsonl STS2AI\Artifacts\llm\datasets\<rollout_dataset>\offline_mining\hard_cases.jsonl `
   --adapter-dir STS2AI\Artifacts\llm\grpo\<adapter>\adapter `
   --samples-per-state 8 `
@@ -190,7 +345,7 @@ python -m llm.scripts.sample_state_candidates `
 
 ```powershell
 $env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
-python -m llm.scripts.add_experience `
+python -m llm.scripts.teacher.add_experience `
   --tags vulnerable,attack `
   --when "hand can apply Vulnerable and also deal meaningful attack damage" `
   --advice "apply Vulnerable before the largest attack when energy allows" `
@@ -215,25 +370,26 @@ STS2AI/Artifacts/llm/experience/lessons.jsonl
 
 ## 为什么按 encounter key 分组
 
-同一个敌人，不同 deck/relic/build 是不同任务。例如 starter deck 的 `SLIMES_NORMAL` 和 midrun build 的 `SLIMES_NORMAL` 不能混在一起算 advantage，否则 reward 差异会来自 build 强弱，而不是动作质量。
+同一个敌人，不同 deck/relic/build 是不同任务。例如 Skada 不同楼层、不同构筑的 `SLIMES_NORMAL` 不能混在一起算 advantage，否则 reward 差异会来自 build 强弱，而不是动作质量。
 
 当前 key 形式：
 
 ```text
-CHOMPERS_NORMAL::act1_midrun::beaab971
+CHOMPERS_NORMAL::skada_floor_07_normal::beaab971
 ```
 
-## 晋级门槛
+## 质量门槛
 
 候选模型必须满足：
 
 - invalid output episode rate 不超过阈值。
-- 总体 win rate 不低于 current。
-- 总体 reward 不能明显回退。
+- 非 boss 已结束战斗的 `hp_lost` 不能明显回退。
+- 非 boss 未结束/失败战斗的 `enemy_damage_progress` 不能明显回退。
+- 总体 reward 不能明显回退；reward 只是聚合指标，不单独替代 `hp_lost / enemy_damage_progress`。
 - `mechanism_score` 不能明显回退。
 - `missed_visible_lethal` 不能增加。
-- 每个 encounter/build 的 win rate 不能明显回退。
-- 每个 encounter/build 的 reward 不能明显回退。
+- 每个 encounter/build 的 `hp_lost`、`enemy_damage_progress`、reward 不能明显回退。
+- Boss/fullrun eval 才把胜负和 Act 进度作为主指标。
 
 这样避免平均值掩盖局部灾难。
 
@@ -241,11 +397,12 @@ CHOMPERS_NORMAL::act1_midrun::beaab971
 
 ```powershell
 $env:PYTHONPATH="C:\Users\Administrator\Desktop\sts2Zero\STS2AI"
-python -m llm.scripts.self_train_loop `
+python -m llm.scripts.automation.self_train_loop `
   --current-adapter STS2AI\Artifacts\llm\sft\grouped_index_damage_20260424-223329\adapter `
+  --case-index STS2AI\Assets\datasets\zero_skada_replay_cases\v0_103_2_a0_single_combat_v1\cases.jsonl `
   --run-name self_train_curriculum `
   --iterations 3 `
-  --stages "CHOMPERS;SLIMES,CULTISTS;act1_midrun" `
+  --stages "CHOMPERS;SLIMES,CULTISTS;skada_floor_06,skada_floor_07,skada_floor_08" `
   --focus-hard-cases `
   --rollout-generations 4 `
   --eval-episodes-per-encounter 2 `

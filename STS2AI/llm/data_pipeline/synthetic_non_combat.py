@@ -219,7 +219,7 @@ def build_sample(state: dict, legal: list[dict], system_prompt: str) -> dict[str
         return None
     user_msg = render_state_text(state, legal)
     assistant_msg = json.dumps(
-        {"action_index": int(dec.action_index), "reason": dec.reason[:80]},
+        {"action_index": int(dec.action_index), "reason": dec.reason[:200]},
         ensure_ascii=False,
     )
     return {

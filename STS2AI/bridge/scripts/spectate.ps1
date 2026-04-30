@@ -33,7 +33,7 @@ $commonScript = Join-Path $PSScriptRoot "trainer_common.ps1"
 
 $sts2aiRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $repoRoot = Split-Path -Parent $sts2aiRoot
-$llmSpectateScript = Join-Path $sts2aiRoot "llm\scripts\spectate_llm.ps1"
+$llmSpectateScript = Join-Path $sts2aiRoot "llm\scripts\spectate\spectate_llm.ps1"
 throw "STS2AI\bridge\scripts\spectate.ps1 targets the removed networkV2 demo_play flow. Use $llmSpectateScript for LLM spectate, or run `python -m game_bridge.spectate.cli` from STS2AI\bridge for the generic spectator controller."
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $recordingRoot = if ([string]::IsNullOrWhiteSpace($OutputDir)) {

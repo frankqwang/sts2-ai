@@ -118,6 +118,8 @@ def summarize_sft_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     encounter_keys: Counter[str] = Counter()
     action_quality: Counter[str] = Counter()
     mechanism_scores: list[float] = []
+    hp_lost: list[float] = []
+    enemy_damage_progress: list[float] = []
     parse_failures = 0
 
     for row in rows:
@@ -142,6 +144,19 @@ def summarize_sft_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         score = report.get("mechanism_score")
         if isinstance(score, (int, float)):
             mechanism_scores.append(float(score))
+        episode_summary = meta.get("episode_quality_summary") if isinstance(meta.get("episode_quality_summary"), dict) else {}
+        # NOTE: dict.get(key, default) 当 meta[key] 显式为 None 时仍返回 None（不是 default），
+        # 必须显式 None 判断才能 fallback 到 episode_summary。
+        raw_hp_lost = meta.get("hp_lost")
+        if raw_hp_lost is None:
+            raw_hp_lost = episode_summary.get("hp_lost")
+        if isinstance(raw_hp_lost, (int, float)):
+            hp_lost.append(float(raw_hp_lost))
+        raw_enemy_progress = meta.get("enemy_damage_progress")
+        if raw_enemy_progress is None:
+            raw_enemy_progress = episode_summary.get("enemy_damage_progress")
+        if isinstance(raw_enemy_progress, (int, float)):
+            enemy_damage_progress.append(float(raw_enemy_progress))
 
         legal_section = _indented_section(user_text, "legal_actions")
         legal_counts.append(len(re.findall(r"^\s*\[\d+\]", legal_section, flags=re.MULTILINE)))
@@ -169,6 +184,8 @@ def summarize_sft_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "action_mode_counts": _counter_payload(action_modes),
         "action_quality_counts": _counter_payload(action_quality),
         "mechanism_score": _number_stats(mechanism_scores),
+        "hp_lost": _number_stats(hp_lost),
+        "enemy_damage_progress": _number_stats(enemy_damage_progress),
     }
 
 
@@ -198,6 +215,7 @@ def summarize_rollout_meta(meta: dict[str, Any]) -> dict[str, Any]:
     action_quality = Counter()
     mechanism_scores: list[float] = []
     hp_lost: list[float] = []
+    enemy_damage_progress: list[float] = []
     sequence_scores: list[float] = []
     defense_scores: list[float] = []
     turns: list[float] = []
@@ -209,6 +227,8 @@ def summarize_rollout_meta(meta: dict[str, Any]) -> dict[str, Any]:
             mechanism_scores.append(float(summary["mechanism_score"]))
         if isinstance(summary.get("hp_lost"), (int, float)):
             hp_lost.append(float(summary["hp_lost"]))
+        if isinstance(summary.get("enemy_damage_progress"), (int, float)):
+            enemy_damage_progress.append(float(summary["enemy_damage_progress"]))
         if isinstance(summary.get("sequence_score"), (int, float)):
             sequence_scores.append(float(summary["sequence_score"]))
         if isinstance(summary.get("defense_score"), (int, float)):
@@ -230,6 +250,16 @@ def summarize_rollout_meta(meta: dict[str, Any]) -> dict[str, Any]:
             float(((ep.get("reward") or {}).get("total")) or 0.0)
             for ep in values
         ]
+        group_hp_lost = [
+            float(((ep.get("quality_summary") or {}).get("hp_lost")) or 0.0)
+            for ep in values
+            if isinstance((ep.get("quality_summary") or {}).get("hp_lost"), (int, float))
+        ]
+        group_enemy_progress = [
+            float(((ep.get("quality_summary") or {}).get("enemy_damage_progress")) or 0.0)
+            for ep in values
+            if isinstance((ep.get("quality_summary") or {}).get("enemy_damage_progress"), (int, float))
+        ]
         group_invalid = sum(1 for ep in values if bool(ep.get("invalid_output")))
         group_total = len(values)
         by_encounter[key] = {
@@ -239,6 +269,8 @@ def summarize_rollout_meta(meta: dict[str, Any]) -> dict[str, Any]:
             "win_rate": round(group_outcomes.get("victory", 0) / group_total, 4) if group_total else None,
             "invalid_output_episode_rate": round(group_invalid / group_total, 4) if group_total else None,
             "reward": _number_stats(group_rewards),
+            "hp_lost": _number_stats(group_hp_lost),
+            "enemy_damage_progress": _number_stats(group_enemy_progress),
             "outcome_counts": _counter_payload(group_outcomes),
         }
     return {
@@ -263,6 +295,7 @@ def summarize_rollout_meta(meta: dict[str, Any]) -> dict[str, Any]:
         "sequence_score": _number_stats(sequence_scores),
         "defense_score": _number_stats(defense_scores),
         "hp_lost": _number_stats(hp_lost),
+        "enemy_damage_progress": _number_stats(enemy_damage_progress),
         "turns": _number_stats(turns),
         "outcome_counts": _counter_payload(outcomes),
         "steps": _number_stats(steps),

@@ -7,7 +7,7 @@ text in Python; HeadlessSim should run with the desired game locale.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
@@ -40,48 +40,74 @@ _LEADING_BLOCK_DESC_RE = re.compile(
 )
 _SELF_HP_LOSS_RE = re.compile(r"\bLose\s+(\d+)\s+HP\b", re.IGNORECASE)
 
-_RELIC_GLOSSARY = {
-    "BURNING_BLOOD": "heal 6 HP after combat.",
-    "HAND_DRILL": "when you break an enemy's Block, apply 2 Vulnerable.",
-    "MINIATURE_CANNON": "at combat start, deal 7 damage to all enemies.",
-    "SILVER_CRUCIBLE": "after combat, 50% chance to heal 4 HP.",
-}
+# NOTE: 之前用手写 _RELIC_GLOSSARY / _POWER_GLOSSARY / _KEYWORD_GLOSSARY 字典做
+# tooltip 数据源，覆盖率仅 4-7 条核心条目，绝大多数 relic / power 在 prompt 里裸 ID。
+# 现在改为直接从 localization/eng/*.json（STS2 官方游戏 i18n 文件）读取：
+#   - relics.json: 全部 relic
+#   - powers.json: 全部 power（含 smartDescription，含具体 amount 占位符）
+#   - card_keywords.json: ETERNAL/ETHEREAL/EXHAUST/INNATE/RETAIN/SLY/UNPLAYABLE
+#   - intents.json: ATTACK/BUFF/DEFEND/DEBUFF/STUN/SLEEP/SUMMON 等
+#   - cards.json / potions.json / monsters.json: 卡 / 药水 / 怪物名
+# 如果游戏更新，只需 sync localization 目录即可。
+# 注意：sim/bridge 的 proto 有 description 字段（proto_state_converter.py:316-317），
+# 但当前 sim 端发送的是 LocString 占位符（未 resolve i18n 表），所以 state 里看不到
+# 真实文案。要从 sim 拿真实文案需要改 sim 或在 bridge 端注入 i18n resolve；那是
+# 独立工程。在那之前用 localization 文件兜底，效果等价于游戏内 tooltip。
+from llm.data_pipeline.localization_loader import (
+    lookup_relic as _loc_lookup_relic,
+    lookup_power as _loc_lookup_power,
+    lookup_keyword as _loc_lookup_keyword,
+    lookup_potion as _loc_lookup_potion,
+    lookup_intent as _loc_lookup_intent,
+)
 
-_POWER_GLOSSARY = {
-    "ARTIFACT_POWER": "negates the next debuff, then loses 1 stack.",
-    "VULNERABLE_POWER": "takes 50% more attack damage; usually decreases by 1 each turn.",
-    "WEAK_POWER": "deals 25% less attack damage; usually decreases by 1 each turn.",
-    "FRAIL_POWER": "gains 25% less Block; usually decreases by 1 each turn.",
-    "STRENGTH_POWER": "modifies attack damage by its stack amount.",
-    "DEXTERITY_POWER": "modifies Block gained by its stack amount.",
-    "CONSTRICT_POWER": "lose HP at end of turn equal to its stack amount; Block does not stop it.",
-}
+# 这些字典保留为空 dict，让 _item_description() 不会抛 KeyError；任何对它们的
+# 显式查找都会落空，进而走 _loc_lookup_* 拿权威 tooltip。
+_RELIC_GLOSSARY: dict[str, str] = {}
+_POWER_GLOSSARY: dict[str, str] = {}
+_POTION_GLOSSARY: dict[str, str] = {}
 
-_POTION_GLOSSARY = {
-    "FORTIFIER": "gain Block equal to twice your current Block.",
-}
+# NOTE: 之前在这里有 _POWER_STRATEGIC_HINTS 字典（手写"SLIPPERY → 用 multi-hit"等
+# 战术规则），已删除。设计原则：prompt 只暴露事实（power description from localization /
+# damage preview / intent / hp / block），战术应对由 Kimi teacher 给 corrected_reason
+# 教 model；如果数据不够覆盖某种 mechanic，用 archetype-aware sampling 补，不在 prompt
+# 里硬编码人类经验。这避免了 model 学到"听话执行硬规则"而不是"自己推理"。
 
-_KEYWORD_GLOSSARY = {
-    "Artifact": "negates the next debuff, then loses 1 stack.",
-    "Vulnerable": "target takes 50% more attack damage.",
-    "Weak": "target deals 25% less attack damage.",
-    "Frail": "target gains 25% less Block.",
-    "Strength": "changes attack damage by its amount.",
-    "Dexterity": "changes Block gained by its amount.",
-    "Block": "damage shield that is usually lost at end of turn.",
-    "Exhaust": "remove the card from combat.",
-    "Ethereal": "if still in hand at end of turn, exhaust it.",
-    "Retain": "the card stays in hand at end of turn.",
-    "Status": "a non-standard deck card, usually harmful or unplayable.",
-    "Dazed": "an unplayable Ethereal Status card.",
-    "Wound": "an unplayable Status card.",
-    "Burn": "a Status card that punishes you if it stays in hand.",
-}
 
+# Keyword 列表来自 localization card_keywords.json + intents.json 的 title。
+# 模式仅用于在 prompt 文本里检测哪些 keyword 出现，从而决定 glossary 包含哪些条目。
+_KEYWORD_LIST = [
+    "Vulnerable", "Weak", "Frail", "Strength", "Dexterity", "Artifact", "Block",
+    "Exhaust", "Ethereal", "Retain", "Innate", "Sly", "Eternal", "Unplayable",
+    "Status", "Dazed", "Wound", "Burn", "Poison", "Constrict", "Ritual",
+    "Skittish", "Barricade", "Vigor", "Thorns",
+]
 _KEYWORD_PATTERNS = {
     key: re.compile(rf"\b{re.escape(key)}(?:ed)?\b", re.IGNORECASE)
-    for key in _KEYWORD_GLOSSARY
+    for key in _KEYWORD_LIST
 }
+
+
+def _resolve_relic_description(relic_id: str) -> str:
+    """单一来源：从 localization 读 relic 描述（带 markup 已清理）。"""
+    return _loc_lookup_relic(relic_id) if relic_id else ""
+
+
+def _resolve_power_description(power_id: str) -> str:
+    return _loc_lookup_power(power_id) if power_id else ""
+
+
+def _resolve_potion_description(potion_id: str) -> str:
+    return _loc_lookup_potion(potion_id) if potion_id else ""
+
+
+def _resolve_keyword_description(keyword: str) -> str:
+    """先按当前 keyword 大写形式（card_keywords.json key 形如 ETERNAL），
+    再按本身（intents.json key 是 ATTACK 之类）尝试。"""
+    if not keyword:
+        return ""
+    upper = keyword.upper()
+    return _loc_lookup_keyword(upper) or _loc_lookup_intent(upper)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -166,7 +192,7 @@ def _filter_relevant_experience(user_message: str, entries: list[ExperienceEntry
 
 
 def inject_experience_context(user_message: str, *, limit: int | None = None) -> str:
-    max_entries = _env_int("STS2_LLM_EXPERIENCE_LIMIT", 1) if limit is None else int(limit)
+    max_entries = _env_int("STS2_LLM_EXPERIENCE_LIMIT", 0) if limit is None else int(limit)
     if max_entries <= 0:
         return user_message
     try:
@@ -246,6 +272,40 @@ def _is_localization_key(text: str) -> bool:
     return bool(_LOCALIZATION_KEY_RE.match(stripped))
 
 
+_SIMPLE_AMOUNT_RE = re.compile(r"\{Amount\}")
+_OWNER_NAME_RE = re.compile(r"\{OwnerName\}")
+
+
+def _resolve_power_placeholders(desc: str, *, amount: Any = None, owner_name: str = "") -> str:
+    """Replace the cheapest, most common placeholders in localization
+    descriptions so the LLM sees concrete values instead of template tags.
+
+    Examples
+    --------
+    Before: ``{OwnerName} gains {Amount} Block when first hit each turn.``
+    After:  ``PHANTASMAL_GARDENER gains 6 Block when first hit each turn.``
+
+    We only resolve ``{Amount}`` and ``{OwnerName}``. Conditional /
+    pluralisation expressions (``{Amount:plural:turn|turns}``,
+    ``{Repeat:plural:| {} times}``, ``{IsMultiplayer:...}``) require a
+    real localization runtime; the LLM still sees the raw template for
+    those and tends to ignore them gracefully (they're ~5% of glossary
+    text). Worth doing only if profiling shows them as a bottleneck.
+    """
+    if not desc:
+        return desc
+    out = desc
+    if amount is not None and "{Amount}" in out:
+        try:
+            amt_str = str(int(amount))
+        except (TypeError, ValueError):
+            amt_str = str(amount)
+        out = _SIMPLE_AMOUNT_RE.sub(amt_str, out)
+    if owner_name and "{OwnerName}" in out:
+        out = _OWNER_NAME_RE.sub(owner_name, out)
+    return out
+
+
 def _clean_runtime_text(text: str) -> str:
     if not text:
         return ""
@@ -286,6 +346,32 @@ def _fmt_powers(powers: Iterable[Any]) -> str:
         else:
             parts.append(f"{pid}={amount}")
     return "; ".join(parts) if parts else "-"
+
+
+def _detect_phase_tag(enemy: dict[str, Any], powers: list[Any]) -> str:
+    """Surface an *explicit* phase label when sim provides one.
+
+    Design choice: we deliberately do NOT infer phase from hp sentinels
+    (999_999_999) or power presence (ASLEEP_POWER, STEAM_ERUPTION_POWER).
+    Those values already live in the prompt — translating them into a
+    pre-digested ``phase=invulnerable`` tag does the model's reasoning
+    *for* it, which is the same anti-pattern as hard-coded
+    counter_strategy lines. We want the combat / planner LoRAs to learn
+    the mapping from raw signals to phase semantics through teacher
+    distillation (deepseek review reason chains), not from a
+    renderer-side cheat sheet.
+
+    The function still emits the tag when sim ships a real ``phase`` /
+    ``phase_id`` / ``phase_name`` field on the enemy snapshot, so
+    forward-compat with future proto extensions works automatically.
+    """
+    # ``powers`` is unused today but kept in the signature so callers
+    # don't have to drop the argument when sim later starts carrying
+    # phase data alongside the power list (e.g. derived in C# rather
+    # than Python).
+    _ = powers
+    explicit = _pick(enemy, "phase", "phase_id", "phase_name", default="")
+    return str(explicit) if explicit else ""
 
 
 def _resolve_card_desc(card: dict[str, Any]) -> str:
@@ -334,15 +420,28 @@ def _iter_hand_cards(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [card for card in hand_raw if isinstance(card, dict)]
 
 
-def _iter_powers(state: dict[str, Any]) -> list[dict[str, Any]]:
+def _iter_player_powers(state: dict[str, Any]) -> list[dict[str, Any]]:
     battle = _as_dict(state.get("battle"))
     top_player = _as_dict(state.get("player"))
     battle_player = _as_dict(battle.get("player"))
     powers = list(_as_list(battle_player.get("powers")) or _as_list(top_player.get("powers")))
+    return [p for p in powers if isinstance(p, dict)]
+
+
+def _iter_enemy_powers(state: dict[str, Any]) -> list[dict[str, Any]]:
+    battle = _as_dict(state.get("battle"))
+    powers: list[dict[str, Any]] = []
     for enemy in _as_list(state.get("enemies")) or _as_list(battle.get("enemies")):
         if isinstance(enemy, dict):
-            powers.extend(_as_list(enemy.get("powers")) or _as_list(enemy.get("buffs")))
-    return [power for power in powers if isinstance(power, dict)]
+            powers.extend(p for p in (_as_list(enemy.get("powers")) or _as_list(enemy.get("buffs"))) if isinstance(p, dict))
+    return powers
+
+
+def _iter_powers(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Backward-compat aggregate iterator. Prefer player/enemy variants
+    when you need to know the source (e.g. glossary now skips enemy-only
+    powers because they're inlined under the enemy row)."""
+    return _iter_player_powers(state) + _iter_enemy_powers(state)
 
 
 def render_player(state: dict[str, Any]) -> str:
@@ -375,18 +474,78 @@ def render_enemies(state: dict[str, Any]) -> list[str]:
         dmg = _pick(enemy, "intent_damage", "move_base_damage", default=None)
         hits = _pick(enemy, "intent_hits", "move_hits", default=None)
         intent_str = str(intent)
+        # NOTE: 多击攻击必须显示 hits 和 total damage；之前 `Attack(7x2)` 容易让 AI
+        # 误读为单击 7（或 7×2 但还要心算），且 PHANTASMAL_GARDENER 这种 1×3 的低
+        # damage 多击在没 hits 显示时被严重低估。改为 dmg=A hits=N total=A*N 显式。
         if dmg:
-            intent_str += f"({dmg}"
-            if hits and int(hits) > 1:
-                intent_str += f"x{hits}"
-            intent_str += ")"
-        powers = _fmt_powers(_as_list(enemy.get("powers")) or _as_list(enemy.get("buffs")))
+            try:
+                dmg_int = int(dmg)
+                hits_int = int(hits) if hits else 1
+            except (TypeError, ValueError):
+                dmg_int, hits_int = int(float(dmg) or 0), 1
+            if hits_int > 1:
+                intent_str += f"(dmg={dmg_int} hits={hits_int} total={dmg_int * hits_int})"
+            else:
+                intent_str += f"(dmg={dmg_int})"
+        powers_list = _as_list(enemy.get("powers")) or _as_list(enemy.get("buffs"))
+        powers = _fmt_powers(powers_list)
         intent_details = _fmt_intent_details(enemy)
         alive = bool(_pick(enemy, "is_alive", "alive", default=True))
         tag = "" if alive else " [dead]"
         detail_part = f" | {intent_details}" if intent_details else ""
-        lines.append(f"  enemy{target_id}: {eid} hp={hp}/{max_hp} block={block} intent={intent_str} powers={powers}{tag}{detail_part}")
+        phase = _detect_phase_tag(enemy, powers_list)
+        phase_part = f" phase={phase}" if phase else ""
+        lines.append(
+            f"  enemy{target_id}: {eid} hp={hp}/{max_hp} block={block} intent={intent_str}{phase_part} powers={powers}{tag}{detail_part}"
+        )
+        # Inline each power description right under the enemy line so the
+        # LLM doesn't have to cross-attend to the glossary 50 lines below.
+        # The descriptions are already populated by bridge (resolve_power_description
+        # → localization/eng/powers.json), we just bring them closer to the
+        # decision context. Owner name + amount are resolved here (replacing
+        # ``{OwnerName}`` / ``{Amount}`` placeholders) so the LLM reads
+        # concrete values instead of localisation templates.
+        for power_line in _fmt_enemy_power_descriptions(powers_list, owner_name=str(eid)):
+            lines.append(power_line)
+        # 注：不再追加 counter_strategy 行（人类经验硬规则），让 AI 从 power description
+        # 自己学应对。
     return lines
+
+
+def _fmt_enemy_power_descriptions(powers: Iterable[Any], *, owner_name: str = "") -> list[str]:
+    """Inline each enemy power's localization description.
+
+    Mechanism descriptions like "Awakens upon losing HP" (ASLEEP_POWER) or
+    "Plating is reduced by 1 at the start of your turn" (PLATING_POWER) are
+    critical for boss decision making but currently sit in the far-away
+    glossary section. Placing them right under the enemy line lets the
+    small policy attend to all relevant facts in one local window.
+    Falls back to localization_loader when the bridge dict didn't carry
+    a description (e.g. older sim builds).
+
+    Placeholder replacement: we resolve ``{Amount}`` (= power.amount) and
+    ``{OwnerName}`` (= owner_name) so the LLM sees concrete values
+    (e.g. ``PHANTASMAL_GARDENER gains 6 Block``) rather than raw template
+    tags.
+    """
+    out: list[str] = []
+    for power in powers or []:
+        if not isinstance(power, dict):
+            continue
+        pid = str(power.get("id") or power.get("power_id") or power.get("name") or "").upper()
+        if not pid:
+            continue
+        amount = power.get("amount")
+        desc = str(power.get("description") or "").strip()
+        if not desc:
+            desc = _resolve_power_description(pid)
+        if not desc:
+            continue
+        desc = _resolve_power_placeholders(desc, amount=amount, owner_name=owner_name)
+        desc_clean = _compact_inline_text(desc, max_chars=180)
+        amt_part = f"({amount})" if amount not in (None, "", 0) else ""
+        out.append(f"    {pid}{amt_part}: {desc_clean}")
+    return out
 
 
 def _fmt_intent_details(enemy: dict[str, Any]) -> str:
@@ -485,9 +644,14 @@ def render_relics(state: dict[str, Any]) -> list[str]:
         rid = str(_pick(relic, "id", "relic_id", default="?"))
         counter = _pick(relic, "counter", "amount", default=None)
         suffix = f":{counter}" if counter not in (None, "", 0) else ""
+        # 优先 sim 自带的 description（少见，但有则最准）；否则查 _RELIC_GLOSSARY；
+        # 再退到 catalog_loader（含 sqlite 里整理的中文描述），最后标 (effect unknown)。
         desc = _item_description(relic, _RELIC_GLOSSARY, rid)
-        desc_part = f" | {desc}" if desc else ""
-        lines.append(f"  [{index}] {rid}{suffix}{desc_part}")
+        if not desc:
+            desc = _resolve_relic_description(rid)
+        if not desc:
+            desc = "(effect not in catalog)"
+        lines.append(f"  [{index}] {rid}{suffix} | {desc}")
     return lines
 
 
@@ -502,6 +666,8 @@ def render_potions(state: dict[str, Any]) -> list[str]:
             continue
         pid = _pick(p, "id", "potion_id", default="?")
         desc = _item_description(p, _POTION_GLOSSARY, str(pid))
+        if not desc:
+            desc = _resolve_potion_description(str(pid))
         desc_part = f" | {desc}" if desc else ""
         out.append(f"  [{idx}] {pid}{desc_part}")
     return out
@@ -544,25 +710,74 @@ def _visible_text_fragments(state: dict[str, Any]) -> list[str]:
 
 
 def render_glossary(state: dict[str, Any]) -> list[str]:
+    """汇总当前局面涉及的所有机制 / 关键词到 glossary。
+
+    覆盖：
+    - 玩家 / 敌方 powers（buffs/debuffs）：从 _POWER_GLOSSARY 或 catalog_loader 取
+    - 当前持有 relics：从 _RELIC_GLOSSARY 或 catalog_loader 取（之前 glossary 完全没 relic）
+    - 出现在卡牌 / 状态文本里的关键词（Vulnerable/Block/Exhaust 等）
+
+    任何缺描述的条目，都用 (effect not in catalog) 显式标记，避免 LLM 把裸 ID 当成已知机制。
+    """
     lines: list[str] = []
     seen: set[str] = set()
 
-    for power in _iter_powers(state):
+    # 1) Player powers — these aren't inlined anywhere (player line is single-row),
+    #    so glossary needs to carry their descriptions. Enemy powers are *already*
+    #    rendered inline under each enemy row, so we skip them here unless the
+    #    same power ID is also on the player (then it's a shared concept worth
+    #    a single canonical description).
+    player_power_ids: set[str] = set()
+    for power in _iter_player_powers(state):
+        pid = str(power.get("id") or power.get("power_id") or power.get("name") or "").upper()
+        if not pid:
+            continue
+        player_power_ids.add(pid)
+    for power in _iter_player_powers(state):
         pid = str(power.get("id") or power.get("power_id") or power.get("name") or "").upper()
         if not pid or pid in seen:
             continue
         desc = _item_description(power, _POWER_GLOSSARY, pid)
+        if not desc:
+            desc = _resolve_power_description(pid)
         if desc:
+            desc = _resolve_power_placeholders(desc, amount=power.get("amount"), owner_name="you")
             lines.append(f"  {pid}: {desc}")
+        else:
+            lines.append(f"  {pid}: (effect not in catalog)")
+        seen.add(pid)
+    # Enemy powers fall through: glossary doesn't repeat them. The enemy row
+    # already displays their description right under the enemy hp/intent line.
+    # Mark them as seen so the keyword pass below doesn't re-add them.
+    for power in _iter_enemy_powers(state):
+        pid = str(power.get("id") or power.get("power_id") or power.get("name") or "").upper()
+        if pid:
             seen.add(pid)
 
+    # 2) 所有持有 relics（之前完全没在 glossary 出现）
+    for relic in _iter_relics(state):
+        rid = str(_pick(relic, "id", "relic_id", default="")).upper()
+        if not rid or rid in seen:
+            continue
+        desc = _item_description(relic, _RELIC_GLOSSARY, rid)
+        if not desc:
+            desc = _resolve_relic_description(rid)
+        if desc:
+            lines.append(f"  {rid}: {desc}")
+        else:
+            lines.append(f"  {rid}: (effect not in catalog)")
+        seen.add(rid)
+
+    # 3) 关键词（按 prompt 文本里实际出现的扫描；描述来源于 localization）
     visible_text = "\n".join(_visible_text_fragments(state))
     for keyword, pattern in _KEYWORD_PATTERNS.items():
         if keyword in seen:
             continue
         if pattern.search(visible_text):
-            lines.append(f"  {keyword}: {_KEYWORD_GLOSSARY[keyword]}")
-            seen.add(keyword)
+            desc = _resolve_keyword_description(keyword)
+            if desc:
+                lines.append(f"  {keyword}: {desc}")
+                seen.add(keyword)
 
     return lines
 
@@ -590,16 +805,34 @@ def _summarize_cards(card_list: list[Any]) -> str:
     return ", ".join(parts)
 
 
+def _card_sequence(card_list: list[Any]) -> str:
+    if not card_list:
+        return "-"
+    parts: list[str] = []
+    for card in card_list:
+        if isinstance(card, dict):
+            cid = str(_pick(card, "id", "card_id", default="")).strip()
+            upg = bool(_pick(card, "is_upgraded", default=False))
+        elif isinstance(card, str):
+            cid = str(card).strip()
+            upg = False
+        else:
+            continue
+        if not cid:
+            continue
+        parts.append(f"{cid}+" if upg else cid)
+    return ", ".join(parts) if parts else "-"
+
+
 def render_piles(state: dict[str, Any]) -> list[str]:
     battle = _as_dict(state.get("battle"))
-    draw = _as_list(battle.get("draw_pile_cards"))
-    discard = _as_list(battle.get("discard_pile_cards"))
-    exhaust = _as_list(battle.get("exhaust_pile_cards"))
+    draw = _as_list(battle.get("draw_pile_cards") or state.get("draw_pile_cards"))
+    discard = _as_list(battle.get("discard_pile_cards") or state.get("discard_pile_cards"))
+    exhaust = _as_list(battle.get("exhaust_pile_cards") or state.get("exhaust_pile_cards"))
     lines = [f"  draw={len(draw)} discard={len(discard)} exhaust={len(exhaust)}"]
-    if 0 < len(draw) <= 8:
-        lines.append(f"  draw_cards: {_summarize_cards(draw)}")
-    if len(exhaust) > 0:
-        lines.append(f"  exhaust_cards: {_summarize_cards(exhaust)}")
+    lines.append(f"  draw_cards: {_card_sequence(draw)}")
+    lines.append(f"  discard_cards: {_card_sequence(discard)}")
+    lines.append(f"  exhaust_cards: {_card_sequence(exhaust)}")
     return lines
 
 
@@ -616,6 +849,149 @@ def _compact_inline_text(value: Any, *, max_chars: int = 180) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max(0, max_chars - 3)].rstrip() + "..."
+
+
+def _infer_select_pile_type(card_select: dict[str, Any]) -> str:
+    """Resolve which pile the selection draws from.
+
+    Bridge proto now exposes ``source_pile_type`` directly — when present we
+    use it verbatim. For backward compat with sim builds that pre-date the
+    schema bump (or skip filling the field), we fall back to sniffing
+    prompt / screen_type strings. False negatives (empty string) are fine;
+    false positives would mislead, so the matcher is conservative.
+    """
+    explicit = str(card_select.get("source_pile_type") or "").strip().lower()
+    if explicit:
+        return explicit
+    haystack = " ".join(
+        str(card_select.get(key) or "")
+        for key in ("prompt", "screen_type", "purpose", "operation", "title", "header")
+    ).lower()
+    if not haystack:
+        return ""
+    matchers: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("discard_pile", ("discard pile", "弃牌堆", "弃牌")),
+        ("draw_pile", ("draw pile", "deck", "抽牌堆", "抽牌")),
+        ("exhaust_pile", ("exhaust pile", "exhausted", "消耗堆")),
+        ("hand", ("your hand", "in hand", "from hand", "手牌")),
+    )
+    for tag, needles in matchers:
+        if any(needle in haystack for needle in needles):
+            return tag
+    return ""
+
+
+def _infer_select_trigger_card(card_select: dict[str, Any], state: dict[str, Any]) -> str:
+    """Heuristic: which card triggered this selection?
+
+    Forward-compat: if bridge ever fills ``trigger_card_id`` we use it
+    directly. Otherwise we fall back to the most recently played card from
+    the action log if available — a safe heuristic since selection prompts
+    follow card play immediately. Empty string when we can't tell.
+    """
+    explicit = str(_pick(card_select, "trigger_card_id", "trigger_card", "source_card_id", default="") or "").strip()
+    if explicit:
+        return explicit
+    last_played = _pick(state, "last_played_card_id", "last_card_id", default="")
+    return str(last_played or "").strip()
+
+
+def render_card_selection(state: dict[str, Any]) -> list[str]:
+    """Render hand_select / card_select state for the LLM.
+
+    The selection step is *not* a separate combat decision: it continues the
+    card whose play triggered it (HEADBUTT → discard pile, ARMAMENTS → hand
+    upgrade, etc.). Without this section the LLM only sees ``select_hand_card``
+    actions in legal_actions and can't reason about *why* it's selecting or
+    *what* the rule is. We surface:
+
+    - trigger card (best-effort: explicit field, else last_played_card_id)
+    - source pile (best-effort: prompt text matching)
+    - selection bounds (min_select / max_select / selected_count)
+    - candidate cards + already-selected cards
+    - confirm/cancel availability
+
+    Returns [] when the state is not a selection state.
+    """
+    card_select = _as_dict(state.get("card_select")) or _as_dict(state.get("card_selection"))
+    if not card_select:
+        return []
+    cards = _as_list(card_select.get("cards") or card_select.get("selectable_cards"))
+    selected = _as_list(card_select.get("selected_cards"))
+    if not cards and not selected and not card_select.get("prompt"):
+        # Nothing useful to render; suppress the heading.
+        return []
+
+    lines: list[str] = []
+    prompt_text = _compact_inline_text(_pick(card_select, "prompt", "title", default=""), max_chars=200)
+    screen_type = str(card_select.get("screen_type") or card_select.get("mode") or "card_select").strip()
+    trigger = _infer_select_trigger_card(card_select, state)
+    pile_type = _infer_select_pile_type(card_select)
+
+    header_parts: list[str] = []
+    if trigger:
+        header_parts.append(f"because_of={trigger}")
+    if pile_type:
+        header_parts.append(f"from={pile_type}")
+    header_parts.append(f"mode={screen_type}")
+    rules = [str(r).strip() for r in _as_list(card_select.get("selection_rules")) if str(r).strip()]
+    if rules:
+        header_parts.append("rules=" + ",".join(rules))
+    lines.append("  " + " ".join(header_parts))
+
+    if prompt_text:
+        lines.append(f"  prompt={prompt_text}")
+
+    bounds: list[str] = []
+    min_select = card_select.get("min_select")
+    max_select = card_select.get("max_select")
+    selected_count = card_select.get("selected_count")
+    if min_select is not None:
+        bounds.append(f"min={min_select}")
+    if max_select is not None:
+        bounds.append(f"max={max_select}")
+    if selected_count is not None:
+        bounds.append(f"selected={selected_count}")
+    if bounds:
+        lines.append("  " + " ".join(bounds))
+
+    can_confirm = card_select.get("can_confirm")
+    can_cancel = card_select.get("can_cancel")
+    flags: list[str] = []
+    if can_confirm is not None:
+        flags.append(f"can_confirm={'true' if can_confirm else 'false'}")
+    if can_cancel is not None:
+        flags.append(f"can_cancel={'true' if can_cancel else 'false'}")
+    if flags:
+        lines.append("  " + " ".join(flags))
+
+    if cards:
+        lines.append("  candidates:")
+        for idx, card in enumerate(cards[:12]):
+            if not isinstance(card, dict):
+                continue
+            cid = str(_pick(card, "id", "card_id", default=f"card{idx}"))
+            cost = _pick(card, "cost", default="?")
+            ctype = str(_pick(card, "type", "card_type", default="") or "").lower()
+            upgraded = bool(_pick(card, "upgraded", default=False))
+            attrs = [f"[{idx}]", cid]
+            if cost not in (None, "?"):
+                attrs.append(f"cost={cost}")
+            if ctype:
+                attrs.append(f"type={ctype}")
+            if upgraded:
+                attrs.append("upgraded=true")
+            lines.append("    " + " ".join(attrs))
+        if len(cards) > 12:
+            lines.append(f"    ... ({len(cards) - 12} more)")
+
+    if selected:
+        ids = [str(_pick(c, "id", "card_id", default="")) for c in selected if isinstance(c, dict)]
+        ids = [cid for cid in ids if cid]
+        if ids:
+            lines.append("  already_selected: " + ", ".join(ids))
+
+    return lines
 
 
 def render_event(state: dict[str, Any]) -> list[str]:
@@ -720,6 +1096,32 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
             return "upgrade_card"
         return ""
 
+    def aoe_total_summary(card: dict[str, Any] | None) -> str:
+        """对 AOE 卡（target_type=AllEnemies）算实际多目标总伤害。
+
+        sim 已经在 ``preview_damage_per_target`` 里给每个敌人的 reduced damage（含 SLIPPERY/Block），
+        我们把它们求和并标 N enemies 总伤害；让 AI 看到 AOE 的实际收益（避免单目标用 STRIKE 浪费）。
+        """
+        if not card:
+            return ""
+        if str(card.get("target_type") or "").lower() not in {"allenemies", "all_enemies", "all"}:
+            return ""
+        preview = card.get("preview_damage_per_target") or {}
+        if not isinstance(preview, dict) or not preview:
+            return ""
+        total = 0.0
+        per_target: list[str] = []
+        for tid, dmg in preview.items():
+            try:
+                d = float(dmg)
+            except (TypeError, ValueError):
+                continue
+            total += d
+            per_target.append(f"{tid}:{int(d) if float(d).is_integer() else d}")
+        if not per_target:
+            return ""
+        return f" aoe_total_dmg={int(total) if float(total).is_integer() else total} (vs {len(per_target)} targets)"
+
     def select_card_detail(index: int, action: dict[str, Any]) -> str:
         atype = str(_pick(action, "action", "action_type", "type", default="?")).lower()
         card_id = str(_pick(action, "card_id", default="") or "").strip()
@@ -767,6 +1169,10 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
                 parts.append(f"self_hp_loss={hp_loss}")
                 if player_hp > 0:
                     parts.append(f"self_hp_after={fmt_num(max(0.0, player_hp - hp_loss))}")
+            # AOE 卡（target_type=AllEnemies）即使 target=self 也显示总伤害收益
+            aoe = aoe_total_summary(card)
+            if aoe:
+                parts.append(aoe.strip())
         else:
             preview_dmg = card.get("preview_damage_per_target") or {}
             damage = None
@@ -774,7 +1180,9 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
                 if key in preview_dmg:
                     damage = preview_dmg[key]
                     break
-            if damage not in (None, "", 0):
+            # NOTE: 之前 if damage not in (None, "", 0) 会把 0 dmg（如 BODY_SLAM 0 block 时）跳过，
+            # AI 看不到"这卡当前 0 伤害"。现在 damage=0 也显示，方便 AI 排除该选项。
+            if damage is not None and damage != "":
                 parts.append(f"damage={damage}")
                 enemy = enemy_for_target(target)
                 if enemy:
@@ -787,12 +1195,31 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
                         block = 0.0
                         damage_value = 0.0
                     hp_damage = min(hp, max(0.0, damage_value - block))
-                    lethal = hp > 0 and hp_damage >= hp
-                    parts.append(f"hp={fmt_num(hp)}")
+                    lethal = hp > 0 and hp_damage >= hp and damage_value > 0
                     if block > 0:
                         parts.append(f"block={fmt_num(block)}")
                         parts.append(f"hp_damage={fmt_num(hp_damage)}")
-                    parts.append(f"lethal={str(lethal).lower()}")
+                    if lethal:
+                        parts.append("lethal=true")
+                    # 检查 nominal vs actual：description 里写 "Deal N damage" 但 preview 远小于 N，标减伤来源
+                    desc_text = _resolve_card_desc(card)
+                    nominal_match = re.search(r"\bDeal\s+(\d+)\s+damage", desc_text or "", re.IGNORECASE)
+                    if nominal_match:
+                        try:
+                            nominal = int(nominal_match.group(1))
+                            if damage_value > 0 and damage_value < nominal * 0.5:
+                                # 找减伤源（enemy 的 power 列表里有 SLIPPERY/INTANGIBLE 之类）
+                                reduce_powers = []
+                                for power in (_as_list(enemy.get("powers")) or _as_list(enemy.get("buffs"))):
+                                    pid = str(power.get("id") or "").upper()
+                                    if pid in {"SLIPPERY_POWER", "INTANGIBLE_POWER", "BARRICADE_POWER", "BUFFER_POWER", "INVINCIBLE_POWER"}:
+                                        reduce_powers.append(pid.replace("_POWER", ""))
+                                if reduce_powers:
+                                    parts.append(f"reduced_from={nominal}(by={','.join(reduce_powers)})")
+                                else:
+                                    parts.append(f"reduced_from={nominal}")
+                        except ValueError:
+                            pass
         return (" " + " ".join(parts)) if parts else ""
 
     def card_reward_detail(action: dict[str, Any]) -> tuple[list[str], str]:
@@ -822,6 +1249,48 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
             attrs.insert(0, f"card={card_id}")
         return attrs, desc_part
 
+    def end_turn_facts() -> list[str]:
+        """计算 end_turn 后的事实预测：incoming attack 总伤害 / 玩家当前 block /
+        基于这两个的损血估算。这是 sim 已经提供的事实信息（不是 WARNING 之类规则）。
+
+        AI 看到这些数字应该自己推理"是否危险"，不在 prompt 里告诉它该怎么做。
+        """
+        if state is None:
+            return []
+        battle = _as_dict(state.get("battle"))
+        top_player = _as_dict(state.get("player"))
+        battle_player = _as_dict(battle.get("player"))
+        try:
+            block = float(_pick(battle_player, "block", default=_pick(top_player, "block", default=0)) or 0)
+        except (TypeError, ValueError):
+            block = 0.0
+
+        incoming = 0
+        for enemy in (_as_list(state.get("enemies")) or _as_list(battle.get("enemies"))):
+            if not isinstance(enemy, dict):
+                continue
+            intent_type = str(_pick(enemy, "intent_type", "intent", default="")).upper()
+            if "ATTACK" not in intent_type:
+                continue
+            try:
+                dmg = float(_pick(enemy, "intent_damage", "move_base_damage", default=0) or 0)
+                hits = int(_pick(enemy, "intent_hits", "move_hits", default=1) or 1)
+            except (TypeError, ValueError):
+                continue
+            incoming += int(dmg) * max(1, hits)
+
+        if incoming <= 0 and block <= 0:
+            return []
+        out: list[str] = []
+        if incoming > 0:
+            out.append(f"predicted_incoming={incoming}")
+        if block > 0:
+            out.append(f"your_block={int(block) if float(block).is_integer() else block}")
+        if incoming > 0:
+            expected = max(0, incoming - int(block))
+            out.append(f"expected_hp_loss={expected}")
+        return out
+
     def fmt_other(index: int, action: dict[str, Any]) -> str:
         atype = str(_pick(action, "action", "action_type", "type", default="?")).lower()
         if atype in {"select_card", "select_card_option", "combat_select_card"}:
@@ -831,6 +1300,9 @@ def render_legal_actions(legal_actions: list[dict[str, Any]], state: dict[str, A
         target = _pick(action, "target_id", "target", default=None)
         label_text = _pick(action, "label", default=None)
         extras: list[str] = []
+        if atype == "end_turn":
+            # 事实预测，不是规则；AI 自己判断是否危险
+            extras.extend(end_turn_facts())
         option_index = _pick(action, "index", default=None)
         event_option = (
             _indexed_item(event_options, option_index)
@@ -1007,6 +1479,10 @@ def render_run_meta(state: dict[str, Any], *, encounter_id: str = "") -> str:
     character = _pick(top_player, "character", default="IRONCLAD")
     floor = _pick(run, "floor_reached", "floor", default="?")
     act = _pick(run, "act", default="?")
+    if str(act).strip() in {"", "0", "-1", "None"}:
+        act = "?"
+    if str(floor).strip() in {"", "0", "-1", "None"}:
+        floor = "?"
     turn_round = _pick(battle, "round_number_raw", "round_number", default="?")
     encounter = encounter_id or _pick(battle, "encounter_id", "encounter", default="?") or "?"
     gold = _pick(top_player, "gold", default=_pick(run, "gold", default=0))
@@ -1026,6 +1502,7 @@ class RenderedState:
     hand_lines: list[str]
     action_lines: list[str]
     glossary_lines: list[str]
+    card_selection_lines: list[str] = field(default_factory=list)
 
     def to_user_message(self) -> str:
         return self._to_user_message(
@@ -1050,6 +1527,7 @@ class RenderedState:
     def _to_user_message(self, *, action_heading: str, return_line: str) -> str:
         parts = [
             self.run_line,
+            "",
             self.player_line,
         ]
         if self.relic_lines:
@@ -1068,6 +1546,10 @@ class RenderedState:
         parts.extend(self.enemy_lines)
         parts.append("hand:")
         parts.extend(self.hand_lines)
+        if self.card_selection_lines:
+            parts.append("card_selection:")
+            parts.extend(self.card_selection_lines)
+        parts.append("")
         parts.append(action_heading)
         parts.extend(self.action_lines)
         if self.glossary_lines:
@@ -1095,6 +1577,7 @@ def render_state(
         hand_lines=render_hand(state),
         action_lines=render_legal_actions(legal_actions, state),
         glossary_lines=render_glossary(state),
+        card_selection_lines=render_card_selection(state),
     )
 
 
@@ -1129,6 +1612,7 @@ def render_structured_action_state(
         hand_lines=render_hand(state, play_hints=_structured_play_hints(legal_actions)),
         action_lines=render_structured_legal_actions(legal_actions, state),
         glossary_lines=render_glossary(state),
+        card_selection_lines=render_card_selection(state),
     )
 
 
@@ -1152,6 +1636,7 @@ def render_structured_action_state_text(
 __all__ = [
     "RenderedState",
     "can_render_structured_actions",
+    "render_card_selection",
     "render_deck",
     "render_enemies",
     "render_hand",

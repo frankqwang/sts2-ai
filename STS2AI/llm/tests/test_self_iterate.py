@@ -1,6 +1,42 @@
 from __future__ import annotations
 
-from llm.scripts.self_iterate import _candidate_passes
+from llm.scripts.automation.self_iterate import (
+    _candidate_passes,
+    _strict_json_failure_rate,
+)
+
+
+def test_strict_json_failure_rate_falls_back_when_field_missing():
+    """policy_stats 不再写 strict_json_failures 时，分子退到 first_attempt_invalid - retry_recovered。"""
+    metrics = {
+        "policy_stats": {
+            "strict_json_ok": 100,
+            "first_attempt_invalid": 5,
+            "retry_recovered": 2,
+            "generated_outputs": 105,
+        }
+    }
+    rate = _strict_json_failure_rate(metrics)
+    # failures = 5 - 2 = 3, denom = max(105, 100+3) = 105
+    assert abs(rate - (3 / 105)) < 1e-9
+
+
+def test_strict_json_failure_rate_uses_generated_outputs_as_denom():
+    """分母优先 generated_outputs，避免命名漂移导致 gate 失效。"""
+    metrics = {
+        "policy_stats": {
+            "strict_json_ok": 100,
+            "strict_json_failures": 5,
+            "generated_outputs": 200,
+        }
+    }
+    rate = _strict_json_failure_rate(metrics)
+    assert abs(rate - (5 / 200)) < 1e-9
+
+
+def test_strict_json_failure_rate_zero_when_no_stats():
+    assert _strict_json_failure_rate({}) == 0.0
+    assert _strict_json_failure_rate({"policy_stats": "not_a_dict"}) == 0.0
 
 
 def _base_metrics() -> dict:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm.scripts.analyze_action_ordering import analyze
+from llm.scripts.analysis.analyze_action_ordering import analyze
 
 
 def test_analyze_detects_bash_before_strike_sequence() -> None:

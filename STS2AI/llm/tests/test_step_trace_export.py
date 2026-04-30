@@ -59,10 +59,10 @@ def _episode() -> EpisodeRecord:
         ],
     )
     return EpisodeRecord(
-        encounter_key="CHOMPERS_NORMAL::act1_midrun::seed",
+        encounter_key="CHOMPERS_NORMAL::skada_floor_07_normal::seed",
         encounter_id="CHOMPERS_NORMAL",
-        encounter_tag="act1_midrun",
-        encounter_label="CHOMPERS_NORMAL[act1_midrun:seed]",
+        encounter_tag="skada_floor_07_normal",
+        encounter_label="CHOMPERS_NORMAL[skada_floor_07_normal:seed]",
         seed="seed-1",
         steps=[step],
         outcome="victory",

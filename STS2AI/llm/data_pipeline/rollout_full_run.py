@@ -88,7 +88,7 @@ def _build_sample(
 ) -> dict[str, Any]:
     user_msg = render_state_text(state, legal)
     assistant_msg = json.dumps(
-        {"action_index": int(chosen_index), "reason": reason[:80]},
+        {"action_index": int(chosen_index), "reason": reason[:200]},
         ensure_ascii=False,
     )
     return {

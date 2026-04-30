@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm.scripts.extract_uncertainty_cases import bucket_cases
+from llm.scripts.analysis.extract_uncertainty_cases import bucket_cases
 
 
 def test_bucket_cases_splits_low_and_high_margin() -> None:

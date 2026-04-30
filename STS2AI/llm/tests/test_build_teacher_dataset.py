@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 
 from llm.prompts import load_system_prompt
-from llm.scripts.build_teacher_dataset import (
+from llm.scripts.datasets.build_teacher_dataset import (
     _candidate_from_trace_row,
+    _coerce_confidence,
+    _coerce_tag_list,
     _dedupe_rows,
     _reason_repair_from_trace_row,
     _review_pairs_from_roots,
@@ -12,6 +14,29 @@ from llm.scripts.build_teacher_dataset import (
     _rows_from_review,
     _sample,
 )
+
+
+def test_coerce_confidence_rejects_bool():
+    """LLM 偶尔回 True/False；bool 是 int 子类，float(True)=1.0 会被错当成 100% 置信。"""
+    assert _coerce_confidence(True) == 0.0
+    assert _coerce_confidence(False) == 0.0
+
+
+def test_coerce_confidence_handles_str_and_none():
+    assert _coerce_confidence(None) == 0.0
+    assert _coerce_confidence("0.8") == 0.8
+    assert _coerce_confidence("not_a_number") == 0.0
+    assert _coerce_confidence(0.75) == 0.75
+    assert _coerce_confidence(1) == 1.0
+
+
+def test_coerce_tag_list_handles_string_not_iterating_chars():
+    """tags 字段防御：LLM 偶尔回 'lethal'（不是 list），不能按字符拆开。"""
+    assert _coerce_tag_list("lethal") == ["lethal"]
+    assert _coerce_tag_list(["lethal", "incoming_damage"]) == ["lethal", "incoming_damage"]
+    assert _coerce_tag_list(None) == []
+    assert _coerce_tag_list("") == []
+    assert _coerce_tag_list([1, "x", None, ""]) == ["1", "x"]
 
 
 def test_trace_rule_prefers_attacking_lethal_target() -> None:
@@ -195,12 +220,73 @@ def test_rows_from_review_validates_teacher_labels(tmp_path) -> None:
     episode_path.write_text(json.dumps(episode, ensure_ascii=False), encoding="utf-8")
     review_path.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
 
-    rows, lessons = _rows_from_review(review_path, episode_path, system_prompt=load_system_prompt(), min_confidence=0.7)
+    # use_kimi_reasons=False 显式声明：测试 canonical reason 路径（向后兼容）。
+    rows, lessons = _rows_from_review(
+        review_path, episode_path,
+        system_prompt=load_system_prompt(), min_confidence=0.7,
+        use_kimi_reasons=False,
+    )
 
     assert len(rows) == 1
     assert json.loads(rows[0]["messages"][-1]["content"])["action_index"] == 0
     assert json.loads(rows[0]["messages"][-1]["content"])["reason"] == "verified lethal on enemy1"
     assert len(lessons) == 1
+
+
+def test_rows_from_review_uses_kimi_reason_by_default(tmp_path) -> None:
+    """新默认行为：use_kimi_reasons=True，SFT row 的 reason 来自 Kimi 教师 reason_en，
+    替代 canonical 模板，避免 model 学到模板化 reason hallucination。"""
+    # 复用 test_rows_from_review_validates_teacher_labels 的 fixture，但 default flag
+    episode = {
+        "episode_id": "ep",
+        "turns": [
+            {
+                "round": 1,
+                "decisions": [
+                    {
+                        "step": 0,
+                        "chosen_action_index": 1,
+                        "reason": "end turn",
+                        "pre_decision_state": (
+                            "run: char=IRONCLAD round=1\n"
+                            "player: hp=80/80 block=0 energy=1/3 powers=-\n"
+                            "enemies:\n"
+                            "  enemy1: CULTIST hp=3/30 block=0 intent=Attack(6) powers=-\n"
+                            "hand:\n"
+                            "  [0] STRIKE_IRONCLAD cost=1 type=attack | Deal 6 damage.\n"
+                            "legal_actions:\n"
+                            "  STRIKE_IRONCLAD hand[0]:\n"
+                            "    [0] target=enemy1 damage=6\n"
+                            "  [1] end_turn\n"
+                        ),
+                    }
+                ],
+            }
+        ],
+    }
+    review = {
+        "episode_id": "ep",
+        "usable_training_labels": [
+            {"step": 0, "best_action_index": 0, "reason_en": "lethal: enemy1 hp=3 attack=6 finishes", "confidence": 0.9},
+        ],
+        "key_lessons": [],
+    }
+    episode_path = tmp_path / "ep_kimi.json"
+    review_path = tmp_path / "review_kimi.json"
+    episode_path.write_text(json.dumps(episode, ensure_ascii=False), encoding="utf-8")
+    review_path.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+
+    rows, _ = _rows_from_review(
+        review_path, episode_path,
+        system_prompt=load_system_prompt(), min_confidence=0.7,
+    )
+
+    assert len(rows) == 1
+    parsed = json.loads(rows[0]["messages"][-1]["content"])
+    assert parsed["action_index"] == 0
+    assert parsed["reason"] == "lethal: enemy1 hp=3 attack=6 finishes"
+    assert rows[0]["meta"]["reason_source"] == "kimi_review"
+    assert rows[0]["meta"]["canonical_reason"] == "verified lethal on enemy1"
 
 
 def test_rows_from_review_rejects_reason_action_mismatch(tmp_path) -> None:

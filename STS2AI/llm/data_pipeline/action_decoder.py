@@ -411,7 +411,7 @@ def format_structured_action_json(action: dict[str, Any], reason: str) -> str:
     if action_name == "end_turn":
         payload: dict[str, Any] = {
             "action": "end_turn",
-            "reason": reason[:80],
+            "reason": reason[:200],
         }
     elif action_name == "play_card":
         card_index = _legal_card_index(action)
@@ -422,11 +422,11 @@ def format_structured_action_json(action: dict[str, Any], reason: str) -> str:
         target_id = _legal_target_id(action)
         if target_id is not None:
             payload["target_id"] = int(target_id)
-        payload["reason"] = reason[:80]
+        payload["reason"] = reason[:200]
     else:
         payload = {
             "action": action_name or "unknown",
-            "reason": reason[:80],
+            "reason": reason[:200],
         }
     return json.dumps(payload, ensure_ascii=False)
 

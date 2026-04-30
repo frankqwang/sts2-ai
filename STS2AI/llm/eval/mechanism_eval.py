@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from llm.data_pipeline.action_decoder import action_score_margin  # noqa: E402
 from llm.paths import BASE_MODEL_ID, EVALS_ROOT, ensure_dirs  # noqa: E402
-from llm.scripts.sample_state_candidates import parse_action_index  # noqa: E402
+from llm.scripts.teacher.sample_state_candidates import parse_action_index  # noqa: E402
 
 
 _LEGAL_INDEX_RE = re.compile(r"^\s*\[(?P<index>-?\d+)\]\s+", re.MULTILINE)

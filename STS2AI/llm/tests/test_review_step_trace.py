@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from llm.scripts.review_step_trace import main as review_main
+from llm.scripts.analysis.review_step_trace import main as review_main
 
 
 def test_review_step_trace_writes_reviews_and_lessons(tmp_path, monkeypatch) -> None:

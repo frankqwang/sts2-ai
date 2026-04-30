@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from llm.metrics import summarize_sft_run, write_json  # noqa: E402
-from llm.paths import BASE_MODEL_ID, DATASETS_ROOT, SFT_ROOT, setup_runtime  # noqa: E402
+from llm.paths import BASE_MODEL_ID, DATASETS_ROOT, REPO_ROOT, SFT_ROOT, setup_runtime  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,6 +52,9 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 def main() -> None:
     args = parse_args()
+    dataset_dir = Path(args.dataset_dir)
+    if not dataset_dir.is_absolute():
+        dataset_dir = REPO_ROOT / dataset_dir
     setup_runtime()
 
     run_name = args.run_name or f"sft_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -61,7 +64,6 @@ def main() -> None:
     adapter_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    dataset_dir = Path(args.dataset_dir)
     train_path = dataset_dir / "train.jsonl"
     eval_path = dataset_dir / "eval.jsonl"
     if not train_path.exists():

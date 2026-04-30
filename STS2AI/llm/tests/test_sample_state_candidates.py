@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from llm.scripts.sample_state_candidates import (
+from llm.scripts.teacher.sample_state_candidates import (
     CandidateSampler,
     entropy_from_counts,
     listed_action_indices,
