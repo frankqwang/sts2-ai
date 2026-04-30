@@ -41,26 +41,12 @@ def _fake_episode(encounter_id: str, outcome: str, reward_total: float = 8.0, hp
     )
 
 
-def test_mask_reason_in_assistant_clears_reason_field():
-    from llm.training.grpo_rollout import _maybe_mask_reason_in_assistant
-    msgs = [
-        {"role": "system", "content": "S"},
-        {"role": "user", "content": "U"},
-        {"role": "assistant", "content": '{"action_index":3,"confidence":0.75,"reason":"Deal 6 damage"}'},
-    ]
-    out = _maybe_mask_reason_in_assistant(msgs, mask=True)
-    parsed = json.loads(out[2]["content"])
-    assert parsed["reason"] == ""
-    assert parsed["action_index"] == 3
-    assert parsed["confidence"] == 0.75
-
-
-def test_mask_reason_in_assistant_off_keeps_reason():
-    from llm.training.grpo_rollout import _maybe_mask_reason_in_assistant
-    msgs = [{"role": "assistant", "content": '{"action_index":3,"reason":"Deal 6 damage"}'}]
-    out = _maybe_mask_reason_in_assistant(msgs, mask=False)
-    parsed = json.loads(out[0]["content"])
-    assert parsed["reason"] == "Deal 6 damage"
+# NOTE: ``test_mask_reason_in_assistant_*`` removed alongside
+# ``_maybe_mask_reason_in_assistant``. With combat policy emitting only
+# ``{action_index, confidence}`` (the planner LoRA owns reasoning), there
+# is no reason field to mask in SFT messages. Trace rows can still
+# preserve the model's raw reason for diagnostics, but the supervision
+# target never includes it.
 
 
 def test_fullrun_aggregate_metrics_basic_shape():

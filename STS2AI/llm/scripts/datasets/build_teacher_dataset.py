@@ -78,9 +78,13 @@ _ENEMY_RE = re.compile(
     re.MULTILINE,
 )
 _RETURN_LINE_RE = re.compile(r"^Return (?:one JSON line|strict JSON only): .*$", re.MULTILINE)
+# combat policy 输出不再带 reason 字段——推理是 planner LoRA 的 job, combat 只选 action.
+# 老的 SFT 数据（含 reason）通过下文 ``_normalize_user_message_schema`` 重写成新格式,
+# 以避免训练时 mixed schema 让模型困惑.
 _CURRENT_RETURN_LINE = (
-    'Return strict JSON only: {"action_index":N,"confidence":0.0,"reason":"..."} '
-    "using one listed action_index. Do not output multiple objects or candidates."
+    'Return strict JSON only: {"action_index":N,"confidence":0.0} '
+    "using one listed action_index. Do not output multiple objects or candidates. "
+    "Do not include a reason / plan / extra keys — strategy text belongs to the planner model."
 )
 
 
@@ -248,15 +252,20 @@ def _action_scores_for_label(user_message: str, action_index: int) -> list[dict[
 
 def _json_action(
     action_index: int,
-    reason: str,
     *,
     user_message: str = "",
     confidence: float = 0.9,
 ) -> str:
+    """Combat policy SFT label content.
+
+    Reason / plan text is no longer part of the combat output schema —
+    those belong to the planner LoRA. ``user_message`` is unused but
+    kept for API compatibility with older callers (build_combat_training_pool).
+    """
+    _ = user_message  # kept for signature stability with legacy callers
     payload = {
         "action_index": int(action_index),
         "confidence": max(0.0, min(1.0, float(confidence))),
-        "reason": reason[:120],
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -370,10 +379,17 @@ def _sample(
     *,
     user_message: str,
     action_index: int,
-    reason: str,
     meta: dict[str, Any],
     system_prompt: str,
 ) -> dict[str, Any]:
+    """Build one combat SFT sample (no reason field).
+
+    The combat policy outputs only ``{action_index, confidence}``; any
+    teacher-supplied prose reason is discarded here so we don't smuggle
+    it back into the supervision target. Diagnostic fields (the original
+    teacher reason text, source rule, etc.) live in ``meta`` for trace
+    inspection but never appear in the assistant message.
+    """
     confidence = float(meta.get("confidence") or 0.9)
     user_message = _normalize_user_message_schema(user_message)
     return {
@@ -384,7 +400,6 @@ def _sample(
                 "role": "assistant",
                 "content": _json_action(
                     action_index,
-                    reason,
                     user_message=user_message,
                     confidence=confidence,
                 ),
@@ -395,7 +410,6 @@ def _sample(
             "teacher": "turn_repair",
             **meta,
             "teacher_action_index": int(action_index),
-            "teacher_reason": reason,
         },
     }
 
@@ -428,10 +442,8 @@ def _candidate_from_trace_row(row: dict[str, Any]) -> dict[str, Any] | None:
         if attacking_lethal:
             best = sorted(attacking_lethal, key=lambda action: _rank_lethal(action, enemies, hand))[0]
             if best.get("index") != original_index:
-                target = str(best.get("target") or "")
                 return {
                     "action_index": int(best["index"]),
-                    "reason": f"kill the attacking {target} to remove incoming damage",
                     "rule": "attacking_lethal_priority",
                 }
 
@@ -439,10 +451,8 @@ def _candidate_from_trace_row(row: dict[str, Any]) -> dict[str, Any] | None:
     if not _is_lethal(original, enemies):
         best = sorted(lethal, key=lambda action: _rank_lethal(action, enemies, hand))[0]
         if best.get("index") != original_index:
-            target = str(best.get("target") or "")
             return {
                 "action_index": int(best["index"]),
-                "reason": f"take visible lethal on {target}",
                 "rule": "visible_lethal",
             }
 
@@ -460,76 +470,18 @@ def _candidate_from_trace_row(row: dict[str, Any]) -> dict[str, Any] | None:
             if best.get("index") != original_index:
                 return {
                     "action_index": int(best["index"]),
-                    "reason": f"cheap lethal on {original_target} preserves energy",
                     "rule": "cheap_lethal_over_overkill",
                 }
     return None
 
 
-def _reason_repair_from_trace_row(row: dict[str, Any]) -> dict[str, Any] | None:
-    """Repair a valid action whose generated reason failed deterministic checks."""
-    user = str(row.get("user_message") or "")
-    if not user:
-        return None
-    for attempt in reversed(row.get("attempts") or []):
-        if not isinstance(attempt, dict):
-            continue
-        decoded = attempt.get("decoded") if isinstance(attempt.get("decoded"), dict) else {}
-        fallback_reason = str(decoded.get("fallback_reason") or "")
-        if not any(
-            key in fallback_reason
-            for key in ("reason_math_contradiction", "reason_claims_lethal_but_action_not_lethal")
-        ):
-            continue
-        action_index = decoded.get("action_index")
-        if isinstance(action_index, bool) or not isinstance(action_index, int):
-            continue
-        actions = _legal_actions({"user_message": user})
-        action = _action_by_index(actions, action_index)
-        if action is None or _is_end_turn(action):
-            continue
-        return {
-            "action_index": int(action_index),
-            "reason": _canonical_reason_from_action(user, action),
-            "rule": "reason_consistency_repair",
-            "original_reason": str(decoded.get("reason") or ""),
-            "fallback_reason": fallback_reason,
-        }
-    decoded = row.get("decoded") if isinstance(row.get("decoded"), dict) else {}
-    action_index = decoded.get("action_index")
-    if isinstance(action_index, bool) or not isinstance(action_index, int):
-        return None
-    actions = _legal_actions({"user_message": user})
-    action = _action_by_index(actions, action_index)
-    if action is None or _is_end_turn(action):
-        return None
-    flags = set(str(flag) for flag in (row.get("quality_flags") or []))
-    state = row.get("state") if isinstance(row.get("state"), dict) else {}
-    legal_actions = row.get("legal_actions") if isinstance(row.get("legal_actions"), list) else []
-    if state and legal_actions:
-        report = assess_action_quality_report(
-            state,
-            legal_actions,
-            action_index,
-            reason=str(decoded.get("reason") or ""),
-            action_scores=decoded.get("action_scores") if isinstance(decoded.get("action_scores"), list) else [],
-        )
-        flags.update(report.flags)
-    explanation_flags = {
-        "reason_math_contradiction",
-        "reason_claims_lethal_but_action_not_lethal",
-        "action_score_lethal_math_contradiction",
-    }
-    if flags.isdisjoint(explanation_flags):
-        return None
-    return {
-        "action_index": int(action_index),
-        "reason": _canonical_reason_from_action(user, action),
-        "rule": "explanation_consistency_repair",
-        "original_reason": str(decoded.get("reason") or ""),
-        "fallback_reason": ",".join(flag for flag in sorted(flags) if flag in explanation_flags),
-    }
-    return None
+# NOTE: ``_reason_repair_from_trace_row`` was deleted intentionally.
+# Its sole purpose was rewriting an inconsistent reason field to a
+# canonical template; with the v4 design split (combat policy emits no
+# reason, planner LoRA owns reasoning) the function had nothing to do.
+# Step traces flagged with reason_math_contradiction etc. are still
+# tagged in ``quality_flags`` and excluded from training via the existing
+# ``TRAINING_BLOCKLIST_FLAGS`` blocklist.
 
 
 def _validate_label(user: str, action_index: int) -> tuple[bool, dict[str, Any] | None]:
@@ -553,10 +505,17 @@ def _preserves_visible_attacking_lethal(user: str, action: dict[str, Any]) -> bo
 
 
 def _rows_from_trace(trace_path: Path, *, system_prompt: str) -> list[dict[str, Any]]:
+    """Mine deterministic better-action candidates from a step_trace.
+
+    For each step where ``_candidate_from_trace_row`` finds a clearly
+    better action_index (visible-lethal / attacking-target priority /
+    cheap-lethal-over-overkill), emit one combat SFT row whose assistant
+    content is just ``{action_index, confidence}`` — no reason field.
+    """
     out: list[dict[str, Any]] = []
     for row in _read_jsonl(trace_path):
         user = str(row.get("user_message") or "")
-        candidate = _candidate_from_trace_row(row) or _reason_repair_from_trace_row(row)
+        candidate = _candidate_from_trace_row(row)
         if not candidate:
             continue
         ok, action = _validate_label(user, int(candidate["action_index"]))
@@ -565,15 +524,12 @@ def _rows_from_trace(trace_path: Path, *, system_prompt: str) -> list[dict[str, 
         out.append(_sample(
             user_message=user,
             action_index=int(candidate["action_index"]),
-            reason=str(candidate["reason"]),
             meta={
                 "source": "trace_rule",
                 "source_trace": str(trace_path),
                 "source_rule": candidate["rule"],
                 "episode_id": row.get("episode_id"),
                 "step": row.get("episode_step", row.get("step")),
-                "original_reason": candidate.get("original_reason"),
-                "fallback_reason": candidate.get("fallback_reason"),
                 "original_action_index": _original_index(row, _legal_actions({"user_message": user})),
                 "teacher_action": action,
                 "action_quality_flags": list(row.get("quality_flags") or []),
@@ -600,17 +556,20 @@ def _rows_from_review(
     *,
     system_prompt: str,
     min_confidence: float,
-    use_kimi_reasons: bool = True,
+    use_kimi_reasons: bool = True,  # kept for API compat; ignored on combat path
 ) -> tuple[list[dict[str, Any]], list[ExperienceEntry]]:
-    """从 turn_order_review 抽 SFT 训练 row。
+    """Convert teacher (deepseek/kimi) turn-order review into combat SFT rows
+    plus reusable lesson entries for the experience replay buffer.
 
-    use_kimi_reasons=True (默认)：用 Kimi 给的 ``reason_en`` 作 SFT 监督 reason
-        （前提是过 _teacher_reason_matches_action 校验，防 Kimi 胡说）。
-        这样 model 学到的 reason 是教师写的真实推理（含 power name + 机制），
-        而不是 _canonical_reason_from_action 模板（"deal X damage to enemy"）。
-        修复 model 把所有卡都说成 "Deal X damage" 的 hallucination 问题。
-    use_kimi_reasons=False：仍用模板 reason（保留向后兼容）。
+    Combat policy SFT samples carry only ``action_index`` (and confidence);
+    the teacher-supplied reason text is kept on the row metadata for
+    diagnostics but never appears in the assistant message — strategic
+    reasoning belongs to the planner LoRA, taught via a separate
+    ``build_planner_hint_dataset`` pipeline that *does* train on the
+    teacher's reasoning text. ``use_kimi_reasons`` is retained as a
+    no-op argument so legacy callers don't break.
     """
+    _ = use_kimi_reasons  # combat SFT no longer carries reason text either way
     review = _read_json(review_path)
     episode = _read_json(episode_path)
     decisions = _episode_decision_by_step(episode)
@@ -638,21 +597,17 @@ def _rows_from_review(
         if not _preserves_visible_attacking_lethal(user, action):
             continue
         teacher_reason = str(label.get("reason_en") or label.get("reason") or "")
-        if not _teacher_reason_matches_action(user, action, teacher_reason):
+        # Teacher prose is allowed to stay on the row metadata (for
+        # debug + planner SFT extraction) even when it's been validated
+        # only loosely — ``_teacher_reason_matches_action`` continues to
+        # reject labels where the prose clearly contradicts the chosen
+        # action so we don't import lethal-claim hallucinations into
+        # downstream tooling.
+        if teacher_reason and not _teacher_reason_matches_action(user, action, teacher_reason):
             continue
-        # 优先用 Kimi 给的真实 reason（含正确机制描述）；fallback 到 canonical 模板
-        # （仅在 Kimi reason 缺失或被禁用时）。
-        canonical_reason = _canonical_reason_from_action(user, action)
-        if use_kimi_reasons and teacher_reason:
-            sft_reason = teacher_reason
-            reason_source = "kimi_review"
-        else:
-            sft_reason = canonical_reason
-            reason_source = "canonical_verified"
         rows.append(_sample(
             user_message=user,
             action_index=action_index,
-            reason=sft_reason,
             meta={
                 "source": "turn_order_review",
                 "source_review": str(review_path),
@@ -662,9 +617,7 @@ def _rows_from_review(
                 "confidence": confidence,
                 "original_action_index": decision.get("chosen_action_index"),
                 "original_reason": decision.get("reason"),
-                "kimi_reason_en": teacher_reason,
-                "canonical_reason": canonical_reason,
-                "reason_source": reason_source,
+                "teacher_reason_en": teacher_reason,
                 "teacher_action": action,
             },
             system_prompt=system_prompt,
@@ -734,7 +687,6 @@ def _rows_from_reselect(path: Path, *, system_prompt: str) -> list[dict[str, Any
         out.append(_sample(
             user_message=user,
             action_index=action_index,
-            reason=str(new.get("reason") or "review corrected action"),
             meta={
                 "source": "review_reselect",
                 "source_results": str(path),
@@ -742,6 +694,7 @@ def _rows_from_reselect(path: Path, *, system_prompt: str) -> list[dict[str, Any
                 "step": row.get("step"),
                 "original_action_index": old.get("action_index"),
                 "score_delta": row.get("score_delta"),
+                "teacher_reason_en": str(new.get("reason") or ""),
                 "teacher_action": action,
             },
             system_prompt=system_prompt,
@@ -749,29 +702,12 @@ def _rows_from_reselect(path: Path, *, system_prompt: str) -> list[dict[str, Any
     return out
 
 
-def _canonical_reason_from_action(user: str, action: dict[str, Any] | None) -> str:
-    """Return a short deterministic reason without training on teacher arithmetic.
-
-    DEPRECATED: kept to avoid breaking the existing legacy SFT path until the
-    code-generated-reason removal lands. New work should let the model emit
-    its own reason and use deepseek review to evaluate (not rewrite).
-    """
-    if not action:
-        return "verified legal action"
-    enemies = _enemies(user)
-    target = str(action.get("target") or "")
-    damage = action.get("damage")
-    block = action.get("block")
-    if _is_lethal(action, enemies) and target:
-        return f"verified lethal on {target}"
-    if isinstance(damage, int) and damage > 0 and target:
-        return f"deal {damage} damage to {target}"
-    if isinstance(block, int) and block > 0:
-        return f"gain {block} block"
-    if _is_end_turn(action):
-        return "end turn"
-    card_id = str(action.get("card_id") or "").strip()
-    return f"play {card_id}" if card_id else "verified legal action"
+# NOTE: ``_canonical_reason_from_action`` was deleted. Combat policy SFT
+# samples no longer carry a reason field, so the per-action template is
+# obsolete. Teacher prose (deepseek / kimi review) still ships on the
+# ``meta`` blob for diagnostics and will be consumed by the planner SFT
+# pipeline (``build_planner_hint_dataset``) — never written into the
+# combat assistant message.
 
 
 def _teacher_reason_matches_action(user: str, action: dict[str, Any] | None, reason: str) -> bool:
@@ -804,8 +740,16 @@ def _rows_from_kimi_labels(
     *,
     system_prompt: str,
     min_confidence: float,
-    keep_kimi_reasons: bool,
+    keep_kimi_reasons: bool = False,  # legacy no-op; combat samples never carry reason
 ) -> list[dict[str, Any]]:
+    """Convert filtered teacher hard-case labels into combat SFT rows.
+
+    Combat assistant message contains only ``action_index`` + confidence;
+    the teacher's prose reason ships on the row metadata (``teacher_reason_en``)
+    so planner-side training and trace inspection can still see it, but
+    the combat policy never learns to reproduce that text.
+    """
+    _ = keep_kimi_reasons  # legacy flag; kept for API compat
     out: list[dict[str, Any]] = []
     for row in _read_jsonl(path):
         user = str(row.get("user_message") or "")
@@ -819,19 +763,15 @@ def _rows_from_kimi_labels(
         if not _preserves_visible_attacking_lethal(user, action):
             continue
         source = row.get("source") if isinstance(row.get("source"), dict) else {}
-        reason = (
-            str(row.get("reason_en") or "Kimi teacher selected this action")
-            if keep_kimi_reasons
-            else _canonical_reason_from_action(user, action)
-        )
+        teacher_reason = str(row.get("reason_en") or "")
         out.append(_sample(
             user_message=user,
             action_index=int(action_index),
-            reason=reason,
             meta={
                 "source": "kimi_teacher_label",
                 "source_labels": str(path),
                 "candidate_id": row.get("candidate_id"),
+                "teacher_reason_en": teacher_reason,
                 "episode_id": source.get("episode_id"),
                 "step": source.get("episode_step", source.get("step")),
                 "confidence": confidence,

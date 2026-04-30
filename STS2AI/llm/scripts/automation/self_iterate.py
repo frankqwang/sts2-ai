@@ -168,11 +168,13 @@ def parse_args() -> argparse.Namespace:
         help="build_teacher_dataset 用 teacher (deepseek/kimi) corrected_reason 替代 canonical 模板；默认 True。"
              "关闭后 reason 字段回退到 canonical 模板（容易产生 'Deal X damage' 幻觉）。",
     )
+    # ``--mask-reason-in-train-data`` 被移除 — combat policy 输出 schema 从
+    # ``{action_index, confidence, reason}`` 收紧成 ``{action_index, confidence}``,
+    # reason 字段不存在所以无需 mask. 保留 flag 作 no-op 防破老 shell 脚本.
     parser.add_argument(
         "--mask-reason-in-train-data",
         action="store_true",
-        help="grpo_rollout 训练时把 SFT 样本里 reason 字段值置空，loss 只监督 action_index；"
-             "防止 canonical 模板的 'Deal X damage' 幻觉污染 SKILL 卡 reason。",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--sim-rebuild",
@@ -653,8 +655,8 @@ def main() -> None:
         rollout_cmd.append("--no-thinking")
     if args.allow_json_like_rollout:
         rollout_cmd.append("--allow-json-like-rollout")
-    if args.mask_reason_in_train_data:
-        rollout_cmd.append("--mask-reason-in-train-data")
+    # mask_reason_in_train_data flag is now a no-op — combat policy
+    # output no longer carries a reason field; nothing to mask.
 
     audit_cmd = [
         py, "-m", "llm.scripts.analysis.audit_rollout_failures",

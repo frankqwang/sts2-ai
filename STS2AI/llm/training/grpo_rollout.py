@@ -1516,43 +1516,19 @@ def rollout_episode(
 # 主流程：按 encounter 分组 rollout -> 计算 advantage -> 输出训练数据
 # ---------------------------------------------------------------------------
 
-def _maybe_mask_reason_in_assistant(messages: list[dict[str, Any]], mask: bool) -> list[dict[str, Any]]:
-    """如果 mask 打开，把 assistant 段的 JSON reason 字段强制清空。"""
-    if not mask:
-        return messages
-    out: list[dict[str, Any]] = []
-    for msg in messages:
-        if not isinstance(msg, dict):
-            out.append(msg)
-            continue
-        if msg.get("role") != "assistant":
-            out.append(dict(msg))
-            continue
-        content = str(msg.get("content") or "")
-        try:
-            parsed = json.loads(content)
-        except Exception:
-            out.append(dict(msg))
-            continue
-        if isinstance(parsed, dict) and "reason" in parsed:
-            parsed["reason"] = ""
-            new_content = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
-            out.append({**msg, "content": new_content})
-        else:
-            out.append(dict(msg))
-    return out
-
-
 def _build_train_eval_rows(
     grouped: dict[str, list[EpisodeRecord]],
     rng: random.Random,
-    *,
-    mask_reason: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """构建 GRPO 训练 + eval 行（含 relative advantage）。
 
     抽出来作为函数，让 main() 在 ``--eval-only`` 模式下完全跳过此路径，
     避免污染候选评估的输出文件夹。
+
+    NOTE: combat assistant content here is whatever the model itself
+    rolled out (now ``{action_index, confidence}`` after the planner-only
+    reasoning split — see ``system_prompt.md`` v4). No reason masking
+    happens because there's no reason field in the assistant message.
     """
     train_rows: list[dict[str, Any]] = []
     for enc_id, eps in grouped.items():
@@ -1574,9 +1550,8 @@ def _build_train_eval_rows(
             for step in ep.steps:
                 if not step.trainable:
                     continue
-                masked_messages = _maybe_mask_reason_in_assistant(step.messages, mask_reason)
                 train_rows.append({
-                    "messages": masked_messages,
+                    "messages": step.messages,
                     "meta": {
                         "encounter_id": ep.encounter_id,
                         "encounter_key": ep.encounter_key,
@@ -1775,17 +1750,15 @@ def parse_args() -> argparse.Namespace:
         help="strict 强制 sample 含某 archetype 的 case 至少 N 个。格式 'multi_hit=2,aoe=2,power_build=2'。"
              "已知 archetype: multi_hit / aoe / power_build / lethal_burst / exhaust / block_engine。",
     )
+    # NOTE: ``--mask-reason-in-train-data`` was removed. Combat policy
+    # output schema was changed to ``{action_index, confidence}`` (see
+    # ``prompts/system_prompt.md`` v4); reasoning belongs to the planner
+    # LoRA. With no reason field in the assistant message there's nothing
+    # to mask; the flag is silently ignored if old shell scripts pass it.
     p.add_argument(
         "--mask-reason-in-train-data",
         action="store_true",
-        help=(
-            "训练数据 (train.jsonl) 的 assistant 段把 reason 字段强制为空字符串。"
-            "防止 GRPO advantage 把 model 自己 hallucinated 的 reason（如 'Deal X damage' 套到 skill 卡）"
-            "强化进 SFT loss。inference / step_trace 里 model 仍生成 reason 用于审计；"
-            "只有 train.jsonl 里的 SFT 标签被清空。"
-            "推荐与 build_teacher_dataset 的 use_kimi_reasons 配合使用："
-            "Kimi 标签里 reason 是教师写的，进 SFT；rollout train_rows 里 reason 不被强化。"
-        ),
+        help=argparse.SUPPRESS,  # deprecated, no-op; kept to avoid breaking shells
     )
     p.add_argument(
         "--eval-only",
@@ -1890,11 +1863,7 @@ def main() -> None:
     train_rows: list[dict[str, Any]] = []
     eval_rows: list[dict[str, Any]] = []
     if not args.eval_only:
-        train_rows, eval_rows = _build_train_eval_rows(
-            grouped,
-            rng,
-            mask_reason=bool(getattr(args, "mask_reason_in_train_data", False)),
-        )
+        train_rows, eval_rows = _build_train_eval_rows(grouped, rng)
 
     def _dump(path: Path, rows: list[dict]) -> None:
         with path.open("w", encoding="utf-8") as f:
