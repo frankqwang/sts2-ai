@@ -45,6 +45,27 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--eval-ratio", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--min-overall-score",
+        type=float,
+        default=0.0,
+        help=(
+            "Skip reviews whose top-level ``overall_score`` is below this. "
+            "Use this to keep planner SFT focused on turns the teacher "
+            "considered competently judged. Default 0 = no filtering."
+        ),
+    )
+    parser.add_argument(
+        "--include-phase-plan",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When the review carries a top-level ``phase_plan_zh`` (turn-by-turn "
+            "tactical breakdown), splice it into the planner_hint assistant "
+            "label as ``phase_plan``. Lets the planner LoRA learn temporal "
+            "phase reasoning, not just episode-level hints."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -151,23 +172,65 @@ def _meta_str(value: Any) -> str:
     return str(value)
 
 
+def _coerce_overall_score(value: Any) -> float | None:
+    """Review ``overall_score`` is sometimes int, sometimes str ("8" / "8/10").
+    Return a float in [0, 10] or None when un-parseable."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    # "8/10" → "8"
+    if "/" in text:
+        text = text.split("/", 1)[0].strip()
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def _row_from_pair(
     review_path: Path,
     episode_path: Path,
     *,
     system_prompt: str,
+    min_overall_score: float = 0.0,
+    include_phase_plan: bool = True,
 ) -> tuple[dict[str, Any] | None, str]:
     review = _read_json(review_path)
     episode = _read_json(episode_path)
     raw_hint = review.get("planner_hint")
     if not isinstance(raw_hint, dict):
         return None, "missing_planner_hint"
+
+    # Optional quality gate: skip reviews where the teacher's own
+    # confidence in the episode read is below threshold. Keeps the planner
+    # SFT pool focused on samples the teacher could competently distill.
+    overall_score = _coerce_overall_score(review.get("overall_score"))
+    if min_overall_score > 0 and overall_score is not None and overall_score < min_overall_score:
+        return None, "below_min_overall_score"
+
     hint, status = parse_planner_hint_json(json.dumps(raw_hint, ensure_ascii=False))
     if status != "ok" or hint is None:
         return None, status
     source_state = _first_decision_state(episode)
     if not source_state:
         return None, "missing_source_state"
+
+    # Splice teacher's per-turn ``phase_plan_zh`` into the planner_hint
+    # label so the LoRA learns turn-by-turn pacing in addition to the
+    # battle-level objective. Schema-wise we just add a sibling
+    # ``phase_plan`` field; planner_hint downstream parser ignores
+    # unknown keys (parse_planner_hint_json is permissive).
+    if include_phase_plan:
+        phase_plan = review.get("phase_plan_zh") or review.get("phase_plan")
+        if isinstance(phase_plan, str) and phase_plan.strip():
+            hint = {**hint, "phase_plan": phase_plan.strip()}
+
     assistant = json.dumps(hint, ensure_ascii=False, separators=(",", ":"))
     return {
         "messages": [
@@ -206,7 +269,12 @@ def main() -> int:
     counters: Counter[str] = Counter()
     invalid: list[dict[str, Any]] = []
     for review_path, episode_path in pairs:
-        row, status = _row_from_pair(review_path, episode_path, system_prompt=system_prompt)
+        row, status = _row_from_pair(
+            review_path, episode_path,
+            system_prompt=system_prompt,
+            min_overall_score=float(args.min_overall_score),
+            include_phase_plan=bool(args.include_phase_plan),
+        )
         counters[status] += 1
         if row is None:
             invalid.append({

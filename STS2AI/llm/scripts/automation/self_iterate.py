@@ -68,6 +68,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--co-train-planner", action="store_true", help="同轮训练 planner candidate，并用四格 eval 矩阵评估 C/P 组合。")
     parser.add_argument("--planner-train-dataset-dir", type=str, default="", help="可选 planner-hint SFT 数据集；为空时使用本轮 teacher 产出的 planner_hint 数据。")
     parser.add_argument("--planner-min-train-rows", type=int, default=1)
+    parser.add_argument(
+        "--planner-min-overall-score",
+        type=float,
+        default=0.0,
+        help=(
+            "Quality gate: skip teacher reviews whose ``overall_score`` is below "
+            "this threshold when building planner_hint SFT data. Default 0 (no "
+            "filter). Useful 6.0+ once we have a settled planner baseline and want "
+            "to bias distillation toward the teacher's high-confidence reviews."
+        ),
+    )
     parser.add_argument("--planner-num-epochs", type=int, default=1)
     parser.add_argument("--planner-batch-size", type=int, default=1)
     parser.add_argument("--planner-grad-accum", type=int, default=4)
@@ -899,6 +910,7 @@ def main() -> None:
                     "--review-root", str(kimi_review_dir),
                     "--out-dir", str(planner_hint_dataset_dir),
                     "--seed", str(args.seed),
+                    "--min-overall-score", str(args.planner_min_overall_score),
                 ]
                 if args.kimi_teacher
                 else None
@@ -993,6 +1005,7 @@ def main() -> None:
                     "--review-root", str(kimi_review_dir),
                     "--out-dir", str(planner_hint_dataset_dir),
                     "--seed", str(args.seed),
+                    "--min-overall-score", str(args.planner_min_overall_score),
                 ]
                 _run_step("planner_hint_dataset", planner_hint_dataset_cmd)
                 manifest["planner_hint_dataset_rows"] = _dataset_rows(planner_hint_dataset_dir / "summary.json")
